@@ -1,36 +1,65 @@
+use anyhow::{Ok, Result, anyhow};
+
 struct Parser {
-    pos: usize,
-    input: String,
+    point: usize,
+    context: String,
+}
+/// the return of element read fn
+/// cmp means the element is matched
+/// length means the length of element
+struct RleRet {
+    cmp: bool,
+    length: usize,
+}
+/// To solve the question when we have a html like :
+/// ```html
+/// 1111<p>1111<\p>
+/// ```
+/// we should return
+/// [ElementBolckRead::Str(String::from("111")),ElementBlockRead::Block(String::from("<p>1111<\p>"))]
+enum ElementBlockRead {
+    Str(String),
+    Block(String),
 }
 
+enum ElementKind {}
+
+///Parser machine
 impl Parser {
-    fn _next_char(&mut self) -> Option<char> {
-        self.input.chars().nth(self.pos)
-    }
-    fn _start_with(&mut self, s: &str) -> bool {
-        self.input[self.pos..].starts_with(s)
-    }
-    fn _expect(&mut self, expected: &str) -> Result<(), String> {
-        if self.start_with(expected) {
-            self.pos += expected.len();
-            Ok(())
-        } else {
-            Err(format!(
-                "Expected '{}', found '{}'",
-                expected,
-                &self.input[self.pos..]
-            ))
+    /// use to get next char from input context
+    /// Result to duel the nth error
+    /// the Option to duel the end of file
+    fn _next_char(&mut self) -> Result<Option<char>> {
+        if self._eof() {
+            return Ok(None);
+        }
+        match self.context.chars().nth(self.point) {
+            Some(c) => {
+                self.point += c.len_utf8();
+                Ok(Some(c))
+            }
+            None => Err(anyhow!(format!("bad char in point {}", self.point))),
         }
     }
+    /// read element from content, when start with <,end with >
+    fn _element_content(&mut self) -> Result<&str> {
+        let start = self.point;
+        let mut chars = self._next_char()?;
+        todo!();
+        Ok(&self.context[start..self.point])
+    }
     fn _eof(&self) -> bool {
-        self.pos >= self.input.len()
+        self.point >= self.context.len()
     }
 }
 
 impl Parser {
-    fn next_char(&mut self) -> Option<char> {
-        let ret = self._next_char();
-        self.pos += ret.len_utf8();
-        ret
+    fn read_element<T>(&mut self, expected_fn: T) -> Result<bool>
+    where
+        T: Fn(&str) -> RleRet,
+    {
+        let ret = expected_fn();
+        self.point += ret.length;
+        Ok(ret.cmp)
     }
 }
