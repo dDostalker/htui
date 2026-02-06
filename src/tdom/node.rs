@@ -25,7 +25,7 @@ impl Node {
     }
     fn element(tag: String, attributes: AttrType, children: Vec<Node>) -> Node {
         Node {
-            node_type: NodeType::Element(ElementData { tag, attributes }),
+            node_type: NodeType::Element,
             children,
         }
     }

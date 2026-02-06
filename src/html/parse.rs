@@ -13,13 +13,18 @@ struct RleRet {
 }
 /// To solve the question when we have a html like :
 /// ```html
-/// 1111<p>1111<\p>
+/// 1111<p>1111</p>
 /// ```
 /// we should return
-/// [ElementBolckRead::Str(String::from("111")),ElementBlockRead::Block(String::from("<p>1111<\p>"))]
-enum ElementBlockRead {
-    Str(String),
-    Block(String),
+///
+/// [ElementBolckRead::Str(String::from("111")),ElementBlockRead::Block(String::from("<p>1111</p>"))]
+///
+/// Str mean a string without element Block       ...
+///
+/// the Block mean a string have a element Block   <...>
+enum ElementBlockRead<'a> {
+    Str(&'a str),
+    Block(&'a str),
 }
 
 enum ElementKind {}
@@ -42,11 +47,34 @@ impl Parser {
         }
     }
     /// read element from content, when start with <,end with >
-    fn _element_content(&mut self) -> Result<&str> {
+    fn _element_content(&mut self) -> Result<Option<ElementBlockRead>> {
         let start = self.point;
-        let mut chars = self._next_char()?;
-        todo!();
-        Ok(&self.context[start..self.point])
+
+        let chars = self._next_char()?;
+        match chars {
+            Some('<') => {
+                while let Some(c) = self._next_char()? {
+                    if c == '>' {
+                        break;
+                    }
+                }
+                Ok(Some(ElementBlockRead::Block(
+                    &self.context[start + 1..self.point - 1],
+                )))
+            }
+            Some(_) => {
+                while let Some(c) = self._next_char()? {
+                    if c == '<' {
+                        break;
+                    }
+                }
+                self.point -= 1;
+                Ok(Some(ElementBlockRead::Str(
+                    &self.context[start..self.point],
+                )))
+            }
+            None => Ok(None),
+        }
     }
     fn _eof(&self) -> bool {
         self.point >= self.context.len()
@@ -58,7 +86,7 @@ impl Parser {
     where
         T: Fn(&str) -> RleRet,
     {
-        let ret = expected_fn();
+        let ret = expected_fn("todo");
         self.point += ret.length;
         Ok(ret.cmp)
     }
