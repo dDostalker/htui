@@ -34,4 +34,10 @@ impl Node {
             children: vec![],
         }
     }
+    pub fn div() -> Node {
+        Node {
+            node_type: NodeType::Div,
+            children: vec![],
+        }
+    }
 }

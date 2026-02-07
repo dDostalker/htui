@@ -1,18 +1,15 @@
 pub(crate) use anyhow::{Ok, Result, anyhow};
 
-use crate::tdom::node::{Node, NodeType};
+use crate::tdom::{
+    element_fn::ELEMENT_FUNCTIONS,
+    node::{Node, NodeType},
+};
 /// parser , to rememeber the status of html parser
 struct Parser {
     point: usize,
     context: String,
 }
-/// the return of element read fn
-/// cmp means the element is matched
-/// length means the length of element
-struct RleRet {
-    cmp: bool,
-    length: usize,
-}
+
 /// To solve the question when we have a html like :
 /// ```html
 /// 1111<p>1111</p>
@@ -136,13 +133,13 @@ impl Parser {
     }
     /// Simple check element type
     pub fn check_ele_ty(element: &str) -> Result<NodeType> {
-        if element.starts_with("<span>") || element.starts_with("</span>") {
-            Ok(NodeType::Span)
-        } else if element.starts_with("<div>") || element.starts_with("</div>") {
-            Ok(NodeType::Div)
-        } else {
-            Err(anyhow!(format!("Unsupported element type {}", element)))
+        for func in ELEMENT_FUNCTIONS {
+            match func(element)? {
+                Some(nodetype) => return Ok(nodetype),
+                None => continue,
+            }
         }
+        Err(anyhow!(format!("Unsupported element type {}", element)))
     }
 }
 
