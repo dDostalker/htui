@@ -1,32 +1,37 @@
-type AttrType = Vec<(String, String)>;
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum NodeType {
-    Document,
-    Element,
+    None,
+    Global,
+    Span,
+    Div,
     Text(String),
     // todo!
 }
 
-pub struct ElementData {
-    pub tag: String,
-    pub attributes: AttrType,
-}
-
+#[derive(Debug)]
 pub struct Node {
     pub node_type: NodeType,
     pub children: Vec<Node>,
 }
 
 impl Node {
-    fn text(data: String) -> Node {
+    pub fn new() -> Node {
         Node {
-            node_type: NodeType::Text(data),
+            node_type: NodeType::Global,
             children: vec![],
         }
     }
-    fn element(tag: String, attributes: AttrType, children: Vec<Node>) -> Node {
+    pub fn from(node_type: NodeType) -> Node {
         Node {
-            node_type: NodeType::Element,
-            children,
+            node_type,
+            children: vec![],
+        }
+    }
+
+    pub fn text(data: &str) -> Node {
+        Node {
+            node_type: NodeType::Text(data.to_string()),
+            children: vec![],
         }
     }
 }
