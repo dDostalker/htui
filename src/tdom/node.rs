@@ -4,6 +4,7 @@ pub enum NodeType {
     Global,
     Span,
     Div,
+    P,
     Text(String),
     // todo!
 }
