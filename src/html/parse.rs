@@ -181,6 +181,7 @@ impl Parser {
         Err(anyhow!(format!("Unsupported element type {}", element)))
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
