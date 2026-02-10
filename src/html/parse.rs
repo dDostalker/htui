@@ -181,10 +181,8 @@ impl Parser {
         Err(anyhow!(format!("Unsupported element type {}", element)))
     }
 }
-
-#[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::{html::parse::Parser, tdom::node::NodeType};
 
     fn init() {
         let _ = env_logger::builder().is_test(true).try_init();
