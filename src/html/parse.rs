@@ -1,6 +1,7 @@
 use crate::tdom::{
     element_fn::ELEMENT_FUNCTIONS,
     node::{Node, NodeType},
+    attributes::Attr
 };
 pub(crate) use anyhow::{Ok, Result, anyhow};
 use log::debug;
@@ -134,8 +135,10 @@ impl Parser {
             if let Some(ele) = element {
                 match ele {
                     EleBlockRead::Block(content) => {
-                        let next_node_type = Self::check_ele_ty(content)?;
-                        node.children.push(self._parse(Some(next_node_type))?)
+                        let (next_node_type, attr) = Self::check_ele_ty(content)?;
+                        let mut child_node = self._parse(Some(next_node_type))?;
+                        child_node.attributes = attr;  // 设置属性
+                        node.children.push(child_node)
                     }
                     EleBlockRead::Str(content) => {
                         if let Some(nty) = nodetype.clone() {
@@ -146,7 +149,7 @@ impl Parser {
                         }
                     }
                     EleBlockRead::EndBlock(content) => {
-                        let end_nodetype = Self::check_ele_ty(content)?;
+                        let (end_nodetype, _attr) = Self::check_ele_ty(content)?;
                         if let Some(nodetype) = nodetype.clone()
                             && end_nodetype == nodetype
                         {
@@ -171,10 +174,10 @@ impl Parser {
         Ok(node)
     }
     /// Simple check element type
-    pub fn check_ele_ty(element: &str) -> Result<NodeType> {
+    pub fn check_ele_ty(element: &str) -> Result<(NodeType, Attr)> {
         for func in ELEMENT_FUNCTIONS {
             match func(element)? {
-                Some(nodetype) => return Ok(nodetype),
+                Some((nodetype, attr)) => return Ok((nodetype, attr)),
                 None => continue,
             }
         }
@@ -190,8 +193,8 @@ mod tests {
     #[test]
     fn test_check_ele_ty() {
         init();
-        assert_eq!(Parser::check_ele_ty("<span>").unwrap(), NodeType::Span);
-        assert_eq!(Parser::check_ele_ty("<div>").unwrap(), NodeType::Div);
+        assert_eq!(Parser::check_ele_ty("<span>").unwrap().0, NodeType::Span);
+        assert_eq!(Parser::check_ele_ty("<div>").unwrap().0, NodeType::Div);
         assert!(Parser::check_ele_ty("<unsupported>").is_err());
     }
     #[test]
@@ -217,4 +220,12 @@ mod tests {
         let node = p.parse().unwrap();
         dbg!(&node);
     }
+    #[test]
+fn test_parse_with_attributes() {
+    init();
+    let html = r#"<div class="container" id="main"><p>Hello</p></div>"#;
+    let mut p = Parser::new(html);
+    let node = p.parse().unwrap();
+    dbg!(&node);
+}
 }
