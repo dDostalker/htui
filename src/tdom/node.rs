@@ -7,8 +7,15 @@ pub enum NodeType {
     Span,
     Div,
     P,
+    Img,
     Text(String),
     // todo!
+}
+
+impl NodeType {
+    pub fn is_self_closing(&self) -> bool {
+        matches!(self, NodeType::Img)
+    }
 }
 
 #[derive(Debug)]
