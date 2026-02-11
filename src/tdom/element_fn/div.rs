@@ -1,7 +1,9 @@
 use anyhow::{Ok, Result};
 
-use crate::tdom::node::NodeType;
-use crate::tdom::attributes::Attr;
+use crate::tdom::{
+    attributes::Attr, 
+    node::NodeType
+};
 
 pub fn div_element(element: &str) -> Result<Option<(NodeType,Attr)>> {
     if element.starts_with("</div") && element.ends_with(">") {

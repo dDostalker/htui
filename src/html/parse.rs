@@ -136,9 +136,16 @@ impl Parser {
                 match ele {
                     EleBlockRead::Block(content) => {
                         let (next_node_type, attr) = Self::check_ele_ty(content)?;
-                        let mut child_node = self._parse(Some(next_node_type))?;
-                        child_node.attributes = attr;  // 设置属性
-                        node.children.push(child_node)
+                        
+                        if next_node_type.is_self_closing() {
+                            let mut self_closing_node = Node::from(next_node_type);
+                            self_closing_node.attributes = attr;
+                            node.children.push(self_closing_node);
+                        } else {
+                            let mut child_node = self._parse(Some(next_node_type))?;
+                            child_node.attributes = attr;
+                            node.children.push(child_node);
+                        }
                     }
                     EleBlockRead::Str(content) => {
                         if let Some(nty) = nodetype.clone() {
@@ -221,11 +228,19 @@ mod tests {
         dbg!(&node);
     }
     #[test]
-fn test_parse_with_attributes() {
-    init();
-    let html = r#"<div class="container" id="main"><p>Hello</p></div>"#;
-    let mut p = Parser::new(html);
-    let node = p.parse().unwrap();
-    dbg!(&node);
-}
+    fn test_parse_with_attributes() {
+        init();
+        let html = r#"<div class="container" id="main"><p>Hello</p></div>"#;
+        let mut p = Parser::new(html);
+        let node = p.parse().unwrap();
+        dbg!(&node);
+    }
+    #[test]
+    fn test_parse_img() {
+        init();
+        let html = r#"<div><img src="test.jpg" alt="Test Image"></div>"#;
+        let mut p = Parser::new(html);
+        let node = p.parse().unwrap();
+        dbg!(&node);
+    }
 }
