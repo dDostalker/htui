@@ -83,12 +83,18 @@ impl Parser {
                 }
             }
             Some(_) => {
+                let mut found_tag = false;  // 添加标志
                 while let Some(c) = self._next_char()? {
                     if c == '<' {
+                        found_tag = true;  // 标记找到了标签
                         break;
                     }
                 }
-                self.point -= 1;
+                
+                // 只有在遇到 '<' 时才退回
+                if found_tag {
+                    self.point -= 1;
+                }
                 let mut ret = &self.context[start..self.point];
                 // if the str only "\n", del it.
                 if ret.contains("\n") {
@@ -239,6 +245,67 @@ mod tests {
     fn test_parse_img() {
         init();
         let html = r#"<div><img src="test.jpg" alt="Test Image"></div>"#;
+        let mut p = Parser::new(html);
+        let node = p.parse().unwrap();
+        dbg!(&node);
+    }
+    #[test]
+    fn test_parse_headings() {
+        init();
+        let html = r#"
+            <div>
+                <h1>Main Title</h1>
+                <h2>Subtitle</h2>
+                <h3>Section</h3>
+                <h4>Subsection</h4>
+                <h5>Small heading</h5>
+                <h6>Smallest heading</h6>
+            </div>
+        "#;
+        let mut p = Parser::new(html);
+        let node = p.parse().unwrap();
+        dbg!(&node);
+    }
+
+    #[test]
+    fn test_heading_with_attributes() {
+        init();
+        let html = r#"<h1 id="title" class="main-title">Welcome</h1>"#;
+        let mut p = Parser::new(html);
+        let node = p.parse().unwrap();
+
+        // 验证解析结果
+        if let Some(child) = node.children.first() {
+            assert_eq!(child.node_type, NodeType::H1);
+            assert_eq!(child.attributes.get("id"), Some(&"title".to_string()));
+            assert_eq!(
+                child.attributes.get_class(),
+                Some(vec!["main-title".to_string()])
+            );
+        }
+    }
+
+    #[test]
+    fn test_nested_headings() {
+        init();
+        let html = r#"
+            <div>
+                <h1>Chapter 1</h1>
+                <p>Introduction</p>
+                <h2>Section 1.1</h2>
+                <p>Content</p>
+                <h2>Section 1.2</h2>
+                <p>More content</p>
+            </div>
+        "#;
+        let mut p = Parser::new(html);
+        let node = p.parse().unwrap();
+        dbg!(&node);
+    }
+    #[test]
+    fn test_single_heading() {
+        init();
+        let html = r#"<h1>Test</h1>"#;
         let mut p = Parser::new(html);
         let node = p.parse().unwrap();
         dbg!(&node);
