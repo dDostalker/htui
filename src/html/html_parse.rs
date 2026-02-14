@@ -1,7 +1,7 @@
 use crate::tdom::{
+    attributes::Attr,
     element_fn::ELEMENT_FUNCTIONS,
     node::{Node, NodeType},
-    attributes::Attr
 };
 pub(crate) use anyhow::{Ok, Result, anyhow};
 use log::debug;
@@ -136,7 +136,7 @@ impl Parser {
                 match ele {
                     EleBlockRead::Block(content) => {
                         let (next_node_type, attr) = Self::check_ele_ty(content)?;
-                        
+
                         if next_node_type.is_self_closing() {
                             let mut self_closing_node = Node::from(next_node_type);
                             self_closing_node.attributes = attr;
@@ -192,7 +192,7 @@ impl Parser {
     }
 }
 mod tests {
-    use crate::{html::parse::Parser, tdom::node::NodeType};
+    use crate::{html::html_parse::Parser, tdom::node::NodeType};
 
     fn init() {
         let _ = env_logger::builder().is_test(true).try_init();

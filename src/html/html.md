@@ -162,6 +162,76 @@ fn test_parse_html() {
 解析后的tdom结构可以传递给布局引擎进行屏幕布局计算，最终通过TUI框架渲染到终端。
 
 ---
+# css 解析
 
-*文档最后更新：2024年*
+首先需要明确，css的组成分为三部分：选择器 + 属性+ 值
+```
+p（选择器） {
+  background-image（属性）: url('img_girl.jpg');（值）
+}
+```
+## 选择器
+选择器只有在完整使用css的时候才会使用，他决定了css的作用对象，如果是对某个标签内连则不需要使用，直接使用属性和值即可，如
+```
+ <p style="background-image: url('img_girl.jpg');"> 
+```
+其中选择器也分为一下几个部分
+- 基础选择器
+- 组合选择器
+- 属性选择器
+- 伪类
+- 伪元素
+
+### 基础选择器
+```
+*          /* 通配选择器 */
+div        /* 标签选择器 */
+.class     /* 类选择器 */
+#id        /* ID选择器 */
+```
+### 组合选择器
+```
+div p      /* 后代选择器 */
+div > p    /* 子选择器 */
+div + p    /* 相邻兄弟 */
+div ~ p    /* 普通兄弟 */
+```
+
+### 属性选择器
+```
+input[type="text"]
+a[href]
+```
+### 伪类
+```
+:hover
+:active
+:focus
+:first-child
+:last-child
+:nth-child()
+```
+## 属性和值
+其属性和值格式如下
+```
+（属性）: （值）;
+（属性）: （值）;
+      ...
+```
+
+## 解析思路
+解析的时候可以先设计一个函数用于分出选择器和属性值两个部分，效果如下
+```
+p:hover{
+  background-image: url('img_girl.jpg')；
+}
+
+-> p:hover    第一部分
+-> background-image:url('img_girl.jpg'); 第二部分   
+```
+然后对这两个部分进行分别解析
+
+
+*文档最后更新：2026年 2月13日*
+
 *相关文件：`src/html/parse.rs`, `src/tdom/node.rs`, `src/tdom/element_fn/`*
