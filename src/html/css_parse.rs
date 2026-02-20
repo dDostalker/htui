@@ -1,22 +1,52 @@
 use std::collections::HashMap;
 
 use anyhow::{Ok, Result, anyhow};
-
+/// the Parsers State of the css attribute
+/// when read ':' , the state turn Value
+/// when read ';' , the state turn Key
 enum State {
     Key,
     Value,
 }
+/// CssAttr newtype to store css attributes
+/// ```
+/// aaa : bbb;
+/// ccc : ddd;
+/// ```
+/// to
+/// ```
+/// CssAttr {
+///     aaa: "bbb",
+///     ccc: "ddd",
+/// }
+/// ```
 #[derive(Debug, Clone)]
-struct css_attr(HashMap<String, String>);
+struct CssAttr(HashMap<String, String>);
+/// CssRule newtype to store css rules
+/// ```
+/// aaa {
+///     bbb : ccc;
+///     ddd : eee;
+/// }
+/// ```
+/// to
+/// ```
+/// CssRule {
+///     aaa: CssAttr {
+///         bbb: "ccc",
+///         ddd: "eee",
+///     },
+/// }
+/// ```
 #[derive(Debug, Clone)]
-struct css_rule(HashMap<String, css_attr>);
+struct CssRule(HashMap<String, CssAttr>);
 
-impl css_rule {
+impl CssRule {
     fn new() -> Self {
-        css_rule(HashMap::new())
+        CssRule(HashMap::new())
     }
     fn add(&mut self, sele: String, attr: HashMap<String, String>) {
-        self.0.insert(sele, css_attr(attr));
+        self.0.insert(sele, CssAttr(attr));
     }
 }
 
@@ -43,6 +73,7 @@ impl Parser {
         };
         ret
     }
+    /// like peek
     fn _next_char_prev(&self) -> Result<Option<char>> {
         if self._eof() {
             return Ok(None);
@@ -67,8 +98,8 @@ impl Parser {
             column: 1,
         }
     }
-    fn parse(&mut self) -> Result<css_rule> {
-        let mut css = css_rule::new();
+    fn parse(&mut self) -> Result<CssRule> {
+        let mut css = CssRule::new();
         loop {
             if let Some((sele, attrs)) = self._parse()? {
                 css.add(sele, attrs);
@@ -77,6 +108,11 @@ impl Parser {
             };
         }
         Ok(css)
+    }
+    fn parse_from_block(input: &str) -> Result<CssAttr> {
+        let mut parser = Parser::new(input);
+        let attrs = parser.get_css_attr(input.to_string())?;
+        return Ok(CssAttr(attrs));
     }
 
     fn _parse(&mut self) -> Result<Option<(String, HashMap<String, String>)>> {
@@ -89,6 +125,7 @@ impl Parser {
         }
         Ok(None)
     }
+
     fn get_selector(&mut self) -> Result<Option<String>> {
         let start = self.point;
         loop {
@@ -187,6 +224,12 @@ mod tests {
             }",
         );
         let attrs = parser.parse().unwrap();
+        dbg!(&attrs);
+    }
+
+    #[test]
+    fn test_parse_from_block() {
+        let attrs = Parser::parse_from_block("color: red; cos: blue;").unwrap();
         dbg!(&attrs);
     }
 }
