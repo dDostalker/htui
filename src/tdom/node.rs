@@ -8,6 +8,7 @@ pub enum NodeType {
     Div,
     P,
     Img,
+    A,
     H1,
     H2,
     H3,
