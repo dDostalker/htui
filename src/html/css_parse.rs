@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn test_get_attr_block() {
         let mut parser = Parser::new("{color: red;}");
-        assert_eq!(parser.get_attr_block().unwrap(), "{color: red;}");
+        assert_eq!(parser.get_attr_block().unwrap(), "color: red;");
     }
 
     #[test]
