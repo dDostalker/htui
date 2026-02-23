@@ -202,6 +202,25 @@ impl Attr {
         self.get("dir")
     }
 
+    ///获取contenteditable属性
+    pub fn get_contenteditable(&self) -> Option<bool> {
+        self.get_as_bool_string("contenteditable")
+    }
+
+    ///获取spellcheck属性
+    pub fn get_spellcheck(&self) -> Option<bool> {
+        self.get_as_bool_string("spellcheck")
+    }
+
+    ///获取translate属性
+    pub fn get_translate(&self) -> Option<bool> {
+        self.get("translate").and_then(|v| match v.as_str() {
+            "yes" | "" => Some(true),
+            "no" => Some(false),
+            _ => None,
+        })
+    }
+
     ///特殊属性标签
     ///获取src中的属性
     pub fn get_src(&self) -> Option<&String> {
@@ -218,33 +237,33 @@ impl Attr {
         matches!(self.get("alt"), Some(v) if v.is_empty())
     }
 
-    /// `width` 属性（像素宽度）
+    /// width属性（像素宽度）
     pub fn get_width(&self) -> Option<u32> {
         self.get_as_u32("width")
     }
 
-    /// `height` 属性（像素高度）
+    /// height属性（像素高度）
     pub fn get_height(&self) -> Option<u32> {
         self.get_as_u32("height")
     }
 
-    /// `ismap` 属性,服务器端图像映射，布尔属性，必须在 `<a>` 内使用
+    /// ismap属性,服务器端图像映射，布尔属性，必须在 `<a>` 内使用
     pub fn get_ismap(&self) -> bool {
         self.has("ismap")
     }
 
-    /// `usemap` 属性,客户端图像映射
+    /// usemap属性,客户端图像映射
     pub fn get_usemap(&self) -> Option<&String> {
         self.get("usemap")
     }
 
-    /// `srcset` 属性（响应式图片候选列表，原始字符串）
+    /// srcset属性（响应式图片候选列表，原始字符串）
     /// 格式较复杂,暂时保留原始字符串
     pub fn get_srcset(&self) -> Option<&String> {
         self.get("srcset")
     }
 
-    /// `sizes` 属性
+    /// sizes`属性
     pub fn get_sizes(&self) -> Option<&String> {
         self.get("sizes")
     }
@@ -252,6 +271,16 @@ impl Attr {
     ///获取href属性
     pub fn get_href(&self) -> Option<&String> {
         self.get("href")
+    }
+
+    ///hreflang属性
+    pub fn get_hreflang(&self) -> Option<&String> {
+        self.get("hreflang")
+    }
+
+    ///referrerpolicy属性
+    pub fn get_referrerpolicy(&self) -> Option<&String> {
+        self.get("referrerpolicy")
     }
 
     /// target属性
@@ -267,6 +296,25 @@ impl Attr {
     ///download属性
     pub fn get_download(&self) -> Option<&String> {
         self.get("download")
+    }
+
+    ///role属性
+    pub fn get_role(&self) -> Option<&String> {
+        self.get("role")
+    }
+    ///aria-label属性
+    pub fn get_aria_label(&self) -> Option<&String> {
+        self.get("aria-label")
+    }
+
+    ///aria-labelledby属性
+    pub fn get_aria_labelledby(&self) -> Option<&String> {
+        self.get("aria-labelledby")
+    }
+
+    ///data-*自定义属性
+    pub fn get_data(&self, key: &str) -> Option<&String> {
+        self.get(&format!("data-{}", key))
     }
 }
 impl Debug for Attr {
@@ -301,5 +349,74 @@ mod tests {
         // alt 缺失 -> 不是装饰性（是无障碍问题，但不是装饰性）
         let attr3 = Attr::parse_from_str(r#"src="photo.jpg""#);
         assert!(!attr3.is_decorative_img());
+    }
+    #[test]
+    fn test_get_role() {
+        let attr = Attr::parse_from_str(r#"role="button""#);
+        assert_eq!(attr.get_role(), Some(&"button".to_string()));
+
+        let attr2 = Attr::parse_from_str(r#"class="nav""#);
+        assert_eq!(attr2.get_role(), None);
+    }
+
+    #[test]
+    fn test_get_data() {
+        let attr = Attr::parse_from_str(r#"data-id="123" data-type="card""#);
+        assert_eq!(attr.get_data("id"), Some(&"123".to_string()));
+        assert_eq!(attr.get_data("type"), Some(&"card".to_string()));
+
+        // 不存在的 data 属性
+        assert_eq!(attr.get_data("notexist"), None);
+    }
+    #[test]
+    fn test_get_contenteditable() {
+        let attr1 = Attr::parse_from_str(r#"contenteditable="true""#);
+        assert_eq!(attr1.get_contenteditable(), Some(true));
+
+        let attr2 = Attr::parse_from_str(r#"contenteditable="false""#);
+        assert_eq!(attr2.get_contenteditable(), Some(false));
+
+        // 空字符串等同 true
+        let attr3 = Attr::parse_from_str(r#"contenteditable="""#);
+        assert_eq!(attr3.get_contenteditable(), Some(true));
+
+        // "inherit" 不映射为布尔
+        let attr4 = Attr::parse_from_str(r#"contenteditable="inherit""#);
+        assert_eq!(attr4.get_contenteditable(), None);
+    }
+
+    #[test]
+    fn test_get_spellcheck_translate() {
+        let attr = Attr::parse_from_str(r#"spellcheck="true" translate="no""#);
+        assert_eq!(attr.get_spellcheck(), Some(true));
+        assert_eq!(attr.get_translate(), Some(false));
+
+        let attr2 = Attr::parse_from_str(r#"spellcheck="false" translate="yes""#);
+        assert_eq!(attr2.get_spellcheck(), Some(false));
+        assert_eq!(attr2.get_translate(), Some(true));
+    }
+
+    #[test]
+    fn test_get_aria() {
+        let attr = Attr::parse_from_str(r#"aria-label="关闭" aria-labelledby="title-id""#);
+        assert_eq!(attr.get_aria_label(), Some(&"关闭".to_string()));
+        assert_eq!(attr.get_aria_labelledby(), Some(&"title-id".to_string()));
+
+        let attr2 = Attr::parse_from_str(r#"class="btn""#);
+        assert_eq!(attr2.get_aria_label(), None);
+        assert_eq!(attr2.get_aria_labelledby(), None);
+    }
+
+    #[test]
+    fn test_get_a_extra() {
+        let attr = Attr::parse_from_str(
+            r#"href="https://example.com" hreflang="en" referrerpolicy="no-referrer""#,
+        );
+        assert_eq!(attr.get_hreflang(), Some(&"en".to_string()));
+        assert_eq!(attr.get_referrerpolicy(), Some(&"no-referrer".to_string()));
+
+        let attr2 = Attr::parse_from_str(r#"href="https://example.com""#);
+        assert_eq!(attr2.get_hreflang(), None);
+        assert_eq!(attr2.get_referrerpolicy(), None);
     }
 }
