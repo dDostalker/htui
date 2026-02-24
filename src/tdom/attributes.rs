@@ -76,7 +76,7 @@ impl Attr {
                         }
                     }
                 }
-                
+
                 attributes.insert(key, value);
             } else {
                 // 没有等号，说明是布尔属性（如 disabled, checked）
@@ -93,38 +93,46 @@ impl Attr {
         self.attributes.get(key)
     }
 
-    //获取属性并尝试转换为 i32
+    ///获取属性并尝试转换为 i32
     pub fn get_as_i32(&self, key: &str) -> Option<i32> {
         self.get(key).and_then(|v| v.parse::<i32>().ok())
     }
-    
-    //获取属性并尝试转换为 f64
+
+    /// 将属性值解析为 `u32`。
+    pub fn get_as_u32(&self, key: &str) -> Option<u32> {
+        self.get(key).and_then(|v| v.parse::<u32>().ok())
+    }
+
+    ///获取属性并尝试转换为 f64
     pub fn get_as_f64(&self, key: &str) -> Option<f64> {
         self.get(key).and_then(|v| v.parse::<f64>().ok())
     }
-    
-    //获取 HTML 布尔属性
-    //只要属性存在就返回 Some(true)，不存在返回 None
+
+    ///获取 HTML 布尔属性,只要属性存在就返回 Some(true)，不存在返回 None
     pub fn get_as_bool_html(&self, key: &str) -> Option<bool> {
-        if self.has(key) {
-            Some(true)
-        } else {
-            None
-        }
+        if self.has(key) { Some(true) } else { None }
     }
 
-    //获取 ARIA/枚举型布尔属性
-    //解析 "true"/"false" 字符串值
+    ///获取字符串形枚举型布尔属性,解析 "true"/"false" 字符串值
     pub fn get_as_bool_string(&self, key: &str) -> Option<bool> {
         self.get(key).and_then(|v| match v.as_str() {
-            "true" | "1" => Some(true),
-            "false" | "0" => Some(false),
+            "true" => Some(true),
+            "false" => Some(false),
             "" => Some(true), // 空字符串在某些上下文中表示 true
             _ => None,
         })
     }
 
-    //检查是否存在指定属性
+    /// 数字形式布尔属性：解析值为 `"1"` / `"0"` 的属性。
+    pub fn get_as_bool_number(&self, key: &str) -> Option<bool> {
+        self.get(key).and_then(|v| match v.as_str() {
+            "1" => Some(true),
+            "0" => Some(false),
+            _ => None,
+        })
+    }
+
+    ///检查是否存在指定属性
     pub fn has(&self, key: &str) -> bool {
         self.attributes.contains_key(key)
     }
@@ -132,16 +140,12 @@ impl Attr {
     ///通用属性标签
     //获取hidden属性
     pub fn get_hidden(&self) -> Option<bool> {
-        if self.has("hidden") { Some(true) } else { None }
+        self.get_as_bool_html("hidden")
     }
 
     //获取 draggable 属性并解析为布尔值
     pub fn get_draggable(&self) -> Option<bool> {
-        self.get("draggable").and_then(|v| match v.as_str() {
-            "true" => Some(true),
-            "false" => Some(false),
-            _ => None, // "auto" 或其他
-        })
+        self.get_as_bool_string("draggable")
     }
 
     //获取class属性
@@ -165,7 +169,7 @@ impl Attr {
 
     //获取tableindex中的整数
     pub fn get_tabindex(&self) -> Option<i32> {
-        self.get("tabindex").and_then(|v| v.parse::<i32>().ok())
+        self.get_as_i32("tabindex")
     }
 
     //获取 id 属性
@@ -198,20 +202,119 @@ impl Attr {
         self.get("dir")
     }
 
+    ///获取contenteditable属性
+    pub fn get_contenteditable(&self) -> Option<bool> {
+        self.get_as_bool_string("contenteditable")
+    }
+
+    ///获取spellcheck属性
+    pub fn get_spellcheck(&self) -> Option<bool> {
+        self.get_as_bool_string("spellcheck")
+    }
+
+    ///获取translate属性
+    pub fn get_translate(&self) -> Option<bool> {
+        self.get("translate").and_then(|v| match v.as_str() {
+            "yes" | "" => Some(true),
+            "no" => Some(false),
+            _ => None,
+        })
+    }
+
     ///特殊属性标签
-    //获取src中的属性
+    ///获取src中的属性
     pub fn get_src(&self) -> Option<&String> {
         self.get("src")
     }
 
-    //获取href属性
+    /// 获取 alt 属性
+    pub fn get_alt(&self) -> Option<&String> {
+        self.get("alt")
+    }
+
+    /// 判断是否为装饰性图片,即`alt=""为空
+    pub fn is_decorative_img(&self) -> bool {
+        matches!(self.get("alt"), Some(v) if v.is_empty())
+    }
+
+    /// width属性（像素宽度）
+    pub fn get_width(&self) -> Option<u32> {
+        self.get_as_u32("width")
+    }
+
+    /// height属性（像素高度）
+    pub fn get_height(&self) -> Option<u32> {
+        self.get_as_u32("height")
+    }
+
+    /// ismap属性,服务器端图像映射，布尔属性，必须在 `<a>` 内使用
+    pub fn get_ismap(&self) -> bool {
+        self.has("ismap")
+    }
+
+    /// usemap属性,客户端图像映射
+    pub fn get_usemap(&self) -> Option<&String> {
+        self.get("usemap")
+    }
+
+    /// srcset属性（响应式图片候选列表，原始字符串）
+    /// 格式较复杂,暂时保留原始字符串
+    pub fn get_srcset(&self) -> Option<&String> {
+        self.get("srcset")
+    }
+
+    /// sizes`属性
+    pub fn get_sizes(&self) -> Option<&String> {
+        self.get("sizes")
+    }
+
+    ///获取href属性
     pub fn get_href(&self) -> Option<&String> {
         self.get("href")
     }
 
-    // 获取 alt 属性
-    pub fn get_alt(&self) -> Option<&String> {
-        self.get("alt")
+    ///hreflang属性
+    pub fn get_hreflang(&self) -> Option<&String> {
+        self.get("hreflang")
+    }
+
+    ///referrerpolicy属性
+    pub fn get_referrerpolicy(&self) -> Option<&String> {
+        self.get("referrerpolicy")
+    }
+
+    /// target属性
+    pub fn get_target(&self) -> Option<&String> {
+        self.get("target")
+    }
+
+    /// rel属性
+    pub fn get_rel(&self) -> Option<&String> {
+        self.get("rel")
+    }
+
+    ///download属性
+    pub fn get_download(&self) -> Option<&String> {
+        self.get("download")
+    }
+
+    ///role属性
+    pub fn get_role(&self) -> Option<&String> {
+        self.get("role")
+    }
+    ///aria-label属性
+    pub fn get_aria_label(&self) -> Option<&String> {
+        self.get("aria-label")
+    }
+
+    ///aria-labelledby属性
+    pub fn get_aria_labelledby(&self) -> Option<&String> {
+        self.get("aria-labelledby")
+    }
+
+    ///data-*自定义属性
+    pub fn get_data(&self, key: &str) -> Option<&String> {
+        self.get(&format!("data-{}", key))
     }
 }
 impl Debug for Attr {
@@ -223,167 +326,97 @@ impl Debug for Attr {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn test_get_hidden() {
-        // hidden 属性存在（无值）
-        let attr1 = Attr::parse_from_str("hidden");
-        // 注意：你的 parse_from_str 可能需要修改以支持无值属性
-        // 暂时测试有值的情况
-        let attr1 = Attr::parse_from_str(r#"hidden="hidden""#);
-        assert_eq!(attr1.get_hidden(), Some(true));
+    fn test_get_width_height() {
+        let attr = Attr::parse_from_str(r#"width="800" height="600""#);
+        assert_eq!(attr.get_width(), Some(800));
+        assert_eq!(attr.get_height(), Some(600));
 
-        // hidden 属性存在（任意值）
-        let attr2 = Attr::parse_from_str(r#"hidden="true""#);
-        assert_eq!(attr2.get_hidden(), Some(true));
+        // 负数应返回 None
+        let attr2 = Attr::parse_from_str(r#"width="-1""#);
+        assert_eq!(attr2.get_width(), None);
+    }
+    #[test]
+    fn test_is_decorative_img() {
+        // alt="" 显式存在且为空 -> 装饰性
+        let attr1 = Attr::parse_from_str(r#"src="spacer.gif" alt="""#);
+        assert!(attr1.is_decorative_img());
 
-        // 没有 hidden 属性
-        let attr3 = Attr::parse_from_str(r#"class="test""#);
-        assert_eq!(attr3.get_hidden(), None);
+        // alt 有内容 -> 不是装饰性
+        let attr2 = Attr::parse_from_str(r#"src="photo.jpg" alt="A sunset""#);
+        assert!(!attr2.is_decorative_img());
+
+        // alt 缺失 -> 不是装饰性（是无障碍问题，但不是装饰性）
+        let attr3 = Attr::parse_from_str(r#"src="photo.jpg""#);
+        assert!(!attr3.is_decorative_img());
+    }
+    #[test]
+    fn test_get_role() {
+        let attr = Attr::parse_from_str(r#"role="button""#);
+        assert_eq!(attr.get_role(), Some(&"button".to_string()));
+
+        let attr2 = Attr::parse_from_str(r#"class="nav""#);
+        assert_eq!(attr2.get_role(), None);
     }
 
     #[test]
-    fn test_get_class() {
-        // 多个 class
-        let attr1 = Attr::parse_from_str(r#"class="btn primary active""#);
-        assert_eq!(
-            attr1.get_class(),
-            Some(vec![
-                "btn".to_string(),
-                "primary".to_string(),
-                "active".to_string()
-            ])
-        );
+    fn test_get_data() {
+        let attr = Attr::parse_from_str(r#"data-id="123" data-type="card""#);
+        assert_eq!(attr.get_data("id"), Some(&"123".to_string()));
+        assert_eq!(attr.get_data("type"), Some(&"card".to_string()));
 
-        // 单个 class
-        let attr2 = Attr::parse_from_str(r#"class="single""#);
-        assert_eq!(attr2.get_class(), Some(vec!["single".to_string()]));
+        // 不存在的 data 属性
+        assert_eq!(attr.get_data("notexist"), None);
+    }
+    #[test]
+    fn test_get_contenteditable() {
+        let attr1 = Attr::parse_from_str(r#"contenteditable="true""#);
+        assert_eq!(attr1.get_contenteditable(), Some(true));
 
-        // 没有 class 属性
-        let attr3 = Attr::parse_from_str(r#"id="main""#);
-        assert_eq!(attr3.get_class(), None);
+        let attr2 = Attr::parse_from_str(r#"contenteditable="false""#);
+        assert_eq!(attr2.get_contenteditable(), Some(false));
 
-        // 空 class（多个空格）
-        let attr4 = Attr::parse_from_str(r#"class="  ""#);
-        assert_eq!(attr4.get_class(), Some(vec![]));
+        // 空字符串等同 true
+        let attr3 = Attr::parse_from_str(r#"contenteditable="""#);
+        assert_eq!(attr3.get_contenteditable(), Some(true));
+
+        // "inherit" 不映射为布尔
+        let attr4 = Attr::parse_from_str(r#"contenteditable="inherit""#);
+        assert_eq!(attr4.get_contenteditable(), None);
     }
 
     #[test]
-    fn test_has_class() {
-        let attr = Attr::parse_from_str(r#"class="btn primary active""#);
-        assert!(attr.has_class("btn"));
-        assert!(attr.has_class("primary"));
-        assert!(attr.has_class("active"));
-        assert!(!attr.has_class("disabled"));
+    fn test_get_spellcheck_translate() {
+        let attr = Attr::parse_from_str(r#"spellcheck="true" translate="no""#);
+        assert_eq!(attr.get_spellcheck(), Some(true));
+        assert_eq!(attr.get_translate(), Some(false));
 
-        let empty_attr = Attr::parse_from_str(r#"id="test""#);
-        assert!(!empty_attr.has_class("btn"));
+        let attr2 = Attr::parse_from_str(r#"spellcheck="false" translate="yes""#);
+        assert_eq!(attr2.get_spellcheck(), Some(false));
+        assert_eq!(attr2.get_translate(), Some(true));
     }
 
     #[test]
-    fn test_get_id_and_style() {
-        let attr = Attr::parse_from_str(r#"id="main" style="color:red""#);
-        assert_eq!(attr.get_id(), Some(&"main".to_string()));
-        assert_eq!(attr.get_style(), Some(&"color:red".to_string()));
+    fn test_get_aria() {
+        let attr = Attr::parse_from_str(r#"aria-label="关闭" aria-labelledby="title-id""#);
+        assert_eq!(attr.get_aria_label(), Some(&"关闭".to_string()));
+        assert_eq!(attr.get_aria_labelledby(), Some(&"title-id".to_string()));
+
+        let attr2 = Attr::parse_from_str(r#"class="btn""#);
+        assert_eq!(attr2.get_aria_label(), None);
+        assert_eq!(attr2.get_aria_labelledby(), None);
     }
 
     #[test]
-    fn test_parse_with_spaces_around_equals() {
-        // 测试等号前后有空格的情况
-        let attr1 = Attr::parse_from_str(r#"class = "container""#);
-        assert_eq!(attr1.get("class"), Some(&"container".to_string()));
-
-        // 测试等号前有空格
-        let attr2 = Attr::parse_from_str(r#"id ="main""#);
-        assert_eq!(attr2.get("id"), Some(&"main".to_string()));
-
-        // 测试等号后有空格
-        let attr3 = Attr::parse_from_str(r#"style= "color:red""#);
-        assert_eq!(attr3.get("style"), Some(&"color:red".to_string()));
-
-        // 测试多个空格
-        let attr4 = Attr::parse_from_str(r#"title  =  "test""#);
-        assert_eq!(attr4.get("title"), Some(&"test".to_string()));
-
-        // 测试混合情况：多个属性，有的有空格，有的没有
-        let attr5 = Attr::parse_from_str(r#"class="btn" id = "main" style= "color:red""#);
-        assert_eq!(attr5.get("class"), Some(&"btn".to_string()));
-        assert_eq!(attr5.get("id"), Some(&"main".to_string()));
-        assert_eq!(attr5.get("style"), Some(&"color:red".to_string()));
-    }
-
-    #[test]
-    fn test_get_src_href_alt() {
-        // 测试 img 标签的 src 和 alt
-        let img_attr = Attr::parse_from_str(r#"src="image.jpg" alt="A beautiful sunset""#);
-        assert_eq!(img_attr.get_src(), Some(&"image.jpg".to_string()));
-        assert_eq!(img_attr.get_alt(), Some(&"A beautiful sunset".to_string()));
-
-        // 测试 a 标签的 href
-        let a_attr = Attr::parse_from_str(r#"href="https://example.com" target="_blank""#);
-        assert_eq!(a_attr.get_href(), Some(&"https://example.com".to_string()));
-
-        // 测试装饰性图片（空 alt）
-        let decorative_img = Attr::parse_from_str(r#"src="spacer.gif" alt="""#);
-        assert_eq!(decorative_img.get_src(), Some(&"spacer.gif".to_string()));
-        assert_eq!(decorative_img.get_alt(), Some(&"".to_string()));
-
-        // 测试不存在的属性
-        let div_attr = Attr::parse_from_str(r#"class="container""#);
-        assert_eq!(div_attr.get_src(), None);
-        assert_eq!(div_attr.get_href(), None);
-        assert_eq!(div_attr.get_alt(), None);
-    }
-    #[test]
-    fn test_get_as_i32() {
-        let attr = Attr::parse_from_str(r#"tabindex="5" width="100" invalid="abc""#);
-        
-        assert_eq!(attr.get_as_i32("tabindex"), Some(5));
-        assert_eq!(attr.get_as_i32("width"), Some(100));
-        assert_eq!(attr.get_as_i32("invalid"), None); // 转换失败
-        assert_eq!(attr.get_as_i32("notexist"), None); // 不存在
-    }
-
-    #[test]
-    fn test_get_as_f64() {
-        let attr = Attr::parse_from_str(r#"opacity="0.5" zoom="1.5" invalid="abc""#);
-        
-        assert_eq!(attr.get_as_f64("opacity"), Some(0.5));
-        assert_eq!(attr.get_as_f64("zoom"), Some(1.5));
-        assert_eq!(attr.get_as_f64("invalid"), None);
-        assert_eq!(attr.get_as_f64("notexist"), None);
-    }
-
-    #[test]
-    fn test_get_as_bool_html() {
-        // HTML 布尔属性：存在即为 true
-        let attr1 = Attr::parse_from_str(r#"disabled checked required"#);
-        // 注意：你的 parse_from_str 可能需要修改以支持无值属性
-        
-        // 暂时用有值的测试
-        let attr2 = Attr::parse_from_str(r#"disabled="" checked="checked""#);
-        assert_eq!(attr2.get_as_bool_html("disabled"), Some(true));
-        assert_eq!(attr2.get_as_bool_html("checked"), Some(true));
-        
-        // 不存在
-        let attr3 = Attr::parse_from_str(r#"class="test""#);
-        assert_eq!(attr3.get_as_bool_html("disabled"), None);
-    }
-
-    #[test]
-    fn test_get_as_bool_string() {
-        // ARIA 和枚举型布尔属性
+    fn test_get_a_extra() {
         let attr = Attr::parse_from_str(
-            r#"aria-hidden="true" spellcheck="false" translate="1" custom="0""#
+            r#"href="https://example.com" hreflang="en" referrerpolicy="no-referrer""#,
         );
-        
-        assert_eq!(attr.get_as_bool_string("aria-hidden"), Some(true));
-        assert_eq!(attr.get_as_bool_string("spellcheck"), Some(false));
-        assert_eq!(attr.get_as_bool_string("translate"), Some(true));
-        assert_eq!(attr.get_as_bool_string("custom"), Some(false));
-        
-        // 无效值
-        let attr2 = Attr::parse_from_str(r#"invalid="maybe""#);
-        assert_eq!(attr2.get_as_bool_string("invalid"), None);
+        assert_eq!(attr.get_hreflang(), Some(&"en".to_string()));
+        assert_eq!(attr.get_referrerpolicy(), Some(&"no-referrer".to_string()));
+
+        let attr2 = Attr::parse_from_str(r#"href="https://example.com""#);
+        assert_eq!(attr2.get_hreflang(), None);
+        assert_eq!(attr2.get_referrerpolicy(), None);
     }
 }

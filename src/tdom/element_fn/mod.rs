@@ -1,4 +1,5 @@
 use anyhow::Result;
+mod a;
 mod div;
 mod heading;
 mod img;
@@ -7,6 +8,7 @@ mod span;
 use crate::tdom::{
     attributes::Attr,
     element_fn::{
+        a::a_element,
         div::div_element,
         heading::{h1_element, h2_element, h3_element, h4_element, h5_element, h6_element},
         img::img_element,
@@ -23,7 +25,8 @@ pub static ELEMENT_FUNCTIONS: &[ElementFn] = &[
     p_element,
     span_element,
     img_element,
-    h1_element,
+    a_element,
+    h1_element, // 添加
     h2_element,
     h3_element,
     h4_element,
