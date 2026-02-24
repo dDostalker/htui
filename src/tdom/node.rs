@@ -15,6 +15,17 @@ pub enum NodeType {
     H4,
     H5,
     H6,
+    Header,
+    Footer,
+    Nav,
+    Main,
+    Section,
+    Article,
+    Aside,
+    Figure,
+    Figcaption,
+    Details,
+    Summary,
     Text(String),
     // todo!
 }
