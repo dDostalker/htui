@@ -312,7 +312,7 @@ impl Attr {
         self.get("aria-labelledby")
     }
 
-    ///ol属性
+    ///ol特殊属性
     ///start树新风
     pub fn get_start(&self)->Option<i32>{
         self.get_as_i32("start")
@@ -328,11 +328,107 @@ impl Attr {
         self.get("type")
     }
 
-    ///li属性
+    ///li特殊属性
     ///value属性
     pub fn get_li_value(&self)->Option<i32>{
         self.get_as_i32("value")
     }
+
+    ///input特殊属性
+    ///type属性
+    pub fn get_input_type(&self) -> Option<&String>{
+        self.get("type")
+    } 
+    ///name属性
+    pub fn get_name(&self) -> Option<&String> {
+        self.get("name")
+    }
+
+    ///value属性
+    pub fn get_value(&self) -> Option<&String> {
+        self.get("value")
+    }
+
+    ///placeholder属性
+    pub fn get_placeholder(&self) -> Option<&String> {
+        self.get("placeholder")
+    }
+
+    ///disabled属性
+    pub fn get_disabled(&self) -> bool {
+        self.has("disabled")
+    }
+
+    ///required属性
+    pub fn get_required(&self) -> bool {
+        self.has("required")
+    }
+
+    ///readonly属性
+    pub fn get_readonly(&self) -> bool {
+        self.has("readonly")
+    }
+
+    ///autofocus属性
+    pub fn get_autofocus(&self) -> bool {
+        self.has("autofocus")
+    }
+
+    ///checked属性
+    pub fn get_checked(&self) -> bool {
+        self.has("checked")
+    }
+
+    ///multiple属性
+    pub fn get_multiple(&self) -> bool {
+        self.has("multiple")
+    }
+
+    ///accept属性
+    pub fn get_accept(&self) -> Option<&String> {
+        self.get("accept")
+    }
+
+    ///maxlength属性
+    pub fn get_maxlength(&self) -> Option<u32> {
+        self.get_as_u32("maxlength")
+    }
+
+    ///minlength属性
+    pub fn get_minlength(&self) -> Option<u32> {
+        self.get_as_u32("minlength")
+    }
+
+    ///min属性
+    pub fn get_min(&self) -> Option<&String> {
+        self.get("min")
+    }
+
+    ///max属性
+    pub fn get_max(&self) -> Option<&String> {
+        self.get("max")
+    }
+
+    ///step
+    pub fn get_step(&self) -> Option<&String> {
+        self.get("step")
+    }
+
+    ///pattern
+    pub fn get_pattern(&self) -> Option<&String> {
+        self.get("pattern")
+    }
+
+    ///autocomplete属性
+    pub fn get_autocomplete(&self) -> Option<&String> {
+        self.get("autocomplete")
+    }
+
+    ///list属性
+    pub fn get_list(&self) -> Option<&String> {
+        self.get("list")
+    }
+
     ///data-*自定义属性
     pub fn get_data(&self, key: &str) -> Option<&String> {
         self.get(&format!("data-{}", key))
@@ -466,5 +562,46 @@ mod tests {
 
         let attr3 = Attr::parse_from_str(r#"class="item""#);
         assert_eq!(attr3.get_li_value(), None);
+    }
+
+    #[test]
+    fn test_input_bool_attrs() {
+        let attr = Attr::parse_from_str(r#"disabled required readonly autofocus checked multiple"#);
+        assert!(attr.get_disabled());
+        assert!(attr.get_required());
+        assert!(attr.get_readonly());
+        assert!(attr.get_autofocus());
+        assert!(attr.get_checked());
+        assert!(attr.get_multiple());
+
+        let attr2 = Attr::parse_from_str(r#"type="text""#);
+        assert!(!attr2.get_disabled());
+        assert!(!attr2.get_checked());
+    }
+
+    #[test]
+    fn test_input_text_attrs() {
+        let attr = Attr::parse_from_str(
+            r#"placeholder="请输入邮箱" maxlength="100" minlength="5" pattern="[a-z]+""#
+        );
+        assert_eq!(attr.get_placeholder(), Some(&"请输入邮箱".to_string()));
+        assert_eq!(attr.get_maxlength(), Some(100));
+        assert_eq!(attr.get_minlength(), Some(5));
+        assert_eq!(attr.get_pattern(), Some(&"[a-z]+".to_string()));
+    }
+
+    #[test]
+    fn test_input_range_attrs() {
+        let attr = Attr::parse_from_str(r#"min="0" max="100" step="5""#);
+        assert_eq!(attr.get_min(), Some(&"0".to_string()));
+        assert_eq!(attr.get_max(), Some(&"100".to_string()));
+        assert_eq!(attr.get_step(), Some(&"5".to_string()));
+    }
+
+    #[test]
+    fn test_input_file_attrs() {
+        let attr = Attr::parse_from_str(r#"accept="image/*" multiple"#);
+        assert_eq!(attr.get_accept(), Some(&"image/*".to_string()));
+        assert!(attr.get_multiple());
     }
 }

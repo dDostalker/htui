@@ -10,6 +10,7 @@ mod footer;
 mod header;
 mod heading;
 mod img;
+mod input;
 mod li;
 mod main;
 mod nav;
@@ -33,6 +34,7 @@ use crate::tdom::{
         header::header_element,
         heading::{h1_element, h2_element, h3_element, h4_element, h5_element, h6_element},
         img::img_element,
+        input::input_element,
         li::li_element,
         main::main_element,
         nav::nav_element,
@@ -65,6 +67,7 @@ pub static ELEMENT_FUNCTIONS: &[ElementFn] = &[
     h5_element,
     h6_element,
     img_element,
+    input_element,
     li_element,
     main_element,
     nav_element,

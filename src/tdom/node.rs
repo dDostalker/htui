@@ -29,13 +29,18 @@ pub enum NodeType {
     Ul,//列表
     Ol,
     Li,//列表
+    Input,
     Text(String),
     // todo!
 }
 
 impl NodeType {
     pub fn is_self_closing(&self) -> bool {
-        matches!(self, NodeType::Img)
+        match self{
+            NodeType::Img => true,
+            NodeType::Input => true,
+            _ => false,
+        }
     }
 }
 
