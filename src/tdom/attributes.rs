@@ -312,6 +312,27 @@ impl Attr {
         self.get("aria-labelledby")
     }
 
+    ///ol属性
+    ///start树新风
+    pub fn get_start(&self)->Option<i32>{
+        self.get_as_i32("start")
+    }
+
+    ///reversed属性
+    pub fn get_reversed(&self)->bool{
+        self.has("reversed")
+    }
+
+    ///tyoe属性
+    pub fn get_ol_type(&self)->Option<&String>{
+        self.get("type")
+    }
+
+    ///li属性
+    ///value属性
+    pub fn get_li_value(&self)->Option<i32>{
+        self.get_as_i32("value")
+    }
     ///data-*自定义属性
     pub fn get_data(&self, key: &str) -> Option<&String> {
         self.get(&format!("data-{}", key))
@@ -418,5 +439,32 @@ mod tests {
         let attr2 = Attr::parse_from_str(r#"href="https://example.com""#);
         assert_eq!(attr2.get_hreflang(), None);
         assert_eq!(attr2.get_referrerpolicy(), None);
+    }
+
+    #[test]
+    fn test_ol_attrs() {
+        let attr = Attr::parse_from_str(r#"start="3" type="a""#);
+        assert_eq!(attr.get_start(), Some(3));
+        assert_eq!(attr.get_ol_type(), Some(&"a".to_string()));
+
+        // reversed 是布尔属性
+        let attr2 = Attr::parse_from_str(r#"reversed"#);
+        assert!(attr2.get_reversed());
+
+        let attr3 = Attr::parse_from_str(r#"start="1""#);
+        assert!(!attr3.get_reversed());
+    }
+
+    #[test]
+    fn test_li_value() {
+        let attr = Attr::parse_from_str(r#"value="5""#);
+        assert_eq!(attr.get_li_value(), Some(5));
+
+        // 负数合法（ol 可以倒序）
+        let attr2 = Attr::parse_from_str(r#"value="-1""#);
+        assert_eq!(attr2.get_li_value(), Some(-1));
+
+        let attr3 = Attr::parse_from_str(r#"class="item""#);
+        assert_eq!(attr3.get_li_value(), None);
     }
 }

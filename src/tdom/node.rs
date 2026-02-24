@@ -15,7 +15,7 @@ pub enum NodeType {
     H4,
     H5,
     H6,
-    Header,
+    Header,//语义
     Footer,
     Nav,
     Main,
@@ -25,7 +25,10 @@ pub enum NodeType {
     Figure,
     Figcaption,
     Details,
-    Summary,
+    Summary,//语义
+    Ul,//列表
+    Ol,
+    Li,//列表
     Text(String),
     // todo!
 }
