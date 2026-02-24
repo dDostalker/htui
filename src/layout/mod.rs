@@ -1,1 +1,17 @@
-mod layout;
+use anyhow::Result;
+
+use crate::{
+    layout::{
+        layout::{TermLayout, TermMap},
+        layout_fn::p::layout_p,
+    },
+    tdom::node::Node,
+};
+
+pub mod layout;
+pub mod layout_fn;
+
+type LayoutFn = fn(node: &Node, term_layout: &mut TermLayout, term_map: &TermMap) -> Result<()>;
+
+/// 这里的循环需要有固定的顺序
+pub static DEFAULT_LAYOUT: &[LayoutFn] = &[layout_p];

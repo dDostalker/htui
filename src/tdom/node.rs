@@ -46,7 +46,9 @@ impl Node {
             attributes: Attr::new(),
         }
     }
-
+    pub fn children(&self) -> impl Iterator<Item = &Node> {
+        self.children.iter()
+    }
     pub fn text(data: &str) -> Node {
         Node {
             node_type: NodeType::Text(data.to_string()),

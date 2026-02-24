@@ -1,29 +1,29 @@
 use anyhow::Result;
 mod div;
+mod heading;
+mod img;
 mod p;
 mod span;
-mod img;
-mod heading;
 use crate::tdom::{
+    attributes::Attr,
     element_fn::{
-        div::div_element, 
-        p::p_element, 
-        span::span_element,
-        img::img_element,
+        div::div_element,
         heading::{h1_element, h2_element, h3_element, h4_element, h5_element, h6_element},
+        img::img_element,
+        p::p_element,
+        span::span_element,
     },
     node::NodeType,
-    attributes::Attr
 };
 
-pub type ElementFn = fn(&str) -> Result<Option<(NodeType,Attr)>>;
+pub type ElementFn = fn(&str) -> Result<Option<(NodeType, Attr)>>;
 
 pub static ELEMENT_FUNCTIONS: &[ElementFn] = &[
-    div_element, 
-    p_element, 
+    div_element,
+    p_element,
     span_element,
     img_element,
-    h1_element,  // 添加
+    h1_element,
     h2_element,
     h3_element,
     h4_element,

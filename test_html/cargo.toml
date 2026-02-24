@@ -1,0 +1,12 @@
+[package]
+name = "test_html"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "helloworld"
+path = "helloworld.rs"
+
+[dependencies]
+htui = { path = ".." }
+anyhow = "1.0.101"

@@ -7,7 +7,7 @@ pub(crate) use anyhow::{Ok, Result, anyhow};
 use log::debug;
 /// parser , to rememeber the status of html parser
 #[derive(Debug)]
-struct Parser {
+pub struct Parser {
     point: usize,
     context: String,
     line: usize,
@@ -83,14 +83,14 @@ impl Parser {
                 }
             }
             Some(_) => {
-                let mut found_tag = false;  // 添加标志
+                let mut found_tag = false; // 添加标志
                 while let Some(c) = self._next_char()? {
                     if c == '<' {
-                        found_tag = true;  // 标记找到了标签
+                        found_tag = true; // 标记找到了标签
                         break;
                     }
                 }
-                
+
                 // 只有在遇到 '<' 时才退回
                 if found_tag {
                     self.point -= 1;
@@ -122,7 +122,7 @@ impl Parser {
 }
 
 impl Parser {
-    fn new(context: &str) -> Self {
+    pub fn new(context: &str) -> Self {
         Self {
             context: context.to_string(),
             point: 0,
@@ -130,7 +130,7 @@ impl Parser {
             column: 1,
         }
     }
-    fn parse(&mut self) -> Result<Node> {
+    pub fn parse(&mut self) -> Result<Node> {
         self._parse(Some(NodeType::Global))
     }
     /// todo
