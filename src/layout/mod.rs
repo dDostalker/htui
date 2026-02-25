@@ -1,11 +1,9 @@
 use anyhow::Result;
 
 use crate::{
-    layout::{
-        layout::{TermLayout, TermMap},
-        layout_fn::p::layout_p,
-    },
+    layout::{layout::TermMap, layout_fn::p::layout_p},
     tdom::node::Node,
+    tui::graph_api::TermLayout,
 };
 
 pub mod layout;

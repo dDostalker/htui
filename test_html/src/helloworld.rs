@@ -1,5 +1,5 @@
 use anyhow::Result;
-use htui::{Parser, TermLayout, TermMap};
+use htui::{Parser, TermMap, tui::graph_api::TermLayout};
 
 pub fn test_hello_world() -> Result<()> {
     let html = "

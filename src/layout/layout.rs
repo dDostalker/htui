@@ -1,11 +1,10 @@
-use std::fmt::{Display, write};
-
 use anyhow::{Ok, Result};
 use crossterm::terminal;
 
 use crate::{
     layout::DEFAULT_LAYOUT,
     tdom::node::{Node, NodeType},
+    tui::graph_api::TermLayout,
 };
 
 /// 终端映射信息
@@ -18,20 +17,12 @@ pub struct TermMap {
 }
 
 impl TermMap {
-    /// 终端画布
     pub fn get_ter_map() -> Result<TermMap> {
         let (columns, rows) = terminal::size()?;
-        let block_count = (columns as usize) * (rows as usize);
-
         Ok(TermMap { columns, rows })
     }
 }
-#[derive(Debug, Default)]
-pub struct TermLayout {
-    pub layout: Vec<char>,
-    /// 当前绘画指针
-    pub point: u64,
-}
+
 ///创建画布以及画布信息部分
 impl TermLayout {
     pub fn new(map: &TermMap) -> Result<TermLayout> {
@@ -44,14 +35,6 @@ impl TermLayout {
     }
 }
 
-impl Display for TermLayout {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for row in &self.layout {
-            write!(f, "{}", row)?;
-        }
-        write!(f, "")
-    }
-}
 /// 画布内容描绘
 impl TermLayout {
     pub fn draw(&mut self, tdom: &Node, term_map: &TermMap) -> Result<()> {
