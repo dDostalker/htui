@@ -15,7 +15,7 @@ pub enum NodeType {
     H4,
     H5,
     H6,
-    Header,//语义
+    Header, //语义
     Footer,
     Nav,
     Main,
@@ -25,18 +25,24 @@ pub enum NodeType {
     Figure,
     Figcaption,
     Details,
-    Summary,//语义
-    Ul,//列表
+    Summary, //语义
+    Ul,      //列表
     Ol,
-    Li,//列表
+    Li, //列表
     Input,
+    Form,
+    Select,
+    HtmlOption,
+    Button,
+    Textarea,
+    Label,
     Text(String),
     // todo!
 }
 
 impl NodeType {
     pub fn is_self_closing(&self) -> bool {
-        match self{
+        match self {
             NodeType::Img => true,
             NodeType::Input => true,
             _ => false,

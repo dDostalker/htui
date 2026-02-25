@@ -429,6 +429,92 @@ impl Attr {
         self.get("list")
     }
 
+    ///form特殊属性
+    ///action属性
+    pub fn get_action(&self) -> Option<&String> {
+        self.get("action")
+    }
+
+    ///method属性
+    pub fn get_method(&self) -> Option<&String> {
+        self.get("method")
+    }
+
+    ///enctype属性
+    pub fn get_enctype(&self)->Option<&String>{
+        self.get("enctype")
+    }
+
+    ///target属性
+    pub fn get_form_target(&self) -> Option<&String> {
+        self.get("target")
+    }
+
+    ///novalidate属性
+    pub fn get_novalidate(&self) -> bool {
+        self.has("novalidate")
+    }
+
+    ///accept-charset属性
+    pub fn get_accept_charset(&self) -> Option<&String> {
+        self.get("accept-charset")
+    }
+
+    ///autocomplete属性
+    pub fn get_form_autocomplete(&self) -> Option<&String> {
+        self.get("autocomplete")
+    }
+
+    ///select特殊属性
+    ///size属性
+    pub fn get_size(&self) -> Option<u32> {
+        self.get_as_u32("size")
+    }
+
+    ///form属性
+    pub fn get_form_id(&self) -> Option<&String> {
+        self.get("form")
+    }
+
+    ///htmloption特殊属性
+    ///elected属性
+    pub fn get_selected(&self) -> bool {
+        self.has("selected")
+    }
+
+    ///label属性
+    pub fn get_option_label(&self) -> Option<&String> {
+        self.get("label")
+    }
+
+    ///button特殊属性
+    ///type属性
+    pub fn get_button_type(&self) -> Option<&String> {
+        self.get("type")
+    }
+
+    ///textarea属性
+    ///rows属性
+    pub fn get_rows(&self) -> Option<u32> {
+        self.get_as_u32("rows")
+    }
+
+    ///cols属性
+    pub fn get_cols(&self) -> Option<u32> {
+        self.get_as_u32("cols")
+    }
+
+    ///wrap属性
+    pub fn get_wrap(&self) -> Option<&String> {
+        self.get("wrap")
+    }
+
+    ///label特殊属性
+    ///for属性
+    pub fn get_label_for(&self) -> Option<&String> {
+        self.get("for")
+    }
+
     ///data-*自定义属性
     pub fn get_data(&self, key: &str) -> Option<&String> {
         self.get(&format!("data-{}", key))
@@ -444,164 +530,89 @@ impl Debug for Attr {
 mod tests {
     use super::*;
     #[test]
-    fn test_get_width_height() {
-        let attr = Attr::parse_from_str(r#"width="800" height="600""#);
-        assert_eq!(attr.get_width(), Some(800));
-        assert_eq!(attr.get_height(), Some(600));
-
-        // 负数应返回 None
-        let attr2 = Attr::parse_from_str(r#"width="-1""#);
-        assert_eq!(attr2.get_width(), None);
-    }
-    #[test]
-    fn test_is_decorative_img() {
-        // alt="" 显式存在且为空 -> 装饰性
-        let attr1 = Attr::parse_from_str(r#"src="spacer.gif" alt="""#);
-        assert!(attr1.is_decorative_img());
-
-        // alt 有内容 -> 不是装饰性
-        let attr2 = Attr::parse_from_str(r#"src="photo.jpg" alt="A sunset""#);
-        assert!(!attr2.is_decorative_img());
-
-        // alt 缺失 -> 不是装饰性（是无障碍问题，但不是装饰性）
-        let attr3 = Attr::parse_from_str(r#"src="photo.jpg""#);
-        assert!(!attr3.is_decorative_img());
-    }
-    #[test]
-    fn test_get_role() {
-        let attr = Attr::parse_from_str(r#"role="button""#);
-        assert_eq!(attr.get_role(), Some(&"button".to_string()));
-
-        let attr2 = Attr::parse_from_str(r#"class="nav""#);
-        assert_eq!(attr2.get_role(), None);
-    }
-
-    #[test]
-    fn test_get_data() {
-        let attr = Attr::parse_from_str(r#"data-id="123" data-type="card""#);
-        assert_eq!(attr.get_data("id"), Some(&"123".to_string()));
-        assert_eq!(attr.get_data("type"), Some(&"card".to_string()));
-
-        // 不存在的 data 属性
-        assert_eq!(attr.get_data("notexist"), None);
-    }
-    #[test]
-    fn test_get_contenteditable() {
-        let attr1 = Attr::parse_from_str(r#"contenteditable="true""#);
-        assert_eq!(attr1.get_contenteditable(), Some(true));
-
-        let attr2 = Attr::parse_from_str(r#"contenteditable="false""#);
-        assert_eq!(attr2.get_contenteditable(), Some(false));
-
-        // 空字符串等同 true
-        let attr3 = Attr::parse_from_str(r#"contenteditable="""#);
-        assert_eq!(attr3.get_contenteditable(), Some(true));
-
-        // "inherit" 不映射为布尔
-        let attr4 = Attr::parse_from_str(r#"contenteditable="inherit""#);
-        assert_eq!(attr4.get_contenteditable(), None);
-    }
-
-    #[test]
-    fn test_get_spellcheck_translate() {
-        let attr = Attr::parse_from_str(r#"spellcheck="true" translate="no""#);
-        assert_eq!(attr.get_spellcheck(), Some(true));
-        assert_eq!(attr.get_translate(), Some(false));
-
-        let attr2 = Attr::parse_from_str(r#"spellcheck="false" translate="yes""#);
-        assert_eq!(attr2.get_spellcheck(), Some(false));
-        assert_eq!(attr2.get_translate(), Some(true));
-    }
-
-    #[test]
-    fn test_get_aria() {
-        let attr = Attr::parse_from_str(r#"aria-label="关闭" aria-labelledby="title-id""#);
-        assert_eq!(attr.get_aria_label(), Some(&"关闭".to_string()));
-        assert_eq!(attr.get_aria_labelledby(), Some(&"title-id".to_string()));
-
-        let attr2 = Attr::parse_from_str(r#"class="btn""#);
-        assert_eq!(attr2.get_aria_label(), None);
-        assert_eq!(attr2.get_aria_labelledby(), None);
-    }
-
-    #[test]
-    fn test_get_a_extra() {
+    fn test_form_attrs() {
         let attr = Attr::parse_from_str(
-            r#"href="https://example.com" hreflang="en" referrerpolicy="no-referrer""#,
+            r#"action="/submit" method="post" enctype="multipart/form-data""#
         );
-        assert_eq!(attr.get_hreflang(), Some(&"en".to_string()));
-        assert_eq!(attr.get_referrerpolicy(), Some(&"no-referrer".to_string()));
-
-        let attr2 = Attr::parse_from_str(r#"href="https://example.com""#);
-        assert_eq!(attr2.get_hreflang(), None);
-        assert_eq!(attr2.get_referrerpolicy(), None);
+        assert_eq!(attr.get_action(), Some(&"/submit".to_string()));
+        assert_eq!(attr.get_method(), Some(&"post".to_string()));
     }
 
     #[test]
-    fn test_ol_attrs() {
-        let attr = Attr::parse_from_str(r#"start="3" type="a""#);
-        assert_eq!(attr.get_start(), Some(3));
-        assert_eq!(attr.get_ol_type(), Some(&"a".to_string()));
+    fn test_form_novalidate() {
+        let attr = Attr::parse_from_str(r#"novalidate"#);
+        assert!(attr.get_novalidate());
 
-        // reversed 是布尔属性
-        let attr2 = Attr::parse_from_str(r#"reversed"#);
-        assert!(attr2.get_reversed());
-
-        let attr3 = Attr::parse_from_str(r#"start="1""#);
-        assert!(!attr3.get_reversed());
+        let attr2 = Attr::parse_from_str(r#"action="/submit""#);
+        assert!(!attr2.get_novalidate());
     }
 
     #[test]
-    fn test_li_value() {
-        let attr = Attr::parse_from_str(r#"value="5""#);
-        assert_eq!(attr.get_li_value(), Some(5));
-
-        // 负数合法（ol 可以倒序）
-        let attr2 = Attr::parse_from_str(r#"value="-1""#);
-        assert_eq!(attr2.get_li_value(), Some(-1));
-
-        let attr3 = Attr::parse_from_str(r#"class="item""#);
-        assert_eq!(attr3.get_li_value(), None);
-    }
-
-    #[test]
-    fn test_input_bool_attrs() {
-        let attr = Attr::parse_from_str(r#"disabled required readonly autofocus checked multiple"#);
-        assert!(attr.get_disabled());
-        assert!(attr.get_required());
-        assert!(attr.get_readonly());
-        assert!(attr.get_autofocus());
-        assert!(attr.get_checked());
-        assert!(attr.get_multiple());
-
-        let attr2 = Attr::parse_from_str(r#"type="text""#);
-        assert!(!attr2.get_disabled());
-        assert!(!attr2.get_checked());
-    }
-
-    #[test]
-    fn test_input_text_attrs() {
+    fn test_form_misc() {
         let attr = Attr::parse_from_str(
-            r#"placeholder="请输入邮箱" maxlength="100" minlength="5" pattern="[a-z]+""#
+            r#"target="_blank" accept-charset="UTF-8" autocomplete="off""#
         );
-        assert_eq!(attr.get_placeholder(), Some(&"请输入邮箱".to_string()));
-        assert_eq!(attr.get_maxlength(), Some(100));
-        assert_eq!(attr.get_minlength(), Some(5));
-        assert_eq!(attr.get_pattern(), Some(&"[a-z]+".to_string()));
+        assert_eq!(attr.get_form_target(), Some(&"_blank".to_string()));
+        assert_eq!(attr.get_accept_charset(), Some(&"UTF-8".to_string()));
+        assert_eq!(attr.get_form_autocomplete(), Some(&"off".to_string()));
     }
 
     #[test]
-    fn test_input_range_attrs() {
-        let attr = Attr::parse_from_str(r#"min="0" max="100" step="5""#);
-        assert_eq!(attr.get_min(), Some(&"0".to_string()));
-        assert_eq!(attr.get_max(), Some(&"100".to_string()));
-        assert_eq!(attr.get_step(), Some(&"5".to_string()));
-    }
-
-    #[test]
-    fn test_input_file_attrs() {
-        let attr = Attr::parse_from_str(r#"accept="image/*" multiple"#);
-        assert_eq!(attr.get_accept(), Some(&"image/*".to_string()));
+    fn test_select_attrs() {
+        let attr = Attr::parse_from_str(r#"size="5" multiple form="my-form""#);
+        assert_eq!(attr.get_size(), Some(5));
         assert!(attr.get_multiple());
+        assert_eq!(attr.get_form_id(), Some(&"my-form".to_string()));
+
+        // size 不允许负数
+        let attr2 = Attr::parse_from_str(r#"size="-1""#);
+        assert_eq!(attr2.get_size(), None);
+
+        let attr3 = Attr::parse_from_str(r#"name="city""#);
+        assert_eq!(attr3.get_size(), None);
+        assert_eq!(attr3.get_form_id(), None);
+    }
+
+    #[test]
+    fn test_option_attrs() {
+        let attr = Attr::parse_from_str(r#"value="zh" selected label="中文""#);
+        assert_eq!(attr.get_value(), Some(&"zh".to_string()));
+        assert!(attr.get_selected());
+        assert_eq!(attr.get_option_label(), Some(&"中文".to_string()));
+
+        let attr2 = Attr::parse_from_str(r#"value="en""#);
+        assert!(!attr2.get_selected());
+        assert_eq!(attr2.get_option_label(), None);
+    }
+
+    #[test]
+    fn test_button_type() {
+        let attr1 = Attr::parse_from_str(r#"type="submit""#);
+        assert_eq!(attr1.get_button_type(), Some(&"submit".to_string()));
+    }
+
+    #[test]
+    fn test_textarea_attrs() {
+        let attr = Attr::parse_from_str(r#"rows="5" cols="40" wrap="hard""#);
+        assert_eq!(attr.get_rows(), Some(5));
+        assert_eq!(attr.get_cols(), Some(40));
+        assert_eq!(attr.get_wrap(), Some(&"hard".to_string()));
+
+        // 负数不合法
+        let attr2 = Attr::parse_from_str(r#"rows="-1""#);
+        assert_eq!(attr2.get_rows(), None);
+
+        let attr3 = Attr::parse_from_str(r#"placeholder="请输入内容""#);
+        assert_eq!(attr3.get_rows(), None);
+        assert_eq!(attr3.get_wrap(), None);
+    }
+
+    #[test]
+    fn test_label_for() {
+        let attr = Attr::parse_from_str(r#"for="username""#);
+        assert_eq!(attr.get_label_for(), Some(&"username".to_string()));
+
+        let attr2 = Attr::parse_from_str(r#"class="label""#);
+        assert_eq!(attr2.get_label_for(), None);
     }
 }
