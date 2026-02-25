@@ -5,11 +5,14 @@ use crate::tdom::{
 };
 pub(crate) use anyhow::{Ok, Result, anyhow};
 use log::debug;
+use std::iter::Peekable;
+use std::str::CharIndices;
+
 /// parser , to rememeber the status of html parser
 #[derive(Debug)]
-pub struct Parser {
-    point: usize,
-    context: String,
+pub struct Parser<'a> {
+    input: &'a str,
+    chars: Peekable<CharIndices<'a>>,
     line: usize,
     column: usize,
 }
@@ -38,25 +41,39 @@ enum EleBlockRead<'a> {
 }
 
 ///Parser machine
-impl Parser {
-    /// use to get next char from input context
-    /// Result to duel the nth error
-    /// the Option to duel the end of file
-    fn _next_char(&mut self) -> Result<Option<char>> {
-        if self._eof() {
-            return Ok(None);
+impl<'a> Parser<'a> {
+    pub fn new(input: &'a str) -> Self {
+        Self {
+            input,
+            chars: input.char_indices().peekable(),
+            line: 1,
+            column: 1,
         }
-        let ret = match self.context.chars().nth(self.point) {
-            Some(c) => {
-                self.point += c.len_utf8();
-                self.column += 1;
-                Ok(Some(c))
-            }
-            None => Err(anyhow!(format!("bad char in parser:{:?}", self))),
-        };
-
-        ret
     }
+
+    /// 获取当前位置的字节索引
+    fn current_byte_index(&mut self) -> usize {
+        match self.chars.peek() {
+            Some((idx, _)) => *idx,
+            None => self.input.len(),
+        }
+    }
+
+    /// 消费一个字符，更新行号和列号
+    fn consume_char(&mut self) -> Option<char> {
+        if let Some((_, c)) = self.chars.next() {
+            if c == '\n' {
+                self.line += 1;
+                self.column = 1;
+            } else {
+                self.column += 1;
+            }
+            Some(c)
+        } else {
+            None
+        }
+    }
+
     /// read element from parser content, when start with <,end with >
     ///
     /// example:
@@ -64,72 +81,66 @@ impl Parser {
     ///     <span>hello</span>
     /// ```
     ///[Block("<span>"),Str("hello"),BlockEnd("</span>")]
-    fn _element_content(&mut self) -> Result<Option<EleBlockRead<'_>>> {
-        let start = self.point;
+    fn _element_content(&mut self) -> Result<Option<EleBlockRead<'a>>> {
+        let start = self.current_byte_index();
 
-        let chars = self._next_char()?;
-        let ret = match chars {
-            Some('<') => {
-                while let Some(c) = self._next_char()? {
-                    if c == '>' {
-                        break;
-                    }
-                }
-                let content = &self.context[start..self.point];
-                if content.starts_with("</") {
-                    Ok(Some(EleBlockRead::EndBlock(content)))
-                } else {
-                    Ok(Some(EleBlockRead::Block(content)))
-                }
-            }
-            Some(_) => {
-                let mut found_tag = false; // 添加标志
-                while let Some(c) = self._next_char()? {
-                    if c == '<' {
-                        found_tag = true; // 标记找到了标签
-                        break;
-                    }
-                }
-
-                // 只有在遇到 '<' 时才退回
-                if found_tag {
-                    self.point -= 1;
-                }
-                let mut ret = &self.context[start..self.point];
-                // if the str only "\n", del it.
-                if ret.contains("\n") {
-                    self.line += ret.matches("\n").count();
-                    self.column = 1;
-                    ret = ret.trim();
-                }
-                if ret.is_empty() {
-                    Ok(Some(EleBlockRead::Enter))
-                } else {
-                    Ok(Some(EleBlockRead::Str(ret)))
-                }
-            }
-            None => Ok(None),
+        // Peek 第一个字符
+        let first_char = match self.chars.peek() {
+            Some(&(_, c)) => c,
+            None => return Ok(None),
         };
+
+        let ret = if first_char == '<' {
+            self.consume_char(); // 消耗 '<'
+            loop {
+                match self.consume_char() {
+                    Some('>') => break,
+                    Some(_) => continue,
+                    None => break, // EOF before '>'
+                }
+            }
+            let end = self.current_byte_index();
+            let content = &self.input[start..end];
+            if content.starts_with("</") {
+                Ok(Some(EleBlockRead::EndBlock(content)))
+            } else {
+                Ok(Some(EleBlockRead::Block(content)))
+            }
+        } else {
+            // 读取普通文本直到遇到 '<' 或 EOF
+            loop {
+                match self.chars.peek() {
+                    Some(&(_, '<')) => break, // 遇到 '<' 停止，不消耗
+                    Some(_) => {
+                        self.consume_char();
+                    } // 消耗普通字符
+                    None => break,
+                }
+            }
+            let end = self.current_byte_index();
+            let mut ret = &self.input[start..end];
+
+            // if the str only "\n", del it.
+            if ret.contains('\n') {
+                ret = ret.trim();
+            }
+
+            if ret.is_empty() {
+                Ok(Some(EleBlockRead::Enter))
+            } else {
+                Ok(Some(EleBlockRead::Str(ret)))
+            }
+        };
+
         #[cfg(debug_assertions)]
         {
             debug!("element_content {:?}  parser:{:?}", ret, self);
         }
         ret
     }
-    fn _eof(&self) -> bool {
-        self.point >= self.context.len()
-    }
 }
 
-impl Parser {
-    pub fn new(context: &str) -> Self {
-        Self {
-            context: context.to_string(),
-            point: 0,
-            line: 1,
-            column: 1,
-        }
-    }
+impl<'a> Parser<'a> {
     pub fn parse(&mut self) -> Result<Node> {
         self._parse(Some(NodeType::Global))
     }
@@ -197,6 +208,7 @@ impl Parser {
         Err(anyhow!(format!("Unsupported element type {}", element)))
     }
 }
+#[cfg(test)]
 mod tests {
     use crate::{html::html_parse::Parser, tdom::node::NodeType};
 
@@ -224,12 +236,8 @@ mod tests {
                 <p>Hello</p>
             </div>
         </span>";
-        let mut p = Parser {
-            point: 0,
-            context: html.to_string(),
-            line: 1,
-            column: 1,
-        };
+        // Update: use Parser::new instead of struct initialization
+        let mut p = Parser::new(html);
         let node = p.parse().unwrap();
         dbg!(&node);
     }
