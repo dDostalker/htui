@@ -1,5 +1,5 @@
-use anyhow::Result;
 use crate::tdom::{attributes::Attr, node::NodeType};
+use anyhow::Result;
 
 pub fn a_element(element: &str) -> Result<Option<(NodeType, Attr)>> {
     if element.starts_with("<a>") || element.starts_with("</a>") {

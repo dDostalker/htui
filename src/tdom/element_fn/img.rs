@@ -1,9 +1,6 @@
 use anyhow::Result;
 
-use crate::tdom::{
-    attributes::Attr, 
-    node::NodeType
-};
+use crate::tdom::{attributes::Attr, node::NodeType};
 
 pub fn img_element(element: &str) -> Result<Option<(NodeType, Attr)>> {
     if element.starts_with("<img") && element.ends_with(">") {
