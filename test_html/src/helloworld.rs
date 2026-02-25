@@ -1,7 +1,7 @@
 use anyhow::Result;
 use htui::{Parser, TermLayout, TermMap};
 
-fn main() -> Result<()> {
+pub fn test_hello_world() -> Result<()> {
     let html = "
              <p>Hello</p>
              <p>World</p>
