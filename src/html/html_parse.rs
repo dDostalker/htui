@@ -208,6 +208,7 @@ impl<'a> Parser<'a> {
         Err(anyhow!(format!("Unsupported element type {}", element)))
     }
 }
+
 #[cfg(test)]
 mod tests {
     use crate::{html::html_parse::Parser, tdom::node::NodeType};

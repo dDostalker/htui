@@ -1,6 +1,8 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, str::FromStr};
 
 use anyhow::{Ok, Result, anyhow};
+
+use crate::tdom::node::{Node, NodeType};
 /// the Parsers State of the css attribute
 /// when read ':' , the state turn Value
 /// when read ';' , the state turn Key
@@ -8,6 +10,32 @@ enum State {
     Key,
     Value,
 }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum Selector {
+    Class(NodeType),
+    Id(String),
+    Tag(String),
+}
+impl FromStr for Selector {
+    type Err = anyhow::Error;
+    /// 优先分出selector类型
+    fn from_str(select: &str) -> Result<Self, Self::Err> {
+        match select {
+            "." => todo!(),
+            "#" => todo!(),
+            _ => Ok(Self::_string_to_tag(select)),
+        }
+    }
+}
+impl Selector {
+    fn _string_to_tag(select: &str) -> Self {
+        match select {
+            "p" => Self::Tag(select.to_string()),
+            _ => todo!(),
+        }
+    }
+}
+
 /// CssAttr newtype to store css attributes
 /// ```
 /// aaa : bbb;
@@ -39,19 +67,22 @@ struct CssAttr(HashMap<String, String>);
 /// }
 /// ```
 #[derive(Debug, Clone)]
-struct CssRule(HashMap<String, CssAttr>);
+pub struct CssRule(HashMap<Selector, CssAttr>);
 
 impl CssRule {
-    fn new() -> Self {
+    pub fn new() -> Self {
         CssRule(HashMap::new())
     }
-    fn add(&mut self, sele: String, attr: HashMap<String, String>) {
+    fn add(&mut self, sele: Selector, attr: HashMap<String, String>) {
         self.0.insert(sele, CssAttr(attr));
+    }
+    pub fn css_to_node(&self) {
+        todo!()
     }
 }
 
 #[derive(Debug, Clone)]
-struct Parser {
+pub struct Parser {
     point: usize,
     context: String,
     line: usize,
@@ -98,7 +129,7 @@ impl Parser {
             column: 1,
         }
     }
-    fn parse(&mut self) -> Result<CssRule> {
+    pub fn parse(&mut self) -> Result<CssRule> {
         let mut css = CssRule::new();
         loop {
             if let Some((sele, attrs)) = self._parse()? {
@@ -115,7 +146,7 @@ impl Parser {
         return Ok(CssAttr(attrs));
     }
 
-    fn _parse(&mut self) -> Result<Option<(String, HashMap<String, String>)>> {
+    fn _parse(&mut self) -> Result<Option<(Selector, HashMap<String, String>)>> {
         let sele = self.get_selector()?;
 
         if let Some(sele) = sele {
@@ -125,8 +156,8 @@ impl Parser {
         }
         Ok(None)
     }
-
-    fn get_selector(&mut self) -> Result<Option<String>> {
+    /// 从css parse内获取当前块的css的选择器 并返回选择器类型
+    fn get_selector(&mut self) -> Result<Option<Selector>> {
         let start = self.point;
         loop {
             let c = self._next_char()?;
@@ -146,10 +177,11 @@ impl Parser {
             }
         }
         self.point -= 1;
-
-        Ok(Some(self.context[start..self.point].trim().to_string()))
+        let selector = Selector::from_str(self.context[start..self.point].trim())?;
+        Ok(Some(selector))
     }
 
+    /// 获取当前块的css属性块 并返回属性块内容
     fn get_attr_block(&mut self) -> Result<String> {
         let start = self.point;
 
@@ -166,7 +198,8 @@ impl Parser {
 
         Ok(self.context[start + 1..self.point - 1].to_string())
     }
-
+    /// 解析css块中的内容，用于解析后返回，这里关联变量 State 用于表明解析状态
+    /// 这里考虑后续是不是需要把String去重写？
     fn get_css_attr(&mut self, content: String) -> Result<HashMap<String, String>> {
         let mut attrs = HashMap::new();
         let mut key = String::new();
@@ -198,7 +231,26 @@ impl Parser {
         Ok(attrs)
     }
 }
-
+/// 用于将css中解析的内容写入node节点
+fn css_into_node(node: &mut Node, css: &CssRule) -> Result<()> {
+    for (selector, attr) in css.0.iter() {
+        match selector {
+            Selector::Class(class) => {
+                // 处理类选择器
+                todo!()
+            }
+            Selector::Id(id) => {
+                // 处理ID选择器
+                todo!()
+            }
+            Selector::Tag(tag) => {
+                // 处理标签选择器
+                todo!()
+            }
+        }
+    }
+    Ok(())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,7 +258,10 @@ mod tests {
     #[test]
     fn test_get_selector() {
         let mut parser = Parser::new("div");
-        assert_eq!(parser.get_selector().unwrap().unwrap(), "div".to_string());
+        assert_eq!(
+            parser.get_selector().unwrap().unwrap(),
+            Selector::Class(NodeType::Div)
+        );
     }
 
     #[test]
