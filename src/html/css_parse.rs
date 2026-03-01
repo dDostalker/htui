@@ -104,26 +104,24 @@ impl Parser {
         if self._eof() {
             return Ok(None);
         }
-        let ret = match self.context.chars().nth(self.point) {
+        match self.context[self.point..].chars().next() {
             Some(c) => {
                 self.point += c.len_utf8();
                 self.column += 1;
                 Ok(Some(c))
             }
             None => Err(anyhow!(format!("bad char in parser:{:?}", self))),
-        };
-        ret
+        }
     }
     /// like peek
     fn _next_char_prev(&self) -> Result<Option<char>> {
         if self._eof() {
             return Ok(None);
         }
-        let ret = match self.context.chars().nth(self.point) {
+        match self.context[self.point..].chars().next() {
             Some(c) => Ok(Some(c)),
             None => Err(anyhow!(format!("bad char in parser:{:?}", self))),
-        };
-        ret
+        }
     }
 
     fn _eof(&self) -> bool {
@@ -238,6 +236,11 @@ impl Parser {
             }
         }
 
+        let k = key.trim().to_string();
+        let v = value.trim().to_string();
+        if !k.is_empty() {
+            attrs.insert(k, v);
+        }
         Ok(attrs)
     }
 }
@@ -292,7 +295,7 @@ mod tests {
         let mut parser = Parser::new(
             "p {
             color: red;
-            background-color: blue;
+            background-color: blue
             }",
         );
         let attrs = parser.parse().unwrap();
