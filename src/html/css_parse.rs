@@ -14,7 +14,7 @@ enum State {
 enum Selector {
     Class(NodeType),
     Id(String),
-    Tag(String),
+    Tag(NodeType),
 }
 impl FromStr for Selector {
     type Err = anyhow::Error;
@@ -30,7 +30,7 @@ impl FromStr for Selector {
 impl Selector {
     fn _string_to_tag(select: &str) -> Self {
         match select {
-            "p" => Self::Tag(select.to_string()),
+            "p" => Self::Tag(NodeType::P),
             _ => todo!(),
         }
     }
@@ -49,7 +49,17 @@ impl Selector {
 /// }
 /// ```
 #[derive(Debug, Clone)]
-struct CssAttr(HashMap<String, String>);
+pub struct CssAttr(HashMap<String, String>);
+
+impl CssAttr {
+    pub fn new() -> Self {
+        CssAttr(HashMap::new())
+    }
+    fn add(&mut self, css: CssAttr) {
+        self.0.extend(css.0);
+    }
+}
+
 /// CssRule newtype to store css rules
 /// ```
 /// aaa {
@@ -232,7 +242,7 @@ impl Parser {
     }
 }
 /// 用于将css中解析的内容写入node节点
-fn css_into_node(node: &mut Node, css: &CssRule) -> Result<()> {
+pub fn css_into_node(node: &mut Node, css: &CssRule) -> Result<()> {
     for (selector, attr) in css.0.iter() {
         match selector {
             Selector::Class(class) => {
@@ -243,11 +253,18 @@ fn css_into_node(node: &mut Node, css: &CssRule) -> Result<()> {
                 // 处理ID选择器
                 todo!()
             }
-            Selector::Tag(tag) => {
-                // 处理标签选择器
-                todo!()
-            }
+            Selector::Tag(node_type) => _css_into_node(node, node_type, attr)?,
         }
+    }
+    Ok(())
+}
+/// 用于递归查找node节点，并写入对应的Rule
+fn _css_into_node(node: &mut Node, node_type: &NodeType, css: &CssAttr) -> Result<()> {
+    if &node.node_type == node_type {
+        node.css_rule.add(css.clone());
+    }
+    for child in node.children.iter_mut() {
+        _css_into_node(child, node_type, css)?;
     }
     Ok(())
 }
