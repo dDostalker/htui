@@ -129,7 +129,7 @@ impl Parser {
     }
 }
 impl Parser {
-    fn new(input: &str) -> Self {
+    pub fn new(input: &str) -> Self {
         Parser {
             context: input.to_string(),
             point: 0,
@@ -248,11 +248,11 @@ impl Parser {
 pub fn css_into_node(node: &mut Node, css: &CssRule) -> Result<()> {
     for (selector, attr) in css.0.iter() {
         match selector {
-            Selector::Class(class) => {
+            Selector::Class(_class) => {
                 // 处理类选择器
                 todo!()
             }
-            Selector::Id(id) => {
+            Selector::Id(_id) => {
                 // 处理ID选择器
                 todo!()
             }

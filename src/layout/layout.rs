@@ -26,10 +26,11 @@ impl TermMap {
 ///创建画布以及画布信息部分
 impl TermLayout {
     pub fn new(map: &TermMap) -> Result<TermLayout> {
-        let layout = vec![' '; map.columns as usize * map.rows as usize];
+        let layout = vec![" ".to_string(); map.columns as usize * map.rows as usize];
 
         Ok(TermLayout {
             layout,
+            columns: map.columns,
             ..Default::default()
         })
     }

@@ -1,7 +1,4 @@
-use crate::{
-    html::css_parse::{CssAttr, CssRule},
-    tdom::attributes::Attr,
-};
+use crate::{html::css_parse::CssAttr, tdom::attributes::Attr};
 
 #[derive(PartialEq, Eq, Debug, Clone, Hash)]
 pub enum NodeType {
