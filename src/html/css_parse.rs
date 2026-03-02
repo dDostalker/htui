@@ -1,6 +1,7 @@
 use std::{collections::HashMap, str::FromStr};
 
 use anyhow::{Ok, Result, anyhow};
+use crossterm::style::Color;
 
 use crate::tdom::node::{Node, NodeType};
 /// the Parsers State of the css attribute
@@ -58,8 +59,11 @@ impl CssAttr {
     fn add(&mut self, css: CssAttr) {
         self.0.extend(css.0);
     }
+    pub fn get_color(&self) -> Option<Color> {
+        let color = self.0.get("color")?;
+        Color::from_str(color).ok()
+    }
 }
-
 /// CssRule newtype to store css rules
 /// ```
 /// aaa {
@@ -148,6 +152,7 @@ impl Parser {
         }
         Ok(css)
     }
+
     fn parse_from_block(input: &str) -> Result<CssAttr> {
         let mut parser = Parser::new(input);
         let attrs = parser.get_css_attr(input.to_string())?;
@@ -264,7 +269,7 @@ pub fn css_into_node(node: &mut Node, css: &CssRule) -> Result<()> {
 /// 用于递归查找node节点，并写入对应的Rule
 fn _css_into_node(node: &mut Node, node_type: &NodeType, css: &CssAttr) -> Result<()> {
     if &node.node_type == node_type {
-        node.css_rule.add(css.clone());
+        node.css_attr.add(css.clone());
     }
     for child in node.children.iter_mut() {
         _css_into_node(child, node_type, css)?;
