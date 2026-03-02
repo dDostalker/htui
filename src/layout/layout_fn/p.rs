@@ -13,8 +13,8 @@ pub fn layout_p(tdom: &Node, term_layout: &mut TermLayout, term_map: &TermMap) -
                 let column = term_map.columns;
 
                 term_layout.paint_string(&s, None);
-                let len = term_layout.len;
-                let yu = column as u64 - len % column as u64;
+                let point_val = term_layout.point;
+                let yu = column as u64 - point_val % column as u64;
                 let point = &mut term_layout.point;
                 *point += yu;
             }

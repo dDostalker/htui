@@ -1,7 +1,20 @@
 use anyhow::Result;
-use test_html::helloworld::test_hello_world;
+use htui::render;
 
 fn main() -> Result<()> {
-    test_hello_world().unwrap();
+    let html = "<p>Hello</p>
+    <p>World</p>
+    <p>Hello</p>
+    <p>World</p>
+    <p>Hello</p>
+    <p>World</p>
+    <p>Hello</p>
+    <p>World</p>
+    <p>Hello</p>
+    <p>World</p>
+    <p>Hello</p>
+    ";
+    let css = "p { color: red; }";
+    render(html, css);
     Ok(())
 }
