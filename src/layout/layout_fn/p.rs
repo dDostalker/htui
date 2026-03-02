@@ -11,8 +11,8 @@ pub fn layout_p(tdom: &Node, term_layout: &mut TermLayout, term_map: &TermMap) -
         match child.node_type.clone() {
             NodeType::Text(s) => {
                 let column = term_map.columns;
-
-                term_layout.paint_string(&s, None);
+                let color = tdom.css_attr.get_color();
+                term_layout.paint_string(&s, color);
                 let point_val = term_layout.point;
                 let yu = column as u64 - point_val % column as u64;
                 let point = &mut term_layout.point;
