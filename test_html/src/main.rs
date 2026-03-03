@@ -3,7 +3,7 @@ use htui::render;
 
 fn main() -> Result<()> {
     let html = "<h1>Hello</h1>
-    <p>World</p>
+    <h2>World</h2>
     <p>Hello</p>
     <p>World</p>
     <p>Hello</p>
