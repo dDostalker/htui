@@ -61,15 +61,3 @@ pub fn h5_element(element: &str) -> Result<Option<(NodeType, Attr)>> {
         Ok(None)
     }
 }
-
-pub fn h6_element(element: &str) -> Result<Option<(NodeType, Attr)>> {
-    if element.starts_with("<h6>") || element.starts_with("</h6>") {
-        Ok(Some((NodeType::H6, Attr::new())))
-    } else if element.starts_with("<h6") && element.ends_with(">") {
-        let attributes_str = element.trim_start_matches("<h6").trim_end_matches(">");
-        let attr = Attr::parse_from_str(attributes_str);
-        Ok(Some((NodeType::H6, attr)))
-    } else {
-        Ok(None)
-    }
-}

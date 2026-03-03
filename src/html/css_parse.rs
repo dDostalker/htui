@@ -32,6 +32,11 @@ impl Selector {
     fn _string_to_tag(select: &str) -> Self {
         match select {
             "p" => Self::Tag(NodeType::P),
+            "h1" => Self::Tag(NodeType::H1),
+            "h2" => Self::Tag(NodeType::H2),
+            "h3" => Self::Tag(NodeType::H3),
+            "h4" => Self::Tag(NodeType::H4),
+            "h5" => Self::Tag(NodeType::H5),
             _ => todo!(),
         }
     }

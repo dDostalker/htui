@@ -7,6 +7,9 @@ use crate::{
 };
 
 pub fn layout_p(tdom: &Node, term_layout: &mut TermLayout, term_map: &TermMap) -> Result<()> {
+    if tdom.node_type != NodeType::P {
+        return Ok(());
+    }
     for child in tdom.children() {
         match child.node_type.clone() {
             NodeType::Text(s) => {
