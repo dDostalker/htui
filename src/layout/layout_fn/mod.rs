@@ -1,5 +1,5 @@
 mod div;
-mod head;
+pub mod head;
 mod img;
 pub mod p;
 mod span;

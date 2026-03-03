@@ -2,7 +2,7 @@ use anyhow::Result;
 use htui::render;
 
 fn main() -> Result<()> {
-    let html = "<p>Hello</p>
+    let html = "<h1>Hello</h1>
     <p>World</p>
     <p>Hello</p>
     <p>World</p>
@@ -14,7 +14,8 @@ fn main() -> Result<()> {
     <p>World</p>
     <p>Hello</p>
     ";
-    let css = "p { color: red; }";
+    let css = "p { color: red; }
+        h1 { color: blue; }";
     render(html, css);
     Ok(())
 }
