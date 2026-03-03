@@ -40,7 +40,7 @@ impl TermLayout {
     /// 替换指定画布文字
     pub fn paint_string(&mut self, s: &str, color: Option<Color>) -> u64 {
         let str_len = s.chars().count();
-        
+
         let mut idx = self.point as usize;
         for c in s.chars() {
             if idx >= self.layout.len() {
@@ -61,14 +61,22 @@ impl TermLayout {
         len
     }
 }
-///判断当前是否应该刷新
-pub fn trigger_refresh() -> bool {
+/// 判断当前是否应该刷新
+pub fn trigger_refresh() -> Option<bool> {
     // 阻塞等待事件
-    if let Ok(Event::Key(key)) = event::read() {
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => return false,
+    match event::read() {
+        Ok(Event::Key(key)) => match key.code {
+            KeyCode::Char('q') | KeyCode::Esc => return Some(false),
             _ => {}
+        },
+        Ok(Event::Mouse(_)) => {
+            // 鼠标事件：消费掉，不触发重绘
+            return None;
         }
+        Ok(Event::Resize(_, _)) => {
+            // 终端大小变化：触发重绘
+        }
+        _ => {}
     }
-    true
+    Some(true)
 }
