@@ -1,4 +1,7 @@
-use std::{fmt::Display, path::PathBuf};
+use std::{
+    fmt::Display,
+    path::{self, PathBuf},
+};
 
 use anyhow::Result;
 use crossterm::{
@@ -65,6 +68,45 @@ impl TermLayout {
         self.len += len;
         len
     }
+    /// 将图片渲染为盲文字符，写入画布
+    /// - `path`：图片路径
+    /// - `size`：期望缩放的像素尺寸 (max_width_px, max_height_px)
+    /// 返回实际占用的画布字符总数（columns × rows）
+    pub fn paint_img(&mut self, path: String, size: (u32, u32)) -> u64 {
+        let mut img_data = Img::new(PathBuf::from(path), size);
+        if img_data._create_img().is_err() {
+            return 0;
+        }
+        let picture = match img_data.picture.as_ref() {
+            Some(p) => p,
+            None => return 0,
+        };
+        let img_cols = img_data.cloumns as usize;
+        let img_rows = img_data.rows as usize;
+        let canvas_cols = self.columns as usize;
+
+        // 图片起始行（point 当前所在行）
+        let start_row = self.point as usize / canvas_cols;
+
+        for row in 0..img_rows {
+            for col in 0..img_cols {
+                let canvas_idx = (start_row + row) * canvas_cols + col;
+                if canvas_idx >= self.layout.len() {
+                    break;
+                }
+                let pic_idx = row * img_cols + col;
+                if let Some(cell) = picture.get(pic_idx) {
+                    self.layout[canvas_idx] = cell.clone();
+                }
+            }
+        }
+
+        // 将 point 移动到图片区域结束后的下一行行首
+        let total_chars = (img_rows * canvas_cols) as u64;
+        self.point = (start_row as u64 + img_rows as u64) * canvas_cols as u64;
+        self.len += total_chars;
+        total_chars
+    }
 }
 /// 判断当前是否应该刷新
 pub fn trigger_refresh() -> Option<bool> {
@@ -113,7 +155,7 @@ impl Img {
         let img = image::open(&self.path).unwrap();
         let img = img.resize(self.term_size.0, self.term_size.1, FilterType::Nearest);
         let (width, height) = img.dimensions();
-        // 使用实际缩放后的尺寸，而非 term_size（resize 是等比缩放，实际尺寸可能不同）
+
         self.cloumns = width.div_ceil(2);
         self.rows = height.div_ceil(4);
         self.picture = Some(vec![]);
@@ -142,20 +184,19 @@ impl Img {
                                 (pixel[0] as u16 + pixel[1] as u16 + pixel[2] as u16) / 3;
 
                             if brightness < 128 {
-                                // Unicode 盲文点位标准布局（列优先）:
                                 //   点1(bit0) 点4(bit3)
                                 //   点2(bit1) 点5(bit4)
                                 //   点3(bit2) 点6(bit5)
                                 //   点7(bit6) 点8(bit7)
                                 let bit_index = match (dx, dy) {
-                                    (0, 0) => 0, // 点1
-                                    (0, 1) => 1, // 点2
-                                    (0, 2) => 2, // 点3
-                                    (1, 0) => 3, // 点4
-                                    (1, 1) => 4, // 点5
-                                    (1, 2) => 5, // 点6
-                                    (0, 3) => 6, // 点7
-                                    (1, 3) => 7, // 点8
+                                    (0, 0) => 0,
+                                    (0, 1) => 1,
+                                    (0, 2) => 2,
+                                    (1, 0) => 3,
+                                    (1, 1) => 4,
+                                    (1, 2) => 5,
+                                    (0, 3) => 6,
+                                    (1, 3) => 7,
                                     _ => 0,
                                 };
                                 bits |= 1 << bit_index;
@@ -189,7 +230,7 @@ impl Img {
 
 #[test]
 fn test_create_img() {
-    let mut img = Img::new(PathBuf::from("./src/tui/test/pic.png"), (320, 160));
+    let mut img = Img::new(PathBuf::from("./test_html/src/pic.png"), (320, 160));
     img._create_img().unwrap();
     println!("{}, {}", img.cloumns, img.rows);
     for (i, row) in img.picture.as_ref().unwrap().iter().enumerate() {

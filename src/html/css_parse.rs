@@ -283,10 +283,10 @@ mod tests {
 
     #[test]
     fn test_get_selector() {
-        let mut parser = Parser::new("div");
+        let mut parser = Parser::new("p { color: red;}");
         assert_eq!(
             parser.get_selector().unwrap().unwrap(),
-            Selector::Class(NodeType::Div)
+            Selector::Tag(NodeType::P)
         );
     }
 
