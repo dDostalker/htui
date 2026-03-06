@@ -149,6 +149,16 @@ impl<'a> Parser<'a> {
         let mut node = Node::new();
         loop {
             let element = self._element_content()?;
+            #[cfg(debug_assertions)]
+            {
+                if std::env::var("HTML_PARSE_ELEMENT").unwrap_or("0".to_string()) == "1".to_string()
+                {
+                    println!(
+                        "self._element_content()? => {:?} nodetype is {:?}",
+                        element, nodetype
+                    )
+                }
+            }
             if let Some(ele) = element {
                 match ele {
                     EleBlockRead::Block(content) => {
@@ -258,28 +268,11 @@ mod tests {
         let node = p.parse().unwrap();
         dbg!(&node);
     }
-    #[test]
-    fn test_parse_headings() {
-        init();
-        let html = r#"
-            <div>
-                <h1>Main Title</h1>
-                <h2>Subtitle</h2>
-                <h3>Section</h3>
-                <h4>Subsection</h4>
-                <h5>Small heading</h5>
-                <h6>Smallest heading</h6>
-            </div>
-        "#;
-        let mut p = Parser::new(html);
-        let node = p.parse().unwrap();
-        dbg!(&node);
-    }
 
     #[test]
     fn test_heading_with_attributes() {
         init();
-        let html = r#"<h1 id="title" class="main-title">Welcome</h1>"#;
+        let html = r#"<h1 id="title" class="main-title" src="./1/2/3">Welcome</h1>"#;
         let mut p = Parser::new(html);
         let node = p.parse().unwrap();
 
@@ -287,6 +280,7 @@ mod tests {
         if let Some(child) = node.children.first() {
             assert_eq!(child.node_type, NodeType::H1);
             assert_eq!(child.attributes.get("id"), Some(&"title".to_string()));
+            assert_eq!(child.attributes.get("src"), Some(&"./1/2/3".to_string()));
             assert_eq!(
                 child.attributes.get_class(),
                 Some(vec!["main-title".to_string()])

@@ -54,7 +54,7 @@ impl Selector {
 ///     ccc: "ddd",
 /// }
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CssAttr(HashMap<String, String>);
 
 impl CssAttr {
@@ -148,12 +148,8 @@ impl Parser {
     }
     pub fn parse(&mut self) -> Result<CssRule> {
         let mut css = CssRule::new();
-        loop {
-            if let Some((sele, attrs)) = self._parse()? {
-                css.add(sele, attrs);
-            } else {
-                break;
-            };
+        while let Some((sele, attrs)) = self._parse()? {
+            css.add(sele, attrs);
         }
         Ok(css)
     }
@@ -161,7 +157,7 @@ impl Parser {
     fn parse_from_block(input: &str) -> Result<CssAttr> {
         let mut parser = Parser::new(input);
         let attrs = parser.get_css_attr(input.to_string())?;
-        return Ok(CssAttr(attrs));
+        Ok(CssAttr(attrs))
     }
 
     fn _parse(&mut self) -> Result<Option<(Selector, HashMap<String, String>)>> {
@@ -287,10 +283,10 @@ mod tests {
 
     #[test]
     fn test_get_selector() {
-        let mut parser = Parser::new("div");
+        let mut parser = Parser::new("p { color: red;}");
         assert_eq!(
             parser.get_selector().unwrap().unwrap(),
-            Selector::Class(NodeType::Div)
+            Selector::Tag(NodeType::P)
         );
     }
 

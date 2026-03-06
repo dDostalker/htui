@@ -1,5 +1,6 @@
 use std::{collections::HashMap, fmt::Debug};
 
+#[derive(Clone, Default)]
 pub struct Attr {
     attributes: HashMap<String, String>,
 }
@@ -314,31 +315,31 @@ impl Attr {
 
     ///ol特殊属性
     ///start树新风
-    pub fn get_start(&self)->Option<i32>{
+    pub fn get_start(&self) -> Option<i32> {
         self.get_as_i32("start")
     }
 
     ///reversed属性
-    pub fn get_reversed(&self)->bool{
+    pub fn get_reversed(&self) -> bool {
         self.has("reversed")
     }
 
     ///tyoe属性
-    pub fn get_ol_type(&self)->Option<&String>{
+    pub fn get_ol_type(&self) -> Option<&String> {
         self.get("type")
     }
 
     ///li特殊属性
     ///value属性
-    pub fn get_li_value(&self)->Option<i32>{
+    pub fn get_li_value(&self) -> Option<i32> {
         self.get_as_i32("value")
     }
 
     ///input特殊属性
     ///type属性
-    pub fn get_input_type(&self) -> Option<&String>{
+    pub fn get_input_type(&self) -> Option<&String> {
         self.get("type")
-    } 
+    }
     ///name属性
     pub fn get_name(&self) -> Option<&String> {
         self.get("name")
@@ -441,7 +442,7 @@ impl Attr {
     }
 
     ///enctype属性
-    pub fn get_enctype(&self)->Option<&String>{
+    pub fn get_enctype(&self) -> Option<&String> {
         self.get("enctype")
     }
 
@@ -531,9 +532,8 @@ mod tests {
     use super::*;
     #[test]
     fn test_form_attrs() {
-        let attr = Attr::parse_from_str(
-            r#"action="/submit" method="post" enctype="multipart/form-data""#
-        );
+        let attr =
+            Attr::parse_from_str(r#"action="/submit" method="post" enctype="multipart/form-data""#);
         assert_eq!(attr.get_action(), Some(&"/submit".to_string()));
         assert_eq!(attr.get_method(), Some(&"post".to_string()));
     }
@@ -549,9 +549,8 @@ mod tests {
 
     #[test]
     fn test_form_misc() {
-        let attr = Attr::parse_from_str(
-            r#"target="_blank" accept-charset="UTF-8" autocomplete="off""#
-        );
+        let attr =
+            Attr::parse_from_str(r#"target="_blank" accept-charset="UTF-8" autocomplete="off""#);
         assert_eq!(attr.get_form_target(), Some(&"_blank".to_string()));
         assert_eq!(attr.get_accept_charset(), Some(&"UTF-8".to_string()));
         assert_eq!(attr.get_form_autocomplete(), Some(&"off".to_string()));
