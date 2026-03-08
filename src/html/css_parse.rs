@@ -280,6 +280,7 @@ fn _css_into_node(node: &mut Node, node_type: &NodeType, css: &CssAttr) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tdom::node::NodeType;
 
     #[test]
     fn test_get_selector() {
@@ -291,11 +292,19 @@ mod tests {
     }
 
     #[test]
+   fn test_get_css_attr() {
+    let content = "color: red;".to_string();
+    let mut parser = Parser::new(""); // 解析器状态好像无所谓？
+    let attrs = parser.get_css_attr(content).unwrap();
+    assert_eq!(attrs.get("color"), Some(&"red".to_string()));
+}
+
+    #[test]
     fn test_get_attr_block() {
         let mut parser = Parser::new("{color: red;}");
         assert_eq!(parser.get_attr_block().unwrap(), "color: red;");
     }
-
+    
     #[test]
     fn test_parse() {
         let mut parser = Parser::new(
@@ -312,5 +321,13 @@ mod tests {
     fn test_parse_from_block() {
         let attrs = Parser::parse_from_block("color: red; cos: blue;").unwrap();
         dbg!(&attrs);
+    }
+
+    #[test]
+    fn test_malformed_css() {
+        let css = "p { color: red; "; // 缺少 
+        let mut parser = Parser::new(css);
+        let result = parser.parse();
+        assert!(result.is_err());
     }
 }

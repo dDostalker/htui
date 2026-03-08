@@ -614,4 +614,37 @@ mod tests {
         let attr2 = Attr::parse_from_str(r#"class="label""#);
         assert_eq!(attr2.get_label_for(), None);
     }
+
+    #[test]
+    fn test_parse_empty() {
+        let attr = Attr::parse_from_str("");
+        assert_eq!(attr.attributes.len(), 0); // 预期空HashMap
+    }
+
+    #[test]
+    fn test_parse_multi_attrs() {
+        let attr = Attr::parse_from_str(r#"id="main" class="test bold" style="color:red""#);
+        assert_eq!(attr.get("id"), Some(&"main".to_string()));
+        assert_eq!(attr.get_class(), Some(vec!["test".to_string(), "bold".to_string()]));
+        assert_eq!(attr.get("style"), Some(&"color:red".to_string()));
+    }
+
+    #[test]
+    fn test_parse_malformed_no_value() {
+        let attr = Attr::parse_from_str("key=");
+        assert_eq!(attr.get("key"), Some(&"".to_string())); // 空值处理
+    }
+
+    #[test]
+    fn test_parse_malformed_no_equals() {
+        let attr = Attr::parse_from_str("key value");
+        assert_eq!(attr.attributes.len(), 2); // 应该是两个没有配对的？
+    }
+
+    #[test]
+    fn test_parse_quoted_edge() {
+        let attr = Attr::parse_from_str(r#"name="O'Reilly""#); // 单引号内嵌
+        assert_eq!(attr.get("name"), Some(&"O'Reilly".to_string()));
+    }
+
 }
