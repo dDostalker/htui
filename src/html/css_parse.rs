@@ -292,12 +292,12 @@ mod tests {
     }
 
     #[test]
-   fn test_get_css_attr() {
-    let content = "color: red;".to_string();
-    let mut parser = Parser::new(""); // 解析器状态好像无所谓？
-    let attrs = parser.get_css_attr(content).unwrap();
-    assert_eq!(attrs.get("color"), Some(&"red".to_string()));
-}
+    fn test_get_css_attr() {
+        let content = "color: red;".to_string();
+        let mut parser = Parser::new(""); // 解析器状态好像无所谓？
+        let attrs = parser.get_css_attr(content).unwrap();
+        assert_eq!(attrs.get("color"), Some(&"red".to_string()));
+    }
 
     #[test]
     fn test_get_attr_block() {
@@ -315,6 +315,49 @@ mod tests {
         );
         let attrs = parser.parse().unwrap();
         dbg!(&attrs);
+    }
+    
+    #[test]
+    fn test_parse_empty() {
+        let mut parser = Parser::new("");
+        let rule = parser.parse().unwrap();
+        assert!(rule.0.is_empty());
+    }
+
+    #[test]
+    fn test_parse_space() {
+        let css = "  p  \n  {  color  :  red  ;  }  ";
+        let mut parser = Parser::new(css);
+        let rule = parser.parse().unwrap();
+        assert_eq!(rule.0.len(), 1);
+        let p_selector = Selector::Tag(NodeType::P);
+        let attrs = rule.0.get(&p_selector).unwrap();
+        assert_eq!(attrs.0.get("color"), Some(&"red".to_string()));
+    }
+
+    #[test]
+    fn test_parse_more_rules() {
+        let css = "
+            h1 { color: red; }
+            p { color: red; background-color: blue; }
+            h2 { color: red; }
+        ";
+        let mut parser = Parser::new(css);
+        let rule = parser.parse().unwrap();
+        assert_eq!(rule.0.len(), 3);
+
+        let h1_selector = Selector::Tag(NodeType::H1);
+        let h1_attrs = rule.0.get(&h1_selector).unwrap();
+        assert_eq!(h1_attrs.0.get("color"), Some(&"red".to_string()));
+
+        let p_selector = Selector::Tag(NodeType::P);
+        let p_attrs = rule.0.get(&p_selector).unwrap();
+        assert_eq!(p_attrs.0.get("color"), Some(&"red".to_string()));
+        assert_eq!(p_attrs.0.get("background-color"), Some(&"blue".to_string()));
+
+        let h2_selector = Selector::Tag(NodeType::H2);
+        let h2_attrs = rule.0.get(&h2_selector).unwrap();
+        assert_eq!(h2_attrs.0.get("color"), Some(&"red".to_string()));
     }
 
     #[test]

@@ -241,3 +241,23 @@ fn test_create_img() {
     }
     println!();
 }
+
+#[test]
+fn test_term_layout_paint_string_basic() {
+    //暂时不处理颜色，因为没想出来怎么检测颜色
+    let mut layout = TermLayout {
+        layout: vec![" ".to_string(); 10],
+        point: 2,
+        len: 0,
+        columns: 5,
+    };
+    let len_painted = layout.paint_string("abc", None);
+    assert_eq!(len_painted, 3);
+    assert_eq!(layout.point, 5);
+    assert_eq!(layout.len, 3);
+    assert_eq!(layout.layout[2], "a");
+    assert_eq!(layout.layout[3], "b");
+    assert_eq!(layout.layout[4], "c");
+    assert_eq!(layout.layout[0], " ");
+    assert_eq!(layout.layout[1], " ");
+}
