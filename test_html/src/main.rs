@@ -3,7 +3,7 @@ use htui::render;
 
 fn main() -> Result<()> {
     let html = r#"<h1>Hello</h1>
-    <h2>World</h2>
+    <div><h2>World</h2></div>
     <img src="./test_html/src/pic.png">
     "#;
     let css = "p { color: red; }
