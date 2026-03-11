@@ -27,14 +27,10 @@ pub fn layout_img(tdom: &Node, term_layout: &mut TermLayout, term_map: &TermMap)
         .get_height()
         .unwrap_or(term_map.rows as u32 * 4);
 
-    // point 对齐到行首（与 layout_p / layout_hn 保持一致）
-    let canvas_cols = term_layout.columns as u64;
-    let rem = term_layout.point % canvas_cols;
-    if rem != 0 {
-        term_layout.point += canvas_cols - rem;
-    }
+    term_layout.new_line();
 
     term_layout.paint_img(src, (max_w, max_h));
 
+    term_layout.new_line();
     Ok(())
 }

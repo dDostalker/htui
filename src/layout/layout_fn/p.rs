@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::{
-    layout::layout::TermMap,
+    layout::{layout::TermMap, DEFAULT_LAYOUT},
     tdom::node::{Node, NodeType},
     tui::graph_api::TermLayout,
 };
@@ -10,21 +10,26 @@ pub fn layout_p(tdom: &Node, term_layout: &mut TermLayout, term_map: &TermMap) -
     if tdom.node_type != NodeType::P {
         return Ok(());
     }
+    
+    // 块级元素开始前换行
+    term_layout.new_line();
+
     for child in tdom.children() {
         match child.node_type.clone() {
             NodeType::Text(s) => {
-                let column = term_map.columns;
                 let color = tdom.css_attr.get_color();
                 term_layout.paint_string(&s, color);
-                let point_val = term_layout.point;
-                let yu = column as u64 - point_val % column as u64;
-                let point = &mut term_layout.point;
-                *point += yu;
             }
-
-            _ => {}
+            _ => {
+                for layout in DEFAULT_LAYOUT {
+                    layout(child, term_layout, term_map)?;
+                }
+            }
         }
     }
+    
+    // 块级元素结束后换行
+    term_layout.new_line();
     Ok(())
 }
 

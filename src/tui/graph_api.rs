@@ -1,7 +1,4 @@
-use std::{
-    fmt::Display,
-    path::{self, PathBuf},
-};
+use std::{fmt::Display, path::PathBuf};
 
 use anyhow::Result;
 use crossterm::{
@@ -45,6 +42,13 @@ impl Display for TermLayout {
 }
 
 impl TermLayout {
+    pub fn new_line(&mut self) {
+        let columns = self.columns as u64;
+        // 计算当前行还剩多少个格子
+        let remaining = columns - (self.point % columns);
+
+        self.point += remaining;
+    }
     /// 替换指定画布文字
     pub fn paint_string(&mut self, s: &str, color: Option<Color>) -> u64 {
         let str_len = s.chars().count();
@@ -135,6 +139,7 @@ struct Img {
     cloumns: u32,
     rows: u32,
 }
+
 impl Img {
     /// 或许结构体得合一起比较好?
     fn new(path: PathBuf, term_size: (u32, u32)) -> Self {
