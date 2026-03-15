@@ -77,8 +77,11 @@ impl TermLayout {
     /// - `size`：期望缩放的像素尺寸 (max_width_px, max_height_px)
     /// 返回实际占用的画布字符总数（columns × rows）
     pub fn paint_img(&mut self, path: String, size: (u32, u32)) -> u64 {
+        debug!("开始加载图片: path='{}' size={:?}", path, size);
+
         let mut img_data = Img::new(PathBuf::from(path), size);
         if img_data._create_img().is_err() {
+            error!("图片加载失败: {}", e);
             return 0;
         }
         let picture = match img_data.picture.as_ref() {
@@ -109,6 +112,8 @@ impl TermLayout {
         let total_chars = (img_rows * canvas_cols) as u64;
         self.point = (start_row as u64 + img_rows as u64) * canvas_cols as u64;
         self.len += total_chars;
+
+        debug!("图片加载成功，占用字符数：{}", total_chars);
         total_chars
     }
 }
