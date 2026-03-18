@@ -7,10 +7,12 @@ use crossterm::{
     execute,
     style::{Color, Stylize},
 };
+use env_logger::Builder;
 use image::{
     GenericImageView,
     imageops::FilterType::{self},
 };
+use log::{debug, error, info, warn};
 use std::io::stdout;
 
 /// 终端画布
@@ -79,15 +81,26 @@ impl TermLayout {
     pub fn paint_img(&mut self, path: String, size: (u32, u32)) -> u64 {
         debug!("开始加载图片: path='{}' size={:?}", path, size);
 
-        let mut img_data = Img::new(PathBuf::from(path), size);
-        if img_data._create_img().is_err() {
-            error!("图片加载失败: {}", e);
+        let mut img_data = Img::new(PathBuf::from(&path), size);
+        if let Err(e) = img_data._create_img() {
+            error!("路径：{}图片加载失败: {}", path, e);
             return 0;
         }
         let picture = match img_data.picture.as_ref() {
             Some(p) => p,
-            None => return 0,
+            None => {
+                warn!("图片数据为空(可能是0尺寸或格式不支持?): {}", path);
+                return 0;
+            }
         };
+
+        debug!(
+            "图片加载成功: 字符尺寸 {}×{}, 占用画布字符 {}",
+            img_data.cloumns,
+            img_data.rows,
+            picture.len()
+        );
+
         let img_cols = img_data.cloumns as usize;
         let img_rows = img_data.rows as usize;
         let canvas_cols = self.columns as usize;
@@ -99,6 +112,7 @@ impl TermLayout {
             for col in 0..img_cols {
                 let canvas_idx = (start_row + row) * canvas_cols + col;
                 if canvas_idx >= self.layout.len() {
+                    warn!("画布越界，已截断 row={} col={}", row, col);
                     break;
                 }
                 let pic_idx = row * img_cols + col;
@@ -109,11 +123,14 @@ impl TermLayout {
         }
 
         // 将 point 移动到图片区域结束后的下一行行首
+
+        //这里算面积应该是img_cols？
         let total_chars = (img_rows * canvas_cols) as u64;
+
         self.point = (start_row as u64 + img_rows as u64) * canvas_cols as u64;
         self.len += total_chars;
 
-        debug!("图片加载成功，占用字符数：{}", total_chars);
+        debug!("图片加载成功，path={}，占用字符数：{}", path, total_chars);
         total_chars
     }
 }

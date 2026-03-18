@@ -1,3 +1,5 @@
+use env_logger::Builder;
+use log::{debug, error, info, warn};
 use std::{collections::HashMap, fmt::Debug};
 
 #[derive(Clone, Default)]
@@ -86,7 +88,7 @@ impl Attr {
                 // 没有等号，说明是布尔属性（如 disabled, checked）
                 // 存储空字符串作为值
                 attributes.insert(key.clone(), String::new());
-                debug("布尔属性：{}", key);
+                debug!("布尔属性：{}", key);
             }
         }
         debug!("属性解析完成，共{}项", attributes.len());
