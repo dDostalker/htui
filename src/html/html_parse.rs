@@ -3,8 +3,8 @@ use crate::tdom::{
     element_fn::ELEMENT_FUNCTIONS,
     node::{Node, NodeType},
 };
-pub(crate) use anyhow::{Ok, Result, anyhow};
-use log::debug;
+pub(crate) use anyhow::{Result, anyhow};
+use log::{debug, error, trace, warn};
 use std::iter::Peekable;
 use std::str::CharIndices;
 
@@ -142,13 +142,25 @@ impl<'a> Parser<'a> {
 
 impl<'a> Parser<'a> {
     pub fn parse(&mut self) -> Result<Node> {
-        self._parse(Some(NodeType::Global))
+        debug!("开始解析 HTML，输入长度 {} 字节", self.input.len());
+        let root = self._parse(Some(NodeType::Global))?;
+        debug!("解析完成，根节点子节点数量: {}", root.children.len());
+        Ok(root)
     }
     /// todo
     fn _parse(&mut self, nodetype: Option<NodeType>) -> Result<Node> {
         let mut node = Node::new();
         loop {
-            let element = self._element_content()?;
+            let element = match self._element_content() {
+                Ok(el) => el,
+                Err(e) => {
+                    error!(
+                        "_element_content 失败 line {}, col {}: {}",
+                        self.line, self.column, e
+                    );
+                    return Err(e);
+                }
+            };
             #[cfg(debug_assertions)]
             {
                 if std::env::var("HTML_PARSE_ELEMENT").unwrap_or("0".to_string()) == "1".to_string()
@@ -162,20 +174,43 @@ impl<'a> Parser<'a> {
             if let Some(ele) = element {
                 match ele {
                     EleBlockRead::Block(content) => {
-                        let (next_node_type, attr) = Self::check_ele_ty(content)?;
+                        trace!("发现开始标签: {}", content.trim());
+
+                        let (next_node_type, attr) = match Self::check_ele_ty(content) {
+                            Ok(res) => res,
+                            Err(e) => {
+                                warn!("不支持或解析失败的开始标签: {} → {}", content, e);
+                                continue;
+                            }
+                        };
+
+                        debug!("识别为开始标签 → {:?}，属性: {:?}", next_node_type, attr);
 
                         if next_node_type.is_self_closing() {
-                            let mut self_closing_node = Node::from(next_node_type);
+                            let mut self_closing_node = Node::from(next_node_type.clone());
                             self_closing_node.attributes = attr;
                             node.children.push(self_closing_node);
+                            trace!("添加自闭合节点 {:?}", next_node_type);
                         } else {
-                            let mut child_node = self._parse(Some(next_node_type))?;
+                            debug!("递归解析子节点 {:?}", next_node_type);
+                            let mut child_node = match self._parse(Some(next_node_type.clone())) {
+                                Ok(n) => n,
+                                Err(e) => {
+                                    error!("子节点 {:?} 递归解析失败: {}", next_node_type, e);
+                                    return Err(e);
+                                }
+                            };
                             child_node.attributes = attr;
                             node.children.push(child_node);
                         }
                     }
                     EleBlockRead::Str(content) => {
                         if let Some(nty) = nodetype.clone() {
+                            trace!(
+                                "发现文本内容 (长度 {}): {:?}",
+                                content.len(),
+                                content.trim()
+                            );
                             node.node_type = nty;
                             node.children.push(Node::text(content));
                         } else {
@@ -183,7 +218,15 @@ impl<'a> Parser<'a> {
                         }
                     }
                     EleBlockRead::EndBlock(content) => {
-                        let (end_nodetype, _attr) = Self::check_ele_ty(content)?;
+                        trace!("发现结束标签: {}", content.trim());
+
+                        let (end_nodetype, _) = match Self::check_ele_ty(content) {
+                            Ok(res) => res,
+                            Err(e) => {
+                                error!("结束标签格式错误 {}: {}", content, e);
+                                return Err(e);
+                            }
+                        };
                         if let Some(nodetype) = nodetype.clone()
                             && end_nodetype == nodetype
                         {
@@ -209,10 +252,19 @@ impl<'a> Parser<'a> {
     }
     /// Simple check element type
     pub fn check_ele_ty(element: &str) -> Result<(NodeType, Attr)> {
+        trace!("尝试匹配元素: {}", element.trim());
+
         for func in ELEMENT_FUNCTIONS {
-            match func(element)? {
-                Some((nodetype, attr)) => return Ok((nodetype, attr)),
-                None => continue,
+            match func(element) {
+                Ok(Some((nodetype, attr))) => {
+                    trace!("匹配成功 → {:?}", nodetype);
+                    return Ok((nodetype, attr));
+                }
+                Ok(None) => continue,
+                Err(e) => {
+                    error!("元素函数执行出错: {}", e);
+                    return Err(e);
+                }
             }
         }
         Err(anyhow!(format!("Unsupported element type {}", element)))

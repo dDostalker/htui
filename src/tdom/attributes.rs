@@ -1,3 +1,5 @@
+use env_logger::Builder;
+use log::{debug, error, info, warn};
 use std::{collections::HashMap, fmt::Debug};
 
 #[derive(Clone, Default)]
@@ -13,6 +15,8 @@ impl Attr {
     }
 
     pub fn parse_from_str(attr_str: &str) -> Self {
+        debug!("开始解析属性字符串: {}", attr_str);
+
         let mut attributes = HashMap::new();
         let mut chars = attr_str.chars().peekable();
 
@@ -78,14 +82,16 @@ impl Attr {
                     }
                 }
 
-                attributes.insert(key, value);
+                attributes.insert(key.clone(), value.clone());
+                debug!("解析到属性：key='{}' value='{}'", key, value);
             } else {
                 // 没有等号，说明是布尔属性（如 disabled, checked）
                 // 存储空字符串作为值
-                attributes.insert(key, String::new());
+                attributes.insert(key.clone(), String::new());
+                debug!("布尔属性：{}", key);
             }
         }
-
+        debug!("属性解析完成，共{}项", attributes.len());
         Attr { attributes }
     }
 
@@ -625,7 +631,10 @@ mod tests {
     fn test_parse_multi_attrs() {
         let attr = Attr::parse_from_str(r#"id="main" class="test bold" style="color:red""#);
         assert_eq!(attr.get("id"), Some(&"main".to_string()));
-        assert_eq!(attr.get_class(), Some(vec!["test".to_string(), "bold".to_string()]));
+        assert_eq!(
+            attr.get_class(),
+            Some(vec!["test".to_string(), "bold".to_string()])
+        );
         assert_eq!(attr.get("style"), Some(&"color:red".to_string()));
     }
 
@@ -646,5 +655,4 @@ mod tests {
         let attr = Attr::parse_from_str(r#"name="O'Reilly""#); // 单引号内嵌
         assert_eq!(attr.get("name"), Some(&"O'Reilly".to_string()));
     }
-
 }
