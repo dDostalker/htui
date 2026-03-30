@@ -2,10 +2,7 @@ use anyhow::Result;
 use htui::render;
 
 fn main() -> Result<()> {
-    let html = r#"<h1>Hello</h1>
-    <div><h2>World</h2></div>
-    <img src="./test_html/src/pic.png">
-    "#;
+    let html = include_str!("css.html");
     let css = "p { color: red; }
         h1 { color: blue; }";
     render(html, css);
