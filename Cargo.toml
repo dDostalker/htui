@@ -12,6 +12,7 @@ html5ever = "0.27"
 image = "0.25.9"
 log = "0.4.29"
 markup5ever_rcdom = "0.3"
+slotmap = "1.0"
 tendril = "0.4"
 
 [workspace]

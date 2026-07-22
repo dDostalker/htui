@@ -1,4 +1,30 @@
-use crate::{html::css_parse::CssAttr, tdom::attributes::Attr};
+use std::fmt;
+
+use slotmap::{Key, SlotMap, new_key_type};
+
+use crate::html::css_parse::CssAttr;
+use crate::tdom::attributes::Attr;
+
+// ============================================================
+// NodeId — slotmap 生成的类型安全索引
+// ============================================================
+
+new_key_type! {
+    /// DOM 树节点 ID。
+    ///
+    /// 由 `SlotMap<NodeId, Node>` 分配，保证：
+    ///   - 类型安全（与普通 u64 不混淆）
+    ///   - 版本检测（访问已删除节点会 panic）
+    ///   - Copy + Send + Sync
+    pub struct NodeId;
+}
+
+/// 全局 DOM 节点存储
+pub type NodeArena = SlotMap<NodeId, Node>;
+
+// ============================================================
+// NodeType
+// ============================================================
 
 #[derive(PartialEq, Eq, Debug, Clone, Hash)]
 pub enum NodeType {
@@ -42,23 +68,23 @@ pub enum NodeType {
 
 impl NodeType {
     pub fn is_self_closing(&self) -> bool {
-        match self {
-            NodeType::Img => true,
-            NodeType::Input => true,
-            _ => false,
-        }
+        matches!(self, NodeType::Img | NodeType::Input)
     }
 }
+
+// ============================================================
+// Node — 纯数据，不含所有权
+// ============================================================
 
 #[derive(Debug)]
 pub struct Node {
     pub node_type: NodeType,
-    pub children: Vec<Node>,
+    /// 子节点 ID 列表（保持插入顺序）
+    pub children: Vec<NodeId>,
+    /// 父节点 ID。根节点为 None
+    pub parent: Option<NodeId>,
     pub attributes: Attr,
     pub css_attr: CssAttr,
-    /// 父节点指针，树构建完成后通过 `fix_parent_pointers()` 填充。
-    /// 仅在 CSS 匹配阶段（树稳定后）访问，原始指针在此期间有效。
-    pub parent: Option<*const Node>,
 }
 
 impl Node {
@@ -66,94 +92,149 @@ impl Node {
         Node {
             node_type: NodeType::Global,
             children: vec![],
+            parent: None,
             attributes: Attr::new(),
             css_attr: CssAttr::new(),
-            parent: None,
         }
     }
+
     pub fn from(node_type: NodeType) -> Node {
         Node {
             node_type,
             children: vec![],
+            parent: None,
             attributes: Attr::new(),
             css_attr: CssAttr::new(),
-            parent: None,
         }
     }
-    pub fn children(&self) -> impl Iterator<Item = &Node> {
-        self.children.iter()
-    }
+
     pub fn text(data: &str) -> Node {
         Node {
             node_type: NodeType::Text(data.to_string()),
             children: vec![],
+            parent: None,
             attributes: Attr::new(),
             css_attr: CssAttr::new(),
-            parent: None,
-        }
-    }
-    pub fn div() -> Node {
-        Node {
-            node_type: NodeType::Div,
-            children: vec![],
-            attributes: Attr::new(),
-            css_attr: CssAttr::new(),
-            parent: None,
         }
     }
 
-    /// 递归设置所有子节点的 `parent` 指针。
-    ///
-    /// 必须在树构建完毕后、CSS 匹配 / Layout 之前调用。
-    /// 未来若重构为 arena（如 slotmap）存储，此方法改为填充索引。
-    pub fn fix_parent_pointers(&mut self) {
-        let self_ptr = self as *const Node;
-        for child in &mut self.children {
-            child.parent = Some(self_ptr);
-            child.fix_parent_pointers();
+    // ============================================================
+    // 树操作辅助（需配合 arena 使用）
+    // ============================================================
+
+    /// 将子节点追加到当前节点（同时设置子节点的 parent）
+    pub fn append_child(arena: &mut NodeArena, parent_id: NodeId, child_id: NodeId) {
+        let child_parent = &mut arena[child_id].parent;
+        assert!(child_parent.is_none(), "子节点已有父节点");
+        *child_parent = Some(parent_id);
+        arena[parent_id].children.push(child_id);
+    }
+
+    pub fn child(&self, index: usize) -> Option<NodeId> {
+        self.children.get(index).copied()
+    }
+
+    /// 子节点数量
+    pub fn child_count(&self) -> usize {
+        self.children.len()
+    }
+
+    /// 迭代子节点 ID
+    pub fn child_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.children.iter().copied()
+    }
+
+    /// 获取前一个兄弟节点
+    pub fn prev_sibling(&self, arena: &NodeArena) -> Option<NodeId> {
+        let parent_id = self.parent?;
+        let parent = &arena[parent_id];
+        let mut prev = None;
+        for &id in &parent.children {
+            if id == self.node_id(arena) {
+                return prev;
+            }
+            prev = Some(id);
+        }
+        None
+    }
+
+    /// 获取下一个兄弟节点
+    pub fn next_sibling(&self, arena: &NodeArena) -> Option<NodeId> {
+        let parent_id = self.parent?;
+        let parent = &arena[parent_id];
+        let children = &parent.children;
+        let self_id = self.node_id(arena);
+        for (i, &id) in children.iter().enumerate() {
+            if id == self_id && i + 1 < children.len() {
+                return Some(children[i + 1]);
+            }
+        }
+        None
+    }
+
+    /// 递归构建 parent 指针。树构建后调用一次。
+    /// （通常由 `append_child` 自动维护，此方法作为批量修复工具）
+    pub fn fix_parent_pointers(arena: &mut NodeArena, node_id: NodeId) {
+        let children: Vec<NodeId> = arena[node_id].children.clone();
+        for child_id in children {
+            arena[child_id].parent = Some(node_id);
+            Self::fix_parent_pointers(arena, child_id);
         }
     }
 
-    /// 获取父节点引用（仅在 `parent` 有效时调用）
-    pub fn parent_ref(&self) -> Option<&Node> {
-        // Safety: parent 指针在 fix_parent_pointers 后有效，
-        // 且在 CSS/Layout 期间树不发生移动。
-        self.parent.map(|p| unsafe { &*p })
+    /// 深度优先遍历所有后代（含自身）
+    pub fn descendants<'a>(
+        arena: &'a NodeArena,
+        start_id: NodeId,
+    ) -> Descendants<'a> {
+        Descendants {
+            arena,
+            stack: vec![start_id],
+        }
+    }
+
+
+    fn node_id(&self, arena: &NodeArena) -> NodeId {
+        // 在父节点的 children 中查找自己
+        if let Some(parent_id) = self.parent {
+            let parent = &arena[parent_id];
+            let self_ptr = self as *const Node;
+            for &id in &parent.children {
+                if std::ptr::eq(&arena[id] as *const Node, self_ptr) {
+                    return id;
+                }
+            }
+        }
+        panic!("Node not found in its parent's children");
     }
 }
 
-// ============================================================
-// 未来 Node 重构指引
-// ============================================================
-//
-// 当前 Node 使用 `Vec<Node>` 自有树 + `*const Node` 父指针。
-// 这种设计简单直接，但有以下局限：
-//   1. 原始指针在树修改后可能悬空
-//   2. `Vec` 扩容时子节点地址会变
-//   3. 无法在删除节点后保持指针有效
-//
-// 若需要更安全的父节点导航（如支持 DOM 操作），推荐以下方案：
-//
-// 方案 A: slotmap 索引（推荐）
-//   - 将 Node 存入 `SlotMap<NodeId, Node>`（crate: slotmap）
-//   - parent 改为 `Option<NodeId>`
-//   - children 改为 `Vec<NodeId>`
-//   - 优势：无 unsafe，O(1) 访问，增删安全
-//   - 代价：所有遍历需要传入 &SlotMap
-//
-// 方案 B: Rc<RefCell<Node>>
-//   - 用 Weak 做 parent，Rc 做 children
-//   - 优势：内存安全，自动管理生命周期
-//   - 代价：运行时 borrow check 开销，循环引用需手动处理
-//
-// 方案 C: indextree arena
-//   - crate: indextree，专用的树 arena
-//   - 优势：API 完整（parent/children/siblings 均 O(1)）
-//   - 代价：所有 Node 访问需通过 arena
-//
-// 迁移步骤（以方案 A 为例）：
-//   1. 引入 slotmap，定义 `type NodeId = slotmap::new_key_type!();`
-//   2. Node 改存 NodeId 而非 *const Node
-//   3. 全局 `SlotMap<NodeId, Node>` 管理所有权
-//   4. html_parse 构建时返回 (NodeId, SlotMap)
-//   5. css_into_node / layout 遍历传 &SlotMap
+// 迭代器
+
+pub struct Descendants<'a> {
+    arena: &'a NodeArena,
+    stack: Vec<NodeId>,
+}
+
+impl<'a> Iterator for Descendants<'a> {
+    type Item = (NodeId, &'a Node);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let id = self.stack.pop()?;
+        let node = &self.arena[id];
+        // 子节点逆序入栈保证前序遍历
+        for &child_id in node.children.iter().rev() {
+            self.stack.push(child_id);
+        }
+        Some((id, node))
+    }
+}
+
+// 使 NodeId 可在 logging 中使用
+
+impl fmt::Display for NodeId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // NodeId 内部是 u64，这里只显示低 32 位版本号
+        write!(f, "n#{}", self.data().as_ffi() as u32)
+    }
+}
