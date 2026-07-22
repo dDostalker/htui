@@ -46,9 +46,15 @@ cargo run -p test_html -- text            # 运行文本测试
 
 ## 保留的原有测试
 
+- `aside.html` → `cargo run -p test_html -- aside`（已修复：添加内嵌 `<style>` 块）
 - `css.html` → `cargo run -p test_html -- css`
+- `header_footer.html` → `cargo run -p test_html -- header_footer`
 - `helloworld.html` → `cargo run -p test_html -- helloworld`
 - `pic.png` — 未修改
+
+## 已知问题修复
+
+- `aside.html` 原先缺少内嵌 `<style>` 块，`main.rs` 中注释声称已有但实际未提供，现已补充完整的 CSS 样式块
 
 ## 注意事项
 

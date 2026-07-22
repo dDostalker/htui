@@ -388,10 +388,7 @@ fn parse_color_str(s: &str) -> Option<Color> {
     }
 
     // 2. rgb(r, g, b)
-    if let Some(inner) = lower
-        .strip_prefix("rgb(")
-        .and_then(|s| s.strip_suffix(')'))
-    {
+    if let Some(inner) = lower.strip_prefix("rgb(").and_then(|s| s.strip_suffix(')')) {
         return parse_rgb_color(inner);
     }
 
@@ -640,7 +637,39 @@ pub fn css_into_node(
     for (selector, attr) in css.0.iter() {
         apply_css_rule(arena, root_id, selector, attr);
     }
+    // Propagate inheritable CSS properties (color, text-align, font-weight)
+    inherit_css(arena, root_id, &IndexMap::new());
     Ok(())
+}
+
+/// Inheritable CSS properties: propagate from parent to child if child has no own value.
+const INHERITABLE: &[&str] = &["color", "text-align", "font-weight"];
+
+fn inherit_css(arena: &mut NodeArena, node_id: NodeId, parent_attrs: &IndexMap<String, String>) {
+    // Merge parent inheritable attrs into current node (if not already set)
+    let node = &mut arena[node_id];
+    for key in INHERITABLE {
+        if let Some(value) = parent_attrs.get(*key) {
+            node.css_attr
+                .0
+                .entry(key.to_string())
+                .or_insert_with(|| value.clone());
+        }
+    }
+
+    // Collect inheritable attrs from this node to pass down
+    let mut merged = parent_attrs.clone();
+    for key in INHERITABLE {
+        if let Some(value) = node.css_attr.0.get(*key) {
+            merged.insert(key.to_string(), value.clone());
+        }
+    }
+
+    // Recurse into children (clone to avoid borrow issues)
+    let children: Vec<NodeId> = node.children.clone();
+    for child_id in children {
+        inherit_css(arena, child_id, &merged);
+    }
 }
 
 // Tests
