@@ -26,18 +26,17 @@ impl TermMap {
 impl TermLayout {
     pub fn new(map: &TermMap) -> Result<TermLayout> {
         let layout = vec![" ".to_string(); map.columns as usize * map.rows as usize];
-        Ok(TermLayout { layout, columns: map.columns, ..Default::default() })
+        Ok(TermLayout {
+            layout,
+            columns: map.columns,
+            ..Default::default()
+        })
     }
 }
 
 impl TermLayout {
     /// 将 DOM 树绘制到终端画布
-    pub fn draw(
-        &mut self,
-        arena: &NodeArena,
-        root_id: NodeId,
-        term_map: &TermMap,
-    ) -> Result<()> {
+    pub fn draw(&mut self, arena: &NodeArena, root_id: NodeId, term_map: &TermMap) -> Result<()> {
         let root = &arena[root_id];
         assert_eq!(root.node_type, NodeType::Global);
         let children: Vec<NodeId> = root.children.clone();
@@ -47,12 +46,7 @@ impl TermLayout {
         Ok(())
     }
 
-    fn _draw(
-        &mut self,
-        node: &Node,
-        arena: &NodeArena,
-        term_map: &TermMap,
-    ) -> Result<()> {
+    fn _draw(&mut self, node: &Node, arena: &NodeArena, term_map: &TermMap) -> Result<()> {
         for draw_fn in DEFAULT_LAYOUT {
             draw_fn(node, self, term_map, arena)?;
         }

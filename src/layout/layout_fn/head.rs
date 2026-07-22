@@ -13,8 +13,12 @@ pub fn layout_hn(
     arena: &NodeArena,
 ) -> Result<()> {
     let n = match node.node_type {
-        NodeType::H1 => 1, NodeType::H2 => 2, NodeType::H3 => 3,
-        NodeType::H4 => 4, NodeType::H5 => 5, _ => return Ok(()),
+        NodeType::H1 => 1,
+        NodeType::H2 => 2,
+        NodeType::H3 => 3,
+        NodeType::H4 => 4,
+        NodeType::H5 => 5,
+        _ => return Ok(()),
     };
     term_layout.new_line();
     for child_id in node.child_ids() {

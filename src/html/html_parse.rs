@@ -2,9 +2,9 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::Result;
+use html5ever::Attribute;
 use html5ever::driver::ParseOpts;
 use html5ever::tendril::TendrilSink;
-use html5ever::Attribute;
 use log::{debug, info, warn};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
@@ -21,7 +21,9 @@ pub struct Parser {
 
 impl Parser {
     pub fn new(input: &str) -> Self {
-        Self { input: input.to_string() }
+        Self {
+            input: input.to_string(),
+        }
     }
 
     /// 解析 HTML 并返回 (root_id, arena, embedded_css)。
@@ -37,17 +39,25 @@ impl Parser {
 
         convert_children(&dom.document, root_id, &mut arena, &mut css_sources);
 
-        debug!("解析完成: root={}, {} 节点, CSS: {} 字节",
-            root_id, arena.len(), css_sources.join("\n").len());
+        debug!(
+            "解析完成: root={}, {} 节点, CSS: {} 字节",
+            root_id,
+            arena.len(),
+            css_sources.join("\n").len()
+        );
         Ok((root_id, arena, css_sources.join("\n")))
     }
 }
 
 fn convert_attributes(html5_attrs: &[Attribute]) -> Attr {
-    if html5_attrs.is_empty() { return Attr::new(); }
-    let attr_str: String = html5_attrs.iter()
+    if html5_attrs.is_empty() {
+        return Attr::new();
+    }
+    let attr_str: String = html5_attrs
+        .iter()
         .map(|a| format!("{}=\"{}\"", a.name.local, a.value))
-        .collect::<Vec<_>>().join(" ");
+        .collect::<Vec<_>>()
+        .join(" ");
     Attr::parse_from_str(&attr_str)
 }
 
@@ -82,13 +92,15 @@ fn convert_children(
                                 let ar = attrs.borrow();
                                 convert_attributes(&ar)
                             };
-                            if let (Some(rel), Some(href)) = (a.get("rel"), a.get("href")) {
-                                if rel.to_lowercase().contains("stylesheet") {
-                                    info!("外部样式表: {}", href);
-                                    match fs::read_to_string(Path::new(href)) {
-                                        Ok(c) => { css_sources.push(c); }
-                                        Err(e) => warn!("读取 {} 失败: {}", href, e),
+                            if let (Some(rel), Some(href)) = (a.get("rel"), a.get("href"))
+                                && rel.to_lowercase().contains("stylesheet")
+                            {
+                                info!("外部样式表: {}", href);
+                                match fs::read_to_string(Path::new(href)) {
+                                    Ok(c) => {
+                                        css_sources.push(c);
                                     }
+                                    Err(e) => warn!("读取 {} 失败: {}", href, e),
                                 }
                             }
                             return;
@@ -136,22 +148,38 @@ fn extract_text_content(handle: &Handle) -> String {
 
 fn tag_name_to_node_type(tag: &str) -> Option<NodeType> {
     match tag.to_ascii_lowercase().as_str() {
-        "a" => Some(NodeType::A), "article" => Some(NodeType::Article),
-        "aside" => Some(NodeType::Aside), "button" => Some(NodeType::Button),
-        "details" => Some(NodeType::Details), "div" => Some(NodeType::Div),
-        "figcaption" => Some(NodeType::Figcaption), "figure" => Some(NodeType::Figure),
-        "footer" => Some(NodeType::Footer), "form" => Some(NodeType::Form),
-        "h1" => Some(NodeType::H1), "h2" => Some(NodeType::H2),
-        "h3" => Some(NodeType::H3), "h4" => Some(NodeType::H4),
-        "h5" => Some(NodeType::H5), "header" => Some(NodeType::Header),
-        "img" => Some(NodeType::Img), "input" => Some(NodeType::Input),
-        "label" => Some(NodeType::Label), "li" => Some(NodeType::Li),
-        "link" => Some(NodeType::Link), "main" => Some(NodeType::Main),
-        "nav" => Some(NodeType::Nav), "ol" => Some(NodeType::Ol),
-        "option" => Some(NodeType::HtmlOption), "p" => Some(NodeType::P),
-        "section" => Some(NodeType::Section), "select" => Some(NodeType::Select),
-        "span" => Some(NodeType::Span), "style" => Some(NodeType::Style),
-        "summary" => Some(NodeType::Summary), "textarea" => Some(NodeType::Textarea),
+        "a" => Some(NodeType::A),
+        "article" => Some(NodeType::Article),
+        "aside" => Some(NodeType::Aside),
+        "button" => Some(NodeType::Button),
+        "details" => Some(NodeType::Details),
+        "div" => Some(NodeType::Div),
+        "figcaption" => Some(NodeType::Figcaption),
+        "figure" => Some(NodeType::Figure),
+        "footer" => Some(NodeType::Footer),
+        "form" => Some(NodeType::Form),
+        "h1" => Some(NodeType::H1),
+        "h2" => Some(NodeType::H2),
+        "h3" => Some(NodeType::H3),
+        "h4" => Some(NodeType::H4),
+        "h5" => Some(NodeType::H5),
+        "header" => Some(NodeType::Header),
+        "img" => Some(NodeType::Img),
+        "input" => Some(NodeType::Input),
+        "label" => Some(NodeType::Label),
+        "li" => Some(NodeType::Li),
+        "link" => Some(NodeType::Link),
+        "main" => Some(NodeType::Main),
+        "nav" => Some(NodeType::Nav),
+        "ol" => Some(NodeType::Ol),
+        "option" => Some(NodeType::HtmlOption),
+        "p" => Some(NodeType::P),
+        "section" => Some(NodeType::Section),
+        "select" => Some(NodeType::Select),
+        "span" => Some(NodeType::Span),
+        "style" => Some(NodeType::Style),
+        "summary" => Some(NodeType::Summary),
+        "textarea" => Some(NodeType::Textarea),
         "ul" => Some(NodeType::Ul),
         _ => None,
     }
@@ -160,23 +188,28 @@ fn tag_name_to_node_type(tag: &str) -> Option<NodeType> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn init() { let _ = env_logger::builder().is_test(true).try_init(); }
+    fn init() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
 
-    #[test] fn test_tag_map() {
+    #[test]
+    fn test_tag_map() {
         init();
         assert_eq!(tag_name_to_node_type("div"), Some(NodeType::Div));
         assert_eq!(tag_name_to_node_type("style"), Some(NodeType::Style));
         assert_eq!(tag_name_to_node_type("nope"), None);
     }
 
-    #[test] fn test_parse_basic() {
+    #[test]
+    fn test_parse_basic() {
         init();
         let mut p = Parser::new("<div><p>Hello</p></div>");
         let (root, arena, _) = p.parse().unwrap();
         assert!(arena[root].child_count() > 0);
     }
 
-    #[test] fn test_style_extract() {
+    #[test]
+    fn test_style_extract() {
         init();
         let mut p = Parser::new("<div><style>p{color:red}</style><p>Hi</p></div>");
         let (_root, _arena, css) = p.parse().unwrap();

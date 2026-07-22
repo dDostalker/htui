@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::{
-    layout::{layout::TermMap, DEFAULT_LAYOUT},
+    layout::{DEFAULT_LAYOUT, layout::TermMap},
     tdom::node::{Node, NodeArena, NodeType},
     tui::graph_api::TermLayout,
 };
@@ -12,7 +12,9 @@ pub fn layout_div(
     term_map: &TermMap,
     arena: &NodeArena,
 ) -> Result<()> {
-    if node.node_type != NodeType::Div { return Ok(()); }
+    if node.node_type != NodeType::Div {
+        return Ok(());
+    }
     term_layout.new_line();
     for child_id in node.child_ids() {
         let child = &arena[child_id];

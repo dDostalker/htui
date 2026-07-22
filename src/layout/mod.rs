@@ -12,8 +12,12 @@ use crate::{
 pub mod layout;
 pub mod layout_fn;
 
-pub type LayoutFn =
-    fn(node: &Node, term_layout: &mut TermLayout, term_map: &TermMap, arena: &NodeArena) -> Result<()>;
+pub type LayoutFn = fn(
+    node: &Node,
+    term_layout: &mut TermLayout,
+    term_map: &TermMap,
+    arena: &NodeArena,
+) -> Result<()>;
 
 /// 布局函数注册表（按优先级排列）
 pub static DEFAULT_LAYOUT: &[LayoutFn] = &[layout_p, layout_hn, layout_img, layout_div];

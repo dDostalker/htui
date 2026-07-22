@@ -1,4 +1,4 @@
-use log::{debug};
+use log::debug;
 use std::{collections::HashMap, fmt::Debug};
 
 #[derive(Clone, Default)]
@@ -64,7 +64,7 @@ impl Attr {
                     if quote_ch == '"' || quote_ch == '\'' {
                         // 有引号的值
                         let quote = chars.next().unwrap();
-                        while let Some(ch) = chars.next() {
+                        for ch in chars.by_ref() {
                             if ch == quote {
                                 break;
                             }

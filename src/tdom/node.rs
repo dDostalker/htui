@@ -183,16 +183,12 @@ impl Node {
     }
 
     /// 深度优先遍历所有后代（含自身）
-    pub fn descendants<'a>(
-        arena: &'a NodeArena,
-        start_id: NodeId,
-    ) -> Descendants<'a> {
+    pub fn descendants<'a>(arena: &'a NodeArena, start_id: NodeId) -> Descendants<'a> {
         Descendants {
             arena,
             stack: vec![start_id],
         }
     }
-
 
     fn node_id(&self, arena: &NodeArena) -> NodeId {
         // 在父节点的 children 中查找自己
