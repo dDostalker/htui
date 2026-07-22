@@ -2,7 +2,7 @@
 
 ## 概述
 
-HTML解析器是htui项目中的一个核心模块，负责将HTML字符串解析为树形DOM结构（称为tdom）。解析器实现了递归下降解析算法，能够处理基本的HTML标签和文本内容。
+HTML解析器是htui项目中的一个核心模块，负责将HTML字符串解析为树形DOM结构（称为tdom）。解析器基于 **html5ever** 库实现，该库是 Servo 浏览器引擎使用的符合 WHATWG HTML5 规范的解析器。
 
 ## 核心数据结构
 
@@ -10,39 +10,26 @@ HTML解析器是htui项目中的一个核心模块，负责将HTML字符串解�
 
 ```rust
 #[derive(Debug)]
-struct Parser {
-    point: usize,      // 当前解析位置
-    context: String,   // 要解析的HTML字符串
-    line: usize,       // 当前行号
-    column: usize,     // 当前列号
+pub struct Parser {
+    input: String,
 }
 ```
 
-Parser结构体维护解析状态，跟踪解析位置、行号和列号信息。
-
-### EleBlockRead枚举
-
-```rust
-#[derive(Debug)]
-enum EleBlockRead<'a> {
-    Str(&'a str),      // 纯文本内容
-    Block(&'a str),    // 开始标签（如<span>）
-    EndBlock(&'a str), // 结束标签（如</span>）
-    Enter,             // 换行符
-}
-```
-
-EleBlockRead表示从HTML中读取的基本块类型，用于区分标签和文本内容。
+Parser结构体封装了html5ever的解析流程，对外提供简洁的接口。
 
 ### NodeType枚举
 
 HTML解析器支持的节点类型包括：
 - `Global`: 根节点类型
-- `Span`: span标签
-- `Div`: div标签  
-- `P`: p标签
+- `Span`, `Div`, `P`: 基础标签
+- `Img`, `Input`: 自闭合标签
+- `H1`-`H5`: 标题标签
+- `A`, `Button`, `Form`, `Label`: 交互元素
+- `Header`, `Footer`, `Nav`, `Main`, `Section`, `Article`, `Aside`: 语义元素
+- `Figure`, `Figcaption`, `Details`, `Summary`: 语义元素
+- `Ul`, `Ol`, `Li`: 列表元素
+- `Select`, `HtmlOption`, `Textarea`: 表单元素
 - `Text(String)`: 文本节点
-- `None`: 空节点
 
 ## 解析流程
 
@@ -50,78 +37,80 @@ HTML解析器支持的节点类型包括：
 
 ```rust
 impl Parser {
-    fn parse(&mut self) -> Result<Node> {
-        self._parse(Some(NodeType::Global))
+    pub fn parse(&mut self) -> Result<Node> {
+        // 1. 使用 html5ever::parse_document 解析 HTML
+        // 2. 将 RcDom 树转换为内部 Node 树
+        // 3. 返回以 NodeType::Global 为根的树结构
     }
 }
 ```
 
-解析过程从`parse()`方法开始，它调用内部的`_parse()`方法，并传入`NodeType::Global`作为根节点类型。
+### html5ever 转换流程
 
-### 递归解析方法
+1. **HTML解析**: `html5ever::parse_document(RcDom::default(), opts).one(input)` 产生 `RcDom` 树
+2. **节点转换**: `convert_children()` 递归遍历 RcDom 树：
+   - `Element` → 通过 `tag_name_to_node_type()` 映射为 `NodeType`，创建 `Node`
+   - `Text` → 创建 `Text(String)` 文本节点
+   - `Document` → 递归处理子节点
+   - `Comment` / `Doctype` → 跳过
+3. **属性转换**: html5ever 的 `Attribute` → 序列化为 `key="value"` 字符串 → `Attr::parse_from_str()` 解析
+4. **不支持的标签**: `tag_name_to_node_type()` 返回 `None` 时，元素节点被跳过，子节点提升到父节点（"压平"处理）
 
-`_parse()`方法是解析器的核心，采用递归下降算法：
+### 标签映射函数
 
-1. **初始化节点**：创建新的Node实例
-2. **循环读取**：不断调用`_element_content()`获取下一个HTML块
-3. **处理不同类型块**：
-   - `EleBlockRead::Block`: 识别标签类型，递归解析子节点
-   - `EleBlockRead::Str`: 创建文本节点
-   - `EleBlockRead::EndBlock`: 检查标签闭合是否匹配，返回当前节点
-   - `EleBlockRead::Enter`: 跳过换行符
-4. **结束条件**：当没有更多内容可读时，返回构建的节点
-
-### 字符读取
-
-`_next_char()`方法负责安全地读取下一个字符，处理UTF-8编码和边界检查。
-
-### 元素内容提取
-
-`_element_content()`方法根据当前字符决定如何读取：
-- 遇到`<`：读取整个标签（直到`>`）
-- 其他字符：读取文本内容（直到下一个`<`或结束）
-
-## 标签类型检查
-
-`check_ele_ty()`方法使用预定义的ELEMENT_FUNCTIONS数组来识别HTML标签对应的NodeType。这些函数定义在`tdom::element_fn`模块中。
+```rust
+fn tag_name_to_node_type(tag: &str) -> Option<NodeType> {
+    match tag.to_ascii_lowercase().as_str() {
+        "div" => Some(NodeType::Div),
+        "p" => Some(NodeType::P),
+        "span" => Some(NodeType::Span),
+        "h1" => Some(NodeType::H1),
+        // ... 共 28 种支持的标签
+        _ => None,  // 不支持的标签：压平处理
+    }
+}
+```
 
 ## 使用示例
 
 ### 基本用法
 
 ```rust
-use htui::html::parse::Parser;
+use htui::html::html_parse::Parser;
 
 let html = "<div><p>Hello World</p></div>";
 let mut parser = Parser::new(html);
 let dom = parser.parse().unwrap();
 ```
 
-### 复杂HTML解析
+### 带属性的HTML解析
 
 ```rust
-let html = r#"
-<div class="container">
+let html = r#"<div class="container" id="main">
     <h1>标题</h1>
-    <span>内容<span>嵌套</span></span>
     <p>段落文本</p>
-</div>
-"#;
+</div>"#;
 
 let mut parser = Parser::new(html);
-match parser.parse() {
-    Ok(dom) => println!("解析成功: {:?}", dom),
-    Err(e) => println!("解析失败: {}", e),
-}
+let dom = parser.parse().unwrap();
 ```
+
+## 与旧实现的对比
+
+| 特性 | 旧实现（手写） | 新实现（html5ever） |
+|------|---------------|---------------------|
+| 解析引擎 | 递归下降 | HTML5 规范 Tokenizer+TreeBuilder |
+| 容错能力 | 有限 | 完整的 HTML5 错误恢复 |
+| 文档结构 | 需手动处理 | 自动构建 html/head/body |
+| 自闭合标签 | 仅支持 img/input | 支持所有合法自闭合标签 |
+| 属性解析 | 自定义 | html5ever + Attr::parse_from_str 回填 |
+| 维护成本 | 高 | 低（跟随上游） |
 
 ## 错误处理
 
-解析器使用`anyhow::Result`进行错误处理，可能出现的错误包括：
-1. **标签不匹配**：开始标签和结束标签不匹配
-2. **不支持的标签**：遇到未定义的HTML标签
-3. **字符编码错误**：无效的UTF-8序列
-4. **语法错误**：HTML格式不正确
+- 格式不良的HTML由html5ever自动容错处理
+- 严重解析错误通过`anyhow::Result`返回
+- 不支持的标签通过`warn!`日志记录，不中断解析
 
 ## 测试
 
@@ -129,109 +118,28 @@ match parser.parse() {
 
 ```rust
 #[test]
-fn test_check_ele_ty() {
-    assert_eq!(Parser::check_ele_ty("<span>").unwrap(), NodeType::Span);
-    assert_eq!(Parser::check_ele_ty("<div>").unwrap(), NodeType::Div);
+fn test_tag_name_to_node_type() {
+    assert_eq!(tag_name_to_node_type("span"), Some(NodeType::Span));
+    assert_eq!(tag_name_to_node_type("div"), Some(NodeType::Div));
+    assert_eq!(tag_name_to_node_type("DIV"), Some(NodeType::Div)); // 大小写不敏感
+    assert_eq!(tag_name_to_node_type("unsupported"), None);
 }
 
 #[test]
-fn test_parse_html() {
+fn test_parse_basic_html() {
     let html = "<div><p>Hello</p><p>World</p></div>";
-    let mut parser = Parser::new(html);
-    let node = parser.parse().unwrap();
-    // 验证解析结果
+    let mut p = Parser::new(html);
+    let node = p.parse().unwrap();
+    assert!(!node.children.is_empty());
 }
 ```
-
-## 注意事项
-
-1. **标签属性**：当前版本主要关注标签结构，属性解析可能有限
-2. **自闭合标签**：不支持自闭合标签（如`<br/>`）
-3. **注释和脚本**：不支持HTML注释、`<script>`、`<style>`等特殊标签
-4. **性能考虑**：采用递归算法，深度嵌套的HTML可能引起栈溢出
-
-## 扩展性
-
-要支持新的HTML标签，需要：
-1. 在`NodeType`枚举中添加新的变体
-2. 在`tdom::element_fn`模块中添加对应的识别函数
-3. 更新相关的布局和渲染逻辑
 
 ## 与TUI集成
 
-解析后的tdom结构可以传递给布局引擎进行屏幕布局计算，最终通过TUI框架渲染到终端。
+解析后的tdom结构传递给布局引擎（`layout` 模块）进行屏幕布局计算，最终通过TUI框架渲染到终端。html5ever替换后，该流程完全不变。
 
 ---
-# css 解析
 
-首先需要明确，css的组成分为三部分：选择器 + 属性+ 值
-```
-p（选择器） {
-  background-image（属性）: url('img_girl.jpg');（值）
-}
-```
-## 选择器
-选择器只有在完整使用css的时候才会使用，他决定了css的作用对象，如果是对某个标签内连则不需要使用，直接使用属性和值即可，如
-```
- <p style="background-image: url('img_girl.jpg');"> 
-```
-其中选择器也分为一下几个部分
-- 基础选择器
-- 组合选择器
-- 属性选择器
-- 伪类
-- 伪元素
+*文档最后更新：2026年7月22日*
 
-### 基础选择器
-```
-*          /* 通配选择器 */
-div        /* 标签选择器 */
-.class     /* 类选择器 */
-#id        /* ID选择器 */
-```
-### 组合选择器
-```
-div p      /* 后代选择器 */
-div > p    /* 子选择器 */
-div + p    /* 相邻兄弟 */
-div ~ p    /* 普通兄弟 */
-```
-
-### 属性选择器
-```
-input[type="text"]
-a[href]
-```
-### 伪类
-```
-:hover
-:active
-:focus
-:first-child
-:last-child
-:nth-child()
-```
-## 属性和值
-其属性和值格式如下
-```
-（属性）: （值）;
-（属性）: （值）;
-      ...
-```
-
-## 解析思路
-解析的时候可以先设计一个函数用于分出选择器和属性值两个部分，效果如下
-```
-p:hover{
-  background-image: url('img_girl.jpg')；
-}
-
--> p:hover    第一部分
--> background-image:url('img_girl.jpg'); 第二部分   
-```
-然后对这两个部分进行分别解析
-
-
-*文档最后更新：2026年 2月13日*
-
-*相关文件：`src/html/parse.rs`, `src/tdom/node.rs`, `src/tdom/element_fn/`*
+*相关文件：`src/html/html_parse.rs`, `src/tdom/node.rs`, `src/tdom/attributes.rs`*
