@@ -204,6 +204,12 @@ impl TermLayout {
         let mut i = scroll_start;
 
         while i < scroll_end {
+            // 跳过宽字符的填充格（空字符串标记）
+            if self.layout[i].word.is_empty() {
+                i += 1;
+                continue;
+            }
+
             let cell = &self.layout[i];
 
             let batch_start = i;
@@ -214,6 +220,11 @@ impl TermLayout {
 
             while i < scroll_end {
                 let c = &self.layout[i];
+                // 跳过宽字符的填充格
+                if c.word.is_empty() {
+                    i += 1;
+                    continue;
+                }
                 if i > batch_start && i % cols == 0 {
                     break;
                 }
@@ -277,7 +288,8 @@ impl TermLayout {
             if width > 1 {
                 let next_idx = idx + 1;
                 if next_idx < max {
-                    self.layout[next_idx] = Block::new(' '.to_string(), fcolor, bcolor);
+                    // 填充格用空字符串标记，渲染时跳过，避免终端光标偏移
+                    self.layout[next_idx] = Block::new(String::new(), fcolor, bcolor);
                 }
             }
             self.point += width as u32;
