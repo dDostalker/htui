@@ -7,14 +7,14 @@ edition = "2024"
 anyhow = "1.0.101"
 crossterm = "0.29.0"
 env_logger = "0.11.9"
-cssparser = "0.31"
+cssparser = "0.31.2"
 html5ever = "0.27"
 image = "0.25.9"
-indexmap = "2"
+indexmap = "2.14"
 log = "0.4.29"
 markup5ever_rcdom = "0.3"
-slotmap = "1.0"
-tendril = "0.4"
+slotmap = "1.1.1"
+tendril = "0.4.3"
 
 [workspace]
-members = []
+members = ["visual_test"]

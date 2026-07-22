@@ -1,0 +1,85 @@
+<!--
+  ============================================
+  htui 综合视觉测试 — all_in_one
+  覆盖场景：标题、段落、图片、嵌套、列表
+  运行: cargo run -p test_html -- all_in_one
+  ============================================
+-->
+<div>
+    <h1>htui Terminal UI Render Test</h1>
+    <p>This is a comprehensive visual test of the htui HTML renderer.</p>
+    <p>Press 'q' or Escape to exit. Resize terminal to refresh.</p>
+
+    <h2>1. Heading Hierarchy</h2>
+
+    <h1>Heading Level 1 - Main Title</h1>
+    <p>Paragraph text under H1. Lorem ipsum dolor sit amet.</p>
+
+    <h2>Heading Level 2 - Section</h2>
+    <p>Paragraph text under H2. Consectetur adipiscing elit.</p>
+
+    <h3>Heading Level 3 - Subsection</h3>
+    <p>Paragraph text under H3. Sed do eiusmod tempor incididunt.</p>
+
+    <h4>Heading Level 4 - Detail</h4>
+    <p>Paragraph text under H4. Ut labore et dolore magna aliqua.</p>
+
+    <h5>Heading Level 5 - Minor Detail</h5>
+    <p>Paragraph text under H5. Ut enim ad minim veniam.</p>
+
+    <h2>2. Text Content & Paragraphs</h2>
+    <p>Short paragraph.</p>
+    <p>A longer paragraph that contains multiple sentences. This demonstrates how text wrapping and layout work in the terminal renderer. The text should flow naturally within the available terminal width.</p>
+    <p class="highlight">This paragraph has a highlight class for color testing.</p>
+
+    <h2>3. Nested Divs</h2>
+    <div>
+        <p>Level 1 - Outer div content.</p>
+        <div>
+            <p>Level 2 - Nested div content.</p>
+            <div>
+                <p>Level 3 - Deeply nested div content.</p>
+                <div>
+                    <p>Level 4 - Maximum nesting depth test.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <h2>4. Image Display</h2>
+    <p>Below should be an image rendered with braille characters:</p>
+    <img src="src/image/pic.png" width="200" height="100">
+    <p>Image rendered above. (If src path is valid)</p>
+
+    <h2>5. Mixed Layout</h2>
+    <div>
+        <h3>Mixed Content Section</h3>
+        <p>This section mixes headings and paragraphs.</p>
+        <p>Another paragraph with <em>inline</em> elements (em tags are flattened).</p>
+        <h4>Sub-heading in Mixed Layout</h4>
+        <p>Final paragraph for the mixed layout test.</p>
+    </div>
+
+    <h2>6. Self-closing Tags</h2>
+    <p>Image with self-closing syntax:</p>
+    <img src="src/image/pic.png" width="160" height="80">
+    <p>End of self-closing tag test.</p>
+
+    <h2>7. HTML Entity & Special Characters</h2>
+    <p>Special characters test: &lt;div&gt; &amp; &quot;quotes&quot;</p>
+    <p>Unicode test: Hello 世界 🌍 — em-dash and smart quotes</p>
+
+    <h2>8. Header & Footer</h2>
+    <header>Header - Site Title</header>
+    <p>Body content between header and footer.</p>
+    <footer>Footer - © 2026 htui</footer>
+
+    <h2>9. Aside Sidebar</h2>
+    <aside>INFO: htui v0.1.0 — HTML to Terminal UI renderer.</aside>
+    <aside>TIP: Press 'q' or Escape to exit this demo.</aside>
+    <aside>TIP: Resize your terminal to trigger a refresh.</aside>
+    <aside>NOTE: Zoom with Ctrl+Plus / Ctrl+Minus.</aside>
+    <p>Body content after the aside sidebar section.</p>
+
+    <p>=== End of Comprehensive Test ===</p>
+</div>

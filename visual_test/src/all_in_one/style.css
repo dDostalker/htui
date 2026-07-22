@@ -1,0 +1,8 @@
+h1 { color: cyan; }
+h2 { color: yellow; }
+h3 { color: green; }
+p { color: grey; }
+.highlight { color: magenta; }
+header { color: cyan; background-color: darkblue; text-align: center; }
+footer { color: grey; text-align: center; }
+aside { color: white; }

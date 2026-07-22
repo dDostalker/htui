@@ -38,6 +38,19 @@ htui/
 │       ├── mod.rs
 │       └── graph_api.rs    # Block / TermLayout / RenderCmd / 图像加载
 ├── Cargo.toml
+├── visual_test/          # 可视化测试工具（cargo run -p visual_test）
+│   └── src/
+│       ├── main.rs
+│       ├── all_in_one/   # HTML + CSS per test folder
+│       ├── headings/
+│       ├── image/        # includes pic.png
+│       ├── colors/
+│       ├── nested/
+│       ├── text/
+│       ├── css/
+│       ├── header_footer/
+│       ├── aside/
+│       └── helloworld/
 ├── tests/
 │   ├── fixtures/          # HTML/CSS test fixtures + images
 │   ├── html_parse_tests.rs
