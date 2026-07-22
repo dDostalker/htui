@@ -5,7 +5,7 @@ use crate::{
         layout::TermMap,
         layout_fn::{div::layout_div, head::layout_hn, img::layout_img, p::layout_p},
     },
-    tdom::node::{Node, NodeArena, NodeId},
+    tdom::node::{Node, NodeArena},
     tui::graph_api::TermLayout,
 };
 

@@ -1,5 +1,4 @@
-use env_logger::Builder;
-use log::{debug, error, info, warn};
+use log::{debug};
 use std::{collections::HashMap, fmt::Debug};
 
 #[derive(Clone, Default)]

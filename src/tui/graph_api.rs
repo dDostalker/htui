@@ -11,7 +11,7 @@ use image::{
     GenericImageView,
     imageops::FilterType::{self},
 };
-use log::{debug, error, info, warn};
+use log::{debug, error, warn};
 use std::io::stdout;
 
 /// 终端画布

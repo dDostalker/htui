@@ -5,7 +5,7 @@ use cssparser::{
     AtRuleParser, BasicParseErrorKind, CowRcStr, ParseError, Parser as CssParser, ParserInput,
     ParserState, QualifiedRuleParser, StyleSheetParser,
 };
-use log::{debug, trace, warn};
+use log::{debug,  warn};
 
 use crate::tdom::node::{Node, NodeArena, NodeId, NodeType};
 
