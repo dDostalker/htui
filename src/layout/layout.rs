@@ -2,9 +2,7 @@ use anyhow::{Ok, Result};
 use crossterm::terminal;
 
 use crate::{
-    layout::DEFAULT_LAYOUT,
-    tdom::node::{Node, NodeArena, NodeId, NodeType},
-    tui::graph_api::TermLayout,
+    layout::DEFAULT_LAYOUT, tdom::node::{Node, NodeArena, NodeId, NodeType}, tui::graph_api::{Block, TermLayout},
 };
 
 #[derive(Debug)]
@@ -25,7 +23,7 @@ impl TermMap {
 
 impl TermLayout {
     pub fn new(map: &TermMap) -> Result<TermLayout> {
-        let layout = vec![" ".to_string(); map.columns as usize * map.rows as usize];
+        let layout = vec![Block::new(" ".to_string(), None); map.columns as usize * map.rows as usize];
         Ok(TermLayout {
             layout,
             columns: map.columns,

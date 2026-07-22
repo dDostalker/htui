@@ -67,7 +67,7 @@ pub fn render(html: &str, css: &str) {
         let mut term_layout = TermLayout::new(&term_map).unwrap();
         term_layout.draw(&arena, root_id, &term_map).unwrap();
 
-        print!("{}", term_layout);
+        term_layout.render();
         stdout().flush().unwrap();
 
         loop {

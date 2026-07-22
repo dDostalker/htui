@@ -173,7 +173,7 @@ impl TermLayout {
     /// - `path`：图片路径
     /// - `size`：期望缩放的像素尺寸 (max_width_px, max_height_px)
     ///  返回实际占用的画布字符总数（columns × rows）
-    pub fn paint_img(&mut self, path: String, size: (u32, u32)) -> u64 {
+    pub fn paint_img(&mut self, path: String, size: (u32, u32)) -> u32 {
         debug!("开始加载图片: path='{}' size={:?}", path, size);
 
         let mut img_data = Img::new(PathBuf::from(&path), size);
@@ -224,7 +224,7 @@ impl TermLayout {
         self.len += total_chars;
 
         debug!("图片加载成功，path={}，占用字符数：{}", path, total_chars);
-        total_chars
+        total_chars 
     }
 }
 /// 判断当前是否应该刷新
@@ -349,7 +349,7 @@ impl Img {
 #[test]
 fn test_create_img() {
     let mut img = Img::new(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../test_html/src/pic.png"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_html/src/pic.png"),
         (320, 160),
     );
     img._create_img().unwrap();
