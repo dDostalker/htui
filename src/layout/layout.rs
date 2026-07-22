@@ -23,7 +23,7 @@ impl TermMap {
 
 impl TermLayout {
     pub fn new(map: &TermMap) -> Result<TermLayout> {
-        let layout = vec![Block::new(" ".to_string(), None); map.columns as usize * map.rows as usize];
+        let layout = vec![Block::new(" ".to_string(), None, None); map.columns as usize * map.rows as usize];
         Ok(TermLayout {
             layout,
             columns: map.columns,

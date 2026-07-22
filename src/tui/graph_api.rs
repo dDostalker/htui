@@ -18,12 +18,42 @@ use image::{
 };
 use log::{debug, error, warn};
 use std::io::stdout;
+
+/// 判断字符在终端中的显示宽度（列数）
+/// - ASCII / 制表符 / 窄字符: 1 列
+/// - CJK / 全角字符: 2 列
+pub fn char_width(c: char) -> usize {
+    if c.is_ascii() {
+        return 1;
+    }
+    let cp = c as u32;
+    // 仅以下 Unicode 区块为宽字符（2 列），其余默认 1 列
+    let is_wide = matches!(cp,
+        // CJK 统一表意文字
+        0x4E00..=0x9FFF
+        | 0x3400..=0x4DBF   // CJK Ext-A
+        | 0xF900..=0xFAFF   // CJK Compat Ideographs
+        | 0x2F800..=0x2FA1F // CJK Compat Supplement
+        // 全角形式
+        | 0xFF01..=0xFF60   // Fullwidth Forms
+        | 0xFFE0..=0xFFE6   // Fullwidth Signs
+        // 韩文
+        | 0xAC00..=0xD7AF   // Hangul Syllables
+        // 中文标点 & 符号
+        | 0x3000..=0x303F   // CJK Symbols/Punctuation
+        | 0x2E80..=0x2EFF   // CJK Radicals
+        | 0x3200..=0x33FF   // Enclosed CJK
+        | 0xFFE8..=0xFFEE   // Half/Fullwidth Symbols
+    );
+    if is_wide { 2 } else { 1 }
+}
+
 /// block 块，终端显示的最小单元，包含每个块的内容和特性
 #[derive(Debug, Clone)]
 pub struct Block {
-    word: String,
-    fcolor: Option<Color>,
-    bcolor: Option<Color>,
+    pub(crate) word: String,
+    pub(crate) fcolor: Option<Color>,
+    pub(crate) bcolor: Option<Color>,
     /// 渲染后的文本
     render: Option<RefCell<String>>,
 }
@@ -46,10 +76,15 @@ impl Display for Block {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_render() {
             write!(f, "{}", self.render_str())?;
-        } else if let Some(color) = self.fcolor {
-            write!(f, "{}", self.word.clone().with(color))?;
         } else {
-            write!(f, "{}", self.word)?;
+            let styled = self.word.clone().stylize();
+            let styled = match (self.fcolor, self.bcolor) {
+                (Some(fg), Some(bg)) => styled.with(fg).on(bg),
+                (Some(fg), None) => styled.with(fg),
+                (None, Some(bg)) => styled.on(bg),
+                (None, None) => styled,
+            };
+            write!(f, "{styled}")?;
         }
 
         Ok(())
@@ -60,26 +95,26 @@ impl Block {
     fn is_render(&self) -> bool {
         self.render.is_some()
     }
-    pub fn new(word: String, fcolor: Option<Color>) -> Self {
+    pub fn new(word: String, fcolor: Option<Color>, bcolor: Option<Color>) -> Self {
         Self {
             word,
             fcolor,
-            bcolor: None,
+            bcolor,
             render: None,
         }
     }
-    pub fn new_render(word: String, fcolor: Option<Color>, render: Option<String>) -> Self {
+    pub fn new_render(word: String, fcolor: Option<Color>, bcolor: Option<Color>, render: Option<String>) -> Self {
         match render {
             Some(render) => Self {
                 word,
                 fcolor,
-                bcolor: None,
+                bcolor,
                 render: Some(RefCell::new(render)),
             },
             None => Self {
                 word,
                 fcolor,
-                bcolor: None,
+                bcolor,
                 render: None,
             },
         }
@@ -127,17 +162,56 @@ impl Display for TermLayout {
 
 impl TermLayout {
     /// 将画布渲染到终端（含光标定位）
+    /// 连续相同风格的格子合并为一次输出，减少 IO 次數、消除闪烁
     pub fn render(&self) {
-        for (i, row) in self.layout.iter().enumerate() {
-            if i == self.layout.len() - 1 {
-                break;
+        let total = self.layout.len().saturating_sub(1);
+        let cols = self.columns;
+        let mut i = 0;
+
+        while i < total {
+            let cell = &self.layout[i];
+
+            // 纯空格且无背景 → 跳过
+            if cell.word == " " && cell.bcolor.is_none() {
+                i += 1;
+                continue;
             }
-            let x = i as u16 % self.columns;
-            let y = i as u16 / self.columns;
-            if row.word != " " {
-                execute!(stdout(), MoveTo(x, y)).ok();
-                print!("{}", row);
+
+            let batch_start = i;
+            let fg = cell.fcolor;
+            let bg = cell.bcolor;
+            let mut batch = String::new();
+
+            // 收集连续同风格格子（到行尾或风格变化为止）
+            while i < total {
+                let c = &self.layout[i];
+                // 行边界：下一格在新行开头 → 断批
+                if i > batch_start && i as u16 % cols == 0 {
+                    break;
+                }
+                if c.word == " " && c.bcolor.is_none() {
+                    break;
+                }
+                if c.fcolor != fg || c.bcolor != bg {
+                    break;
+                }
+                batch.push_str(&c.word);
+                i += 1;
             }
+
+            // 定位并输出整批
+            let x = batch_start as u16 % cols;
+            let y = batch_start as u16 / cols;
+            execute!(stdout(), MoveTo(x, y)).ok();
+
+            let styled = batch.stylize();
+            let styled = match (fg, bg) {
+                (Some(f), Some(b)) => styled.with(f).on(b),
+                (Some(f), None) => styled.with(f),
+                (None, Some(b)) => styled.on(b),
+                (None, None) => styled,
+            };
+            print!("{styled}");
         }
     }
 }
@@ -150,22 +224,30 @@ impl TermLayout {
 
         self.point += remaining;
     }
-    /// 替换指定画布文字
-    pub fn paint_string(&mut self, s: &str, color: Option<Color>) -> u32 {
-        let str_len = s.chars().count() as u32;
+    /// 替换指定画布文字（支持 CJK 宽字符）
+    pub fn paint_string(&mut self, s: &str, fcolor: Option<Color>, bcolor: Option<Color>) -> u32 {
+        let mut cell_count = 0u32;
 
-        for (idx, c) in (self.point as usize..).zip(s.chars()) {
+        for c in s.chars() {
+            let idx = self.point as usize;
             if idx >= self.layout.len() {
                 break;
             }
-            let content = Block::new(c.to_string(), color);
-            self.layout[idx] = content;
+            let width = char_width(c);
+            self.layout[idx] = Block::new(c.to_string(), fcolor, bcolor);
+            // 宽字符占 2 列：填充占位格，避免下一个字符覆盖第二列
+            if width > 1 {
+                let next_idx = idx + 1;
+                if next_idx < self.layout.len() {
+                    self.layout[next_idx] = Block::new(' '.to_string(), fcolor, bcolor);
+                }
+            }
+            self.point += width as u32;
+            cell_count += width as u32;
         }
 
-        self.point += str_len;
-        let len = str_len;
-        self.len += len;
-        len
+        self.len += cell_count;
+        cell_count
     }
     /// write_string
 
@@ -212,7 +294,7 @@ impl TermLayout {
                 }
                 let pic_idx = row * img_cols + col;
                 if let Some(cell) = picture.get(pic_idx) {
-                    self.layout[canvas_idx] = Block::new(cell.clone(), None);
+                    self.layout[canvas_idx] = Block::new(cell.clone(), None, None);
                 }
             }
         }

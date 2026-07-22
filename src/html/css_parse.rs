@@ -321,9 +321,151 @@ impl CssAttr {
     fn add(&mut self, css: CssAttr) {
         self.0.extend(css.0);
     }
+    /// 前景色 color
     pub fn get_color(&self) -> Option<Color> {
-        self.0.get("color").and_then(|c| Color::from_str(c).ok())
+        self.0.get("color").and_then(|c| parse_color_str(c))
     }
+    /// 背景色 background-color
+    pub fn get_bg_color(&self) -> Option<Color> {
+        self.0
+            .get("background-color")
+            .or_else(|| self.0.get("background"))
+            .and_then(|c| parse_color_str(c))
+    }
+    /// 文本对齐 text-align
+    pub fn get_text_align(&self) -> TextAlign {
+        match self.0.get("text-align").map(|s| s.as_str()) {
+            Some("center") => TextAlign::Center,
+            Some("right") => TextAlign::Right,
+            _ => TextAlign::Left,
+        }
+    }
+    /// 字重 font-weight
+    pub fn get_font_weight(&self) -> FontWeight {
+        match self.0.get("font-weight").map(|s| s.as_str()) {
+            Some("bold") | Some("bolder") | Some("700") | Some("800") | Some("900") => {
+                FontWeight::Bold
+            }
+            _ => FontWeight::Normal,
+        }
+    }
+    /// 宽度 width（标准 CSS 语法）
+    /// - `80%` → 终端宽度的 80%
+    /// - `40px` → 固定 40 列
+    /// - 无 / `auto` → None (占满)
+    pub fn get_width(&self, term_columns: usize) -> Option<usize> {
+        let raw = self.0.get("width")?;
+        let s = raw.trim();
+        if s == "auto" {
+            return None;
+        }
+        if let Some(pct) = s.strip_suffix('%') {
+            let p: f32 = pct.trim().parse().ok()?;
+            return Some(((term_columns as f32 * p / 100.0) as usize).max(1));
+        }
+        if let Some(n) = s.strip_suffix("px") {
+            return n.trim().parse::<usize>().ok();
+        }
+        // 其他单位或无单位 → 占满
+        None
+    }
+}
+
+/// 解析 CSS 颜色字符串 → crossterm::Color
+///
+/// 支持格式：
+/// - 命名颜色 (含 dark 变体): red, darkblue, DarkBlue, ...
+/// - 十六进制: #RRGGBB, #RGB
+/// - rgb(): rgb(255, 0, 0)
+/// - 回退到 crossterm 内置 FromStr
+fn parse_color_str(s: &str) -> Option<Color> {
+    let lower = s.trim().to_lowercase();
+
+    // 1. 十六进制 #RRGGBB 或 #RGB
+    if let Some(hex) = lower.strip_prefix('#') {
+        return parse_hex_color(hex);
+    }
+
+    // 2. rgb(r, g, b)
+    if let Some(inner) = lower
+        .strip_prefix("rgb(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        return parse_rgb_color(inner);
+    }
+
+    // 3. 扩展命名颜色（含 dark 变体）
+    if let Some(color) = parse_named_color(&lower) {
+        return Some(color);
+    }
+
+    // 4. 回退到 crossterm 内置解析
+    Color::from_str(s).ok()
+}
+
+fn parse_hex_color(hex: &str) -> Option<Color> {
+    let hex = hex.trim();
+    let (r, g, b) = if hex.len() == 6 {
+        let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+        (r, g, b)
+    } else if hex.len() == 3 {
+        let r = u8::from_str_radix(&hex[0..1], 16).ok()? * 17;
+        let g = u8::from_str_radix(&hex[1..2], 16).ok()? * 17;
+        let b = u8::from_str_radix(&hex[2..3], 16).ok()? * 17;
+        (r, g, b)
+    } else {
+        return None;
+    };
+    Some(Color::Rgb { r, g, b })
+}
+
+fn parse_rgb_color(inner: &str) -> Option<Color> {
+    let parts: Vec<&str> = inner.split(',').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let r = parts[0].trim().parse::<u8>().ok()?;
+    let g = parts[1].trim().parse::<u8>().ok()?;
+    let b = parts[2].trim().parse::<u8>().ok()?;
+    Some(Color::Rgb { r, g, b })
+}
+
+fn parse_named_color(name: &str) -> Option<Color> {
+    match name {
+        "black" => Some(Color::Black),
+        "darkgrey" | "darkgray" | "grey" | "gray" => Some(Color::Grey),
+        "red" => Some(Color::Red),
+        "darkred" => Some(Color::DarkRed),
+        "green" => Some(Color::Green),
+        "darkgreen" => Some(Color::DarkGreen),
+        "yellow" => Some(Color::Yellow),
+        "darkyellow" => Some(Color::DarkYellow),
+        "blue" => Some(Color::Blue),
+        "darkblue" => Some(Color::DarkBlue),
+        "magenta" => Some(Color::Magenta),
+        "darkmagenta" => Some(Color::DarkMagenta),
+        "cyan" => Some(Color::Cyan),
+        "darkcyan" => Some(Color::DarkCyan),
+        "white" => Some(Color::White),
+        _ => None,
+    }
+}
+
+/// 文本对齐方向
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextAlign {
+    Left,
+    Center,
+    Right,
+}
+
+/// 字重
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontWeight {
+    Normal,
+    Bold,
 }
 
 #[derive(Debug, Clone)]
@@ -569,5 +711,72 @@ mod tests {
         let p_id = arena[div_id].children[0];
         // div p 匹配的是 p 节点，不是 text 子节点
         assert!(arena[p_id].css_attr.get_color().is_some());
+    }
+
+    #[test]
+    fn test_color_name_parsing() {
+        // 扩展命名颜色解析
+        assert_eq!(parse_color_str("darkblue"), Some(Color::DarkBlue));
+        assert_eq!(parse_color_str("DarkBlue"), Some(Color::DarkBlue));
+        assert_eq!(parse_color_str("red"), Some(Color::Red));
+        assert_eq!(parse_color_str("darkred"), Some(Color::DarkRed));
+        assert_eq!(parse_color_str("blue"), Some(Color::Blue));
+        assert_eq!(parse_color_str("grey"), Some(Color::Grey));
+        assert_eq!(parse_color_str("gray"), Some(Color::Grey));
+    }
+
+    #[test]
+    fn test_color_darkblue_parsing() {
+        // 已合并到 test_color_name_parsing
+    }
+
+    #[test]
+    fn test_color_hex_parsing() {
+        // 验证 hex 颜色解析
+        assert_eq!(
+            parse_color_str("#1e293b"),
+            Some(Color::Rgb {
+                r: 0x1e,
+                g: 0x29,
+                b: 0x3b
+            })
+        );
+        assert_eq!(
+            parse_color_str("#fff"),
+            Some(Color::Rgb {
+                r: 255,
+                g: 255,
+                b: 255
+            })
+        );
+    }
+
+    #[test]
+    fn test_color_rgb_parsing() {
+        assert_eq!(
+            parse_color_str("rgb(30,41,59)"),
+            Some(Color::Rgb {
+                r: 30,
+                g: 41,
+                b: 59
+            })
+        );
+    }
+
+    #[test]
+    fn test_css_attr_full_color() {
+        let mut attr = CssAttr::new();
+        let css = "color: darkblue; background-color: #1e293b;";
+        let m = parse_declaration_text(css);
+        attr.add(CssAttr(m));
+        assert_eq!(attr.get_color(), Some(Color::DarkBlue));
+        assert_eq!(
+            attr.get_bg_color(),
+            Some(Color::Rgb {
+                r: 0x1e,
+                g: 0x29,
+                b: 0x3b
+            })
+        );
     }
 }

@@ -18,7 +18,9 @@ fn main() -> Result<()> {
         "all_in_one" => (
             include_str!("all_in_one.html"),
             "h1 { color: cyan; } h2 { color: yellow; } h3 { color: green; } \
-             p { color: grey; } .highlight { color: magenta; }",
+             p { color: grey; } .highlight { color: magenta; } \
+             header { color: cyan; background-color: darkblue; text-align: center; } \
+             footer { color: grey; text-align: center; }",
         ),
         "headings" => (
             include_str!("headings.html"),
@@ -46,6 +48,11 @@ fn main() -> Result<()> {
             // css.html 已内嵌 <style> 块，无需额外 CSS
             "",
         ),
+        "header_footer" => (
+            include_str!("header_footer.html"),
+            // header_footer.html 已内嵌 <style> 块，无需额外 CSS
+            "",
+        ),
         "helloworld" => (
             include_str!("helloworld.html"),
             "h1 { color: cyan; } p { color: white; }",
@@ -54,14 +61,15 @@ fn main() -> Result<()> {
             eprintln!(
                 "Unknown test: '{}'\n\
                  Available tests:\n  \
-                 all_in_one   - Comprehensive demo (default)\n  \
-                 headings     - H1-H5 heading levels\n  \
-                 image        - Image rendering\n  \
-                 colors       - Color rendering\n  \
-                 nested       - Deeply nested structures\n  \
-                 text         - Text content & layout\n  \
-                 css          - CSS layout demo\n  \
-                 helloworld   - Simple hello world",
+                 all_in_one     - Comprehensive demo (default)\n  \
+                 headings       - H1-H5 heading levels\n  \
+                 image          - Image rendering\n  \
+                 colors         - Color rendering\n  \
+                 nested         - Deeply nested structures\n  \
+                 text           - Text content & layout\n  \
+                 css            - CSS layout demo\n  \
+                 header_footer  - Header & footer layout + CSS\n  \
+                 helloworld     - Simple hello world",
                 test_name
             );
             return Ok(());

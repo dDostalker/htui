@@ -27,7 +27,7 @@ pub fn layout_hn(
             NodeType::Text(s) => {
                 let sharp = "#".repeat(n);
                 let color = node.css_attr.get_color();
-                term_layout.paint_string(&format!("{sharp} {s}"), color);
+                term_layout.paint_string(&format!("{sharp} {s}"), color, None);
             }
             _ => {
                 for layout_fn in DEFAULT_LAYOUT {

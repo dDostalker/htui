@@ -15,13 +15,15 @@ pub fn layout_div(
     if node.node_type != NodeType::Div {
         return Ok(());
     }
+
     term_layout.new_line();
+
     for child_id in node.child_ids() {
         let child = &arena[child_id];
         match &child.node_type {
             NodeType::Text(s) => {
                 let color = node.css_attr.get_color();
-                term_layout.paint_string(s, color);
+                term_layout.paint_string(s, color, None);
             }
             _ => {
                 for layout_fn in DEFAULT_LAYOUT {
@@ -30,6 +32,7 @@ pub fn layout_div(
             }
         }
     }
+
     term_layout.new_line();
     Ok(())
 }

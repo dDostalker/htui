@@ -21,7 +21,7 @@ pub fn layout_p(
         match &child.node_type {
             NodeType::Text(s) => {
                 let color = node.css_attr.get_color();
-                term_layout.paint_string(s, color);
+                term_layout.paint_string(s, color, None);
             }
             _ => {
                 for layout_fn in DEFAULT_LAYOUT {

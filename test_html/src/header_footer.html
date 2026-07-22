@@ -1,0 +1,92 @@
+<!--
+  ============================================
+  htui 视觉测试 — header / footer 布局 + CSS
+  运行: cargo run -p test_html -- header_footer
+  ============================================
+-->
+<!DOCTYPE html>
+<html>
+
+<head>
+  <style>
+    /* 默认 header：深色背景 + 白色文字 + 居中 */
+    header {
+      color: white;
+      background-color: darkblue;
+      text-align: center;
+    }
+
+    /* 默认 footer：灰色文字 + 居中 */
+    footer {
+      color: grey;
+      text-align: center;
+    }
+
+    /* 深色主题 header */
+    .header-dark {
+      color: cyan;
+      background-color: black;
+      text-align: left;
+    }
+
+    /* 红色主题 header */
+    .header-red {
+      color: yellow;
+      background-color: red;
+      text-align: center;
+    }
+
+    /* 右对齐 footer */
+    .footer-right {
+      color: magenta;
+      text-align: right;
+    }
+
+    /* 绿色主题 footer */
+    .footer-green {
+      color: white;
+      background-color: green;
+      text-align: left;
+    }
+  </style>
+</head>
+
+<body>
+  <h2>=== 1. 默认 header / footer（CSS 类选择器）===</h2>
+  <header>Default Header — centered, white on darkblue</header>
+  <p>Body content between header and footer.</p>
+  <footer>Default Footer — centered, grey text</footer>
+
+  <h2>=== 2. 自定义 header ===</h2>
+  <header class="header-dark">Dark Header — left aligned, cyan on black</header>
+  <p>Content under dark header.</p>
+
+  <header class="header-red">Red Alert Header — centered, yellow on red</header>
+  <p>Content under red header.</p>
+
+  <h2>=== 3. 自定义 footer ===</h2>
+  <p>Content above custom footer.</p>
+  <footer class="footer-right">Right Footer — right aligned, magenta</footer>
+
+  <p>More body content.</p>
+  <footer class="footer-green">Green Footer — left aligned, white on green</footer>
+
+  <h2>=== 4. 连续 header / footer ===</h2>
+  <header>Header One</header>
+  <p>Content A.</p>
+  <footer>Footer One</footer>
+
+  <header>Header Two</header>
+  <p>Content B.</p>
+  <footer>Footer Two</footer>
+
+  <h2>=== 5. 空 header / footer ===</h2>
+  <header></header>
+  <p>Content after empty header.</p>
+  <footer></footer>
+  <p>Content after empty footer.</p>
+
+  <p>=== End of Header/Footer Test ===</p>
+</body>
+
+</html>
