@@ -7,7 +7,6 @@ use crossterm::{
     execute,
     style::{Color, Stylize},
 };
-use env_logger::Builder;
 use image::{
     GenericImageView,
     imageops::FilterType::{self},
@@ -28,8 +27,14 @@ pub struct TermLayout {
 /// 画布打印
 impl Display for TermLayout {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let total = self.layout.len();
+        let last_row_start = if total >= self.columns as usize {
+            total - self.columns as usize
+        } else {
+            0
+        };
         for (i, row) in self.layout.iter().enumerate() {
-            if i == self.layout.len() - 1 {
+            if i >= last_row_start {
                 break;
             }
             let x = i as u16 % self.columns;

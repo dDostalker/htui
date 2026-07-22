@@ -19,6 +19,10 @@ pub struct TermMap {
 impl TermMap {
     pub fn get_ter_map() -> Result<TermMap> {
         let (columns, rows) = terminal::size()?;
+        log::info!("终端尺寸: {} 列 × {} 行", columns, rows);
+        // 容错：某些环境可能返回 0
+        let columns = if columns == 0 { 80 } else { columns };
+        let rows = if rows == 0 { 24 } else { rows };
         Ok(TermMap { columns, rows })
     }
 }

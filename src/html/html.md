@@ -140,6 +140,14 @@ fn test_parse_basic_html() {
 
 ---
 
+# CSS 解析器
+
+CSS 解析器基于 **cssparser** 库（与 html5ever 同生态），负责将 CSS 解析为 `CssRule` 再通过 `css_into_node()` 应用到 Node 树。
+
+解析流程：`cssparser::StyleSheetParser` 做规则分割 → 选择器文本交 `CssSelector::from_str()` → 声明块复用原有 State 机解析。@-规则自动跳过，`/* */` 注释原生支持。
+
+---
+
 *文档最后更新：2026年7月22日*
 
-*相关文件：`src/html/html_parse.rs`, `src/tdom/node.rs`, `src/tdom/attributes.rs`*
+*相关文件：`src/html/html_parse.rs`, `src/html/css_parse.rs`, `src/tdom/node.rs`*

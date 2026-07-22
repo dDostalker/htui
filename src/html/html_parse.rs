@@ -41,6 +41,9 @@ impl Parser {
         let mut root = Node::new();
         convert_children(&dom.document, &mut root);
 
+        // 填充 parent 指针，供 CSS selectors 匹配引擎使用
+        root.fix_parent_pointers();
+
         debug!(
             "html5ever 解析完成，根节点子节点数量: {}",
             root.children.len()
@@ -296,5 +299,22 @@ mod tests {
         let mut p = Parser::new(html);
         let node = p.parse().unwrap();
         assert!(node.children.is_empty());
+    }
+
+    /// 模拟 all_in_one.html 场景：注释 + 嵌套元素
+    #[test]
+    fn test_parse_with_comment_and_nested_div() {
+        init();
+        let html = "<!-- header comment -->\n<div><h1>Title</h1><p>Paragraph</p></div>";
+        let mut p = Parser::new(html);
+        let node = p.parse().unwrap();
+
+        dbg!(&node);
+
+        assert!(!node.children.is_empty(), "根节点应有子节点");
+        assert_eq!(node.children[0].node_type, NodeType::Div, "第一个子节点应为 Div");
+        assert_eq!(node.children[0].children.len(), 2, "Div 应有 2 个子节点");
+        assert_eq!(node.children[0].children[0].node_type, NodeType::H1);
+        assert_eq!(node.children[0].children[1].node_type, NodeType::P);
     }
 }

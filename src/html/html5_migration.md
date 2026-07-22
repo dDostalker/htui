@@ -65,6 +65,24 @@ convert_children() ──递归──▶ Node 树
     └── Doctype / PI → 跳过
 ```
 
+### CSS 解析器替换 (同日)
+
+CSS 解析器也替换为 `cssparser` 库（与 html5ever 同属 Servo 生态），新增依赖 `cssparser = "0.31"`。
+
+| 项目 | 旧实现 | 新实现 |
+|------|--------|--------|
+| 解析引擎 | 手写字符级解析 | `cssparser::StyleSheetParser` |
+| 规则分割 | 扫描 `{` `}` | cssparser 原生 tokenizer |
+| 选择器提取 | `get_selector()` 读至 `{` | `parse_prelude()` trait 方法 |
+| 声明解析 | `get_css_attr()` State 机 | 复用原有 State 机，输入由 cssparser 提取 |
+| @-规则 | 不支持（会报错） | 自动跳过 `@media` 等 |
+| CSS 注释 | 不支持 | 原生支持 `/* */` |
+
+**保留不变的部分**：
+- `CssSelector` / `CssAttr` / `CssRule` 类型定义
+- `css_into_node()` 及其匹配引擎
+- `Selector` 枚举和所有选择器解析函数
+
 ## 未修改的文件
 
 以下模块未做任何改动，Layout 与 TUI 渲染逻辑完全兼容：
@@ -73,7 +91,6 @@ convert_children() ──递归──▶ Node 树
 - `src/tdom/` — Node 结构、Attr、element_fn 均不变
 - `src/layout/` — 布局逻辑不变
 - `src/tui/` — 终端渲染不变
-- `src/html/css_parse.rs` — CSS 解析器不变
 - `src/html/mod.rs` — 模块声明不变
 
 ## 注意事项
