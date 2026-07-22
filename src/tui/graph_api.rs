@@ -26,18 +26,18 @@ const MAX_SCROLL_MULTIPLIER: usize = 20;
 const SCROLL_LINES_PER_TICK: u32 = 3;
 
 // ============================================================
-// 刷新动作
+// 渲染命令（主线程 → 渲染线程）
 // ============================================================
 
-pub enum RefreshAction {
+/// 由主线程发出，渲染线程合并执行
+#[derive(Debug, Clone)]
+pub enum RenderCmd {
+    /// 仅重新渲染视口（滚动）
+    Rerender { scroll_y: u32 },
+    /// 完整重绘（缩放 / 终端尺寸变化）
+    Redraw { scroll_y: u32, zoom: f32 },
     /// 退出程序
     Quit,
-    /// 需要完整重绘（终端尺寸变化等）
-    Redraw,
-    /// 仅重新渲染视口（滚动）
-    Rerender,
-    /// 无事发生
-    Continue,
 }
 
 // ============================================================
@@ -428,15 +428,14 @@ const ZOOM_STEP: f32 = 0.1;
 const ZOOM_MIN: f32 = 0.2;
 const ZOOM_MAX: f32 = 5.0;
 
-/// 阻塞等待事件，返回应执行的动作。
-/// 键盘/鼠标滚动会直接修改 `term_layout.scroll_y`，返回 `Rerender`。
-/// 缩放按键修改 `zoom`，返回 `Redraw`。
-pub fn trigger_refresh(term_layout: &mut TermLayout, zoom: &mut f32) -> RefreshAction {
+/// 阻塞等待事件，更新 scroll_y / zoom，返回应发送给渲染线程的命令。
+/// 返回 `None` 表示无需操作。
+/// scroll_y 的越界钳制由渲染线程负责。
+pub fn trigger_refresh(scroll_y: &mut u32, zoom: &mut f32, rows: u16) -> Option<RenderCmd> {
     match event::read() {
         Ok(Event::Key(key)) => {
-            // 仅处理按下事件（忽略重复/释放）
             if key.kind == KeyEventKind::Release {
-                return RefreshAction::Continue;
+                return None;
             }
 
             // 缩放（Ctrl 组合键）
@@ -444,55 +443,52 @@ pub fn trigger_refresh(term_layout: &mut TermLayout, zoom: &mut f32) -> RefreshA
                 match key.code {
                     KeyCode::Char('=') | KeyCode::Char('+') => {
                         *zoom = (*zoom + ZOOM_STEP).min(ZOOM_MAX);
-                        return RefreshAction::Redraw;
+                        return Some(RenderCmd::Redraw { scroll_y: *scroll_y, zoom: *zoom });
                     }
                     KeyCode::Char('-') | KeyCode::Char('_') => {
                         *zoom = (*zoom - ZOOM_STEP).max(ZOOM_MIN);
-                        return RefreshAction::Redraw;
+                        return Some(RenderCmd::Redraw { scroll_y: *scroll_y, zoom: *zoom });
                     }
                     KeyCode::Char('0') => {
                         *zoom = 1.0;
-                        return RefreshAction::Redraw;
+                        return Some(RenderCmd::Redraw { scroll_y: *scroll_y, zoom: *zoom });
                     }
                     _ => {}
                 }
             }
 
             match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => return RefreshAction::Quit,
+                KeyCode::Esc | KeyCode::Char('q') => return Some(RenderCmd::Quit),
 
-                // ── 滚动 ──
                 KeyCode::Up | KeyCode::Char('k') => {
-                    term_layout.scroll_y = term_layout.scroll_y.saturating_sub(1);
-                    return RefreshAction::Rerender;
+                    *scroll_y = scroll_y.saturating_sub(1);
+                    return Some(RenderCmd::Rerender { scroll_y: *scroll_y });
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    term_layout.scroll_y += 1;
-                    term_layout.clamp_scroll();
-                    return RefreshAction::Rerender;
+                    *scroll_y = scroll_y.saturating_add(1);
+                    return Some(RenderCmd::Rerender { scroll_y: *scroll_y });
                 }
                 KeyCode::PageUp => {
-                    let step = (term_layout.rows as u32).saturating_sub(1).max(1);
-                    term_layout.scroll_y = term_layout.scroll_y.saturating_sub(step);
-                    return RefreshAction::Rerender;
+                    let step = (rows as u32).saturating_sub(1).max(1);
+                    *scroll_y = scroll_y.saturating_sub(step);
+                    return Some(RenderCmd::Rerender { scroll_y: *scroll_y });
                 }
                 KeyCode::PageDown => {
-                    let step = (term_layout.rows as u32).saturating_sub(1).max(1);
-                    term_layout.scroll_y += step;
-                    term_layout.clamp_scroll();
-                    return RefreshAction::Rerender;
+                    let step = (rows as u32).saturating_sub(1).max(1);
+                    *scroll_y = scroll_y.saturating_add(step);
+                    return Some(RenderCmd::Rerender { scroll_y: *scroll_y });
                 }
                 KeyCode::Home => {
-                    term_layout.scroll_y = 0;
-                    return RefreshAction::Rerender;
+                    *scroll_y = 0;
+                    return Some(RenderCmd::Rerender { scroll_y: *scroll_y });
                 }
                 KeyCode::End => {
-                    term_layout.scroll_y = term_layout.max_scroll();
-                    return RefreshAction::Rerender;
+                    *scroll_y = u32::MAX;
+                    return Some(RenderCmd::Rerender { scroll_y: *scroll_y });
                 }
                 _ => {}
             }
-            RefreshAction::Continue
+            None
         }
 
         Ok(Event::Mouse(mouse)) => {
@@ -500,35 +496,31 @@ pub fn trigger_refresh(term_layout: &mut TermLayout, zoom: &mut f32) -> RefreshA
             match mouse.kind {
                 MouseEventKind::ScrollUp => {
                     if ctrl {
-                        *zoom = (*zoom + ZOOM_STEP).min(ZOOM_MAX);
-                        RefreshAction::Redraw
+                        *zoom = (*zoom - ZOOM_STEP).max(ZOOM_MIN);
+                        Some(RenderCmd::Redraw { scroll_y: *scroll_y, zoom: *zoom })
                     } else {
-                        term_layout.scroll_y = term_layout
-                            .scroll_y
-                            .saturating_sub(SCROLL_LINES_PER_TICK);
-                        RefreshAction::Rerender
+                        *scroll_y = scroll_y.saturating_sub(SCROLL_LINES_PER_TICK);
+                        Some(RenderCmd::Rerender { scroll_y: *scroll_y })
                     }
                 }
                 MouseEventKind::ScrollDown => {
                     if ctrl {
-                        *zoom = (*zoom - ZOOM_STEP).max(ZOOM_MIN);
-                        RefreshAction::Redraw
+                        *zoom = (*zoom + ZOOM_STEP).min(ZOOM_MAX);
+                        Some(RenderCmd::Redraw { scroll_y: *scroll_y, zoom: *zoom })
                     } else {
-                        term_layout.scroll_y += SCROLL_LINES_PER_TICK;
-                        term_layout.clamp_scroll();
-                        RefreshAction::Rerender
+                        *scroll_y = scroll_y.saturating_add(SCROLL_LINES_PER_TICK);
+                        Some(RenderCmd::Rerender { scroll_y: *scroll_y })
                     }
                 }
-                _ => RefreshAction::Continue,
+                _ => None,
             }
-        },
-
-        Ok(Event::Resize(_, _)) => {
-            // 终端大小变化：触发完整重绘
-            RefreshAction::Redraw
         }
 
-        _ => RefreshAction::Continue,
+        Ok(Event::Resize(_, _new_rows)) => {
+            Some(RenderCmd::Redraw { scroll_y: *scroll_y, zoom: *zoom })
+        }
+
+        _ => None,
     }
 }
 
