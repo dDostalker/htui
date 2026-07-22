@@ -9,10 +9,13 @@ use crate::{
 pub fn layout_img(
     node: &Node,
     term_layout: &mut TermLayout,
-    term_map: &TermMap,
+    _term_map: &TermMap,
     _arena: &NodeArena,
 ) -> Result<()> {
     if node.node_type != NodeType::Img {
+        return Ok(());
+    }
+    if term_layout.is_full() {
         return Ok(());
     }
     let src = match node.attributes.get_src() {
@@ -22,11 +25,11 @@ pub fn layout_img(
     let max_w = node
         .attributes
         .get_width()
-        .unwrap_or(term_map.columns as u32 * 2);
+        .unwrap_or(term_layout.effective_columns() as u32 * 2);
     let max_h = node
         .attributes
         .get_height()
-        .unwrap_or(term_map.rows as u32 * 4);
+        .unwrap_or(term_layout.effective_rows() as u32 * 4);
     term_layout.new_line();
     term_layout.paint_img(src, (max_w, max_h));
     term_layout.new_line();

@@ -15,8 +15,14 @@ pub fn layout_p(
     if node.node_type != NodeType::P {
         return Ok(());
     }
+    if term_layout.is_full() {
+        return Ok(());
+    }
     term_layout.new_line();
     for child_id in node.child_ids() {
+        if term_layout.is_full() {
+            break;
+        }
         let child = &arena[child_id];
         match &child.node_type {
             NodeType::Text(s) => {
@@ -44,7 +50,7 @@ mod tests {
         let mut p = Parser::new("<p>Hello</p><p>World</p>");
         let (root, arena, _) = p.parse().unwrap();
         let term_map = TermMap::get_ter_map().unwrap();
-        let mut tl = TermLayout::new(&term_map).unwrap();
+        let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root, &term_map).unwrap();
         dbg!(&tl.layout[..200]);
     }

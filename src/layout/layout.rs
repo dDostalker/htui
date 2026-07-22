@@ -22,29 +22,43 @@ impl TermMap {
 }
 
 impl TermLayout {
-    pub fn new(map: &TermMap) -> Result<TermLayout> {
-        let layout = vec![Block::new(" ".to_string(), None, None); map.columns as usize * map.rows as usize];
+    pub fn new(map: &TermMap, zoom: f32) -> Result<TermLayout> {
+        let max_cells = map.columns as usize * map.rows as usize * 20;
+        let layout = vec![Block::new(" ".to_string(), None, None); max_cells];
         Ok(TermLayout {
             layout,
             columns: map.columns,
-            ..Default::default()
+            rows: map.rows,
+            scroll_y: 0,
+            point: 0,
+            len: 0,
+            rendered_rows: 0,
+            zoom,
         })
     }
 }
 
 impl TermLayout {
-    /// 将 DOM 树绘制到终端画布
+    /// 将 DOM 树绘制到终端画布（虚拟，可超终端尺寸）
     pub fn draw(&mut self, arena: &NodeArena, root_id: NodeId, term_map: &TermMap) -> Result<()> {
         let root = &arena[root_id];
         assert_eq!(root.node_type, NodeType::Global);
         let children: Vec<NodeId> = root.children.clone();
         for child_id in children {
+            if self.is_full() {
+                break;
+            }
             self._draw(&arena[child_id], arena, term_map)?;
         }
+        // 绘制完成后更新 rendered_rows
+        self.rendered_rows = self.point / self.columns as u32;
         Ok(())
     }
 
     fn _draw(&mut self, node: &Node, arena: &NodeArena, term_map: &TermMap) -> Result<()> {
+        if self.is_full() {
+            return Ok(());
+        }
         for draw_fn in DEFAULT_LAYOUT {
             draw_fn(node, self, term_map, arena)?;
         }

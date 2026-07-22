@@ -31,6 +31,9 @@ pub fn layout_header(
     if node.node_type != NodeType::Header {
         return Ok(());
     }
+    if term_layout.is_full() {
+        return Ok(());
+    }
     render_block(node, term_layout, term_map, arena)
 }
 
@@ -42,6 +45,9 @@ pub fn layout_footer(
     arena: &NodeArena,
 ) -> Result<()> {
     if node.node_type != NodeType::Footer {
+        return Ok(());
+    }
+    if term_layout.is_full() {
         return Ok(());
     }
     render_block(node, term_layout, term_map, arena)
@@ -57,30 +63,27 @@ fn render_block(
     term_map: &TermMap,
     arena: &NodeArena,
 ) -> Result<()> {
-    let term_cols = term_map.columns as usize;
+    let eff_cols = term_layout.effective_columns() as usize;
+    let phys_cols = term_layout.columns as usize;
     let fg = node.css_attr.get_color();
     let bg = node.css_attr.get_bg_color();
     let align = node.css_attr.get_text_align();
 
-    // 计算块宽度：优先 CSS `width`，否则占满终端
-    let block_width = node.css_attr.get_width(term_cols).unwrap_or(term_cols);
-    let block_width = block_width.min(term_cols);
-    let left = (term_cols.saturating_sub(block_width)) / 2;
+    // CSS width 按有效列解析，再钳制到物理列
+    let block_width = node.css_attr.get_width(eff_cols).unwrap_or(eff_cols);
+    let block_width = block_width.min(phys_cols);
+    // 在物理行内居中
+    let left = (phys_cols.saturating_sub(block_width)) / 2;
 
-    // ── 上留白（整行）──
     term_layout.new_line();
 
-    // ── 内容行 ──
-    // 左侧边距（无背景）
     if left > 0 {
         term_layout.paint_string(&" ".repeat(left), None, None);
     }
-    // 文本（带背景）
     render_text(node, term_layout, term_map, arena, fg, bg, align, block_width);
-    // 填充块内剩余 → 背景色
-    fill_to_col(term_layout, left + block_width, term_cols, fg, bg);
+    // 填充到物理行尾
+    fill_to_col(term_layout, left + block_width, phys_cols, fg, bg);
 
-    // ── 下留白 + 收尾 ──
     term_layout.new_line();
     term_layout.new_line();
 
@@ -114,6 +117,9 @@ fn render_text(
     }
 
     for child_id in node.child_ids() {
+        if term_layout.is_full() {
+            break;
+        }
         let child = &arena[child_id];
         match &child.node_type {
             NodeType::Text(s) => {
@@ -180,7 +186,7 @@ mod tests {
         init();
         let (root_id, arena) = setup("<header>My Site</header>", "");
         let term_map = TermMap::get_ter_map().unwrap();
-        let mut tl = TermLayout::new(&term_map).unwrap();
+        let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
         let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
         assert!(canvas.contains("My Site"), "header 应包含文本");
@@ -191,7 +197,7 @@ mod tests {
         init();
         let (root_id, arena) = setup("<footer>(c) 2024</footer>", "");
         let term_map = TermMap::get_ter_map().unwrap();
-        let mut tl = TermLayout::new(&term_map).unwrap();
+        let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
         let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
         assert!(canvas.contains("(c) 2024"), "footer 应包含文本");
@@ -204,7 +210,7 @@ mod tests {
         let css = "header { color: blue; background-color: yellow; }";
         let (root_id, arena) = setup(html, css);
         let term_map = TermMap::get_ter_map().unwrap();
-        let mut tl = TermLayout::new(&term_map).unwrap();
+        let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
         let has_fg = tl.layout.iter().any(|b| b.fcolor == Some(Color::Blue));
         let has_bg = tl.layout.iter().any(|b| b.bcolor == Some(Color::Yellow));
@@ -221,7 +227,7 @@ mod tests {
         let term_map = TermMap::get_ter_map().unwrap();
         let cols = term_map.columns as usize;
 
-        let mut tl = TermLayout::new(&term_map).unwrap();
+        let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
 
         let content_idx = tl.layout.iter()
@@ -247,7 +253,7 @@ mod tests {
         let term_map = TermMap::get_ter_map().unwrap();
         let cols = term_map.columns as usize;
 
-        let mut tl = TermLayout::new(&term_map).unwrap();
+        let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
 
         // 内容行
@@ -288,7 +294,7 @@ mod tests {
         let term_map = TermMap::get_ter_map().unwrap();
         let cols = term_map.columns as usize;
 
-        let mut tl = TermLayout::new(&term_map).unwrap();
+        let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
 
         let content_idx = tl.layout.iter()
@@ -315,7 +321,7 @@ mod tests {
         let term_map = TermMap::get_ter_map().unwrap();
         let cols = term_map.columns as usize;
 
-        let mut tl = TermLayout::new(&term_map).unwrap();
+        let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
 
         let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -347,7 +353,7 @@ mod tests {
         let term_map = TermMap::get_ter_map().unwrap();
         let cols = term_map.columns as usize;
 
-        let mut tl = TermLayout::new(&term_map).unwrap();
+        let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
 
         let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -372,7 +378,7 @@ mod tests {
         let css = "header { text-align: center; }";
         let (root_id, arena) = setup(html, css);
         let term_map = TermMap::get_ter_map().unwrap();
-        let mut tl = TermLayout::new(&term_map).unwrap();
+        let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
         let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
         assert!(canvas.contains("Centered"));
@@ -385,7 +391,7 @@ mod tests {
         let css = "header { text-align: right; }";
         let (root_id, arena) = setup(html, css);
         let term_map = TermMap::get_ter_map().unwrap();
-        let mut tl = TermLayout::new(&term_map).unwrap();
+        let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
         let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
         assert!(canvas.contains("Right"));
