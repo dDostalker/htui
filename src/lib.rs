@@ -22,18 +22,21 @@ pub use html::html_parse::Parser;
 pub use layout::layout::TermMap;
 
 use crate::{
-    html::css_parse,
+    html::css_parse::{self, CssRule},
     tdom::node::{NodeArena, NodeId},
     tui::graph_api::{RenderCmd, TermLayout, trigger_refresh},
 };
 
-/// Parse HTML + CSS into (root_id, arena)
-fn parse(
-    html: &str,
-    css: &str,
-) -> Result<(NodeId, NodeArena)> {
+fn parse_and_apply(html: &str, css_rules: &CssRule) -> Result<(NodeId, NodeArena)> {
     let mut html_parser = html::html_parse::Parser::new(html);
-    let (root_id, mut arena, embedded_css) = html_parser.parse()?;
+    let (root_id, mut arena, _embedded) = html_parser.parse()?;
+    css_parse::css_into_node(&mut arena, root_id, css_rules)?;
+    Ok((root_id, arena))
+}
+
+fn build_css_rules(html: &str, css: &str) -> Result<CssRule> {
+    let mut html_parser = html::html_parse::Parser::new(html);
+    let (_root_id, _arena, embedded_css) = html_parser.parse()?;
 
     let combined = if css.is_empty() {
         embedded_css
@@ -41,27 +44,23 @@ fn parse(
         format!("{}\n{}", embedded_css, css)
     };
 
-    if !combined.trim().is_empty() {
-        let mut css_parser = css_parse::Parser::new(&combined);
-        let rules = css_parser.parse()?;
-        css_parse::css_into_node(&mut arena, root_id, &rules)?;
+    if combined.trim().is_empty() {
+        return Ok(CssRule::new());
     }
 
-    Ok((root_id, arena))
+    let mut css_parser = css_parse::Parser::new(&combined);
+    css_parser.parse()
 }
 
 // ============================================================
-// 渲染线程
+// Render thread
 // ============================================================
 
-fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css: Arc<str>) {
+fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css_rules: Arc<CssRule>) {
     let mut term_layout: Option<TermLayout> = None;
 
     loop {
-        // 阻塞等待第一个命令
         let mut cmd = rx.recv().unwrap();
-
-        // 排空队列，只保留最后一条（合并中间帧）
         while let Ok(next) = rx.try_recv() {
             cmd = next;
             if matches!(cmd, RenderCmd::Quit) {
@@ -83,10 +82,10 @@ fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css: Arc<str>) {
             }
 
             RenderCmd::Redraw { scroll_y, zoom } => {
-                let (root_id, arena) = match parse(&html, &css) {
+                let (root_id, arena) = match parse_and_apply(&html, &css_rules) {
                     Ok(v) => v,
                     Err(e) => {
-                        log::error!("解析失败: {}", e);
+                        log::error!("Parse failed: {}", e);
                         continue;
                     }
                 };
@@ -94,7 +93,7 @@ fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css: Arc<str>) {
                 let term_map = TermMap::get_ter_map().unwrap();
                 let mut tl = TermLayout::new(&term_map, zoom).unwrap();
                 if let Err(e) = tl.draw(&arena, root_id, &term_map) {
-                    log::error!("布局失败: {}", e);
+                    log::error!("Layout failed: {}", e);
                     continue;
                 }
 
@@ -112,34 +111,36 @@ fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css: Arc<str>) {
 }
 
 // ============================================================
-// 入口
+// Entry point
 // ============================================================
 
-/// Render entry point
 pub fn render(html: &str, css: &str) {
     enable_raw_mode().unwrap();
     execute!(stdout(), EnterAlternateScreen, EnableMouseCapture, Hide).unwrap();
 
-    let html: Arc<str> = Arc::from(html);
-    let css: Arc<str> = Arc::from(css);
+    let css_rules = match build_css_rules(html, css) {
+        Ok(r) => Arc::new(r),
+        Err(e) => {
+            log::error!("CSS parse failed: {}", e);
+            Arc::new(CssRule::new())
+        }
+    };
 
+    let html: Arc<str> = Arc::from(html);
     let (tx, rx) = mpsc::channel::<RenderCmd>();
 
-    // 启动渲染线程
     let render_handle = std::thread::spawn({
         let html_clone = Arc::clone(&html);
-        let css_clone = Arc::clone(&css);
+        let css_clone = Arc::clone(&css_rules);
         move || {
             render_thread(rx, html_clone, css_clone);
         }
     });
 
-    // 主线程：事件读取 + 发送命令
     let mut scroll_y: u32 = 0;
     let mut zoom: f32 = 1.0;
     let mut rows: u16 = TermMap::get_ter_map().unwrap().rows;
 
-    // 初始渲染
     tx.send(RenderCmd::Redraw { scroll_y, zoom }).unwrap();
 
     loop {
@@ -149,7 +150,6 @@ pub fn render(html: &str, css: &str) {
                 break;
             }
             Some(cmd) => {
-                // 更新行数（来自 Resize 事件的新值）
                 if let RenderCmd::Redraw { .. } = &cmd {
                     if let Ok(map) = TermMap::get_ter_map() {
                         rows = map.rows;
@@ -157,7 +157,7 @@ pub fn render(html: &str, css: &str) {
                 }
                 tx.send(cmd).unwrap();
             }
-            None => {} // 无操作，继续等待
+            None => {}
         }
     }
 

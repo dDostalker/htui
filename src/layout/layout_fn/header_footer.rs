@@ -63,29 +63,27 @@ fn render_block(
     term_map: &TermMap,
     arena: &NodeArena,
 ) -> Result<()> {
-    let term_cols = term_layout.effective_columns() as usize;
+    let eff_cols = term_layout.effective_columns() as usize;
+    let phys_cols = term_layout.columns as usize;
     let fg = node.css_attr.get_color();
     let bg = node.css_attr.get_bg_color();
     let align = node.css_attr.get_text_align();
 
-    let block_width = node.css_attr.get_width(term_cols).unwrap_or(term_cols);
-    let block_width = block_width.min(term_cols);
-    let left = (term_cols.saturating_sub(block_width)) / 2;
+    // CSS width 按有效列解析，再钳制到物理列
+    let block_width = node.css_attr.get_width(eff_cols).unwrap_or(eff_cols);
+    let block_width = block_width.min(phys_cols);
+    // 在物理行内居中
+    let left = (phys_cols.saturating_sub(block_width)) / 2;
 
-    // ── 上留白（整行）──
     term_layout.new_line();
 
-    // ── 内容行 ──
-    // 左侧边距（无背景）
     if left > 0 {
         term_layout.paint_string(&" ".repeat(left), None, None);
     }
-    // 文本（带背景）
     render_text(node, term_layout, term_map, arena, fg, bg, align, block_width);
-    // 填充块内剩余 → 背景色
-    fill_to_col(term_layout, left + block_width, term_cols, fg, bg);
+    // 填充到物理行尾
+    fill_to_col(term_layout, left + block_width, phys_cols, fg, bg);
 
-    // ── 下留白 + 收尾 ──
     term_layout.new_line();
     term_layout.new_line();
 

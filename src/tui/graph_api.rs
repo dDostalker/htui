@@ -19,24 +19,20 @@ use image::{
 use log::{debug, error, warn};
 use std::io::stdout;
 
-/// 最大虚拟画布倍数（相对于终端可视区域）
+/// Maximum virtual canvas multiplier (relative to terminal viewport)
 const MAX_SCROLL_MULTIPLIER: usize = 20;
 
-/// 鼠标滚轮每次滚动的行数
+/// Mouse wheel scroll lines per tick
 const SCROLL_LINES_PER_TICK: u32 = 3;
 
 // ============================================================
-// 渲染命令（主线程 → 渲染线程）
+// Render command
 // ============================================================
 
-/// 由主线程发出，渲染线程合并执行
 #[derive(Debug, Clone)]
 pub enum RenderCmd {
-    /// 仅重新渲染视口（滚动）
     Rerender { scroll_y: u32 },
-    /// 完整重绘（缩放 / 终端尺寸变化）
     Redraw { scroll_y: u32, zoom: f32 },
-    /// 退出程序
     Quit,
 }
 
@@ -44,30 +40,23 @@ pub enum RenderCmd {
 // char_width
 // ============================================================
 
-/// 判断字符在终端中的显示宽度（列数）
-/// - ASCII / 制表符 / 窄字符: 1 列
-/// - CJK / 全角字符: 2 列
 pub fn char_width(c: char) -> usize {
     if c.is_ascii() {
         return 1;
     }
     let cp = c as u32;
     let is_wide = matches!(cp,
-        // CJK 统一表意文字
         0x4E00..=0x9FFF
-        | 0x3400..=0x4DBF   // CJK Ext-A
-        | 0xF900..=0xFAFF   // CJK Compat Ideographs
-        | 0x2F800..=0x2FA1F // CJK Compat Supplement
-        // 全角形式
-        | 0xFF01..=0xFF60   // Fullwidth Forms
-        | 0xFFE0..=0xFFE6   // Fullwidth Signs
-        // 韩文
-        | 0xAC00..=0xD7AF   // Hangul Syllables
-        // 中文标点 & 符号
-        | 0x3000..=0x303F   // CJK Symbols/Punctuation
-        | 0x2E80..=0x2EFF   // CJK Radicals
-        | 0x3200..=0x33FF   // Enclosed CJK
-        | 0xFFE8..=0xFFEE   // Half/Fullwidth Symbols
+        | 0x3400..=0x4DBF
+        | 0xF900..=0xFAFF
+        | 0x2F800..=0x2FA1F
+        | 0xFF01..=0xFF60
+        | 0xFFE0..=0xFFE6
+        | 0xAC00..=0xD7AF
+        | 0x3000..=0x303F
+        | 0x2E80..=0x2EFF
+        | 0x3200..=0x33FF
+        | 0xFFE8..=0xFFEE
     );
     if is_wide { 2 } else { 1 }
 }
@@ -76,27 +65,21 @@ pub fn char_width(c: char) -> usize {
 // Block
 // ============================================================
 
-/// block 块，终端显示的最小单元，包含每个块的内容和特性
 #[derive(Debug, Clone)]
 pub struct Block {
     pub(crate) word: String,
     pub(crate) fcolor: Option<Color>,
     pub(crate) bcolor: Option<Color>,
-    /// 渲染后的文本
     render: Option<RefCell<String>>,
 }
 
 impl Deref for Block {
     type Target = str;
-    fn deref(&self) -> &Self::Target {
-        &self.word
-    }
+    fn deref(&self) -> &Self::Target { &self.word }
 }
 
 impl DerefMut for Block {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.word
-    }
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.word }
 }
 
 impl Display for Block {
@@ -118,38 +101,21 @@ impl Display for Block {
 }
 
 impl Block {
-    fn is_render(&self) -> bool {
-        self.render.is_some()
-    }
+    fn is_render(&self) -> bool { self.render.is_some() }
     pub fn new(word: String, fcolor: Option<Color>, bcolor: Option<Color>) -> Self {
-        Self {
-            word,
-            fcolor,
-            bcolor,
-            render: None,
-        }
+        Self { word, fcolor, bcolor, render: None }
     }
     pub fn new_render(word: String, fcolor: Option<Color>, bcolor: Option<Color>, render: Option<String>) -> Self {
         match render {
-            Some(render) => Self {
-                word,
-                fcolor,
-                bcolor,
-                render: Some(RefCell::new(render)),
-            },
-            None => Self {
-                word,
-                fcolor,
-                bcolor,
-                render: None,
-            },
+            Some(render) => Self { word, fcolor, bcolor, render: Some(RefCell::new(render)) },
+            None => Self { word, fcolor, bcolor, render: None },
         }
     }
     fn render_str(&self) -> String {
         match self.render.clone() {
             Some(render) => render.borrow().as_str().to_string(),
             None => {
-                debug!("render 并为染色");
+                debug!("render not styled");
                 self.word.clone()
             }
         }
@@ -157,60 +123,43 @@ impl Block {
 }
 
 // ============================================================
-// TermLayout — 虚拟画布
+// TermLayout
 // ============================================================
 
-/// 终端画布（虚拟，可超过终端可视区域）
 #[derive(Debug)]
 pub struct TermLayout {
-    /// 虚拟画布格子
     pub layout: Vec<Block>,
-    /// 当前绘画指针位置（格索引）
     pub point: u32,
-    /// 当前显示的字符数量
     pub len: u32,
-    /// 终端列数
     pub columns: u16,
-    /// 终端行数（视口高度）
     pub rows: u16,
-    /// 当前垂直滚动偏移（行数）
     pub scroll_y: u32,
-    /// 实际渲染到的最大行号（用于计算可滚动范围）
     pub rendered_rows: u32,
-    /// 缩放比例（1.0 = 100%，>1 放大，<1 缩小）
     pub zoom: f32,
 }
 
 impl TermLayout {
-    // ── 容量查询 ──
-
-    /// 最大可渲染格数
     pub fn max_cells(&self) -> usize {
         self.columns as usize * self.rows as usize * MAX_SCROLL_MULTIPLIER
     }
 
-    /// 画布是否已满（超出 max_cells 不再渲染）
     pub fn is_full(&self) -> bool {
         self.point as usize >= self.max_cells()
     }
 
-    /// 缩放后的有效列数（用于布局宽度计算）
     pub fn effective_columns(&self) -> u16 {
         (self.columns as f32 / self.zoom).round() as u16
     }
 
-    /// 缩放后的有效行数
     pub fn effective_rows(&self) -> u16 {
         (self.rows as f32 / self.zoom).round() as u16
     }
 
-    /// 最大可滚动行数
     pub fn max_scroll(&self) -> u32 {
         let total_lines = self.rendered_rows.max(self.point / self.columns as u32);
         total_lines.saturating_sub(self.rows as u32)
     }
 
-    /// 将 scroll_y 钳制在有效范围
     pub fn clamp_scroll(&mut self) {
         let max = self.max_scroll();
         if self.scroll_y > max {
@@ -220,17 +169,21 @@ impl TermLayout {
 }
 
 // ============================================================
-// TermLayout — 画布打印（仅调试用）
+// Display (debug)
 // ============================================================
 
 impl Display for TermLayout {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let viewport_start = self.scroll_y as usize * self.columns as usize;
-        let viewport_end = (viewport_start + self.rows as usize * self.columns as usize)
-            .min(self.layout.len());
-        for row in self.layout[viewport_start..viewport_end].iter() {
-            if row.word != " " {
-                write!(f, "{}", row)?;
+        let cols = self.columns as usize;
+        let rows = self.rows as usize;
+        let sy = self.scroll_y as usize;
+        for r in 0..rows {
+            let start = (sy + r) * cols;
+            let end = (start + cols).min(self.layout.len());
+            for cell in self.layout[start..end].iter() {
+                if cell.word != " " {
+                    write!(f, "{}", cell)?;
+                }
             }
         }
         write!(f, "")
@@ -238,12 +191,10 @@ impl Display for TermLayout {
 }
 
 // ============================================================
-// TermLayout — 视口渲染到终端
+// Render (viewport)
 // ============================================================
 
 impl TermLayout {
-    /// 将当前视口渲染到终端（含光标定位）。
-    /// 连续相同风格的格子合并为一次输出，减少 IO 次数、消除闪烁。
     pub fn render(&self) {
         let cols = self.columns as usize;
         let rows = self.rows as usize;
@@ -255,87 +206,74 @@ impl TermLayout {
         while i < scroll_end {
             let cell = &self.layout[i];
 
-            // 纯空格且无背景 → 跳过
-            if cell.word == " " && cell.bcolor.is_none() {
-                i += 1;
-                continue;
-            }
-
             let batch_start = i;
             let fg = cell.fcolor;
             let bg = cell.bcolor;
+            let is_empty = cell.word == " " && cell.bcolor.is_none();
             let mut batch = String::new();
 
-            // 收集连续同风格格子（到行尾或风格变化为止）
             while i < scroll_end {
                 let c = &self.layout[i];
                 if i > batch_start && i % cols == 0 {
                     break;
                 }
-                if c.word == " " && c.bcolor.is_none() {
+                let c_empty = c.word == " " && c.bcolor.is_none();
+                if c_empty != is_empty {
                     break;
                 }
-                if c.fcolor != fg || c.bcolor != bg {
+                if !c_empty && (c.fcolor != fg || c.bcolor != bg) {
                     break;
                 }
                 batch.push_str(&c.word);
                 i += 1;
             }
 
-            // 虚拟坐标 → 终端坐标
-            let global_idx = batch_start;
-            let x = (global_idx % cols) as u16;
-            let y = (global_idx / cols) as u16 - self.scroll_y as u16;
+            let x = (batch_start % cols) as u16;
+            let y = (batch_start / cols) as u16 - self.scroll_y as u16;
 
             if y < self.rows {
                 execute!(stdout(), MoveTo(x, y)).ok();
-                let styled = batch.stylize();
-                let styled = match (fg, bg) {
-                    (Some(f), Some(b)) => styled.with(f).on(b),
-                    (Some(f), None) => styled.with(f),
-                    (None, Some(b)) => styled.on(b),
-                    (None, None) => styled,
-                };
-                print!("{styled}");
+                if is_empty {
+                    print!("{batch}");
+                } else {
+                    let styled = batch.stylize();
+                    let styled = match (fg, bg) {
+                        (Some(f), Some(b)) => styled.with(f).on(b),
+                        (Some(f), None) => styled.with(f),
+                        (None, Some(b)) => styled.on(b),
+                        (None, None) => styled,
+                    };
+                    print!("{styled}");
+                }
             }
         }
     }
 }
 
 // ============================================================
-// TermLayout — 绘制方法
+// Paint methods
 // ============================================================
 
 impl TermLayout {
-    /// 换行：将 point 移动到下一行行首（受 max_cells 限制）
     pub fn new_line(&mut self) {
-        if self.is_full() {
-            return;
-        }
+        if self.is_full() { return; }
         let columns = self.columns as u32;
         let remaining = columns - (self.point % columns);
         let new_point = (self.point + remaining).min(self.max_cells() as u32);
         self.point = new_point;
     }
 
-    /// 替换指定画布文字（支持 CJK 宽字符）。
-    /// 画布已满时返回 0 不写入。
     pub fn paint_string(&mut self, s: &str, fcolor: Option<Color>, bcolor: Option<Color>) -> u32 {
-        if self.is_full() {
-            return 0;
-        }
+        if self.is_full() { return 0; }
 
         let max = self.max_cells();
         let mut cell_count = 0u32;
 
         for c in s.chars() {
             let idx = self.point as usize;
-            if idx >= max {
-                break;
-            }
+            if idx >= max { break; }
             let width = char_width(c);
             self.layout[idx] = Block::new(c.to_string(), fcolor, bcolor);
-            // 宽字符占 2 列：填充占位格
             if width > 1 {
                 let next_idx = idx + 1;
                 if next_idx < max {
@@ -348,7 +286,6 @@ impl TermLayout {
 
         self.len += cell_count;
 
-        // 更新已渲染行数
         let current_row = self.point / self.columns as u32;
         if current_row > self.rendered_rows {
             self.rendered_rows = current_row;
@@ -357,34 +294,23 @@ impl TermLayout {
         cell_count
     }
 
-    /// 将图片渲染为盲文字符，写入画布。
-    /// 画布已满时直接返回 0。
     pub fn paint_img(&mut self, path: String, size: (u32, u32)) -> u32 {
-        if self.is_full() {
-            return 0;
-        }
+        if self.is_full() { return 0; }
 
-        debug!("开始加载图片: path='{}' size={:?}", path, size);
+        debug!("Loading image: path='{}' size={:?}", path, size);
 
         let mut img_data = Img::new(PathBuf::from(&path), size);
         if let Err(e) = img_data._create_img() {
-            error!("路径：{}图片加载失败: {}", path, e);
+            error!("Image load failed: {}: {}", path, e);
             return 0;
         }
         let picture = match img_data.picture.as_ref() {
             Some(p) => p,
             None => {
-                warn!("图片数据为空(可能是0尺寸或格式不支持?): {}", path);
+                warn!("Image data empty: {}", path);
                 return 0;
             }
         };
-
-        debug!(
-            "图片加载成功: 字符尺寸 {}×{}, 占用画布字符 {}",
-            img_data.cloumns,
-            img_data.rows,
-            picture.len()
-        );
 
         let img_cols = img_data.cloumns as usize;
         let img_rows = img_data.rows as usize;
@@ -397,7 +323,7 @@ impl TermLayout {
             for col in 0..img_cols {
                 let canvas_idx = (start_row + row) * canvas_cols + col;
                 if canvas_idx >= max {
-                    warn!("画布越界，已截断 row={} col={}", row, col);
+                    warn!("Canvas overflow, row={} col={}", row, col);
                     break;
                 }
                 let pic_idx = row * img_cols + col;
@@ -413,24 +339,19 @@ impl TermLayout {
 
         self.rendered_rows = self.point / self.columns as u32;
 
-        debug!("图片加载成功，path={}，占用字符数：{}", path, total_chars);
+        debug!("Image loaded, path={}, chars={}", path, total_chars);
         total_chars
     }
 }
 
 // ============================================================
-// trigger_refresh — 事件处理（含滚动）
+// trigger_refresh
 // ============================================================
 
-/// 缩放步进（每次 +-10%）
 const ZOOM_STEP: f32 = 0.1;
-/// 缩放范围
 const ZOOM_MIN: f32 = 0.2;
 const ZOOM_MAX: f32 = 5.0;
 
-/// 阻塞等待事件，更新 scroll_y / zoom，返回应发送给渲染线程的命令。
-/// 返回 `None` 表示无需操作。
-/// scroll_y 的越界钳制由渲染线程负责。
 pub fn trigger_refresh(scroll_y: &mut u32, zoom: &mut f32, rows: u16) -> Option<RenderCmd> {
     match event::read() {
         Ok(Event::Key(key)) => {
@@ -438,7 +359,6 @@ pub fn trigger_refresh(scroll_y: &mut u32, zoom: &mut f32, rows: u16) -> Option<
                 return None;
             }
 
-            // 缩放（Ctrl 组合键）
             if key.modifiers.contains(event::KeyModifiers::CONTROL) {
                 match key.code {
                     KeyCode::Char('=') | KeyCode::Char('+') => {
@@ -525,7 +445,7 @@ pub fn trigger_refresh(scroll_y: &mut u32, zoom: &mut f32, rows: u16) -> Option<
 }
 
 // ============================================================
-// Img — 图片转盲文字符
+// Img
 // ============================================================
 
 #[derive(Debug)]
@@ -539,19 +459,11 @@ struct Img {
 
 impl Img {
     fn new(path: PathBuf, term_size: (u32, u32)) -> Self {
-        Self {
-            path,
-            term_size,
-            picture: None,
-            cloumns: 0,
-            rows: 0,
-        }
+        Self { path, term_size, picture: None, cloumns: 0, rows: 0 }
     }
 
     pub fn _create_img(&mut self) -> Result<()> {
-        if self.picture.is_some() {
-            return Ok(());
-        }
+        if self.picture.is_some() { return Ok(()); }
 
         let img = image::open(&self.path)?;
         let img = img.resize(self.term_size.0, self.term_size.1, FilterType::Nearest);
@@ -575,25 +487,16 @@ impl Img {
 
                         if px < width && py < height {
                             let pixel = img.get_pixel(px, py);
-
                             r_sum += pixel[0] as u32;
                             g_sum += pixel[1] as u32;
                             b_sum += pixel[2] as u32;
                             count += 1;
 
-                            let brightness =
-                                (pixel[0] as u16 + pixel[1] as u16 + pixel[2] as u16) / 3;
-
+                            let brightness = (pixel[0] as u16 + pixel[1] as u16 + pixel[2] as u16) / 3;
                             if brightness < 128 {
                                 let bit_index = match (dx, dy) {
-                                    (0, 0) => 0,
-                                    (0, 1) => 1,
-                                    (0, 2) => 2,
-                                    (1, 0) => 3,
-                                    (1, 1) => 4,
-                                    (1, 2) => 5,
-                                    (0, 3) => 6,
-                                    (1, 3) => 7,
+                                    (0, 0) => 0, (0, 1) => 1, (0, 2) => 2, (1, 0) => 3,
+                                    (1, 1) => 4, (1, 2) => 5, (0, 3) => 6, (1, 3) => 7,
                                     _ => 0,
                                 };
                                 bits |= 1 << bit_index;
@@ -605,27 +508,16 @@ impl Img {
                 r_sum = r_sum.checked_div(count).ok_or(anyhow!("r_sum is 0"))?;
                 g_sum = g_sum.checked_div(count).ok_or(anyhow!("g_sum is 0"))?;
                 b_sum = b_sum.checked_div(count).ok_or(anyhow!("b_sum is 0"))?;
-                let color = Color::Rgb {
-                    r: r_sum as u8,
-                    g: g_sum as u8,
-                    b: b_sum as u8,
-                };
+                let color = Color::Rgb { r: r_sum as u8, g: g_sum as u8, b: b_sum as u8 };
                 self.picture.as_mut().unwrap().push(format!(
                     "{}",
-                    char::from_u32(0x2800 + bits)
-                        .unwrap()
-                        .to_string()
-                        .with(color)
+                    char::from_u32(0x2800 + bits).unwrap().to_string().with(color)
                 ));
             }
         }
         Ok(())
     }
 }
-
-// ============================================================
-// 测试
-// ============================================================
 
 #[test]
 fn test_create_img() {
@@ -637,9 +529,7 @@ fn test_create_img() {
     println!("{}, {}", img.cloumns, img.rows);
     for (i, row) in img.picture.as_ref().unwrap().iter().enumerate() {
         print!("{}", row);
-        if (i + 1) % img.cloumns as usize == 0 {
-            println!()
-        }
+        if (i + 1) % img.cloumns as usize == 0 { println!() }
     }
     println!();
 }
