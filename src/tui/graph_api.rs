@@ -1,4 +1,9 @@
-use std::{fmt::Display, path::PathBuf};
+use std::{
+    cell::{Ref, RefCell},
+    fmt::{self, Display, format, write},
+    ops::{Deref, DerefMut},
+    path::PathBuf,
+};
 
 use anyhow::Result;
 use crossterm::{
@@ -7,24 +12,107 @@ use crossterm::{
     execute,
     style::{Color, Stylize},
 };
-use env_logger::Builder;
+
 use image::{
     GenericImageView,
     imageops::FilterType::{self},
 };
-use log::{debug, error, info, warn};
+use log::{debug, error, warn};
 use std::io::stdout;
+/// block 块，终端显示的最小单元，包含每个块的内容和特性
+#[derive(Debug, Clone)]
+pub struct Block {
+    word: String,
+    fcolor: Option<Color>,
+    bcolor: Option<Color>,
+    /// 渲染后的文本
+    render: Option<RefCell<String>>,
+}
+
+impl Deref for Block {
+    type Target = str;
+    fn deref(&self) -> &Self::Target {
+        &self.word
+    }
+}
+
+impl DerefMut for Block {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.word
+    }
+}
+
+/// 块样式打印
+impl Display for Block {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_render() {
+            write!(f, "{}", self.render_str())?;
+        } else if let Some(color) = self.fcolor {
+            write!(f, "{}", self.word.clone().with(color))?;
+        } else {
+            write!(f, "{}", self.word)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Block {
+    fn is_render(&self) -> bool {
+        self.render.is_some()
+    }
+    pub fn new(word: String, fcolor: Option<Color>) -> Self {
+        Self {
+            word,
+            fcolor,
+            bcolor: None,
+            render: None,
+        }
+    }
+    pub fn new_render(word: String, fcolor: Option<Color>, render: Option<String>) -> Self {
+        match render {
+            Some(render) => Self {
+                word,
+                fcolor,
+                bcolor: None,
+                render: Some(RefCell::new(render)),
+            },
+            None => Self {
+                word,
+                fcolor,
+                bcolor: None,
+                render: None,
+            },
+        }
+    }
+    fn render_str(&self) -> String {
+        match self.render.clone() {
+            Some(render) => render.borrow().as_str().to_string(),
+            None => {
+                debug!("render 并为染色");
+                self.word.clone()
+            }
+        }
+    }
+    fn render(&self) {
+        let color = self.fcolor.unwrap();
+        let word = self.word.clone();
+        self.render.unwrap().borrow_mut() = RefCell::new(format!("{}", word.with(color)));
+    }
+}
 
 /// 终端画布
 #[derive(Debug, Default)]
 pub struct TermLayout {
-    pub layout: Vec<String>,
+    pub layout: Vec<Block>,
     /// 当前绘画指针位置
-    pub point: u64,
+    pub point: u32,
     /// 当前显示的字符数量
-    pub len: u64,
+    pub len: u32,
+    // 行长度
     pub columns: u16,
 }
+
 /// 画布打印
 impl Display for TermLayout {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -34,7 +122,7 @@ impl Display for TermLayout {
             }
             let x = i as u16 % self.columns;
             let y = i as u16 / self.columns;
-            if row != " " {
+            if row.word != " " {
                 execute!(stdout(), MoveTo(x, y)).ok();
                 write!(f, "{}", row)?;
             }
@@ -45,40 +133,38 @@ impl Display for TermLayout {
 
 impl TermLayout {
     pub fn new_line(&mut self) {
-        let columns = self.columns as u64;
+        let columns = self.columns as u32;
         // 计算当前行还剩多少个格子
         let remaining = columns - (self.point % columns);
 
         self.point += remaining;
     }
     /// 替换指定画布文字
-    pub fn paint_string(&mut self, s: &str, color: Option<Color>) -> u64 {
-        let str_len = s.chars().count();
+    pub fn paint_string(&mut self, s: &str, color: Option<Color>) -> u32 {
+        let str_len = s.chars().count() as u32;
 
         let mut idx = self.point as usize;
         for c in s.chars() {
             if idx >= self.layout.len() {
                 break;
             }
-            let content = if let Some(color) = color {
-                format!("{}", c.with(color))
-            } else {
-                c.to_string()
-            };
+            let content = Block::new(c.to_string(), color);
             self.layout[idx] = content;
             idx += 1;
         }
 
-        self.point += str_len as u64;
-        let len = str_len as u64;
+        self.point += str_len;
+        let len = str_len;
         self.len += len;
         len
     }
+    /// write_string
+
     /// 将图片渲染为盲文字符，写入画布
     /// - `path`：图片路径
     /// - `size`：期望缩放的像素尺寸 (max_width_px, max_height_px)
     /// 返回实际占用的画布字符总数（columns × rows）
-    pub fn paint_img(&mut self, path: String, size: (u32, u32)) -> u64 {
+    pub fn paint_img(&mut self, path: String, size: (u32, u32)) -> u32 {
         debug!("开始加载图片: path='{}' size={:?}", path, size);
 
         let mut img_data = Img::new(PathBuf::from(&path), size);
@@ -117,7 +203,7 @@ impl TermLayout {
                 }
                 let pic_idx = row * img_cols + col;
                 if let Some(cell) = picture.get(pic_idx) {
-                    self.layout[canvas_idx] = cell.clone();
+                    self.layout[canvas_idx] = Block::new(cell.clone(), None);
                 }
             }
         }
@@ -125,9 +211,9 @@ impl TermLayout {
         // 将 point 移动到图片区域结束后的下一行行首
 
         //这里算面积应该是img_cols？
-        let total_chars = (img_rows * canvas_cols) as u64;
+        let total_chars = (img_rows * canvas_cols) as u32;
 
-        self.point = (start_row as u64 + img_rows as u64) * canvas_cols as u64;
+        self.point = (start_row as u32 + img_rows as u32) * canvas_cols as u32;
         self.len += total_chars;
 
         debug!("图片加载成功，path={}，占用字符数：{}", path, total_chars);

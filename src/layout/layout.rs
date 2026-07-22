@@ -4,7 +4,7 @@ use crossterm::terminal;
 use crate::{
     layout::DEFAULT_LAYOUT,
     tdom::node::{Node, NodeType},
-    tui::graph_api::TermLayout,
+    tui::graph_api::{Block, TermLayout},
 };
 
 /// 终端映射信息
@@ -26,7 +26,10 @@ impl TermMap {
 ///创建画布以及画布信息部分
 impl TermLayout {
     pub fn new(map: &TermMap) -> Result<TermLayout> {
-        let layout = vec![" ".to_string(); map.columns as usize * map.rows as usize];
+        let layout = vec![
+            Block::new_render("".to_string(), None, Some("".to_string()));
+            map.columns as usize * map.rows as usize
+        ];
 
         Ok(TermLayout {
             layout,
