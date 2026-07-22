@@ -351,7 +351,10 @@ impl Img {
 
 #[test]
 fn test_create_img() {
-    let mut img = Img::new(PathBuf::from("./test_html/src/pic.png"), (320, 160));
+    let mut img = Img::new(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../test_html/src/pic.png"),
+        (320, 160),
+    );
     img._create_img().unwrap();
     println!("{}, {}", img.cloumns, img.rows);
     for (i, row) in img.picture.as_ref().unwrap().iter().enumerate() {
