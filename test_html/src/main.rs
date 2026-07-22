@@ -20,7 +20,8 @@ fn main() -> Result<()> {
             "h1 { color: cyan; } h2 { color: yellow; } h3 { color: green; } \
              p { color: grey; } .highlight { color: magenta; } \
              header { color: cyan; background-color: darkblue; text-align: center; } \
-             footer { color: grey; text-align: center; }",
+             footer { color: grey; text-align: center; } \
+             aside { color: white; }",
         ),
         "headings" => (
             include_str!("headings.html"),
@@ -53,6 +54,11 @@ fn main() -> Result<()> {
             // header_footer.html 已内嵌 <style> 块，无需额外 CSS
             "",
         ),
+        "aside" => (
+            include_str!("aside.html"),
+            // aside.html 已内嵌 <style> 块，无需额外 CSS
+            "",
+        ),
         "helloworld" => (
             include_str!("helloworld.html"),
             "h1 { color: cyan; } p { color: white; }",
@@ -69,6 +75,7 @@ fn main() -> Result<()> {
                  text           - Text content & layout\n  \
                  css            - CSS layout demo\n  \
                  header_footer  - Header & footer layout + CSS\n  \
+                 aside          - Aside layout + CSS\n  \
                  helloworld     - Simple hello world",
                 test_name
             );

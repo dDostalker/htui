@@ -1,10 +1,11 @@
-use std::{collections::HashMap, str::FromStr};
+use std::str::FromStr;
 
 use crossterm::style::Color;
 use cssparser::{
     AtRuleParser, BasicParseErrorKind, CowRcStr, ParseError, Parser as CssParser, ParserInput,
     ParserState, QualifiedRuleParser, StyleSheetParser,
 };
+use indexmap::IndexMap;
 use log::{debug, warn};
 
 use crate::tdom::node::{Node, NodeArena, NodeId, NodeType};
@@ -312,11 +313,11 @@ fn apply_css_rule(arena: &mut NodeArena, node_id: NodeId, selector: &CssSelector
 // CssAttr / CssRule
 
 #[derive(Debug, Clone, Default)]
-pub struct CssAttr(HashMap<String, String>);
+pub struct CssAttr(IndexMap<String, String>);
 
 impl CssAttr {
     pub fn new() -> Self {
-        CssAttr(HashMap::new())
+        CssAttr(IndexMap::new())
     }
     fn add(&mut self, css: CssAttr) {
         self.0.extend(css.0);
@@ -387,10 +388,7 @@ fn parse_color_str(s: &str) -> Option<Color> {
     }
 
     // 2. rgb(r, g, b)
-    if let Some(inner) = lower
-        .strip_prefix("rgb(")
-        .and_then(|s| s.strip_suffix(')'))
-    {
+    if let Some(inner) = lower.strip_prefix("rgb(").and_then(|s| s.strip_suffix(')')) {
         return parse_rgb_color(inner);
     }
 
@@ -469,13 +467,13 @@ pub enum FontWeight {
 }
 
 #[derive(Debug, Clone)]
-pub struct CssRule(pub(crate) HashMap<CssSelector, CssAttr>);
+pub struct CssRule(pub(crate) IndexMap<CssSelector, CssAttr>);
 
 impl CssRule {
     pub fn new() -> Self {
-        CssRule(HashMap::new())
+        CssRule(IndexMap::new())
     }
-    fn add(&mut self, sel: CssSelector, attr: HashMap<String, String>) {
+    fn add(&mut self, sel: CssSelector, attr: IndexMap<String, String>) {
         self.0.insert(sel, CssAttr(attr));
     }
     pub fn css_to_node(&self) {
@@ -522,7 +520,7 @@ impl Parser {
 }
 
 struct CssParseState {
-    rules: Vec<(String, HashMap<String, String>)>,
+    rules: Vec<(String, IndexMap<String, String>)>,
 }
 impl CssParseState {
     fn new() -> Self {
@@ -598,8 +596,8 @@ impl<'i> AtRuleParser<'i> for CssParseState {
     }
 }
 
-fn parse_declaration_text(block: &str) -> HashMap<String, String> {
-    let mut m = HashMap::new();
+fn parse_declaration_text(block: &str) -> IndexMap<String, String> {
+    let mut m = IndexMap::new();
     let mut k = String::new();
     let mut v = String::new();
     let mut in_v = false;
@@ -639,7 +637,39 @@ pub fn css_into_node(
     for (selector, attr) in css.0.iter() {
         apply_css_rule(arena, root_id, selector, attr);
     }
+    // Propagate inheritable CSS properties (color, text-align, font-weight)
+    inherit_css(arena, root_id, &IndexMap::new());
     Ok(())
+}
+
+/// Inheritable CSS properties: propagate from parent to child if child has no own value.
+const INHERITABLE: &[&str] = &["color", "text-align", "font-weight"];
+
+fn inherit_css(arena: &mut NodeArena, node_id: NodeId, parent_attrs: &IndexMap<String, String>) {
+    // Merge parent inheritable attrs into current node (if not already set)
+    let node = &mut arena[node_id];
+    for key in INHERITABLE {
+        if let Some(value) = parent_attrs.get(*key) {
+            node.css_attr
+                .0
+                .entry(key.to_string())
+                .or_insert_with(|| value.clone());
+        }
+    }
+
+    // Collect inheritable attrs from this node to pass down
+    let mut merged = parent_attrs.clone();
+    for key in INHERITABLE {
+        if let Some(value) = node.css_attr.0.get(*key) {
+            merged.insert(key.to_string(), value.clone());
+        }
+    }
+
+    // Recurse into children (clone to avoid borrow issues)
+    let children: Vec<NodeId> = node.children.clone();
+    for child_id in children {
+        inherit_css(arena, child_id, &merged);
+    }
 }
 
 // Tests
@@ -703,7 +733,7 @@ mod tests {
         let (root, _) = build_test(&mut arena);
         let mut css = CssRule::new();
         let sel: CssSelector = "div p".parse().unwrap();
-        let mut m = HashMap::new();
+        let mut m = IndexMap::new();
         m.insert("color".into(), "red".into());
         css.add(sel, m);
         css_into_node(&mut arena, root, &css).unwrap();

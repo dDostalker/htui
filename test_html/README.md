@@ -28,6 +28,8 @@ cargo run -p test_html -- unknown  # 会列出所有可用测试
 | `colors` | `colors.html` | CSS 颜色渲染：red/green/blue/yellow/cyan/magenta/white/grey |
 | `nested` | `nested.html` | 深度嵌套 div 结构 (1-4 层)，混合嵌套 |
 | `text` | `text.html` | 文本内容：长短段落、空段落、Unicode/CJK/Emoji、特殊字符 |
+| `aside` | `aside.html` | Aside 侧边栏布局 + CSS 颜色变体 |
+| `header_footer` | `header_footer.html` | Header/Footer 布局 + CSS |
 | `css` | `css.html` | 类 CSS 布局 Demo (原项目自带) |
 | `helloworld` | `helloworld.html` | 最简 HTML 测试 (原项目自带) |
 
@@ -82,17 +84,19 @@ cargo run -p test_html -- unknown  # 会列出所有可用测试
 
 ## 测试覆盖矩阵
 
-| 能力 | all_in_one | headings | image | colors | nested | text | css | helloworld |
-|------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| H1-H5 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| P 段落 | ✓ | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Img 图片 | ✓ | - | ✓ | - | - | - | - | - |
-| Div 嵌套 | ✓ | - | - | - | ✓ | - | ✓ | - |
-| CSS 颜色 | ✓ | ✓ | - | ✓ | ✓ | - | ✓ | - |
-| Unicode | ✓ | - | - | - | - | ✓ | - | - |
-| Emoji | ✓ | - | - | - | - | ✓ | - | - |
-| 空元素 | - | - | - | - | - | ✓ | - | - |
-| 多图序列 | - | - | ✓ | - | - | - | - | - |
+| 能力 | all_in_one | headings | image | colors | nested | text | aside | header_footer | css | helloworld |
+|------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| H1-H5 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| P 段落 | ✓ | ✓ | - | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Img 图片 | ✓ | - | ✓ | - | - | - | - | - | - | - |
+| Div 嵌套 | ✓ | - | - | - | ✓ | - | - | - | ✓ | - |
+| CSS 颜色 | ✓ | ✓ | - | ✓ | ✓ | - | ✓ | ✓ | ✓ | - |
+| Unicode | ✓ | - | - | - | - | ✓ | - | - | - | - |
+| Emoji | ✓ | - | - | - | - | ✓ | - | - | - | - |
+| Aside | - | - | - | - | - | - | ✓ | ✓ | - | - |
+| Header/Footer | - | - | - | - | - | - | - | ✓ | - | - |
+| 空元素 | - | - | - | - | - | ✓ | - | - | - |
+| 多图序列 | - | - | ✓ | - | - | - | - | - | - |
 
 ---
 

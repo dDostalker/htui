@@ -4,8 +4,9 @@ use crate::{
     layout::{
         layout::TermMap,
         layout_fn::{
-            div::layout_div, head::layout_hn, header_footer::layout_header,
-            header_footer::layout_footer, img::layout_img, p::layout_p,
+            aside::layout_aside, div::layout_div, head::layout_hn,
+            header_footer::layout_header, header_footer::layout_footer,
+            img::layout_img, p::layout_p,
         },
     },
     tdom::node::{Node, NodeArena},
@@ -30,4 +31,5 @@ pub static DEFAULT_LAYOUT: &[LayoutFn] = &[
     layout_div,
     layout_header,
     layout_footer,
+    layout_aside,
 ];
