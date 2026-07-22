@@ -1,6 +1,6 @@
 use std::{
-    cell::{Ref, RefCell},
-    fmt::{self, Display, format, write},
+    cell::RefCell,
+    fmt::{self, Display},
     ops::{Deref, DerefMut},
     path::PathBuf,
 };
@@ -94,11 +94,7 @@ impl Block {
             }
         }
     }
-    fn render(&self) {
-        let color = self.fcolor.unwrap();
-        let word = self.word.clone();
-        self.render.unwrap().borrow_mut() = RefCell::new(format!("{}", word.with(color)));
-    }
+
 }
 
 /// 终端画布
@@ -120,14 +116,28 @@ impl Display for TermLayout {
             if i == self.layout.len() - 1 {
                 break;
             }
-            let x = i as u16 % self.columns;
-            let y = i as u16 / self.columns;
             if row.word != " " {
-                execute!(stdout(), MoveTo(x, y)).ok();
                 write!(f, "{}", row)?;
             }
         }
         write!(f, "")
+    }
+}
+
+impl TermLayout {
+    /// 将画布渲染到终端（含光标定位）
+    pub fn render(&self) {
+        for (i, row) in self.layout.iter().enumerate() {
+            if i == self.layout.len() - 1 {
+                break;
+            }
+            let x = i as u16 % self.columns;
+            let y = i as u16 / self.columns;
+            if row.word != " " {
+                execute!(stdout(), MoveTo(x, y)).ok();
+                print!("{}", row);
+            }
+        }
     }
 }
 
@@ -209,9 +219,7 @@ impl TermLayout {
         }
 
         // 将 point 移动到图片区域结束后的下一行行首
-
-        //这里算面积应该是img_cols？
-        let total_chars = (img_rows * canvas_cols) as u32;
+        let total_chars = (img_rows * img_cols) as u32;
 
         self.point = (start_row as u32 + img_rows as u32) * canvas_cols as u32;
         self.len += total_chars;
