@@ -179,7 +179,7 @@ impl Img {
             return Ok(());
         }
 
-        let img = image::open(&self.path).unwrap();
+        let img = image::open(&self.path)?;
         let img = img.resize(self.term_size.0, self.term_size.1, FilterType::Nearest);
         let (width, height) = img.dimensions();
 
