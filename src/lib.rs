@@ -22,26 +22,23 @@ pub use layout::layout::TermMap;
 use crate::{
     html::css_parse,
     tdom::node::{NodeArena, NodeId},
-    tui::graph_api::{TermLayout, trigger_refresh},
+    tui::graph_api::{RefreshAction, TermLayout, trigger_refresh},
 };
 
-/// 解析 HTML + CSS → (root_id, arena)
+/// Parse HTML + CSS into (root_id, arena)
 fn parse(
     html: &mut html::html_parse::Parser,
     css: &mut css_parse::Parser,
     external_css: &str,
 ) -> Result<(NodeId, NodeArena)> {
-    // HTML 解析 → 含嵌入 CSS
     let (root_id, mut arena, embedded_css) = html.parse()?;
 
-    // 拼接嵌入 CSS + 外部 CSS
     let combined = if external_css.is_empty() {
         embedded_css
     } else {
         format!("{}\n{}", embedded_css, external_css)
     };
 
-    // 解析并应用 CSS
     if !combined.trim().is_empty() {
         *css = css_parse::Parser::new(&combined);
         let rules = css.parse()?;
@@ -51,10 +48,13 @@ fn parse(
     Ok((root_id, arena))
 }
 
-/// 渲染入口
+/// Render entry point
 pub fn render(html: &str, css: &str) {
     enable_raw_mode().unwrap();
     execute!(stdout(), EnterAlternateScreen, EnableMouseCapture, Hide).unwrap();
+
+    let mut zoom: f32 = 1.0;
+    let mut saved_scroll_y: u32 = 0;
 
     'remder: loop {
         execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0)).unwrap();
@@ -64,17 +64,29 @@ pub fn render(html: &str, css: &str) {
         let (root_id, arena) = parse(&mut html_parser, &mut css_parser, css).unwrap();
 
         let term_map = TermMap::get_ter_map().unwrap();
-        let mut term_layout = TermLayout::new(&term_map).unwrap();
+        let mut term_layout = TermLayout::new(&term_map, zoom).unwrap();
         term_layout.draw(&arena, root_id, &term_map).unwrap();
+
+        // 恢复缩放前的滚动位置
+        term_layout.scroll_y = saved_scroll_y;
+        term_layout.clamp_scroll();
 
         term_layout.render();
         stdout().flush().unwrap();
 
         loop {
-            match trigger_refresh() {
-                Some(false) => break 'remder,
-                None => {}
-                Some(true) => break,
+            match trigger_refresh(&mut term_layout, &mut zoom) {
+                RefreshAction::Quit => break 'remder,
+                RefreshAction::Redraw => {
+                    saved_scroll_y = term_layout.scroll_y;
+                    break;
+                }
+                RefreshAction::Rerender => {
+                    execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0)).unwrap();
+                    term_layout.render();
+                    stdout().flush().unwrap();
+                }
+                RefreshAction::Continue => {}
             }
         }
     }

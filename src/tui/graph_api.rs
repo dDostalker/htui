@@ -8,7 +8,7 @@ use std::{
 use anyhow::{Result, anyhow};
 use crossterm::{
     cursor::MoveTo,
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyCode, KeyEventKind, MouseEventKind},
     execute,
     style::{Color, Stylize},
 };
@@ -19,6 +19,31 @@ use image::{
 use log::{debug, error, warn};
 use std::io::stdout;
 
+/// 最大虚拟画布倍数（相对于终端可视区域）
+const MAX_SCROLL_MULTIPLIER: usize = 20;
+
+/// 鼠标滚轮每次滚动的行数
+const SCROLL_LINES_PER_TICK: u32 = 3;
+
+// ============================================================
+// 刷新动作
+// ============================================================
+
+pub enum RefreshAction {
+    /// 退出程序
+    Quit,
+    /// 需要完整重绘（终端尺寸变化等）
+    Redraw,
+    /// 仅重新渲染视口（滚动）
+    Rerender,
+    /// 无事发生
+    Continue,
+}
+
+// ============================================================
+// char_width
+// ============================================================
+
 /// 判断字符在终端中的显示宽度（列数）
 /// - ASCII / 制表符 / 窄字符: 1 列
 /// - CJK / 全角字符: 2 列
@@ -27,7 +52,6 @@ pub fn char_width(c: char) -> usize {
         return 1;
     }
     let cp = c as u32;
-    // 仅以下 Unicode 区块为宽字符（2 列），其余默认 1 列
     let is_wide = matches!(cp,
         // CJK 统一表意文字
         0x4E00..=0x9FFF
@@ -47,6 +71,10 @@ pub fn char_width(c: char) -> usize {
     );
     if is_wide { 2 } else { 1 }
 }
+
+// ============================================================
+// Block
+// ============================================================
 
 /// block 块，终端显示的最小单元，包含每个块的内容和特性
 #[derive(Debug, Clone)]
@@ -71,7 +99,6 @@ impl DerefMut for Block {
     }
 }
 
-/// 块样式打印
 impl Display for Block {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_render() {
@@ -86,7 +113,6 @@ impl Display for Block {
             };
             write!(f, "{styled}")?;
         }
-
         Ok(())
     }
 }
@@ -128,30 +154,81 @@ impl Block {
             }
         }
     }
-
 }
 
-/// 终端画布
-#[derive(Debug, Default)]
+// ============================================================
+// TermLayout — 虚拟画布
+// ============================================================
+
+/// 终端画布（虚拟，可超过终端可视区域）
+#[derive(Debug)]
 pub struct TermLayout {
+    /// 虚拟画布格子
     pub layout: Vec<Block>,
-    /// 当前绘画指针位置
+    /// 当前绘画指针位置（格索引）
     pub point: u32,
     /// 当前显示的字符数量
     pub len: u32,
-    // 行长度
+    /// 终端列数
     pub columns: u16,
+    /// 终端行数（视口高度）
+    pub rows: u16,
+    /// 当前垂直滚动偏移（行数）
+    pub scroll_y: u32,
+    /// 实际渲染到的最大行号（用于计算可滚动范围）
+    pub rendered_rows: u32,
+    /// 缩放比例（1.0 = 100%，>1 放大，<1 缩小）
+    pub zoom: f32,
 }
 
-/// 画布打印
+impl TermLayout {
+    // ── 容量查询 ──
+
+    /// 最大可渲染格数
+    pub fn max_cells(&self) -> usize {
+        self.columns as usize * self.rows as usize * MAX_SCROLL_MULTIPLIER
+    }
+
+    /// 画布是否已满（超出 max_cells 不再渲染）
+    pub fn is_full(&self) -> bool {
+        self.point as usize >= self.max_cells()
+    }
+
+    /// 缩放后的有效列数（用于布局宽度计算）
+    pub fn effective_columns(&self) -> u16 {
+        (self.columns as f32 / self.zoom).round() as u16
+    }
+
+    /// 缩放后的有效行数
+    pub fn effective_rows(&self) -> u16 {
+        (self.rows as f32 / self.zoom).round() as u16
+    }
+
+    /// 最大可滚动行数
+    pub fn max_scroll(&self) -> u32 {
+        let total_lines = self.rendered_rows.max(self.point / self.columns as u32);
+        total_lines.saturating_sub(self.rows as u32)
+    }
+
+    /// 将 scroll_y 钳制在有效范围
+    pub fn clamp_scroll(&mut self) {
+        let max = self.max_scroll();
+        if self.scroll_y > max {
+            self.scroll_y = max;
+        }
+    }
+}
+
+// ============================================================
+// TermLayout — 画布打印（仅调试用）
+// ============================================================
+
 impl Display for TermLayout {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let total = self.layout.len();
-        let last_row_start = total.saturating_sub(self.columns as usize);
-        for (i, row) in self.layout.iter().enumerate() {
-            if i >= last_row_start {
-                break;
-            }
+        let viewport_start = self.scroll_y as usize * self.columns as usize;
+        let viewport_end = (viewport_start + self.rows as usize * self.columns as usize)
+            .min(self.layout.len());
+        for row in self.layout[viewport_start..viewport_end].iter() {
             if row.word != " " {
                 write!(f, "{}", row)?;
             }
@@ -160,15 +237,22 @@ impl Display for TermLayout {
     }
 }
 
-impl TermLayout {
-    /// 将画布渲染到终端（含光标定位）
-    /// 连续相同风格的格子合并为一次输出，减少 IO 次數、消除闪烁
-    pub fn render(&self) {
-        let total = self.layout.len().saturating_sub(1);
-        let cols = self.columns;
-        let mut i = 0;
+// ============================================================
+// TermLayout — 视口渲染到终端
+// ============================================================
 
-        while i < total {
+impl TermLayout {
+    /// 将当前视口渲染到终端（含光标定位）。
+    /// 连续相同风格的格子合并为一次输出，减少 IO 次数、消除闪烁。
+    pub fn render(&self) {
+        let cols = self.columns as usize;
+        let rows = self.rows as usize;
+        let scroll_start = self.scroll_y as usize * cols;
+        let scroll_end = (scroll_start + rows * cols).min(self.layout.len());
+
+        let mut i = scroll_start;
+
+        while i < scroll_end {
             let cell = &self.layout[i];
 
             // 纯空格且无背景 → 跳过
@@ -183,10 +267,9 @@ impl TermLayout {
             let mut batch = String::new();
 
             // 收集连续同风格格子（到行尾或风格变化为止）
-            while i < total {
+            while i < scroll_end {
                 let c = &self.layout[i];
-                // 行边界：下一格在新行开头 → 断批
-                if i > batch_start && i as u16 % cols == 0 {
+                if i > batch_start && i % cols == 0 {
                     break;
                 }
                 if c.word == " " && c.bcolor.is_none() {
@@ -199,46 +282,63 @@ impl TermLayout {
                 i += 1;
             }
 
-            // 定位并输出整批
-            let x = batch_start as u16 % cols;
-            let y = batch_start as u16 / cols;
-            execute!(stdout(), MoveTo(x, y)).ok();
+            // 虚拟坐标 → 终端坐标
+            let global_idx = batch_start;
+            let x = (global_idx % cols) as u16;
+            let y = (global_idx / cols) as u16 - self.scroll_y as u16;
 
-            let styled = batch.stylize();
-            let styled = match (fg, bg) {
-                (Some(f), Some(b)) => styled.with(f).on(b),
-                (Some(f), None) => styled.with(f),
-                (None, Some(b)) => styled.on(b),
-                (None, None) => styled,
-            };
-            print!("{styled}");
+            if y < self.rows {
+                execute!(stdout(), MoveTo(x, y)).ok();
+                let styled = batch.stylize();
+                let styled = match (fg, bg) {
+                    (Some(f), Some(b)) => styled.with(f).on(b),
+                    (Some(f), None) => styled.with(f),
+                    (None, Some(b)) => styled.on(b),
+                    (None, None) => styled,
+                };
+                print!("{styled}");
+            }
         }
     }
 }
 
-impl TermLayout {
-    pub fn new_line(&mut self) {
-        let columns = self.columns as u32;
-        // 计算当前行还剩多少个格子
-        let remaining = columns - (self.point % columns);
+// ============================================================
+// TermLayout — 绘制方法
+// ============================================================
 
-        self.point += remaining;
+impl TermLayout {
+    /// 换行：将 point 移动到下一行行首（受 max_cells 限制）
+    pub fn new_line(&mut self) {
+        if self.is_full() {
+            return;
+        }
+        let columns = self.columns as u32;
+        let remaining = columns - (self.point % columns);
+        let new_point = (self.point + remaining).min(self.max_cells() as u32);
+        self.point = new_point;
     }
-    /// 替换指定画布文字（支持 CJK 宽字符）
+
+    /// 替换指定画布文字（支持 CJK 宽字符）。
+    /// 画布已满时返回 0 不写入。
     pub fn paint_string(&mut self, s: &str, fcolor: Option<Color>, bcolor: Option<Color>) -> u32 {
+        if self.is_full() {
+            return 0;
+        }
+
+        let max = self.max_cells();
         let mut cell_count = 0u32;
 
         for c in s.chars() {
             let idx = self.point as usize;
-            if idx >= self.layout.len() {
+            if idx >= max {
                 break;
             }
             let width = char_width(c);
             self.layout[idx] = Block::new(c.to_string(), fcolor, bcolor);
-            // 宽字符占 2 列：填充占位格，避免下一个字符覆盖第二列
+            // 宽字符占 2 列：填充占位格
             if width > 1 {
                 let next_idx = idx + 1;
-                if next_idx < self.layout.len() {
+                if next_idx < max {
                     self.layout[next_idx] = Block::new(' '.to_string(), fcolor, bcolor);
                 }
             }
@@ -247,15 +347,23 @@ impl TermLayout {
         }
 
         self.len += cell_count;
+
+        // 更新已渲染行数
+        let current_row = self.point / self.columns as u32;
+        if current_row > self.rendered_rows {
+            self.rendered_rows = current_row;
+        }
+
         cell_count
     }
-    /// write_string
 
-    /// 将图片渲染为盲文字符，写入画布
-    /// - `path`：图片路径
-    /// - `size`：期望缩放的像素尺寸 (max_width_px, max_height_px)
-    ///  返回实际占用的画布字符总数（columns × rows）
+    /// 将图片渲染为盲文字符，写入画布。
+    /// 画布已满时直接返回 0。
     pub fn paint_img(&mut self, path: String, size: (u32, u32)) -> u32 {
+        if self.is_full() {
+            return 0;
+        }
+
         debug!("开始加载图片: path='{}' size={:?}", path, size);
 
         let mut img_data = Img::new(PathBuf::from(&path), size);
@@ -281,14 +389,14 @@ impl TermLayout {
         let img_cols = img_data.cloumns as usize;
         let img_rows = img_data.rows as usize;
         let canvas_cols = self.columns as usize;
+        let max = self.max_cells();
 
-        // 图片起始行（point 当前所在行）
         let start_row = self.point as usize / canvas_cols;
 
         for row in 0..img_rows {
             for col in 0..img_cols {
                 let canvas_idx = (start_row + row) * canvas_cols + col;
-                if canvas_idx >= self.layout.len() {
+                if canvas_idx >= max {
                     warn!("画布越界，已截断 row={} col={}", row, col);
                     break;
                 }
@@ -299,35 +407,135 @@ impl TermLayout {
             }
         }
 
-        // 将 point 移动到图片区域结束后的下一行行首
         let total_chars = (img_rows * img_cols) as u32;
-
-        self.point = (start_row as u32 + img_rows as u32) * canvas_cols as u32;
+        self.point = ((start_row + img_rows) as u32 * canvas_cols as u32).min(max as u32);
         self.len += total_chars;
 
+        self.rendered_rows = self.point / self.columns as u32;
+
         debug!("图片加载成功，path={}，占用字符数：{}", path, total_chars);
-        total_chars 
+        total_chars
     }
 }
-/// 判断当前是否应该刷新
-pub fn trigger_refresh() -> Option<bool> {
-    // 阻塞等待事件
+
+// ============================================================
+// trigger_refresh — 事件处理（含滚动）
+// ============================================================
+
+/// 缩放步进（每次 +-10%）
+const ZOOM_STEP: f32 = 0.1;
+/// 缩放范围
+const ZOOM_MIN: f32 = 0.2;
+const ZOOM_MAX: f32 = 5.0;
+
+/// 阻塞等待事件，返回应执行的动作。
+/// 键盘/鼠标滚动会直接修改 `term_layout.scroll_y`，返回 `Rerender`。
+/// 缩放按键修改 `zoom`，返回 `Redraw`。
+pub fn trigger_refresh(term_layout: &mut TermLayout, zoom: &mut f32) -> RefreshAction {
     match event::read() {
-        Ok(Event::Key(key)) => match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => return Some(false),
-            _ => {}
+        Ok(Event::Key(key)) => {
+            // 仅处理按下事件（忽略重复/释放）
+            if key.kind == KeyEventKind::Release {
+                return RefreshAction::Continue;
+            }
+
+            // 缩放（Ctrl 组合键）
+            if key.modifiers.contains(event::KeyModifiers::CONTROL) {
+                match key.code {
+                    KeyCode::Char('=') | KeyCode::Char('+') => {
+                        *zoom = (*zoom + ZOOM_STEP).min(ZOOM_MAX);
+                        return RefreshAction::Redraw;
+                    }
+                    KeyCode::Char('-') | KeyCode::Char('_') => {
+                        *zoom = (*zoom - ZOOM_STEP).max(ZOOM_MIN);
+                        return RefreshAction::Redraw;
+                    }
+                    KeyCode::Char('0') => {
+                        *zoom = 1.0;
+                        return RefreshAction::Redraw;
+                    }
+                    _ => {}
+                }
+            }
+
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => return RefreshAction::Quit,
+
+                // ── 滚动 ──
+                KeyCode::Up | KeyCode::Char('k') => {
+                    term_layout.scroll_y = term_layout.scroll_y.saturating_sub(1);
+                    return RefreshAction::Rerender;
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    term_layout.scroll_y += 1;
+                    term_layout.clamp_scroll();
+                    return RefreshAction::Rerender;
+                }
+                KeyCode::PageUp => {
+                    let step = (term_layout.rows as u32).saturating_sub(1).max(1);
+                    term_layout.scroll_y = term_layout.scroll_y.saturating_sub(step);
+                    return RefreshAction::Rerender;
+                }
+                KeyCode::PageDown => {
+                    let step = (term_layout.rows as u32).saturating_sub(1).max(1);
+                    term_layout.scroll_y += step;
+                    term_layout.clamp_scroll();
+                    return RefreshAction::Rerender;
+                }
+                KeyCode::Home => {
+                    term_layout.scroll_y = 0;
+                    return RefreshAction::Rerender;
+                }
+                KeyCode::End => {
+                    term_layout.scroll_y = term_layout.max_scroll();
+                    return RefreshAction::Rerender;
+                }
+                _ => {}
+            }
+            RefreshAction::Continue
+        }
+
+        Ok(Event::Mouse(mouse)) => {
+            let ctrl = mouse.modifiers.contains(event::KeyModifiers::CONTROL);
+            match mouse.kind {
+                MouseEventKind::ScrollUp => {
+                    if ctrl {
+                        *zoom = (*zoom + ZOOM_STEP).min(ZOOM_MAX);
+                        RefreshAction::Redraw
+                    } else {
+                        term_layout.scroll_y = term_layout
+                            .scroll_y
+                            .saturating_sub(SCROLL_LINES_PER_TICK);
+                        RefreshAction::Rerender
+                    }
+                }
+                MouseEventKind::ScrollDown => {
+                    if ctrl {
+                        *zoom = (*zoom - ZOOM_STEP).max(ZOOM_MIN);
+                        RefreshAction::Redraw
+                    } else {
+                        term_layout.scroll_y += SCROLL_LINES_PER_TICK;
+                        term_layout.clamp_scroll();
+                        RefreshAction::Rerender
+                    }
+                }
+                _ => RefreshAction::Continue,
+            }
         },
-        Ok(Event::Mouse(_)) => {
-            // 鼠标事件：消费掉，不触发重绘
-            return None;
-        }
+
         Ok(Event::Resize(_, _)) => {
-            // 终端大小变化：触发重绘
+            // 终端大小变化：触发完整重绘
+            RefreshAction::Redraw
         }
-        _ => {}
+
+        _ => RefreshAction::Continue,
     }
-    Some(true)
 }
+
+// ============================================================
+// Img — 图片转盲文字符
+// ============================================================
+
 #[derive(Debug)]
 struct Img {
     path: PathBuf,
@@ -338,7 +546,6 @@ struct Img {
 }
 
 impl Img {
-    /// 或许结构体得合一起比较好?
     fn new(path: PathBuf, term_size: (u32, u32)) -> Self {
         Self {
             path,
@@ -348,7 +555,7 @@ impl Img {
             rows: 0,
         }
     }
-    /// 图片转画面
+
     pub fn _create_img(&mut self) -> Result<()> {
         if self.picture.is_some() {
             return Ok(());
@@ -386,10 +593,6 @@ impl Img {
                                 (pixel[0] as u16 + pixel[1] as u16 + pixel[2] as u16) / 3;
 
                             if brightness < 128 {
-                                //   点1(bit0) 点4(bit3)
-                                //   点2(bit1) 点5(bit4)
-                                //   点3(bit2) 点6(bit5)
-                                //   点7(bit6) 点8(bit7)
                                 let bit_index = match (dx, dy) {
                                     (0, 0) => 0,
                                     (0, 1) => 1,
@@ -427,6 +630,10 @@ impl Img {
         Ok(())
     }
 }
+
+// ============================================================
+// 测试
+// ============================================================
 
 #[test]
 fn test_create_img() {

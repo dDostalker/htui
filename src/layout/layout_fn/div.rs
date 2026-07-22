@@ -15,10 +15,16 @@ pub fn layout_div(
     if node.node_type != NodeType::Div {
         return Ok(());
     }
+    if term_layout.is_full() {
+        return Ok(());
+    }
 
     term_layout.new_line();
 
     for child_id in node.child_ids() {
+        if term_layout.is_full() {
+            break;
+        }
         let child = &arena[child_id];
         match &child.node_type {
             NodeType::Text(s) => {
