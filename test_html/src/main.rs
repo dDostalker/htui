@@ -4,7 +4,7 @@ use htui::render;
 use log::{debug, error, info, warn};
 
 fn main() -> Result<()> {
-    let html = include_str!("css.html");
+    let html = include_str!("helloworld.html"); //include_str!("css.html");
     let css = "p { color: red; }
         h1 { color: blue; }";
 

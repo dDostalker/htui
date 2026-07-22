@@ -50,7 +50,7 @@ pub fn render(html: &str, css: &str) {
         let mut term_layout = TermLayout::new(&term_map).unwrap();
         term_layout.draw(&node, &term_map).unwrap();
         // 渲染页面输出
-        print!("{}", term_layout);
+        term_layout.render();
         stdout().flush().unwrap();
         loop {
             match trigger_refresh() {
