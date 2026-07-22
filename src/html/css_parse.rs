@@ -9,10 +9,7 @@ use log::{debug, trace, warn};
 
 use crate::tdom::node::{Node, NodeType};
 
-// ============================================================
-// CSS 选择器类型 & 匹配引擎
-// ============================================================
-
+/// CSS 选择器类型 & 匹配引擎
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Selector {
     Tag(NodeType),
@@ -187,16 +184,19 @@ fn tag_str_to_node_type(tag: &str) -> std::result::Result<NodeType, anyhow::Erro
         "section" => Ok(NodeType::Section),
         "select" => Ok(NodeType::Select),
         "span" => Ok(NodeType::Span),
+        "style" => Ok(NodeType::Style),
+        "link" => Ok(NodeType::Link),
         "summary" => Ok(NodeType::Summary),
         "textarea" => Ok(NodeType::Textarea),
         "ul" => Ok(NodeType::Ul),
-        _ => Err(anyhow::anyhow!("unsupported tag in CSS selector: {:?}", tag)),
+        _ => Err(anyhow::anyhow!(
+            "unsupported tag in CSS selector: {:?}",
+            tag
+        )),
     }
 }
 
-// ============================================================
-// 匹配引擎 — 利用 parent 指针支持完整组合子
-// ============================================================
+/// 匹配引擎 — 利用 parent 指针支持完整组合子
 
 fn matches_css(node: &Node, sel: &Selector) -> bool {
     match sel {
@@ -303,10 +303,7 @@ fn apply_css_rule(node: &mut Node, selector: &CssSelector, css: &CssAttr) {
     }
 }
 
-// ============================================================
-// CssAttr / CssRule
-// ============================================================
-
+/// CssAttr / CssRule
 #[derive(Debug, Clone, Default)]
 pub struct CssAttr(HashMap<String, String>);
 
@@ -338,9 +335,7 @@ impl CssRule {
     }
 }
 
-// ============================================================
-// Parser
-// ============================================================
+/// Parser
 
 #[derive(Debug, Clone)]
 pub struct Parser {
@@ -515,23 +510,16 @@ fn parse_declaration_text(block: &str) -> HashMap<String, String> {
     declarations
 }
 
-// ============================================================
-// css_into_node
-// ============================================================
+/// css_into_node
 
-pub fn css_into_node(
-    node: &mut Node,
-    css: &CssRule,
-) -> std::result::Result<(), anyhow::Error> {
+pub fn css_into_node(node: &mut Node, css: &CssRule) -> std::result::Result<(), anyhow::Error> {
     for (selector, attr) in css.0.iter() {
         apply_css_rule(node, selector, attr);
     }
     Ok(())
 }
 
-// ============================================================
-// Tests
-// ============================================================
+/// Tests
 
 #[cfg(test)]
 mod tests {
@@ -725,7 +713,10 @@ mod tests {
 
         // Layout rendering with fixed terminal size
         use crate::{layout::layout::TermMap, tui::graph_api::TermLayout};
-        let term_map = TermMap { columns: 80, rows: 24 };
+        let term_map = TermMap {
+            columns: 80,
+            rows: 24,
+        };
         let mut term_layout = TermLayout::new(&term_map).unwrap();
         term_layout.draw(&node, &term_map).unwrap();
 

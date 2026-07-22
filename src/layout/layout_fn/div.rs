@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::{
-    layout::{layout::TermMap, DEFAULT_LAYOUT},
+    layout::{DEFAULT_LAYOUT, layout::TermMap},
     tdom::node::{Node, NodeType},
     tui::graph_api::TermLayout,
 };

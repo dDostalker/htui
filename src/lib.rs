@@ -26,9 +26,21 @@ use crate::{
 };
 /// 总体的渲染解析
 fn parse(html: &mut html_parse::Parser, css: &mut css_parse::Parser) -> Result<Node> {
-    let css = css.parse().unwrap();
-    let mut node = html.parse().unwrap();
-    css_parse::css_into_node(&mut node, &css).unwrap();
+    // 从 HTML 中提取 <style> / <link> 中的 CSS
+    let (mut node, embedded_css) = html.parse_with_css()?;
+
+    // 解析外部 CSS 字符串
+    let external = css.parse().unwrap();
+
+    // 解析嵌入 CSS 并合并
+    if !embedded_css.trim().is_empty() {
+        let mut embedded_parser = css_parse::Parser::new(&embedded_css);
+        if let Ok(embedded) = embedded_parser.parse() {
+            // 先应用嵌入 CSS，再应用外部 CSS（外部可覆盖）
+            css_parse::css_into_node(&mut node, &embedded).unwrap();
+        }
+    }
+    css_parse::css_into_node(&mut node, &external).unwrap();
     Ok(node)
 }
 /// 渲染

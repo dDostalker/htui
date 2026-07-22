@@ -35,6 +35,8 @@ pub enum NodeType {
     Button,
     Textarea,
     Label,
+    Style,
+    Link,
     Text(String),
 }
 
@@ -139,7 +141,7 @@ impl Node {
 //   - 优势：无 unsafe，O(1) 访问，增删安全
 //   - 代价：所有遍历需要传入 &SlotMap
 //
-// 方案 B: Rc<RefCell<Node>> 
+// 方案 B: Rc<RefCell<Node>>
 //   - 用 Weak 做 parent，Rc 做 children
 //   - 优势：内存安全，自动管理生命周期
 //   - 代价：运行时 borrow check 开销，循环引用需手动处理

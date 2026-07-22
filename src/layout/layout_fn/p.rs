@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::{
-    layout::{layout::TermMap, DEFAULT_LAYOUT},
+    layout::{DEFAULT_LAYOUT, layout::TermMap},
     tdom::node::{Node, NodeType},
     tui::graph_api::TermLayout,
 };
@@ -10,7 +10,7 @@ pub fn layout_p(tdom: &Node, term_layout: &mut TermLayout, term_map: &TermMap) -
     if tdom.node_type != NodeType::P {
         return Ok(());
     }
-    
+
     // 块级元素开始前换行
     term_layout.new_line();
 
@@ -27,7 +27,7 @@ pub fn layout_p(tdom: &Node, term_layout: &mut TermLayout, term_map: &TermMap) -
             }
         }
     }
-    
+
     // 块级元素结束后换行
     term_layout.new_line();
     Ok(())

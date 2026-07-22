@@ -25,10 +25,7 @@ fn main() -> Result<()> {
             "h1 { color: cyan; } h2 { color: green; } h3 { color: yellow; } \
              h4 { color: blue; } h5 { color: magenta; }",
         ),
-        "image" => (
-            include_str!("image.html"),
-            "",
-        ),
+        "image" => (include_str!("image.html"), ""),
         "colors" => (
             include_str!("colors.html"),
             ".red { color: red; } .green { color: green; } .blue { color: blue; } \
@@ -46,8 +43,8 @@ fn main() -> Result<()> {
         ),
         "css" => (
             include_str!("css.html"),
-            "p { color: red; } h1 { color: blue; } h2 { color: green; } \
-             h3 { color: yellow; } h4 { color: cyan; }",
+            // css.html 已内嵌 <style> 块，无需额外 CSS
+            "",
         ),
         "helloworld" => (
             include_str!("helloworld.html"),
