@@ -13,7 +13,7 @@ use crate::tdom::{
     node::{Node, NodeArena, NodeId, NodeType},
 };
 
-/// HTML 解析器（slotmap arena 版）。
+/// HTML parser (slotmap arena-based).
 #[derive(Debug)]
 pub struct Parser {
     input: String,
@@ -26,7 +26,7 @@ impl Parser {
         }
     }
 
-    /// 解析 HTML 并返回 (root_id, arena, embedded_css)。
+    /// Parse HTML and return (root_id, arena, embedded_css).
     pub fn parse(&mut self) -> Result<(NodeId, NodeArena, String)> {
         debug!("html5ever 解析 HTML，{} 字节", self.input.len());
 

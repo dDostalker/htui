@@ -94,7 +94,7 @@ impl Attr {
         Attr { attributes }
     }
 
-    /// 获取指定属性的值为String
+    /// Get the value of an attribute as a `String`.
     pub fn get(&self, key: &str) -> Option<&String> {
         self.attributes.get(key)
     }
@@ -104,7 +104,7 @@ impl Attr {
         self.get(key).and_then(|v| v.parse::<i32>().ok())
     }
 
-    /// 将属性值解析为 `u32`。
+    /// Parse the attribute value as `u32`.
     pub fn get_as_u32(&self, key: &str) -> Option<u32> {
         self.get(key).and_then(|v| v.parse::<u32>().ok())
     }
@@ -129,7 +129,7 @@ impl Attr {
         })
     }
 
-    /// 数字形式布尔属性：解析值为 `"1"` / `"0"` 的属性。
+    /// Numeric boolean attribute: parse `"1"` / `"0"` values.
     pub fn get_as_bool_number(&self, key: &str) -> Option<bool> {
         self.get(key).and_then(|v| match v.as_str() {
             "1" => Some(true),
@@ -233,12 +233,12 @@ impl Attr {
         self.get("src")
     }
 
-    /// 获取 alt 属性
+    /// Get the `alt` attribute.
     pub fn get_alt(&self) -> Option<&String> {
         self.get("alt")
     }
 
-    /// 判断是否为装饰性图片,即`alt=""为空
+    /// Check if this is a decorative image (`alt=""`).
     pub fn is_decorative_img(&self) -> bool {
         matches!(self.get("alt"), Some(v) if v.is_empty())
     }
@@ -263,8 +263,8 @@ impl Attr {
         self.get("usemap")
     }
 
-    /// srcset属性（响应式图片候选列表，原始字符串）
-    /// 格式较复杂,暂时保留原始字符串
+    /// Get the `srcset` attribute (responsive image candidate list, raw string).
+    /// The format is complex; the raw string is preserved as-is.
     pub fn get_srcset(&self) -> Option<&String> {
         self.get("srcset")
     }

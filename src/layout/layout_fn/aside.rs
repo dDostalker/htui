@@ -139,11 +139,21 @@ mod tests {
         (root_id, arena)
     }
 
+    const COLS: u16 = 80;
+    const ROWS: u16 = 24;
+
+    fn mock_term_map() -> TermMap {
+        TermMap {
+            columns: COLS,
+            rows: ROWS,
+        }
+    }
+
     #[test]
     fn test_aside_basic() {
         init();
         let (root_id, arena) = setup("<aside>Side note</aside>", "");
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
         let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -156,7 +166,7 @@ mod tests {
         let html = "<aside>Colored aside</aside>";
         let css = "aside { color: blue; background-color: yellow; }";
         let (root_id, arena) = setup(html, css);
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
         let has_fg = tl.layout.iter().any(|b| b.fcolor == Some(Color::Blue));
@@ -170,7 +180,7 @@ mod tests {
         init();
         let html = "<aside><div>Inner div</div></aside>";
         let (root_id, arena) = setup(html, "");
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
         let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -188,7 +198,7 @@ mod tests {
         let html = "<aside>Half</aside>";
         let css = "aside { width: 50%; background-color: blue; color: white; }";
         let (root_id, arena) = setup(html, css);
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
         let cols = term_map.columns as usize;
 
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
@@ -223,7 +233,7 @@ mod tests {
         let html = "<aside>Fix</aside>";
         let css = "aside { width: 20px; background-color: red; }";
         let (root_id, arena) = setup(html, css);
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
 
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
@@ -246,7 +256,7 @@ mod tests {
         let html = "<aside>Full width</aside>";
         let css = "aside { background-color: green; }";
         let (root_id, arena) = setup(html, css);
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
 
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
@@ -274,7 +284,7 @@ mod tests {
         let html = "<aside>Centered</aside>";
         let css = "aside { text-align: center; width: 40px; background-color: darkblue; }";
         let (root_id, arena) = setup(html, css);
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
         let cols = term_map.columns as usize;
 
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
@@ -317,7 +327,7 @@ mod tests {
         let html = "<aside>Right</aside>";
         let css = "aside { text-align: right; width: 40px; background-color: darkblue; }";
         let (root_id, arena) = setup(html, css);
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
         let cols = term_map.columns as usize;
 
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();

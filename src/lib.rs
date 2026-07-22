@@ -4,8 +4,8 @@ pub mod tdom;
 pub mod tui;
 
 use std::io::{Write, stdout};
-use std::sync::mpsc;
 use std::sync::Arc;
+use std::sync::mpsc;
 
 use anyhow::Result;
 use crossterm::{
@@ -60,7 +60,13 @@ fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css_rules: Arc<C
     let mut term_layout: Option<TermLayout> = None;
 
     loop {
-        let mut cmd = rx.recv().unwrap();
+        let mut cmd = match rx.recv() {
+            Ok(c) => c,
+            Err(e) => {
+                log::error!("Render channel disconnected: {}", e);
+                break;
+            }
+        };
         while let Ok(next) = rx.try_recv() {
             cmd = next;
             if matches!(cmd, RenderCmd::Quit) {
@@ -75,9 +81,13 @@ fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css_rules: Arc<C
                 if let Some(ref mut tl) = term_layout {
                     tl.scroll_y = scroll_y;
                     tl.clamp_scroll();
-                    execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0)).unwrap();
+                    if let Err(e) = execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0)) {
+                        log::error!("Failed to clear screen: {}", e);
+                    }
                     tl.render();
-                    stdout().flush().unwrap();
+                    if let Err(e) = stdout().flush() {
+                        log::error!("Failed to flush stdout: {}", e);
+                    }
                 }
             }
 
@@ -90,8 +100,20 @@ fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css_rules: Arc<C
                     }
                 };
 
-                let term_map = TermMap::get_ter_map().unwrap();
-                let mut tl = TermLayout::new(&term_map, zoom).unwrap();
+                let term_map = match TermMap::get_ter_map() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        log::error!("Failed to get terminal size: {}", e);
+                        continue;
+                    }
+                };
+                let mut tl = match TermLayout::new(&term_map, zoom) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        log::error!("Failed to create layout: {}", e);
+                        continue;
+                    }
+                };
                 if let Err(e) = tl.draw(&arena, root_id, &term_map) {
                     log::error!("Layout failed: {}", e);
                     continue;
@@ -100,9 +122,13 @@ fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css_rules: Arc<C
                 tl.scroll_y = scroll_y;
                 tl.clamp_scroll();
 
-                execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0)).unwrap();
+                if let Err(e) = execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0)) {
+                    log::error!("Failed to clear screen: {}", e);
+                }
                 tl.render();
-                stdout().flush().unwrap();
+                if let Err(e) = stdout().flush() {
+                    log::error!("Failed to flush stdout: {}", e);
+                }
 
                 term_layout = Some(tl);
             }
@@ -115,8 +141,15 @@ fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css_rules: Arc<C
 // ============================================================
 
 pub fn render(html: &str, css: &str) {
-    enable_raw_mode().unwrap();
-    execute!(stdout(), EnterAlternateScreen, EnableMouseCapture, Hide).unwrap();
+    if let Err(e) = enable_raw_mode() {
+        log::error!("Failed to enable raw mode: {}", e);
+        return;
+    }
+    if let Err(e) = execute!(stdout(), EnterAlternateScreen, EnableMouseCapture, Hide) {
+        log::error!("Failed to enter alternate screen: {}", e);
+        let _ = disable_raw_mode();
+        return;
+    }
 
     let css_rules = match build_css_rules(html, css) {
         Ok(r) => Arc::new(r),
@@ -139,14 +172,23 @@ pub fn render(html: &str, css: &str) {
 
     let mut scroll_y: u32 = 0;
     let mut zoom: f32 = 1.0;
-    let mut rows: u16 = TermMap::get_ter_map().unwrap().rows;
+    let mut rows: u16 = match TermMap::get_ter_map() {
+        Ok(m) => m.rows,
+        Err(e) => {
+            log::error!("Failed to get terminal size: {}", e);
+            24
+        }
+    };
 
-    tx.send(RenderCmd::Redraw { scroll_y, zoom }).unwrap();
+    if let Err(e) = tx.send(RenderCmd::Redraw { scroll_y, zoom }) {
+        log::error!("Failed to send initial Redraw: {}", e);
+        let _ = tx.send(RenderCmd::Quit);
+    }
 
     loop {
         match trigger_refresh(&mut scroll_y, &mut zoom, rows) {
             Some(RenderCmd::Quit) => {
-                tx.send(RenderCmd::Quit).unwrap();
+                let _ = tx.send(RenderCmd::Quit);
                 break;
             }
             Some(cmd) => {
@@ -155,14 +197,19 @@ pub fn render(html: &str, css: &str) {
                         rows = map.rows;
                     }
                 }
-                tx.send(cmd).unwrap();
+                if let Err(e) = tx.send(cmd) {
+                    log::error!("Failed to send render command: {}", e);
+                    break;
+                }
             }
             None => {}
         }
     }
 
-    render_handle.join().unwrap();
+    if let Err(e) = render_handle.join() {
+        log::error!("Render thread panicked: {:?}", e);
+    }
 
-    execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture, Show).unwrap();
-    disable_raw_mode().unwrap();
+    let _ = execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture, Show);
+    let _ = disable_raw_mode();
 }

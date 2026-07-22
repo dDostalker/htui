@@ -10,16 +10,16 @@ use crate::tdom::attributes::Attr;
 // ============================================================
 
 new_key_type! {
-    /// DOM 树节点 ID。
+    /// DOM tree node ID.
     ///
-    /// 由 `SlotMap<NodeId, Node>` 分配，保证：
-    ///   - 类型安全（与普通 u64 不混淆）
-    ///   - 版本检测（访问已删除节点会 panic）
+    /// Allocated by `SlotMap<NodeId, Node>`, guarantees:
+    ///   - Type-safe (not interchangeable with plain u64)
+    ///   - Versioned (accessing a removed node will panic)
     ///   - Copy + Send + Sync
     pub struct NodeId;
 }
 
-/// 全局 DOM 节点存储
+/// Global DOM node storage.
 pub type NodeArena = SlotMap<NodeId, Node>;
 
 // ============================================================
@@ -79,9 +79,9 @@ impl NodeType {
 #[derive(Debug)]
 pub struct Node {
     pub node_type: NodeType,
-    /// 子节点 ID 列表（保持插入顺序）
+    /// Child node IDs (insertion order).
     pub children: Vec<NodeId>,
-    /// 父节点 ID。根节点为 None
+    /// Parent node ID. `None` for the root node.
     pub parent: Option<NodeId>,
     pub attributes: Attr,
     pub css_attr: CssAttr,
@@ -122,10 +122,10 @@ impl Node {
     // 树操作辅助（需配合 arena 使用）
     // ============================================================
 
-    /// 将子节点追加到当前节点（同时设置子节点的 parent）
+    /// Append a child node to the current node (also sets child's parent).
     pub fn append_child(arena: &mut NodeArena, parent_id: NodeId, child_id: NodeId) {
         let child_parent = &mut arena[child_id].parent;
-        assert!(child_parent.is_none(), "子节点已有父节点");
+        assert!(child_parent.is_none(), "Child already has a parent");
         *child_parent = Some(parent_id);
         arena[parent_id].children.push(child_id);
     }
@@ -134,17 +134,17 @@ impl Node {
         self.children.get(index).copied()
     }
 
-    /// 子节点数量
+    /// Number of child nodes.
     pub fn child_count(&self) -> usize {
         self.children.len()
     }
 
-    /// 迭代子节点 ID
+    /// Iterate over child node IDs.
     pub fn child_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.children.iter().copied()
     }
 
-    /// 获取前一个兄弟节点
+    /// Get the previous sibling node.
     pub fn prev_sibling(&self, arena: &NodeArena) -> Option<NodeId> {
         let parent_id = self.parent?;
         let parent = &arena[parent_id];
@@ -158,7 +158,7 @@ impl Node {
         None
     }
 
-    /// 获取下一个兄弟节点
+    /// Get the next sibling node.
     pub fn next_sibling(&self, arena: &NodeArena) -> Option<NodeId> {
         let parent_id = self.parent?;
         let parent = &arena[parent_id];
@@ -172,8 +172,8 @@ impl Node {
         None
     }
 
-    /// 递归构建 parent 指针。树构建后调用一次。
-    /// （通常由 `append_child` 自动维护，此方法作为批量修复工具）
+    /// Recursively rebuild parent pointers. Call once after tree construction.
+    /// (Normally maintained automatically by `append_child`; this is a bulk-repair tool.)
     pub fn fix_parent_pointers(arena: &mut NodeArena, node_id: NodeId) {
         let children: Vec<NodeId> = arena[node_id].children.clone();
         for child_id in children {
@@ -182,7 +182,7 @@ impl Node {
         }
     }
 
-    /// 深度优先遍历所有后代（含自身）
+    /// Depth-first traversal of all descendants (including self).
     pub fn descendants<'a>(arena: &'a NodeArena, start_id: NodeId) -> Descendants<'a> {
         Descendants {
             arena,

@@ -75,11 +75,15 @@ pub struct Block {
 
 impl Deref for Block {
     type Target = str;
-    fn deref(&self) -> &Self::Target { &self.word }
+    fn deref(&self) -> &Self::Target {
+        &self.word
+    }
 }
 
 impl DerefMut for Block {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.word }
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.word
+    }
 }
 
 impl Display for Block {
@@ -101,14 +105,36 @@ impl Display for Block {
 }
 
 impl Block {
-    fn is_render(&self) -> bool { self.render.is_some() }
-    pub fn new(word: String, fcolor: Option<Color>, bcolor: Option<Color>) -> Self {
-        Self { word, fcolor, bcolor, render: None }
+    fn is_render(&self) -> bool {
+        self.render.is_some()
     }
-    pub fn new_render(word: String, fcolor: Option<Color>, bcolor: Option<Color>, render: Option<String>) -> Self {
+    pub fn new(word: String, fcolor: Option<Color>, bcolor: Option<Color>) -> Self {
+        Self {
+            word,
+            fcolor,
+            bcolor,
+            render: None,
+        }
+    }
+    pub fn new_render(
+        word: String,
+        fcolor: Option<Color>,
+        bcolor: Option<Color>,
+        render: Option<String>,
+    ) -> Self {
         match render {
-            Some(render) => Self { word, fcolor, bcolor, render: Some(RefCell::new(render)) },
-            None => Self { word, fcolor, bcolor, render: None },
+            Some(render) => Self {
+                word,
+                fcolor,
+                bcolor,
+                render: Some(RefCell::new(render)),
+            },
+            None => Self {
+                word,
+                fcolor,
+                bcolor,
+                render: None,
+            },
         }
     }
     fn render_str(&self) -> String {
@@ -267,7 +293,9 @@ impl TermLayout {
 
 impl TermLayout {
     pub fn new_line(&mut self) {
-        if self.is_full() { return; }
+        if self.is_full() {
+            return;
+        }
         let columns = self.columns as u32;
         let remaining = columns - (self.point % columns);
         let new_point = (self.point + remaining).min(self.max_cells() as u32);
@@ -275,14 +303,18 @@ impl TermLayout {
     }
 
     pub fn paint_string(&mut self, s: &str, fcolor: Option<Color>, bcolor: Option<Color>) -> u32 {
-        if self.is_full() { return 0; }
+        if self.is_full() {
+            return 0;
+        }
 
         let max = self.max_cells();
         let mut cell_count = 0u32;
 
         for c in s.chars() {
             let idx = self.point as usize;
-            if idx >= max { break; }
+            if idx >= max {
+                break;
+            }
             let width = char_width(c);
             self.layout[idx] = Block::new(c.to_string(), fcolor, bcolor);
             if width > 1 {
@@ -307,7 +339,9 @@ impl TermLayout {
     }
 
     pub fn paint_img(&mut self, path: String, size: (u32, u32)) -> u32 {
-        if self.is_full() { return 0; }
+        if self.is_full() {
+            return 0;
+        }
 
         debug!("Loading image: path='{}' size={:?}", path, size);
 
@@ -375,15 +409,24 @@ pub fn trigger_refresh(scroll_y: &mut u32, zoom: &mut f32, rows: u16) -> Option<
                 match key.code {
                     KeyCode::Char('=') | KeyCode::Char('+') => {
                         *zoom = (*zoom + ZOOM_STEP).min(ZOOM_MAX);
-                        return Some(RenderCmd::Redraw { scroll_y: *scroll_y, zoom: *zoom });
+                        return Some(RenderCmd::Redraw {
+                            scroll_y: *scroll_y,
+                            zoom: *zoom,
+                        });
                     }
                     KeyCode::Char('-') | KeyCode::Char('_') => {
                         *zoom = (*zoom - ZOOM_STEP).max(ZOOM_MIN);
-                        return Some(RenderCmd::Redraw { scroll_y: *scroll_y, zoom: *zoom });
+                        return Some(RenderCmd::Redraw {
+                            scroll_y: *scroll_y,
+                            zoom: *zoom,
+                        });
                     }
                     KeyCode::Char('0') => {
                         *zoom = 1.0;
-                        return Some(RenderCmd::Redraw { scroll_y: *scroll_y, zoom: *zoom });
+                        return Some(RenderCmd::Redraw {
+                            scroll_y: *scroll_y,
+                            zoom: *zoom,
+                        });
                     }
                     _ => {}
                 }
@@ -394,29 +437,41 @@ pub fn trigger_refresh(scroll_y: &mut u32, zoom: &mut f32, rows: u16) -> Option<
 
                 KeyCode::Up | KeyCode::Char('k') => {
                     *scroll_y = scroll_y.saturating_sub(1);
-                    return Some(RenderCmd::Rerender { scroll_y: *scroll_y });
+                    return Some(RenderCmd::Rerender {
+                        scroll_y: *scroll_y,
+                    });
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     *scroll_y = scroll_y.saturating_add(1);
-                    return Some(RenderCmd::Rerender { scroll_y: *scroll_y });
+                    return Some(RenderCmd::Rerender {
+                        scroll_y: *scroll_y,
+                    });
                 }
                 KeyCode::PageUp => {
                     let step = (rows as u32).saturating_sub(1).max(1);
                     *scroll_y = scroll_y.saturating_sub(step);
-                    return Some(RenderCmd::Rerender { scroll_y: *scroll_y });
+                    return Some(RenderCmd::Rerender {
+                        scroll_y: *scroll_y,
+                    });
                 }
                 KeyCode::PageDown => {
                     let step = (rows as u32).saturating_sub(1).max(1);
                     *scroll_y = scroll_y.saturating_add(step);
-                    return Some(RenderCmd::Rerender { scroll_y: *scroll_y });
+                    return Some(RenderCmd::Rerender {
+                        scroll_y: *scroll_y,
+                    });
                 }
                 KeyCode::Home => {
                     *scroll_y = 0;
-                    return Some(RenderCmd::Rerender { scroll_y: *scroll_y });
+                    return Some(RenderCmd::Rerender {
+                        scroll_y: *scroll_y,
+                    });
                 }
                 KeyCode::End => {
                     *scroll_y = u32::MAX;
-                    return Some(RenderCmd::Rerender { scroll_y: *scroll_y });
+                    return Some(RenderCmd::Rerender {
+                        scroll_y: *scroll_y,
+                    });
                 }
                 _ => {}
             }
@@ -429,28 +484,39 @@ pub fn trigger_refresh(scroll_y: &mut u32, zoom: &mut f32, rows: u16) -> Option<
                 MouseEventKind::ScrollUp => {
                     if ctrl {
                         *zoom = (*zoom - ZOOM_STEP).max(ZOOM_MIN);
-                        Some(RenderCmd::Redraw { scroll_y: *scroll_y, zoom: *zoom })
+                        Some(RenderCmd::Redraw {
+                            scroll_y: *scroll_y,
+                            zoom: *zoom,
+                        })
                     } else {
                         *scroll_y = scroll_y.saturating_sub(SCROLL_LINES_PER_TICK);
-                        Some(RenderCmd::Rerender { scroll_y: *scroll_y })
+                        Some(RenderCmd::Rerender {
+                            scroll_y: *scroll_y,
+                        })
                     }
                 }
                 MouseEventKind::ScrollDown => {
                     if ctrl {
                         *zoom = (*zoom + ZOOM_STEP).min(ZOOM_MAX);
-                        Some(RenderCmd::Redraw { scroll_y: *scroll_y, zoom: *zoom })
+                        Some(RenderCmd::Redraw {
+                            scroll_y: *scroll_y,
+                            zoom: *zoom,
+                        })
                     } else {
                         *scroll_y = scroll_y.saturating_add(SCROLL_LINES_PER_TICK);
-                        Some(RenderCmd::Rerender { scroll_y: *scroll_y })
+                        Some(RenderCmd::Rerender {
+                            scroll_y: *scroll_y,
+                        })
                     }
                 }
                 _ => None,
             }
         }
 
-        Ok(Event::Resize(_, _new_rows)) => {
-            Some(RenderCmd::Redraw { scroll_y: *scroll_y, zoom: *zoom })
-        }
+        Ok(Event::Resize(_, _new_rows)) => Some(RenderCmd::Redraw {
+            scroll_y: *scroll_y,
+            zoom: *zoom,
+        }),
 
         _ => None,
     }
@@ -471,11 +537,19 @@ struct Img {
 
 impl Img {
     fn new(path: PathBuf, term_size: (u32, u32)) -> Self {
-        Self { path, term_size, picture: None, cloumns: 0, rows: 0 }
+        Self {
+            path,
+            term_size,
+            picture: None,
+            cloumns: 0,
+            rows: 0,
+        }
     }
 
     pub fn _create_img(&mut self) -> Result<()> {
-        if self.picture.is_some() { return Ok(()); }
+        if self.picture.is_some() {
+            return Ok(());
+        }
 
         let img = image::open(&self.path)?;
         let img = img.resize(self.term_size.0, self.term_size.1, FilterType::Nearest);
@@ -504,11 +578,18 @@ impl Img {
                             b_sum += pixel[2] as u32;
                             count += 1;
 
-                            let brightness = (pixel[0] as u16 + pixel[1] as u16 + pixel[2] as u16) / 3;
+                            let brightness =
+                                (pixel[0] as u16 + pixel[1] as u16 + pixel[2] as u16) / 3;
                             if brightness < 128 {
                                 let bit_index = match (dx, dy) {
-                                    (0, 0) => 0, (0, 1) => 1, (0, 2) => 2, (1, 0) => 3,
-                                    (1, 1) => 4, (1, 2) => 5, (0, 3) => 6, (1, 3) => 7,
+                                    (0, 0) => 0,
+                                    (0, 1) => 1,
+                                    (0, 2) => 2,
+                                    (1, 0) => 3,
+                                    (1, 1) => 4,
+                                    (1, 2) => 5,
+                                    (0, 3) => 6,
+                                    (1, 3) => 7,
                                     _ => 0,
                                 };
                                 bits |= 1 << bit_index;
@@ -520,17 +601,22 @@ impl Img {
                 r_sum = r_sum.checked_div(count).ok_or(anyhow!("r_sum is 0"))?;
                 g_sum = g_sum.checked_div(count).ok_or(anyhow!("g_sum is 0"))?;
                 b_sum = b_sum.checked_div(count).ok_or(anyhow!("b_sum is 0"))?;
-                let color = Color::Rgb { r: r_sum as u8, g: g_sum as u8, b: b_sum as u8 };
-                self.picture.as_mut().unwrap().push(format!(
-                    "{}",
-                    char::from_u32(0x2800 + bits).unwrap().to_string().with(color)
-                ));
+                let color = Color::Rgb {
+                    r: r_sum as u8,
+                    g: g_sum as u8,
+                    b: b_sum as u8,
+                };
+                if let Some(picture) = self.picture.as_mut() {
+                    let ch = char::from_u32(0x2800 + bits).unwrap_or(' ');
+                    picture.push(format!("{}", ch.to_string().with(color)));
+                }
             }
         }
         Ok(())
     }
 }
 
+#[cfg(test)]
 #[test]
 fn test_create_img() {
     let mut img = Img::new(
@@ -538,10 +624,7 @@ fn test_create_img() {
         (320, 160),
     );
     img._create_img().unwrap();
-    println!("{}, {}", img.cloumns, img.rows);
-    for (i, row) in img.picture.as_ref().unwrap().iter().enumerate() {
-        print!("{}", row);
-        if (i + 1) % img.cloumns as usize == 0 { println!() }
-    }
-    println!();
+    assert!(img.cloumns > 0, "image should have columns");
+    assert!(img.rows > 0, "image should have rows");
+    assert!(img.picture.is_some(), "image should have picture data");
 }

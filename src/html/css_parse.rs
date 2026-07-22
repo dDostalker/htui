@@ -322,18 +322,18 @@ impl CssAttr {
     fn add(&mut self, css: CssAttr) {
         self.0.extend(css.0);
     }
-    /// 前景色 color
+    /// Foreground color (CSS `color`).
     pub fn get_color(&self) -> Option<Color> {
         self.0.get("color").and_then(|c| parse_color_str(c))
     }
-    /// 背景色 background-color
+    /// Background color (CSS `background-color`, falls back to `background`).
     pub fn get_bg_color(&self) -> Option<Color> {
         self.0
             .get("background-color")
             .or_else(|| self.0.get("background"))
             .and_then(|c| parse_color_str(c))
     }
-    /// 文本对齐 text-align
+    /// Text alignment (CSS `text-align`).
     pub fn get_text_align(&self) -> TextAlign {
         match self.0.get("text-align").map(|s| s.as_str()) {
             Some("center") => TextAlign::Center,
@@ -341,7 +341,7 @@ impl CssAttr {
             _ => TextAlign::Left,
         }
     }
-    /// 字重 font-weight
+    /// Font weight (CSS `font-weight`).
     pub fn get_font_weight(&self) -> FontWeight {
         match self.0.get("font-weight").map(|s| s.as_str()) {
             Some("bold") | Some("bolder") | Some("700") | Some("800") | Some("900") => {
@@ -350,10 +350,11 @@ impl CssAttr {
             _ => FontWeight::Normal,
         }
     }
-    /// 宽度 width（标准 CSS 语法）
-    /// - `80%` → 终端宽度的 80%
-    /// - `40px` → 固定 40 列
-    /// - 无 / `auto` → None (占满)
+    /// Element width (CSS `width`).
+    ///
+    /// - `80%` → 80% of terminal width
+    /// - `40px` → fixed 40 columns
+    /// - `auto` / missing → `None` (fill available)
     pub fn get_width(&self, term_columns: usize) -> Option<usize> {
         let raw = self.0.get("width")?;
         let s = raw.trim();
@@ -451,7 +452,7 @@ fn parse_named_color(name: &str) -> Option<Color> {
     }
 }
 
-/// 文本对齐方向
+/// Text alignment direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextAlign {
     Left,
@@ -459,7 +460,7 @@ pub enum TextAlign {
     Right,
 }
 
-/// 字重
+/// Font weight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FontWeight {
     Normal,

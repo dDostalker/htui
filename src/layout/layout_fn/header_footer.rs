@@ -21,7 +21,7 @@ fn collect_text(arena: &NodeArena, node: &Node) -> String {
     s
 }
 
-/// 渲染 `<header>` — 实心背景块，宽度按 CSS `width` 等比缩放
+/// Render `<header>` — solid background block, width scaled by CSS `width`.
 pub fn layout_header(
     node: &Node,
     term_layout: &mut TermLayout,
@@ -37,7 +37,7 @@ pub fn layout_header(
     render_block(node, term_layout, term_map, arena)
 }
 
-/// 渲染 `<footer>` — 同 header
+/// Render `<footer>` — same as header.
 pub fn layout_footer(
     node: &Node,
     term_layout: &mut TermLayout,
@@ -80,7 +80,16 @@ fn render_block(
     if left > 0 {
         term_layout.paint_string(&" ".repeat(left), None, None);
     }
-    render_text(node, term_layout, term_map, arena, fg, bg, align, block_width);
+    render_text(
+        node,
+        term_layout,
+        term_map,
+        arena,
+        fg,
+        bg,
+        align,
+        block_width,
+    );
     // 填充到物理行尾
     fill_to_col(term_layout, left + block_width, phys_cols, fg, bg);
 
@@ -159,6 +168,16 @@ mod tests {
     };
     use crossterm::style::Color;
 
+    const COLS: u16 = 80;
+    const ROWS: u16 = 24;
+
+    fn mock_term_map() -> TermMap {
+        TermMap {
+            columns: COLS,
+            rows: ROWS,
+        }
+    }
+
     fn init() {
         let _ = env_logger::builder().is_test(true).try_init();
     }
@@ -185,7 +204,7 @@ mod tests {
     fn test_header_basic() {
         init();
         let (root_id, arena) = setup("<header>My Site</header>", "");
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
         let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -196,7 +215,7 @@ mod tests {
     fn test_footer_basic() {
         init();
         let (root_id, arena) = setup("<footer>(c) 2024</footer>", "");
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
         let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -209,7 +228,7 @@ mod tests {
         let html = "<header>Colored</header>";
         let css = "header { color: blue; background-color: yellow; }";
         let (root_id, arena) = setup(html, css);
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
         let has_fg = tl.layout.iter().any(|b| b.fcolor == Some(Color::Blue));
@@ -224,13 +243,15 @@ mod tests {
         let html = "<header>Solid</header>";
         let css = "header { background-color: green; }";
         let (root_id, arena) = setup(html, css);
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
         let cols = term_map.columns as usize;
 
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
 
-        let content_idx = tl.layout.iter()
+        let content_idx = tl
+            .layout
+            .iter()
             .position(|b| b.word != " " && b.bcolor == Some(Color::Green))
             .expect("应有绿色文本");
         let content_row = content_idx / cols;
@@ -250,14 +271,16 @@ mod tests {
         let html = "<header>Half</header>";
         let css = "header { width: 50%; background-color: blue; color: white; }";
         let (root_id, arena) = setup(html, css);
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
         let cols = term_map.columns as usize;
 
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
 
         // 内容行
-        let content_idx = tl.layout.iter()
+        let content_idx = tl
+            .layout
+            .iter()
             .position(|b| b.bcolor.is_some() && b.word != " ")
             .expect("应有带背景色的内容");
         let content_row = content_idx / cols;
@@ -291,13 +314,15 @@ mod tests {
         let html = "<header>Fix</header>";
         let css = "header { width: 20px; background-color: red; }";
         let (root_id, arena) = setup(html, css);
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
         let cols = term_map.columns as usize;
 
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
 
-        let content_idx = tl.layout.iter()
+        let content_idx = tl
+            .layout
+            .iter()
             .position(|b| b.bcolor.is_some() && b.word != " ")
             .expect("应有内容");
         let row = content_idx / cols;
@@ -318,7 +343,7 @@ mod tests {
         let html = "<header>Site Title</header>";
         let css = "header { background-color: darkblue; text-align: center; }";
         let (root_id, arena) = setup(html, css);
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
         let cols = term_map.columns as usize;
 
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
@@ -328,7 +353,9 @@ mod tests {
         assert!(!canvas.contains('═'));
         assert!(!canvas.contains('─'));
 
-        let content_idx = tl.layout.iter()
+        let content_idx = tl
+            .layout
+            .iter()
             .position(|b| b.bcolor.is_some() && b.word != " ")
             .expect("应有内容");
         let row = content_idx / cols;
@@ -350,7 +377,7 @@ mod tests {
         let html = "<p>Above</p><footer>Copyright</footer>";
         let css = "footer { background-color: black; }";
         let (root_id, arena) = setup(html, css);
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
         let cols = term_map.columns as usize;
 
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
@@ -360,7 +387,9 @@ mod tests {
         assert!(!canvas.contains('─'));
         assert!(!canvas.contains('═'));
 
-        let content_idx = tl.layout.iter()
+        let content_idx = tl
+            .layout
+            .iter()
             .position(|b| b.word == "C")
             .expect("应有 footer");
         let row = content_idx / cols;
@@ -377,7 +406,7 @@ mod tests {
         let html = "<header>Centered</header>";
         let css = "header { text-align: center; }";
         let (root_id, arena) = setup(html, css);
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
         let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -390,7 +419,7 @@ mod tests {
         let html = "<header>Right</header>";
         let css = "header { text-align: right; }";
         let (root_id, arena) = setup(html, css);
-        let term_map = TermMap::get_ter_map().unwrap();
+        let term_map = mock_term_map();
         let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
         tl.draw(&arena, root_id, &term_map).unwrap();
         let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();

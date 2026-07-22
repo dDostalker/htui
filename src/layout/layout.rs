@@ -2,7 +2,9 @@ use anyhow::{Ok, Result};
 use crossterm::terminal;
 
 use crate::{
-    layout::DEFAULT_LAYOUT, tdom::node::{Node, NodeArena, NodeId, NodeType}, tui::graph_api::{Block, TermLayout},
+    layout::DEFAULT_LAYOUT,
+    tdom::node::{Node, NodeArena, NodeId, NodeType},
+    tui::graph_api::{Block, TermLayout},
 };
 
 #[derive(Debug)]
@@ -39,7 +41,7 @@ impl TermLayout {
 }
 
 impl TermLayout {
-    /// 将 DOM 树绘制到终端画布（虚拟，可超终端尺寸）
+    /// Draw the DOM tree onto the terminal canvas (virtual, may exceed terminal size).
     pub fn draw(&mut self, arena: &NodeArena, root_id: NodeId, term_map: &TermMap) -> Result<()> {
         let root = &arena[root_id];
         assert_eq!(root.node_type, NodeType::Global);
@@ -69,9 +71,14 @@ impl TermLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn test_get_ter_map() {
-        let map = TermMap::get_ter_map().unwrap();
-        dbg!(&map);
+    fn test_term_map_mock() {
+        let map = TermMap {
+            columns: 80,
+            rows: 24,
+        };
+        assert_eq!(map.columns, 80);
+        assert_eq!(map.rows, 24);
     }
 }

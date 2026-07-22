@@ -4,9 +4,8 @@ use crate::{
     layout::{
         layout::TermMap,
         layout_fn::{
-            aside::layout_aside, div::layout_div, head::layout_hn,
-            header_footer::layout_header, header_footer::layout_footer,
-            img::layout_img, p::layout_p,
+            aside::layout_aside, div::layout_div, head::layout_hn, header_footer::layout_footer,
+            header_footer::layout_header, img::layout_img, p::layout_p,
         },
     },
     tdom::node::{Node, NodeArena},
@@ -23,7 +22,7 @@ pub type LayoutFn = fn(
     arena: &NodeArena,
 ) -> Result<()>;
 
-/// 布局函数注册表（按优先级排列）
+/// Layout function registry (ordered by priority).
 pub static DEFAULT_LAYOUT: &[LayoutFn] = &[
     layout_p,
     layout_hn,
