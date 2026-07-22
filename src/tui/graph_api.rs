@@ -5,14 +5,13 @@ use std::{
     path::PathBuf,
 };
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use crossterm::{
     cursor::MoveTo,
     event::{self, Event, KeyCode},
     execute,
     style::{Color, Stylize},
 };
-
 use image::{
     GenericImageView,
     imageops::FilterType::{self},
@@ -112,8 +111,10 @@ pub struct TermLayout {
 /// 画布打印
 impl Display for TermLayout {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let total = self.layout.len();
+        let last_row_start = total.saturating_sub(self.columns as usize);
         for (i, row) in self.layout.iter().enumerate() {
-            if i == self.layout.len() - 1 {
+            if i >= last_row_start {
                 break;
             }
             if row.word != " " {
@@ -153,14 +154,12 @@ impl TermLayout {
     pub fn paint_string(&mut self, s: &str, color: Option<Color>) -> u32 {
         let str_len = s.chars().count() as u32;
 
-        let mut idx = self.point as usize;
-        for c in s.chars() {
+        for (idx, c) in (self.point as usize..).zip(s.chars()) {
             if idx >= self.layout.len() {
                 break;
             }
             let content = Block::new(c.to_string(), color);
             self.layout[idx] = content;
-            idx += 1;
         }
 
         self.point += str_len;
@@ -173,8 +172,8 @@ impl TermLayout {
     /// 将图片渲染为盲文字符，写入画布
     /// - `path`：图片路径
     /// - `size`：期望缩放的像素尺寸 (max_width_px, max_height_px)
-    /// 返回实际占用的画布字符总数（columns × rows）
-    pub fn paint_img(&mut self, path: String, size: (u32, u32)) -> u32 {
+    ///  返回实际占用的画布字符总数（columns × rows）
+    pub fn paint_img(&mut self, path: String, size: (u32, u32)) -> u64 {
         debug!("开始加载图片: path='{}' size={:?}", path, size);
 
         let mut img_data = Img::new(PathBuf::from(&path), size);
@@ -273,7 +272,7 @@ impl Img {
             return Ok(());
         }
 
-        let img = image::open(&self.path).unwrap();
+        let img = image::open(&self.path)?;
         let img = img.resize(self.term_size.0, self.term_size.1, FilterType::Nearest);
         let (width, height) = img.dimensions();
 
@@ -326,11 +325,9 @@ impl Img {
                     }
                 }
 
-                if count > 0 {
-                    r_sum /= count;
-                    g_sum /= count;
-                    b_sum /= count;
-                }
+                r_sum = r_sum.checked_div(count).ok_or(anyhow!("r_sum is 0"))?;
+                g_sum = g_sum.checked_div(count).ok_or(anyhow!("g_sum is 0"))?;
+                b_sum = b_sum.checked_div(count).ok_or(anyhow!("b_sum is 0"))?;
                 let color = Color::Rgb {
                     r: r_sum as u8,
                     g: g_sum as u8,

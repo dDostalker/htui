@@ -15,53 +15,70 @@ use crossterm::{
         enable_raw_mode,
     },
 };
-// 重新导出常用的类型以简化导入
+
 pub use html::html_parse::Parser;
 pub use layout::layout::TermMap;
 
 use crate::{
-    html::{css_parse, html_parse},
-    tdom::node::Node,
+    html::css_parse,
+    tdom::node::{NodeArena, NodeId},
     tui::graph_api::{TermLayout, trigger_refresh},
 };
-/// 总体的渲染解析
-fn parse(html: &mut html_parse::Parser, css: &mut css_parse::Parser) -> Result<Node> {
-    let css = css.parse().unwrap();
-    let mut node = html.parse().unwrap();
-    css_parse::css_into_node(&mut node, &css).unwrap();
-    Ok(node)
+
+/// 解析 HTML + CSS → (root_id, arena)
+fn parse(
+    html: &mut html::html_parse::Parser,
+    css: &mut css_parse::Parser,
+    external_css: &str,
+) -> Result<(NodeId, NodeArena)> {
+    // HTML 解析 → 含嵌入 CSS
+    let (root_id, mut arena, embedded_css) = html.parse()?;
+
+    // 拼接嵌入 CSS + 外部 CSS
+    let combined = if external_css.is_empty() {
+        embedded_css
+    } else {
+        format!("{}\n{}", embedded_css, external_css)
+    };
+
+    // 解析并应用 CSS
+    if !combined.trim().is_empty() {
+        *css = css_parse::Parser::new(&combined);
+        let rules = css.parse()?;
+        css_parse::css_into_node(&mut arena, root_id, &rules)?;
+    }
+
+    Ok((root_id, arena))
 }
-/// 渲染
+
+/// 渲染入口
 pub fn render(html: &str, css: &str) {
     enable_raw_mode().unwrap();
     execute!(stdout(), EnterAlternateScreen, EnableMouseCapture, Hide).unwrap();
+
     'remder: loop {
-        execute!(
-            stdout(),
-            Clear(ClearType::All), // 清空整个屏幕
-            MoveTo(0, 0)           // 光标移动到左上角
-        )
-        .unwrap();
-        // 解析
-        let mut html_parser = html_parse::Parser::new(html);
-        let mut css_parser = css_parse::Parser::new(css);
-        let node = parse(&mut html_parser, &mut css_parser).unwrap();
+        execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0)).unwrap();
+
+        let mut html_parser = html::html_parse::Parser::new(html);
+        let mut css_parser = css_parse::Parser::new("");
+        let (root_id, arena) = parse(&mut html_parser, &mut css_parser, css).unwrap();
+
         let term_map = TermMap::get_ter_map().unwrap();
         let mut term_layout = TermLayout::new(&term_map).unwrap();
-        term_layout.draw(&node, &term_map).unwrap();
-        // 渲染页面输出
-        term_layout.render();
+        term_layout.draw(&arena, root_id, &term_map).unwrap();
+
+        print!("{}", term_layout);
         stdout().flush().unwrap();
+
         loop {
             match trigger_refresh() {
                 Some(false) => break 'remder,
                 None => {}
-                Some(true) => {
-                    break;
-                }
+                Some(true) => break,
             }
         }
     }
+
     execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture, Show).unwrap();
     disable_raw_mode().unwrap();
 }

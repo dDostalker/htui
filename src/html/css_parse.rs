@@ -1,16 +1,15 @@
 use std::{collections::HashMap, str::FromStr};
 
-use anyhow::{Ok, Result, anyhow};
 use crossterm::style::Color;
+use cssparser::{
+    AtRuleParser, BasicParseErrorKind, CowRcStr, ParseError, Parser as CssParser, ParserInput,
+    ParserState, QualifiedRuleParser, StyleSheetParser,
+};
+use log::{debug, warn};
 
-use crate::tdom::node::{Node, NodeType};
-/// the Parsers State of the css attribute
-/// when read ':' , the state turn Value
-/// when read ';' , the state turn Key
-enum State {
-    Key,
-    Value,
-}
+use crate::tdom::node::{Node, NodeArena, NodeId, NodeType};
+
+// CSS 选择器类型 & 匹配引擎
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Selector {
@@ -19,40 +18,91 @@ pub enum Selector {
     Id(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Combinator {
+    Descendant,
+    Child,
+    NextSibling,
+    SubsequentSibling,
+}
+
 pub type CompoundSelector = Vec<Selector>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CssSelector {
     pub compounds: Vec<CompoundSelector>,
+    pub combinators: Vec<Combinator>,
 }
 
 impl FromStr for CssSelector {
     type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let s = s.trim();
         if s.is_empty() {
-            return Err(anyhow!("empty selector"));
+            return Err(anyhow::anyhow!("empty selector"));
         }
-        let parts: Vec<&str> = s.split_whitespace().filter(|p| !p.is_empty()).collect();
-        if parts.is_empty() {
-            return Err(anyhow!("empty selector"));
+        let segments = split_by_combinators(s);
+        let mut compounds = Vec::new();
+        let mut combinators = Vec::new();
+        for (i, seg) in segments.iter().enumerate() {
+            let sub: Vec<&str> = seg.split_whitespace().filter(|p| !p.is_empty()).collect();
+            for (j, part) in sub.iter().enumerate() {
+                compounds.push(parse_compound(part)?);
+                if j < sub.len() - 1 {
+                    combinators.push(Combinator::Descendant);
+                }
+            }
+            if i < segments.len() - 1 {
+                combinators.push(extract_combinator(s));
+            }
         }
-        let mut compounds = Vec::with_capacity(parts.len());
-        for p in parts {
-            compounds.push(parse_compound(p)?);
+        if compounds.is_empty() {
+            return Err(anyhow::anyhow!("empty selector"));
         }
-        Ok(CssSelector { compounds })
+        Ok(CssSelector {
+            compounds,
+            combinators,
+        })
     }
 }
 
-/// from str的方法，主要作用用于
-/// 将 `div`、`div.foo`、`#id`、`.c` 等解析为组合选择器
-///
-fn parse_compound(s: &str) -> Result<CompoundSelector> {
+fn split_by_combinators(s: &str) -> Vec<&str> {
+    let mut result = Vec::new();
+    let mut start = 0;
+    for (i, ch) in s.char_indices() {
+        if ch == '>' || ch == '+' || ch == '~' {
+            let before = s[start..i].trim();
+            if !before.is_empty() {
+                result.push(&s[start..i]);
+            } else {
+                result.push("");
+            }
+            start = i + ch.len_utf8();
+        }
+    }
+    let last = s[start..].trim();
+    if !last.is_empty() || result.is_empty() {
+        result.push(&s[start..]);
+    }
+    result
+}
+
+fn extract_combinator(s: &str) -> Combinator {
+    for ch in s.chars() {
+        match ch {
+            '>' => return Combinator::Child,
+            '+' => return Combinator::NextSibling,
+            '~' => return Combinator::SubsequentSibling,
+            _ => {}
+        }
+    }
+    Combinator::Descendant
+}
+
+fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, anyhow::Error> {
     let s = s.trim();
     if s.is_empty() {
-        return Err(anyhow!("empty compound selector"));
+        return Err(anyhow::anyhow!("empty compound"));
     }
     let mut out = Vec::new();
     let chars: Vec<char> = s.chars().collect();
@@ -67,7 +117,7 @@ fn parse_compound(s: &str) -> Result<CompoundSelector> {
                 }
                 let name: String = chars[start..i].iter().collect();
                 if name.is_empty() {
-                    return Err(anyhow!("invalid class in compound {:?}", s));
+                    return Err(anyhow::anyhow!("invalid class"));
                 }
                 out.push(Selector::Class(name));
             }
@@ -79,7 +129,7 @@ fn parse_compound(s: &str) -> Result<CompoundSelector> {
                 }
                 let name: String = chars[start..i].iter().collect();
                 if name.is_empty() {
-                    return Err(anyhow!("invalid id in compound {:?}", s));
+                    return Err(anyhow::anyhow!("invalid id"));
                 }
                 out.push(Selector::Id(name));
             }
@@ -90,7 +140,7 @@ fn parse_compound(s: &str) -> Result<CompoundSelector> {
                 }
                 let tag: String = chars[start..i].iter().collect();
                 if tag.is_empty() {
-                    return Err(anyhow!("invalid tag in compound {:?}", s));
+                    return Err(anyhow::anyhow!("invalid tag"));
                 }
                 out.push(Selector::Tag(tag_str_to_node_type(&tag)?));
             }
@@ -99,7 +149,7 @@ fn parse_compound(s: &str) -> Result<CompoundSelector> {
     Ok(out)
 }
 
-fn tag_str_to_node_type(tag: &str) -> Result<NodeType> {
+fn tag_str_to_node_type(tag: &str) -> std::result::Result<NodeType, anyhow::Error> {
     let t = tag.to_ascii_lowercase();
     match t.as_str() {
         "a" => Ok(NodeType::A),
@@ -123,6 +173,7 @@ fn tag_str_to_node_type(tag: &str) -> Result<NodeType> {
         "input" => Ok(NodeType::Input),
         "label" => Ok(NodeType::Label),
         "li" => Ok(NodeType::Li),
+        "link" => Ok(NodeType::Link),
         "main" => Ok(NodeType::Main),
         "nav" => Ok(NodeType::Nav),
         "ol" => Ok(NodeType::Ol),
@@ -130,12 +181,17 @@ fn tag_str_to_node_type(tag: &str) -> Result<NodeType> {
         "section" => Ok(NodeType::Section),
         "select" => Ok(NodeType::Select),
         "span" => Ok(NodeType::Span),
+        "style" => Ok(NodeType::Style),
         "summary" => Ok(NodeType::Summary),
         "textarea" => Ok(NodeType::Textarea),
         "ul" => Ok(NodeType::Ul),
-        _ => Err(anyhow!("unsupported tag in CSS selector: {:?}", tag)),
+        _ => Err(anyhow::anyhow!("unsupported CSS tag: {:?}", tag)),
     }
 }
+
+// ============================================================
+// 匹配引擎 — 使用 arena + NodeId
+// ============================================================
 
 fn matches_css(node: &Node, sel: &Selector) -> bool {
     match sel {
@@ -153,81 +209,108 @@ fn matches_compound(node: &Node, compound: &CompoundSelector) -> bool {
     compound.iter().all(|s| matches_css(node, s))
 }
 
-/// 在 ancestors中按顺序匹配compounds
-fn matches_subsequence_chain(ancestors: &[&Node], compounds: &[CompoundSelector]) -> bool {
-    if compounds.is_empty() {
+fn selector_chain_matches(arena: &NodeArena, node_id: NodeId, selector: &CssSelector) -> bool {
+    let node = &arena[node_id];
+    let n = selector.compounds.len();
+    if n == 0 {
+        return false;
+    }
+    if !matches_compound(node, &selector.compounds[n - 1]) {
+        return false;
+    }
+    if n == 1 {
         return true;
     }
-    fn dfs(
-        ancestors: &[&Node],
-        compounds: &[CompoundSelector],
-        anc_start: usize,
-        step: usize,
-    ) -> bool {
-        if step == compounds.len() {
-            return true;
-        }
-        for i in anc_start..ancestors.len() {
-            if matches_compound(ancestors[i], &compounds[step])
-                && dfs(ancestors, compounds, i + 1, step + 1)
-            {
-                return true;
+    match_combinators(
+        arena,
+        node_id,
+        &selector.compounds,
+        &selector.combinators,
+        n - 1,
+    )
+}
+
+fn match_combinators(
+    arena: &NodeArena,
+    node_id: NodeId,
+    compounds: &[CompoundSelector],
+    combinators: &[Combinator],
+    idx: usize,
+) -> bool {
+    if idx == 0 {
+        return true;
+    }
+    let combinator = combinators[idx - 1];
+    let target = &compounds[idx - 1];
+    let node = &arena[node_id];
+
+    match combinator {
+        Combinator::Descendant => {
+            let mut cur = node.parent;
+            while let Some(pid) = cur {
+                let ancestor = &arena[pid];
+                if matches_compound(ancestor, target)
+                    && match_combinators(arena, pid, compounds, combinators, idx - 1)
+                {
+                    return true;
+                }
+                cur = ancestor.parent;
             }
+            false
         }
-        false
-    }
-    dfs(ancestors, compounds, 0, 0)
-}
-
-fn ancestors_ptr_to_refs(ancestors: &[*const Node]) -> Vec<&Node> {
-    ancestors.iter().map(|p| unsafe { &**p }).collect()
-}
-
-/// 当前节点是否匹配整条选择器链
-fn selector_chain_matches(node: &Node, ancestors: &[*const Node], selector: &CssSelector) -> bool {
-    let compounds = &selector.compounds;
-    if compounds.is_empty() {
-        return false;
-    }
-    let last = compounds.len() - 1;
-    if !matches_compound(node, &compounds[last]) {
-        return false;
-    }
-    if last == 0 {
-        return true;
-    }
-    let arefs = ancestors_ptr_to_refs(ancestors);
-    matches_subsequence_chain(&arefs, &compounds[0..last])
-}
-
-fn apply_css_rule(
-    node: &mut Node,
-    ancestors: &[*const Node],
-    selector: &CssSelector,
-    css: &CssAttr,
-) {
-    if selector_chain_matches(node, ancestors, selector) {
-        node.css_attr.add(css.clone());
-    }
-    let mut path: Vec<*const Node> = ancestors.to_vec();
-    path.push(node as *const Node);
-    for child in node.children.iter_mut() {
-        apply_css_rule(child, &path, selector, css);
+        Combinator::Child => match node.parent {
+            Some(pid) if matches_compound(&arena[pid], target) => {
+                match_combinators(arena, pid, compounds, combinators, idx - 1)
+            }
+            _ => false,
+        },
+        Combinator::NextSibling => match prev_sibling_id(arena, node_id) {
+            Some(sid) if matches_compound(&arena[sid], target) => {
+                match_combinators(arena, sid, compounds, combinators, idx - 1)
+            }
+            _ => false,
+        },
+        Combinator::SubsequentSibling => {
+            let mut cur = prev_sibling_id(arena, node_id);
+            while let Some(sid) = cur {
+                if matches_compound(&arena[sid], target)
+                    && match_combinators(arena, sid, compounds, combinators, idx - 1)
+                {
+                    return true;
+                }
+                cur = prev_sibling_id(arena, sid);
+            }
+            false
+        }
     }
 }
 
-/// CssAttr newtype to store css attributes
-/// ```text
-/// aaa : bbb;
-/// ccc : ddd;
-/// ```
-/// to
-/// ```text
-/// CssAttr {
-///     aaa: "bbb",
-///     ccc: "ddd",
-/// }
-/// ```
+fn prev_sibling_id(arena: &NodeArena, node_id: NodeId) -> Option<NodeId> {
+    let node = &arena[node_id];
+    let parent_id = node.parent?;
+    let parent = &arena[parent_id];
+    let mut prev = None;
+    for &cid in &parent.children {
+        if cid == node_id {
+            return prev;
+        }
+        prev = Some(cid);
+    }
+    None
+}
+
+fn apply_css_rule(arena: &mut NodeArena, node_id: NodeId, selector: &CssSelector, css: &CssAttr) {
+    if selector_chain_matches(arena, node_id, selector) {
+        arena[node_id].css_attr.add(css.clone());
+    }
+    let children: Vec<NodeId> = arena[node_id].children.clone();
+    for child_id in children {
+        apply_css_rule(arena, child_id, selector, css);
+    }
+}
+
+// CssAttr / CssRule
+
 #[derive(Debug, Clone, Default)]
 pub struct CssAttr(HashMap<String, String>);
 
@@ -239,319 +322,252 @@ impl CssAttr {
         self.0.extend(css.0);
     }
     pub fn get_color(&self) -> Option<Color> {
-        let color = self.0.get("color")?;
-        Color::from_str(color).ok()
+        self.0.get("color").and_then(|c| Color::from_str(c).ok())
     }
 }
-/// CssRule newtype to store css rules
-/// ```text
-/// aaa {
-///     bbb : ccc;
-///     ddd : eee;
-/// }
-/// bbb {
-///     bbb : ccc;
-///     ddd : eee;
-/// }
-/// ```
-/// to
-/// ```text
-/// CssRule {
-///     aaa: CssAttr {
-///         bbb: "ccc",
-///         ddd: "eee",
-///     },
-///     bbb: CssAttr {
-///         bbb: "ccc",
-///         ddd: "eee",
-///     },
-/// }
-/// ```
+
 #[derive(Debug, Clone)]
-pub struct CssRule(HashMap<CssSelector, CssAttr>);
+pub struct CssRule(pub(crate) HashMap<CssSelector, CssAttr>);
 
 impl CssRule {
     pub fn new() -> Self {
         CssRule(HashMap::new())
     }
-    fn add(&mut self, sele: CssSelector, attr: HashMap<String, String>) {
-        self.0.insert(sele, CssAttr(attr));
+    fn add(&mut self, sel: CssSelector, attr: HashMap<String, String>) {
+        self.0.insert(sel, CssAttr(attr));
     }
     pub fn css_to_node(&self) {
         todo!()
     }
 }
 
+// Parser
+
 #[derive(Debug, Clone)]
 pub struct Parser {
-    point: usize,
     context: String,
-    line: usize,
-    column: usize,
 }
 
-impl Parser {
-    fn _next_char(&mut self) -> Result<Option<char>> {
-        if self._eof() {
-            return Ok(None);
-        }
-        match self.context[self.point..].chars().next() {
-            Some(c) => {
-                self.point += c.len_utf8();
-                self.column += 1;
-                Ok(Some(c))
-            }
-            None => Err(anyhow!(format!("bad char in parser:{:?}", self))),
-        }
-    }
-    /// like peek
-    fn _next_char_prev(&self) -> Result<Option<char>> {
-        if self._eof() {
-            return Ok(None);
-        }
-        match self.context[self.point..].chars().next() {
-            Some(c) => Ok(Some(c)),
-            None => Err(anyhow!(format!("bad char in parser:{:?}", self))),
-        }
-    }
-
-    fn _eof(&self) -> bool {
-        self.point >= self.context.len()
-    }
-}
 impl Parser {
     pub fn new(input: &str) -> Self {
         Parser {
             context: input.to_string(),
-            point: 0,
-            line: 1,
-            column: 1,
         }
     }
-    pub fn parse(&mut self) -> Result<CssRule> {
-        let mut css = CssRule::new();
-        while let Some((sele, attrs)) = self._parse()? {
-            css.add(sele, attrs);
+
+    pub fn parse(&mut self) -> std::result::Result<CssRule, anyhow::Error> {
+        let mut parser_input = ParserInput::new(&self.context);
+        let mut parser = CssParser::new(&mut parser_input);
+        let mut state = CssParseState::new();
+        {
+            let rule_list = StyleSheetParser::new(&mut parser, &mut state);
+            for rule_result in rule_list {
+                if let std::result::Result::Err(e) = rule_result {
+                    warn!("CSS error: {:?}", e);
+                }
+            }
         }
+        let mut css = CssRule::new();
+        for (sel_text, declarations) in state.rules.drain(..) {
+            match CssSelector::from_str(&sel_text) {
+                std::result::Result::Ok(sel) => css.add(sel, declarations),
+                std::result::Result::Err(e) => warn!("Selector parse fail: {}: {}", sel_text, e),
+            }
+        }
+        debug!("CSS parsed: {} rules", css.0.len());
         Ok(css)
     }
+}
 
-    fn parse_from_block(input: &str) -> Result<CssAttr> {
-        let mut parser = Parser::new(input);
-        let attrs = parser.get_css_attr(input.to_string())?;
-        Ok(CssAttr(attrs))
+struct CssParseState {
+    rules: Vec<(String, HashMap<String, String>)>,
+}
+impl CssParseState {
+    fn new() -> Self {
+        Self { rules: vec![] }
     }
+}
 
-    fn _parse(&mut self) -> Result<Option<(CssSelector, HashMap<String, String>)>> {
-        let sele = self.get_selector()?;
-
-        if let Some(sele) = sele {
-            let attr_block = self.get_attr_block()?;
-            let attrs = self.get_css_attr(attr_block)?;
-            return Ok(Some((sele, attrs)));
-        }
-        Ok(None)
-    }
-    /// 从css parse内获取当前块的css的选择器 并返回选择器类型
-    fn get_selector(&mut self) -> Result<Option<CssSelector>> {
-        let start = self.point;
-        loop {
-            let c = self._next_char()?;
-            if c.is_none() {
-                if self._eof() {
-                    return Ok(None);
-                }
-                return Err(anyhow!("cannot find selector end"));
-            }
-            let c = c.unwrap();
-            if c == '{' {
-                if start + 1 == self.point {
-                    return Err(anyhow!("cannot find selector"));
-                } else {
-                    break;
-                }
-            }
-        }
-        self.point -= 1;
-        CssSelector::from_str(self.context[start..self.point].trim()).map(Some)
-    }
-
-    /// 获取当前块的css属性块 并返回属性块内容
-    fn get_attr_block(&mut self) -> Result<String> {
-        let start = self.point;
-
-        loop {
-            let c = self._next_char()?;
-            if c.is_none() {
-                return Err(anyhow!("cannot find attribute block end"));
-            }
-            let c = c.unwrap();
-            if c == '}' {
+impl<'i> QualifiedRuleParser<'i> for CssParseState {
+    type Prelude = String;
+    type QualifiedRule = ();
+    type Error = cssparser::BasicParseError<'i>;
+    fn parse_prelude<'t>(
+        &mut self,
+        input: &mut CssParser<'i, 't>,
+    ) -> std::result::Result<String, ParseError<'i, Self::Error>> {
+        let start = input.position();
+        while !input.is_exhausted() {
+            if input.next_including_whitespace_and_comments().is_err() {
                 break;
             }
         }
-
-        Ok(self.context[start + 1..self.point - 1].to_string())
+        let text = input.slice_from(start).trim().to_string();
+        if text.is_empty() {
+            return Err(input.new_error(BasicParseErrorKind::QualifiedRuleInvalid));
+        }
+        Ok(text)
     }
-    /// 解析css块中的内容，用于解析后返回，这里关联变量 State 用于表明解析状态
-    /// 这里考虑后续是不是需要把String去重写？
-    fn get_css_attr(&mut self, content: String) -> Result<HashMap<String, String>> {
-        let mut attrs = HashMap::new();
-        let mut key = String::new();
-        let mut value = String::new();
-        let mut state = State::Key;
-
-        for c in content.chars() {
-            match state {
-                State::Key => {
-                    if c == ':' {
-                        state = State::Value;
-                    } else {
-                        key.push(c);
-                    }
-                }
-                State::Value => {
-                    if c == ';' {
-                        attrs.insert(key.trim().to_string(), value.trim().to_string());
-                        key.clear();
-                        value.clear();
-                        state = State::Key;
-                    } else {
-                        value.push(c);
-                    }
-                }
-            }
+    fn parse_block<'t>(
+        &mut self,
+        prelude: String,
+        _start: &ParserState,
+        input: &mut CssParser<'i, 't>,
+    ) -> std::result::Result<(), ParseError<'i, Self::Error>> {
+        let block_start = input.position();
+        while !input.is_exhausted() {
+            let _ = input.next();
         }
-
-        let k = key.trim().to_string();
-        let v = value.trim().to_string();
-        if !k.is_empty() {
-            attrs.insert(k, v);
-        }
-        Ok(attrs)
+        let block_text = input.slice_from(block_start).to_string();
+        self.rules
+            .push((prelude, parse_declaration_text(&block_text)));
+        Ok(())
     }
 }
-/// 用于将css中解析的内容写入node节点
-pub fn css_into_node(node: &mut Node, css: &CssRule) -> Result<()> {
+
+impl<'i> AtRuleParser<'i> for CssParseState {
+    type Prelude = ();
+    type AtRule = ();
+    type Error = cssparser::BasicParseError<'i>;
+    fn parse_prelude<'t>(
+        &mut self,
+        name: CowRcStr<'i>,
+        input: &mut CssParser<'i, 't>,
+    ) -> std::result::Result<(), ParseError<'i, Self::Error>> {
+        debug!("skip @{}", name);
+        while !input.is_exhausted() {
+            let _ = input.next();
+        }
+        Ok(())
+    }
+    fn parse_block<'t>(
+        &mut self,
+        _: (),
+        _: &ParserState,
+        input: &mut CssParser<'i, 't>,
+    ) -> std::result::Result<(), ParseError<'i, Self::Error>> {
+        while !input.is_exhausted() {
+            let _ = input.next();
+        }
+        Ok(())
+    }
+    fn rule_without_block(&mut self, _: (), _: &ParserState) -> std::result::Result<(), ()> {
+        Ok(())
+    }
+}
+
+fn parse_declaration_text(block: &str) -> HashMap<String, String> {
+    let mut m = HashMap::new();
+    let mut k = String::new();
+    let mut v = String::new();
+    let mut in_v = false;
+    for c in block.chars() {
+        if !in_v {
+            if c == ':' {
+                in_v = true;
+            } else {
+                k.push(c);
+            }
+        } else if c == ';' {
+            let kt = k.trim().to_string();
+            if !kt.is_empty() {
+                m.insert(kt, v.trim().to_string());
+            }
+            k.clear();
+            v.clear();
+            in_v = false;
+        } else {
+            v.push(c);
+        }
+    }
+    let kt = k.trim().to_string();
+    if !kt.is_empty() {
+        m.insert(kt, v.trim().to_string());
+    }
+    m
+}
+
+// css_into_node
+
+pub fn css_into_node(
+    arena: &mut NodeArena,
+    root_id: NodeId,
+    css: &CssRule,
+) -> std::result::Result<(), anyhow::Error> {
     for (selector, attr) in css.0.iter() {
-        apply_css_rule(node, &[] as &[*const Node], selector, attr);
+        apply_css_rule(arena, root_id, selector, attr);
     }
     Ok(())
 }
 
+// Tests
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tdom::node::NodeType;
 
-    #[test]
-    fn test_get_selector() {
-        let mut parser = Parser::new("p { color: red;}");
-        assert_eq!(
-            parser.get_selector().unwrap().unwrap(),
-            "p".parse::<CssSelector>().unwrap()
-        );
+    fn init() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+
+    fn build_test(arena: &mut NodeArena) -> (NodeId, NodeId) {
+        let root = arena.insert(Node::new());
+        let div_id = arena.insert(Node::from(NodeType::Div));
+        arena[div_id].attributes =
+            crate::tdom::attributes::Attr::parse_from_str(r#"class="active" id="main""#);
+        let p_id = arena.insert(Node::from(NodeType::P));
+        let text_id = arena.insert(Node::text("Hello"));
+        Node::append_child(arena, p_id, text_id);
+        Node::append_child(arena, div_id, p_id);
+        Node::append_child(arena, root, div_id);
+        (root, div_id)
     }
 
     #[test]
-    fn test_get_css_attr() {
-        let content = "color: red;".to_string();
-        let mut parser = Parser::new(""); // 解析器状态好像无所谓？
-        let attrs = parser.get_css_attr(content).unwrap();
-        assert_eq!(attrs.get("color"), Some(&"red".to_string()));
+    fn test_parse_simple() {
+        init();
+        let mut p = Parser::new("p { color: red; }");
+        assert_eq!(p.parse().unwrap().0.len(), 1);
     }
-
     #[test]
-    fn test_get_attr_block() {
-        let mut parser = Parser::new("{color: red;}");
-        assert_eq!(parser.get_attr_block().unwrap(), "color: red;");
-    }
-
-    #[test]
-    fn test_parse() {
-        let mut parser = Parser::new(
-            "p {
-            color: red;
-            background-color: blue
-            }",
-        );
-        let attrs = parser.parse().unwrap();
-        dbg!(&attrs);
-    }
-
-    #[test]
-    fn test_parse_from_block() {
-        let attrs = Parser::parse_from_block("color: red; cos: blue;").unwrap();
-        dbg!(&attrs);
-    }
-
-    #[test]
-    fn test_malformed_css() {
-        let css = "p { color: red; "; // 缺少
-        let mut parser = Parser::new(css);
-        let result = parser.parse();
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_selector_class_id_compound() {
-        let s: CssSelector = ".foo".parse().unwrap();
-        assert_eq!(
-            s,
-            CssSelector {
-                compounds: vec![vec![Selector::Class("foo".into())]],
-            }
-        );
-        let s: CssSelector = "#bar".parse().unwrap();
-        assert_eq!(
-            s,
-            CssSelector {
-                compounds: vec![vec![Selector::Id("bar".into())]],
-            }
-        );
-        let s: CssSelector = "div.active".parse().unwrap();
-        assert_eq!(
-            s,
-            CssSelector {
-                compounds: vec![vec![
-                    Selector::Tag(NodeType::Div),
-                    Selector::Class("active".into()),
-                ]],
-            }
-        );
-    }
-
-    #[test]
-    fn test_selector_descendant() {
+    fn test_parse_desc() {
+        init();
         let s: CssSelector = "div p".parse().unwrap();
-        assert_eq!(
-            s.compounds,
-            vec![
-                vec![Selector::Tag(NodeType::Div)],
-                vec![Selector::Tag(NodeType::P)],
-            ]
-        );
+        assert_eq!(s.combinators[0], Combinator::Descendant);
+    }
+    #[test]
+    fn test_parse_child() {
+        init();
+        let s: CssSelector = "div > p".parse().unwrap();
+        assert_eq!(s.combinators[0], Combinator::Child);
     }
 
     #[test]
-    fn test_matches_compound_and_chain() {
-        let mut div = Node::from(NodeType::Div);
-        div.attributes = crate::tdom::attributes::Attr::parse_from_str(r#"class="active""#);
-        assert!(matches_compound(
-            &div,
-            &vec![
-                Selector::Tag(NodeType::Div),
-                Selector::Class("active".into()),
-            ]
-        ));
-
-        let p = Node::from(NodeType::P);
-        let ancestors: &[*const Node] = &[&div as *const Node];
+    fn test_matches_descendant() {
+        init();
+        let mut arena = NodeArena::default();
+        let (root, _) = build_test(&mut arena);
         let sel: CssSelector = "div p".parse().unwrap();
-        assert!(selector_chain_matches(&p, ancestors, &sel));
+        // root -> div -> p -> text
+        let div_id = arena[root].children[0];
+        let p_id = arena[div_id].children[0];
+        assert!(selector_chain_matches(&arena, p_id, &sel));
+    }
 
-        let p2 = Node::from(NodeType::P);
-        let ancestors2: &[*const Node] = &[];
-        assert!(!selector_chain_matches(&p2, ancestors2, &sel));
+    #[test]
+    fn test_css_into_node() {
+        init();
+        let mut arena = NodeArena::default();
+        let (root, _) = build_test(&mut arena);
+        let mut css = CssRule::new();
+        let sel: CssSelector = "div p".parse().unwrap();
+        let mut m = HashMap::new();
+        m.insert("color".into(), "red".into());
+        css.add(sel, m);
+        css_into_node(&mut arena, root, &css).unwrap();
+        let div_id = arena[root].children[0];
+        let p_id = arena[div_id].children[0];
+        // div p 匹配的是 p 节点，不是 text 子节点
+        assert!(arena[p_id].css_attr.get_color().is_some());
     }
 }

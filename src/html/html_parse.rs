@@ -1,368 +1,218 @@
+use std::fs;
+use std::path::Path;
+
+use anyhow::Result;
+use html5ever::Attribute;
+use html5ever::driver::ParseOpts;
+use html5ever::tendril::TendrilSink;
+use log::{debug, info, warn};
+use markup5ever_rcdom::{Handle, NodeData, RcDom};
+
 use crate::tdom::{
     attributes::Attr,
-    element_fn::ELEMENT_FUNCTIONS,
-    node::{Node, NodeType},
+    node::{Node, NodeArena, NodeId, NodeType},
 };
-pub(crate) use anyhow::{Result, anyhow};
-use log::{debug, error, trace, warn};
-use std::iter::Peekable;
-use std::str::CharIndices;
 
-/// parser , to rememeber the status of html parser
+/// HTML 解析器（slotmap arena 版）。
 #[derive(Debug)]
-pub struct Parser<'a> {
-    input: &'a str,
-    chars: Peekable<CharIndices<'a>>,
-    line: usize,
-    column: usize,
+pub struct Parser {
+    input: String,
 }
 
-/// To solve the question when we have a html like :
-/// ```html
-/// start<p>hello</p>
-/// ```
-/// we should return
-///
-/// [Str("start"),Block("<p>"),...EndBlock("</p>")]
-///
-/// Str mean a string without element Block       ...
-///
-/// the Block mean a string have a element Block   <...>
-///
-/// EndBlock mean a string end with a element Block </...>
-///
-/// Enter mean "\n"
-#[derive(Debug)]
-enum EleBlockRead<'a> {
-    Str(&'a str),
-    Block(&'a str),
-    EndBlock(&'a str),
-    Enter,
-}
-
-///Parser machine
-impl<'a> Parser<'a> {
-    pub fn new(input: &'a str) -> Self {
+impl Parser {
+    pub fn new(input: &str) -> Self {
         Self {
-            input,
-            chars: input.char_indices().peekable(),
-            line: 1,
-            column: 1,
+            input: input.to_string(),
         }
     }
 
-    /// 获取当前位置的字节索引
-    fn current_byte_index(&mut self) -> usize {
-        match self.chars.peek() {
-            Some((idx, _)) => *idx,
-            None => self.input.len(),
-        }
-    }
+    /// 解析 HTML 并返回 (root_id, arena, embedded_css)。
+    pub fn parse(&mut self) -> Result<(NodeId, NodeArena, String)> {
+        debug!("html5ever 解析 HTML，{} 字节", self.input.len());
 
-    /// 消费一个字符，更新行号和列号
-    fn consume_char(&mut self) -> Option<char> {
-        if let Some((_, c)) = self.chars.next() {
-            if c == '\n' {
-                self.line += 1;
-                self.column = 1;
-            } else {
-                self.column += 1;
-            }
-            Some(c)
-        } else {
-            None
-        }
-    }
+        let opts = ParseOpts::default();
+        let dom = html5ever::parse_document(RcDom::default(), opts).one(self.input.clone());
 
-    /// read element from parser content, when start with <,end with >
-    ///
-    /// example:
-    /// ```html
-    ///     <span>hello</span>
-    /// ```
-    ///[Block("<span>"),Str("hello"),BlockEnd("</span>")]
-    fn _element_content(&mut self) -> Result<Option<EleBlockRead<'a>>> {
-        let start = self.current_byte_index();
+        let mut arena = NodeArena::default();
+        let root_id = arena.insert(Node::new());
+        let mut css_sources: Vec<String> = Vec::new();
 
-        // Peek 第一个字符
-        let first_char = match self.chars.peek() {
-            Some(&(_, c)) => c,
-            None => return Ok(None),
-        };
+        convert_children(&dom.document, root_id, &mut arena, &mut css_sources);
 
-        let ret = if first_char == '<' {
-            self.consume_char(); // 消耗 '<'
-            loop {
-                match self.consume_char() {
-                    Some('>') => break,
-                    Some(_) => continue,
-                    None => break, // EOF before '>'
-                }
-            }
-            let end = self.current_byte_index();
-            let content = &self.input[start..end];
-            if content.starts_with("</") {
-                Ok(Some(EleBlockRead::EndBlock(content)))
-            } else {
-                Ok(Some(EleBlockRead::Block(content)))
-            }
-        } else {
-            // 读取普通文本直到遇到 '<' 或 EOF
-            loop {
-                match self.chars.peek() {
-                    Some(&(_, '<')) => break, // 遇到 '<' 停止，不消耗
-                    Some(_) => {
-                        self.consume_char();
-                    } // 消耗普通字符
-                    None => break,
-                }
-            }
-            let end = self.current_byte_index();
-            let mut ret = &self.input[start..end];
-
-            // if the str only "\n", del it.
-            if ret.contains('\n') {
-                ret = ret.trim();
-            }
-
-            if ret.is_empty() {
-                Ok(Some(EleBlockRead::Enter))
-            } else {
-                Ok(Some(EleBlockRead::Str(ret)))
-            }
-        };
-
-        #[cfg(debug_assertions)]
-        {
-            debug!("element_content {:?}  parser:{:?}", ret, self);
-        }
-        ret
+        debug!(
+            "解析完成: root={}, {} 节点, CSS: {} 字节",
+            root_id,
+            arena.len(),
+            css_sources.join("\n").len()
+        );
+        Ok((root_id, arena, css_sources.join("\n")))
     }
 }
 
-impl<'a> Parser<'a> {
-    pub fn parse(&mut self) -> Result<Node> {
-        debug!("开始解析 HTML，输入长度 {} 字节", self.input.len());
-        let root = self._parse(Some(NodeType::Global))?;
-        debug!("解析完成，根节点子节点数量: {}", root.children.len());
-        Ok(root)
+fn convert_attributes(html5_attrs: &[Attribute]) -> Attr {
+    if html5_attrs.is_empty() {
+        return Attr::new();
     }
-    /// todo
-    fn _parse(&mut self, nodetype: Option<NodeType>) -> Result<Node> {
-        let mut node = Node::new();
-        loop {
-            let element = match self._element_content() {
-                Ok(el) => el,
-                Err(e) => {
-                    error!(
-                        "_element_content 失败 line {}, col {}: {}",
-                        self.line, self.column, e
-                    );
-                    return Err(e);
-                }
-            };
-            #[cfg(debug_assertions)]
-            {
-                if std::env::var("HTML_PARSE_ELEMENT").unwrap_or("0".to_string()) == "1".to_string()
-                {
-                    println!(
-                        "self._element_content()? => {:?} nodetype is {:?}",
-                        element, nodetype
-                    )
-                }
+    let attr_str: String = html5_attrs
+        .iter()
+        .map(|a| format!("{}=\"{}\"", a.name.local, a.value))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Attr::parse_from_str(&attr_str)
+}
+
+fn convert_children(
+    handle: &Handle,
+    parent_id: NodeId,
+    arena: &mut NodeArena,
+    css_sources: &mut Vec<String>,
+) {
+    let children = handle.children.borrow().clone();
+    for child_handle in &children {
+        match &child_handle.data {
+            NodeData::Document => {
+                convert_children(child_handle, parent_id, arena, css_sources);
             }
-            if let Some(ele) = element {
-                match ele {
-                    EleBlockRead::Block(content) => {
-                        trace!("发现开始标签: {}", content.trim());
-
-                        let (next_node_type, attr) = match Self::check_ele_ty(content) {
-                            Ok(res) => res,
-                            Err(e) => {
-                                warn!("不支持或解析失败的开始标签: {} → {}", content, e);
-                                continue;
+            NodeData::Element { name, attrs, .. } => {
+                let tag = name.local.as_ref();
+                match tag_name_to_node_type(tag) {
+                    Some(node_type) => {
+                        // ---- <style>: 提取 CSS ----
+                        if node_type == NodeType::Style {
+                            let css = extract_text_content(child_handle);
+                            if !css.trim().is_empty() {
+                                info!("提取 <style> CSS: {} 字节", css.len());
+                                css_sources.push(css);
                             }
-                        };
-
-                        debug!("识别为开始标签 → {:?}，属性: {:?}", next_node_type, attr);
-
-                        if next_node_type.is_self_closing() {
-                            let mut self_closing_node = Node::from(next_node_type.clone());
-                            self_closing_node.attributes = attr;
-                            node.children.push(self_closing_node);
-                            trace!("添加自闭合节点 {:?}", next_node_type);
-                        } else {
-                            debug!("递归解析子节点 {:?}", next_node_type);
-                            let mut child_node = match self._parse(Some(next_node_type.clone())) {
-                                Ok(n) => n,
-                                Err(e) => {
-                                    error!("子节点 {:?} 递归解析失败: {}", next_node_type, e);
-                                    return Err(e);
-                                }
+                            return;
+                        }
+                        // ---- <link>: 读取外部 CSS ----
+                        if node_type == NodeType::Link {
+                            let a = {
+                                let ar = attrs.borrow();
+                                convert_attributes(&ar)
                             };
-                            child_node.attributes = attr;
-                            node.children.push(child_node);
-                        }
-                    }
-                    EleBlockRead::Str(content) => {
-                        if let Some(nty) = nodetype.clone() {
-                            trace!(
-                                "发现文本内容 (长度 {}): {:?}",
-                                content.len(),
-                                content.trim()
-                            );
-                            node.node_type = nty;
-                            node.children.push(Node::text(content));
-                        } else {
-                            node = Node::text(content);
-                        }
-                    }
-                    EleBlockRead::EndBlock(content) => {
-                        trace!("发现结束标签: {}", content.trim());
-
-                        let (end_nodetype, _) = match Self::check_ele_ty(content) {
-                            Ok(res) => res,
-                            Err(e) => {
-                                error!("结束标签格式错误 {}: {}", content, e);
-                                return Err(e);
+                            if let (Some(rel), Some(href)) = (a.get("rel"), a.get("href"))
+                                && rel.to_lowercase().contains("stylesheet")
+                            {
+                                info!("外部样式表: {}", href);
+                                match fs::read_to_string(Path::new(href)) {
+                                    Ok(c) => {
+                                        css_sources.push(c);
+                                    }
+                                    Err(e) => warn!("读取 {} 失败: {}", href, e),
+                                }
                             }
-                        };
-                        if let Some(nodetype) = nodetype.clone()
-                            && end_nodetype == nodetype
-                        {
-                            node.node_type = end_nodetype;
-                            return Ok(node);
-                        } else {
-                            return Err(anyhow!(format!(
-                                "bad close with {:?}..{:?} \n parser:{:?}",
-                                nodetype, end_nodetype, self
-                            )));
+                            return;
                         }
+                        let child_id = arena.insert(Node::from(node_type));
+                        {
+                            let ar = attrs.borrow();
+                            arena[child_id].attributes = convert_attributes(&ar);
+                        }
+                        Node::append_child(arena, parent_id, child_id);
+                        convert_children(child_handle, child_id, arena, css_sources);
                     }
-                    EleBlockRead::Enter => {
-                        continue;
+                    None => {
+                        warn!("不支持标签 <{}>，压平", tag);
+                        convert_children(child_handle, parent_id, arena, css_sources);
                     }
                 }
-            } else {
-                break;
+            }
+            NodeData::Text { contents } => {
+                let text = contents.borrow().to_string();
+                let trimmed = text.trim().to_string();
+                if !trimmed.is_empty() {
+                    let text_id = arena.insert(Node::text(&trimmed));
+                    Node::append_child(arena, parent_id, text_id);
+                }
+            }
+            NodeData::Comment { .. } => {}
+            NodeData::Doctype { .. } | NodeData::ProcessingInstruction { .. } => {
+                convert_children(child_handle, parent_id, arena, css_sources);
             }
         }
-
-        Ok(node)
     }
-    /// Simple check element type
-    pub fn check_ele_ty(element: &str) -> Result<(NodeType, Attr)> {
-        trace!("尝试匹配元素: {}", element.trim());
+}
 
-        for func in ELEMENT_FUNCTIONS {
-            match func(element) {
-                Ok(Some((nodetype, attr))) => {
-                    trace!("匹配成功 → {:?}", nodetype);
-                    return Ok((nodetype, attr));
-                }
-                Ok(None) => continue,
-                Err(e) => {
-                    error!("元素函数执行出错: {}", e);
-                    return Err(e);
-                }
-            }
+fn extract_text_content(handle: &Handle) -> String {
+    let children = handle.children.borrow();
+    let mut text = String::new();
+    for child in children.iter() {
+        if let NodeData::Text { contents } = &child.data {
+            text.push_str(&contents.borrow());
         }
-        Err(anyhow!(format!("Unsupported element type {}", element)))
+    }
+    text
+}
+
+fn tag_name_to_node_type(tag: &str) -> Option<NodeType> {
+    match tag.to_ascii_lowercase().as_str() {
+        "a" => Some(NodeType::A),
+        "article" => Some(NodeType::Article),
+        "aside" => Some(NodeType::Aside),
+        "button" => Some(NodeType::Button),
+        "details" => Some(NodeType::Details),
+        "div" => Some(NodeType::Div),
+        "figcaption" => Some(NodeType::Figcaption),
+        "figure" => Some(NodeType::Figure),
+        "footer" => Some(NodeType::Footer),
+        "form" => Some(NodeType::Form),
+        "h1" => Some(NodeType::H1),
+        "h2" => Some(NodeType::H2),
+        "h3" => Some(NodeType::H3),
+        "h4" => Some(NodeType::H4),
+        "h5" => Some(NodeType::H5),
+        "header" => Some(NodeType::Header),
+        "img" => Some(NodeType::Img),
+        "input" => Some(NodeType::Input),
+        "label" => Some(NodeType::Label),
+        "li" => Some(NodeType::Li),
+        "link" => Some(NodeType::Link),
+        "main" => Some(NodeType::Main),
+        "nav" => Some(NodeType::Nav),
+        "ol" => Some(NodeType::Ol),
+        "option" => Some(NodeType::HtmlOption),
+        "p" => Some(NodeType::P),
+        "section" => Some(NodeType::Section),
+        "select" => Some(NodeType::Select),
+        "span" => Some(NodeType::Span),
+        "style" => Some(NodeType::Style),
+        "summary" => Some(NodeType::Summary),
+        "textarea" => Some(NodeType::Textarea),
+        "ul" => Some(NodeType::Ul),
+        _ => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{html::html_parse::Parser, tdom::node::NodeType};
-
+    use super::*;
     fn init() {
         let _ = env_logger::builder().is_test(true).try_init();
     }
+
     #[test]
-    fn test_check_ele_ty() {
+    fn test_tag_map() {
         init();
-        assert_eq!(Parser::check_ele_ty("<span>").unwrap().0, NodeType::Span);
-        assert_eq!(Parser::check_ele_ty("<div>").unwrap().0, NodeType::Div);
-        assert!(Parser::check_ele_ty("<unsupported>").is_err());
-    }
-    #[test]
-    fn test_parse_html() {
-        init();
-        let html = "start<span>
-            <div>
-                <p>Hello</p>
-                <p>World</p>
-            </div>
-        </span>
-        <span>
-            <div>
-                <p>Hello</p>
-            </div>
-        </span>";
-        // Update: use Parser::new instead of struct initialization
-        let mut p = Parser::new(html);
-        let node = p.parse().unwrap();
-        dbg!(&node);
-    }
-    #[test]
-    fn test_parse_with_attributes() {
-        init();
-        let html = r#"<div class="container" id="main"><p>Hello</p></div>"#;
-        let mut p = Parser::new(html);
-        let node = p.parse().unwrap();
-        dbg!(&node);
-    }
-    #[test]
-    fn test_parse_img() {
-        init();
-        let html = r#"<div><img src="test.jpg" alt="Test Image"></div>"#;
-        let mut p = Parser::new(html);
-        let node = p.parse().unwrap();
-        dbg!(&node);
+        assert_eq!(tag_name_to_node_type("div"), Some(NodeType::Div));
+        assert_eq!(tag_name_to_node_type("style"), Some(NodeType::Style));
+        assert_eq!(tag_name_to_node_type("nope"), None);
     }
 
     #[test]
-    fn test_heading_with_attributes() {
+    fn test_parse_basic() {
         init();
-        let html = r#"<h1 id="title" class="main-title" src="./1/2/3">Welcome</h1>"#;
-        let mut p = Parser::new(html);
-        let node = p.parse().unwrap();
-
-        // 验证解析结果
-        if let Some(child) = node.children.first() {
-            assert_eq!(child.node_type, NodeType::H1);
-            assert_eq!(child.attributes.get("id"), Some(&"title".to_string()));
-            assert_eq!(child.attributes.get("src"), Some(&"./1/2/3".to_string()));
-            assert_eq!(
-                child.attributes.get_class(),
-                Some(vec!["main-title".to_string()])
-            );
-        }
+        let mut p = Parser::new("<div><p>Hello</p></div>");
+        let (root, arena, _) = p.parse().unwrap();
+        assert!(arena[root].child_count() > 0);
     }
 
     #[test]
-    fn test_nested_headings() {
+    fn test_style_extract() {
         init();
-        let html = r#"
-            <div>
-                <h1>Chapter 1</h1>
-                <p>Introduction</p>
-                <h2>Section 1.1</h2>
-                <p>Content</p>
-                <h2>Section 1.2</h2>
-                <p>More content</p>
-            </div>
-        "#;
-        let mut p = Parser::new(html);
-        let node = p.parse().unwrap();
-        dbg!(&node);
-    }
-    #[test]
-    fn test_single_heading() {
-        init();
-        let html = r#"<h1>Test</h1>"#;
-        let mut p = Parser::new(html);
-        let node = p.parse().unwrap();
-        dbg!(&node);
+        let mut p = Parser::new("<div><style>p{color:red}</style><p>Hi</p></div>");
+        let (_root, _arena, css) = p.parse().unwrap();
+        assert!(css.contains("p{color:red}"));
     }
 }
