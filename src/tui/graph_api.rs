@@ -67,9 +67,9 @@ pub fn char_width(c: char) -> usize {
 
 #[derive(Debug, Clone)]
 pub struct Block {
-    pub(crate) word: String,
-    pub(crate) fcolor: Option<Color>,
-    pub(crate) bcolor: Option<Color>,
+    pub word: String,
+    pub fcolor: Option<Color>,
+    pub bcolor: Option<Color>,
     render: Option<RefCell<String>>,
 }
 
@@ -527,16 +527,16 @@ pub fn trigger_refresh(scroll_y: &mut u32, zoom: &mut f32, rows: u16) -> Option<
 // ============================================================
 
 #[derive(Debug)]
-struct Img {
-    path: PathBuf,
-    term_size: (u32, u32),
-    picture: Option<Vec<String>>,
-    cloumns: u32,
-    rows: u32,
+pub struct Img {
+    pub path: PathBuf,
+    pub term_size: (u32, u32),
+    pub picture: Option<Vec<String>>,
+    pub cloumns: u32,
+    pub rows: u32,
 }
 
 impl Img {
-    fn new(path: PathBuf, term_size: (u32, u32)) -> Self {
+    pub fn new(path: PathBuf, term_size: (u32, u32)) -> Self {
         Self {
             path,
             term_size,
@@ -614,17 +614,4 @@ impl Img {
         }
         Ok(())
     }
-}
-
-#[cfg(test)]
-#[test]
-fn test_create_img() {
-    let mut img = Img::new(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_html/src/pic.png"),
-        (320, 160),
-    );
-    img._create_img().unwrap();
-    assert!(img.cloumns > 0, "image should have columns");
-    assert!(img.rows > 0, "image should have rows");
-    assert!(img.picture.is_some(), "image should have picture data");
 }

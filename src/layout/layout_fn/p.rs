@@ -39,24 +39,3 @@ pub fn layout_p(
     term_layout.new_line();
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::html::html_parse::Parser;
-
-    #[test]
-    fn test_layout_p() {
-        let mut p = Parser::new("<p>Hello</p><p>World</p>");
-        let (root, arena, _) = p.parse().unwrap();
-        let term_map = TermMap {
-            columns: 80,
-            rows: 24,
-        };
-        let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
-        tl.draw(&arena, root, &term_map).unwrap();
-        let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
-        assert!(canvas.contains("Hello"));
-        assert!(canvas.contains("World"));
-    }
-}

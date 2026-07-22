@@ -67,18 +67,3 @@ impl TermLayout {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_term_map_mock() {
-        let map = TermMap {
-            columns: 80,
-            rows: 24,
-        };
-        assert_eq!(map.columns, 80);
-        assert_eq!(map.rows, 24);
-    }
-}
