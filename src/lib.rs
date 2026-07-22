@@ -147,7 +147,9 @@ pub fn render(html: &str, css: &str) {
     }
     if let Err(e) = execute!(stdout(), EnterAlternateScreen, EnableMouseCapture, Hide) {
         log::error!("Failed to enter alternate screen: {}", e);
-        let _ = disable_raw_mode();
+        if let Err(e2) = disable_raw_mode() {
+            log::error!("Failed to disable raw mode during cleanup: {}", e2);
+        }
         return;
     }
 
@@ -182,13 +184,17 @@ pub fn render(html: &str, css: &str) {
 
     if let Err(e) = tx.send(RenderCmd::Redraw { scroll_y, zoom }) {
         log::error!("Failed to send initial Redraw: {}", e);
-        let _ = tx.send(RenderCmd::Quit);
+        if let Err(e2) = tx.send(RenderCmd::Quit) {
+            log::error!("Failed to send Quit during cleanup: {}", e2);
+        }
     }
 
     loop {
         match trigger_refresh(&mut scroll_y, &mut zoom, rows) {
             Some(RenderCmd::Quit) => {
-                let _ = tx.send(RenderCmd::Quit);
+                if let Err(e) = tx.send(RenderCmd::Quit) {
+                    log::error!("Failed to send Quit: {}", e);
+                }
                 break;
             }
             Some(cmd) => {
@@ -210,6 +216,10 @@ pub fn render(html: &str, css: &str) {
         log::error!("Render thread panicked: {:?}", e);
     }
 
-    let _ = execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture, Show);
-    let _ = disable_raw_mode();
+    if let Err(e) = execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture, Show) {
+        log::error!("Failed to leave alternate screen: {}", e);
+    }
+    if let Err(e) = disable_raw_mode() {
+        log::error!("Failed to disable raw mode: {}", e);
+    }
 }

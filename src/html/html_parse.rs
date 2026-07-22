@@ -146,6 +146,10 @@ fn extract_text_content(handle: &Handle) -> String {
     text
 }
 
+/// Maps an HTML tag name to its corresponding [`NodeType`].
+///
+/// Returns `None` for unsupported tags (they are flattened).
+#[doc(hidden)]
 pub fn tag_name_to_node_type(tag: &str) -> Option<NodeType> {
     match tag.to_ascii_lowercase().as_str() {
         "a" => Some(NodeType::A),

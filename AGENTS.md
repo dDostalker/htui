@@ -38,7 +38,15 @@ htui/
 │       ├── mod.rs
 │       └── graph_api.rs    # Block / TermLayout / RenderCmd / 图像加载
 ├── Cargo.toml
-└── test_html/              # 测试用的 HTML 工作空间
+├── tests/
+│   ├── fixtures/          # HTML/CSS test fixtures + images
+│   ├── html_parse_tests.rs
+│   ├── css_parse_tests.rs
+│   ├── layout_tests.rs
+│   ├── layout_aside_tests.rs
+│   ├── layout_header_footer_tests.rs
+│   ├── attributes_tests.rs
+│   └── graph_api_tests.rs
 ```
 
 ## 架构
@@ -109,8 +117,8 @@ CSS 字符串 ───► css_parse::Parser ──► CssRule
 - **import 风格**：使用 crate 内相对路径引用，不在模块顶部做通配导入。
 
 ## API创建
-创建API时，
-
+- API创建时必须对功能进行///注释，并且其他位置除难以理解的部分不要注释，必要时可以注释。
+- 对于API的共享保持最小共享原则。
 
 ## 添加新 HTML 元素支持 — 操作清单
 

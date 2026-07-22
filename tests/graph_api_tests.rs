@@ -5,7 +5,7 @@ use htui::tui::graph_api::Img;
 #[test]
 fn test_create_img() {
     let mut img = Img::new(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_html/src/pic.png"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pic.png"),
         (320, 160),
     );
     img._create_img().unwrap();

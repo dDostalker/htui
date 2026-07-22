@@ -7,10 +7,14 @@ use crate::{
     tui::graph_api::{TermLayout, char_width},
 };
 
+/// Calculate the display width of a string (ASCII = 1, CJK = 2).
+#[doc(hidden)]
 pub fn text_display_width(s: &str) -> usize {
     s.chars().map(|c| char_width(c)).sum()
 }
 
+/// Collect direct text children into a single string.
+#[doc(hidden)]
 pub fn collect_text(arena: &NodeArena, node: &Node) -> String {
     let mut s = String::new();
     for child_id in node.child_ids() {
@@ -136,7 +140,9 @@ fn render_text(
             }
             _ => {
                 for layout_fn in DEFAULT_LAYOUT {
-                    let _ = layout_fn(child, term_layout, term_map, arena);
+                    if let Err(e) = layout_fn(child, term_layout, term_map, arena) {
+                        log::debug!("Sub-layout skipped for {:?}: {}", child.node_type, e);
+                    }
                 }
             }
         }

@@ -17,4 +17,4 @@ slotmap = "1.0"
 tendril = "0.4"
 
 [workspace]
-members = ["test_html"]
+members = []

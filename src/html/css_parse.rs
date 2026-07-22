@@ -210,6 +210,8 @@ fn matches_compound(node: &Node, compound: &CompoundSelector) -> bool {
     compound.iter().all(|s| matches_css(node, s))
 }
 
+/// Check whether a node matches a CSS selector chain.
+#[doc(hidden)]
 pub fn selector_chain_matches(arena: &NodeArena, node_id: NodeId, selector: &CssSelector) -> bool {
     let node = &arena[node_id];
     let n = selector.compounds.len();
@@ -380,6 +382,8 @@ impl CssAttr {
 /// - 十六进制: #RRGGBB, #RGB
 /// - rgb(): rgb(255, 0, 0)
 /// - 回退到 crossterm 内置 FromStr
+/// Parse a CSS color string into a [`crossterm::style::Color`].
+#[doc(hidden)]
 pub fn parse_color_str(s: &str) -> Option<Color> {
     let lower = s.trim().to_lowercase();
 
@@ -557,7 +561,7 @@ impl<'i> QualifiedRuleParser<'i> for CssParseState {
     ) -> std::result::Result<(), ParseError<'i, Self::Error>> {
         let block_start = input.position();
         while !input.is_exhausted() {
-            let _ = input.next();
+            input.next().ok();
         }
         let block_text = input.slice_from(block_start).to_string();
         self.rules
@@ -577,7 +581,7 @@ impl<'i> AtRuleParser<'i> for CssParseState {
     ) -> std::result::Result<(), ParseError<'i, Self::Error>> {
         debug!("skip @{}", name);
         while !input.is_exhausted() {
-            let _ = input.next();
+            input.next().ok();
         }
         Ok(())
     }
@@ -588,7 +592,7 @@ impl<'i> AtRuleParser<'i> for CssParseState {
         input: &mut CssParser<'i, 't>,
     ) -> std::result::Result<(), ParseError<'i, Self::Error>> {
         while !input.is_exhausted() {
-            let _ = input.next();
+            input.next().ok();
         }
         Ok(())
     }
@@ -597,6 +601,8 @@ impl<'i> AtRuleParser<'i> for CssParseState {
     }
 }
 
+/// Parse a CSS declaration block text into key-value pairs.
+#[doc(hidden)]
 pub fn parse_declaration_text(block: &str) -> IndexMap<String, String> {
     let mut m = IndexMap::new();
     let mut k = String::new();

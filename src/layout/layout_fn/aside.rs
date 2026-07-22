@@ -7,10 +7,14 @@ use crate::{
     tui::graph_api::{TermLayout, char_width},
 };
 
+/// Calculate the display width of a string (ASCII = 1, CJK = 2).
+#[doc(hidden)]
 pub fn text_display_width(s: &str) -> usize {
     s.chars().map(|c| char_width(c)).sum()
 }
 
+/// Collect all descendant text into a single string.
+#[doc(hidden)]
 pub fn collect_all_text(arena: &NodeArena, node: &Node) -> String {
     let mut s = String::new();
     for child_id in node.child_ids() {
