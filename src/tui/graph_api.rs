@@ -19,6 +19,13 @@ use image::{
 use log::{debug, error, warn};
 use std::io::stdout;
 
+use crate::{
+    TermMap,
+    html::css_parse::{FontWeight, TextAlign},
+    layout::{FormattingContext, layout::text_display_width},
+    tdom::node::{Node, NodeArena, NodeType, collect_text},
+};
+
 /// Maximum virtual canvas multiplier (relative to terminal viewport)
 const MAX_SCROLL_MULTIPLIER: usize = 20;
 
@@ -70,6 +77,7 @@ pub struct Block {
     pub word: String,
     pub fcolor: Option<Color>,
     pub bcolor: Option<Color>,
+    pub bold: bool,
     render: Option<RefCell<String>>,
 }
 
@@ -92,6 +100,7 @@ impl Display for Block {
             write!(f, "{}", self.render_str())?;
         } else {
             let styled = self.word.clone().stylize();
+            let styled = if self.bold { styled.bold() } else { styled };
             let styled = match (self.fcolor, self.bcolor) {
                 (Some(fg), Some(bg)) => styled.with(fg).on(bg),
                 (Some(fg), None) => styled.with(fg),
@@ -108,11 +117,12 @@ impl Block {
     fn is_render(&self) -> bool {
         self.render.is_some()
     }
-    pub fn new(word: String, fcolor: Option<Color>, bcolor: Option<Color>) -> Self {
+    pub fn new(word: String, fcolor: Option<Color>, bcolor: Option<Color>, bold: bool) -> Self {
         Self {
             word,
             fcolor,
             bcolor,
+            bold,
             render: None,
         }
     }
@@ -120,6 +130,7 @@ impl Block {
         word: String,
         fcolor: Option<Color>,
         bcolor: Option<Color>,
+        bold: bool,
         render: Option<String>,
     ) -> Self {
         match render {
@@ -127,12 +138,14 @@ impl Block {
                 word,
                 fcolor,
                 bcolor,
+                bold,
                 render: Some(RefCell::new(render)),
             },
             None => Self {
                 word,
                 fcolor,
                 bcolor,
+                bold,
                 render: None,
             },
         }
@@ -241,6 +254,7 @@ impl TermLayout {
             let batch_start = i;
             let fg = cell.fcolor;
             let bg = cell.bcolor;
+            let is_bold = cell.bold;
             let is_empty = cell.word == " " && cell.bcolor.is_none();
             let mut batch = String::new();
 
@@ -258,7 +272,7 @@ impl TermLayout {
                 if c_empty != is_empty {
                     break;
                 }
-                if !c_empty && (c.fcolor != fg || c.bcolor != bg) {
+                if !c_empty && (c.fcolor != fg || c.bcolor != bg || c.bold != is_bold) {
                     break;
                 }
                 batch.push_str(&c.word);
@@ -274,6 +288,7 @@ impl TermLayout {
                     print!("{batch}");
                 } else {
                     let styled = batch.stylize();
+                    let styled = if is_bold { styled.bold() } else { styled };
                     let styled = match (fg, bg) {
                         (Some(f), Some(b)) => styled.with(f).on(b),
                         (Some(f), None) => styled.with(f),
@@ -302,7 +317,13 @@ impl TermLayout {
         self.point = new_point;
     }
 
-    pub fn paint_string(&mut self, s: &str, fcolor: Option<Color>, bcolor: Option<Color>) -> u32 {
+    pub fn paint_string(
+        &mut self,
+        s: &str,
+        fcolor: Option<Color>,
+        bcolor: Option<Color>,
+        bold: bool,
+    ) -> u32 {
         if self.is_full() {
             return 0;
         }
@@ -316,12 +337,12 @@ impl TermLayout {
                 break;
             }
             let width = char_width(c);
-            self.layout[idx] = Block::new(c.to_string(), fcolor, bcolor);
+            self.layout[idx] = Block::new(c.to_string(), fcolor, bcolor, bold);
             if width > 1 {
                 let next_idx = idx + 1;
                 if next_idx < max {
                     // 填充格用空字符串标记，渲染时跳过，避免终端光标偏移
-                    self.layout[next_idx] = Block::new(String::new(), fcolor, bcolor);
+                    self.layout[next_idx] = Block::new(String::new(), fcolor, bcolor, bold);
                 }
             }
             self.point += width as u32;
@@ -374,7 +395,7 @@ impl TermLayout {
                 }
                 let pic_idx = row * img_cols + col;
                 if let Some(cell) = picture.get(pic_idx) {
-                    self.layout[canvas_idx] = Block::new(cell.clone(), None, None);
+                    self.layout[canvas_idx] = Block::new(cell.clone(), None, None, false);
                 }
             }
         }
@@ -613,5 +634,88 @@ impl Img {
             }
         }
         Ok(())
+    }
+}
+
+/// Decode an image into the half-block / quarter-block glyph grid and stamp
+/// the cells into `term_layout` starting at `(x, y)`.
+///
+/// `max_size` is the `(width, height)` in terminal cells the image should be
+/// resized to. Errors from the underlying loader are propagated; callers that
+/// want best-effort rendering should catch and log.
+pub fn paint_image_at(
+    term_layout: &mut TermLayout,
+    path: &str,
+    origin: (usize, usize),
+    max_size: (u32, u32),
+) -> Result<()> {
+    let (x, y) = origin;
+    let mut img_data = Img::new(PathBuf::from(path), max_size);
+    img_data._create_img()?;
+    let picture = img_data
+        .picture
+        .as_ref()
+        .ok_or_else(|| anyhow!("Image data empty: {}", path))?;
+    let img_cols = img_data.cloumns as usize;
+    let img_rows = img_data.rows as usize;
+    let canvas_cols = term_layout.columns as usize;
+    let max = term_layout.max_cells();
+    for row in 0..img_rows {
+        for col in 0..img_cols {
+            let canvas_idx = (y + row) * canvas_cols + (x + col);
+            if canvas_idx >= max {
+                break;
+            }
+            let pic_idx = row * img_cols + col;
+            if let Some(cell) = picture.get(pic_idx) {
+                term_layout.layout[canvas_idx] = Block::new(cell.clone(), None, None, false);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Render text content within `block_width`, applying `align` to direct text
+/// children and dispatching element children through the layout registry.
+///
+/// **Deprecated** — superseded by [`crate::layout::paint::paint_layout_tree`]
+/// in the two-phase pipeline. Retained for any external callers; will be
+/// removed once we can confirm no consumer relies on it.
+#[deprecated(note = "use paint_layout_tree in crate::layout::paint")]
+pub fn render_text(
+    node: &Node,
+    term_layout: &mut TermLayout,
+    _term_map: &TermMap,
+    arena: &NodeArena,
+    fg: Option<crossterm::style::Color>,
+    bg: Option<crossterm::style::Color>,
+    align: TextAlign,
+    block_width: usize,
+    _context: FormattingContext,
+) {
+    let bold = matches!(node.css_attr.get_font_weight(), FontWeight::Bold);
+    let text = collect_text(arena, node);
+    let has_text = !text.is_empty();
+
+    if has_text && align != TextAlign::Left {
+        let text_width = text_display_width(&text);
+        let padding = match align {
+            TextAlign::Center => (block_width.saturating_sub(text_width)) / 2,
+            TextAlign::Right => block_width.saturating_sub(text_width),
+            TextAlign::Left => 0,
+        };
+        if padding > 0 {
+            term_layout.paint_string(&" ".repeat(padding), fg, bg, bold);
+        }
+    }
+
+    for child_id in node.child_ids() {
+        if term_layout.is_full() {
+            break;
+        }
+        let child = &arena[child_id];
+        if let NodeType::Text(s) = &child.node_type {
+            term_layout.paint_string(s, fg, bg, bold);
+        }
     }
 }

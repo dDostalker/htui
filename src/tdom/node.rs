@@ -234,3 +234,13 @@ impl fmt::Display for NodeId {
         write!(f, "n#{}", self.data().as_ffi() as u32)
     }
 }
+
+pub fn collect_text(arena: &NodeArena, node: &Node) -> String {
+    let mut s = String::new();
+    for child_id in node.child_ids() {
+        if let NodeType::Text(t) = &arena[child_id].node_type {
+            s.push_str(t);
+        }
+    }
+    s
+}

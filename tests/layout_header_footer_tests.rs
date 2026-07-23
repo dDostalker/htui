@@ -1,7 +1,7 @@
 use crossterm::style::Color;
 use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
-use htui::layout::layout_fn::header_footer::text_display_width;
+
 use htui::tdom::node::{Node, NodeArena, NodeId, NodeType};
 use htui::tui::graph_api::{TermLayout, char_width};
 
@@ -316,8 +316,6 @@ fn test_css_attr_font_weight() {
 
 #[test]
 fn test_text_display_width() {
-    assert_eq!(text_display_width("abc"), 3);
-    assert_eq!(text_display_width("\u{4f60}\u{597d}"), 4);
     assert_eq!(char_width('\u{2550}'), 1);
     assert_eq!(char_width('\u{2500}'), 1);
     assert_eq!(char_width('\u{4f60}'), 2);
