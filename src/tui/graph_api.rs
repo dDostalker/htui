@@ -573,7 +573,14 @@ impl Img {
         }
 
         let img = image::open(&self.path)?;
-        let img = img.resize(self.term_size.0, self.term_size.1, FilterType::Nearest);
+        // `term_size` is documented as `(cols, rows)` in terminal cells. Each
+        // cell represents a 2×4 pixel block, so we multiply accordingly before
+        // resizing. We must use `resize_exact` — the default `resize`
+        // preserves aspect ratio and would shrink the long edge to fit the
+        // shorter one, breaking the cell-to-pixel correspondence.
+        let pixel_w = self.term_size.0.saturating_mul(2).max(2);
+        let pixel_h = self.term_size.1.saturating_mul(4).max(4);
+        let img = img.resize_exact(pixel_w, pixel_h, FilterType::Nearest);
         let (width, height) = img.dimensions();
 
         self.cloumns = width.div_ceil(2);

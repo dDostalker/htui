@@ -8,9 +8,10 @@ use crate::{
 /// Build a [`LayoutBox`] for an `<img>` element.
 ///
 /// The rasterized dimensions are derived from the HTML `width` / `height`
-/// attributes (falling back to the containing block × 2 / × 4 to roughly
-/// match a half-screen image). The path is taken from the `src` attribute
-/// verbatim — the paint phase resolves it through `paint_image_at`.
+/// attributes (each cell is a 2×4 pixel block, falling back to
+/// `containing.width × 2` pixels wide and `containing.width × 4` pixels
+/// tall when omitted). The path is taken from the `src` attribute verbatim
+/// — the paint phase resolves it through `paint_image_at`.
 pub fn layout_img(
     arena: &NodeArena,
     node_id: NodeId,
@@ -31,6 +32,10 @@ pub fn layout_img(
         .attributes
         .get_width()
         .unwrap_or(containing.width as u32 * 2);
+    // `BoxConstraint` only exposes the containing block width, so the default
+    // height is approximated as 4× that in pixels (i.e. a 2:1 portrait by
+    // default once converted to cells). The picture always scrolls
+    // vertically, so we never need to clamp to the terminal height.
     let max_h = node
         .attributes
         .get_height()
@@ -39,6 +44,9 @@ pub fn layout_img(
     // Each terminal cell represents a 2×4 pixel block (see Img::_create_img).
     let img_cols = max_w.div_ceil(2).max(1) as usize;
     let img_rows = max_h.div_ceil(4).max(1) as usize;
+    // Clamp to the containing block width so the rect and the rendered image
+    // share the same cell count — painting past `rect.width` would overwrite
+    // neighboring boxes.
     let block_width = img_cols.min(containing.width);
     let x = centered_left(containing, block_width);
     let y = cursor.allocate(img_rows);
@@ -46,7 +54,7 @@ pub fn layout_img(
     Ok(Some(LayoutBox::new_image(
         node_id,
         crate::layout::Rect::new(x, y, block_width, img_rows),
-        img_cols,
+        block_width,
         img_rows,
         src,
     )))
