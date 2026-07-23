@@ -3,7 +3,7 @@ use anyhow::Result;
 use crate::{
     layout::{
         BoxConstraint, Cursor, LayoutBox,
-        tree::{centered_left, layout_children, resolve_block_width},
+        tree::{block_left, layout_children, resolve_block_width},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
 };
@@ -31,7 +31,7 @@ pub fn layout_hn(
 
     let block_width =
         resolve_block_width(node.css_attr.get_width(containing.width), containing.width);
-    let x = centered_left(containing, block_width);
+    let x = block_left(containing, block_width);
     let y = cursor.allocate(1);
 
     let prefix = "#".repeat(level);

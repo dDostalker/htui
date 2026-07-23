@@ -100,7 +100,10 @@ fn test_div_bg_fills_full_row_default() {
 }
 
 #[test]
-fn test_div_width_50pct_centered() {
+fn test_div_width_50pct_left() {
+    // Browser-like geometry: a block with explicit `width` sits flush left
+    // inside its containing block (CSS `margin-left: 0` default). The
+    // 50%-wide div occupies cols 0..cols/2; the right half is bg-free.
     init();
     let html = "<div>half</div>";
     let css = "div { width: 50%; background-color: blue; color: white; }";
@@ -118,17 +121,14 @@ fn test_div_width_50pct_centered() {
     let content_row = content_idx / cols;
     let row = &tl.layout[content_row * cols..(content_row + 1) * cols];
 
-    let left_margin = (cols - cols / 2) / 2;
-    for i in 0..left_margin {
-        assert!(
-            row[i].bcolor.is_none(),
-            "left margin should have no bg col={i}"
-        );
-    }
-    let block_end = left_margin + cols / 2;
+    let block_start = 0;
+    let block_end = cols / 2;
     let mut has_text = false;
-    for i in left_margin..block_end {
-        assert!(row[i].bcolor.is_some(), "block should have bg col={i}");
+    for i in block_start..block_end {
+        assert!(
+            row[i].bcolor.is_some(),
+            "block should have bg col={i} (flush left)"
+        );
         if row[i].word != " " {
             assert_eq!(row[i].fcolor, Some(Color::White), "text should be white");
             has_text = true;
@@ -138,13 +138,15 @@ fn test_div_width_50pct_centered() {
     for i in block_end..cols {
         assert!(
             row[i].bcolor.is_none(),
-            "right margin should have no bg col={i}"
+            "cols cols/2..cols should be bg-free (outside the block)"
         );
     }
 }
 
 #[test]
 fn test_div_width_fixed() {
+    // Browser-like geometry: a fixed-width block sits flush left. The 20-col
+    // block occupies cols 0..20.
     init();
     let html = "<div>Fix</div>";
     let css = "div { width: 20px; background-color: red; }";
@@ -165,11 +167,25 @@ fn test_div_width_fixed() {
     let bg_count = (rstart..rend)
         .filter(|&i| tl.layout[i].bcolor.is_some())
         .count();
-    assert_eq!(bg_count, 20, "background should be exactly 20 columns");
+    assert_eq!(
+        bg_count, 20,
+        "background should be exactly 20 columns (cols 0..20, flush left)"
+    );
+    // Block bg starts at col 0 (flush left), not centered.
+    let first_bg_col = (rstart..rend)
+        .find(|&i| tl.layout[i].bcolor.is_some())
+        .map(|i| i - rstart)
+        .expect("block should have at least one bg cell");
+    assert_eq!(
+        first_bg_col, 0,
+        "fixed-width block must sit flush left at col 0"
+    );
 }
 
 #[test]
 fn test_div_text_align_center() {
+    // Browser-like geometry: the BLOCK is flush left (cols 0..40); the TEXT
+    // inside is centered within the block.
     init();
     let html = "<div>Centered</div>";
     let css = "div { text-align: center; width: 40px; }";
@@ -179,28 +195,25 @@ fn test_div_text_align_center() {
     let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
     tl.draw(&arena, root_id, &term_map).unwrap();
 
+    // Find the first text cell; text "Centered" (8 chars) sits at col
+    // (40 - 8) / 2 = 16 within the flush-left block.
     let text_idx = tl
         .layout
         .iter()
-        .position(|b| b.word != " ")
+        .position(|b| b.word == *"C")
         .expect("should find text");
-    let row = text_idx / cols;
-    let rstart = row * cols;
-    let left_margin = (cols - 40) / 2;
-    let text_start = rstart + left_margin;
-    let block = &tl.layout[text_start..text_start + 40];
-
-    let leading_spaces = block.iter().take_while(|b| b.word == " ").count();
-    let text_str_width = "Centered".len();
-    let expected_padding = (40 - text_str_width) / 2;
+    let col = text_idx % cols;
+    let expected_padding = (40 - "Centered".len()) / 2;
     assert_eq!(
-        leading_spaces, expected_padding,
-        "text should be centered within block"
+        col, expected_padding,
+        "text should be centered within the (flush-left) 40-col block"
     );
 }
 
 #[test]
 fn test_div_text_align_right() {
+    // Browser-like geometry: the BLOCK is flush left (cols 0..40); the TEXT
+    // inside is right-aligned within the block.
     init();
     let html = "<div>Right</div>";
     let css = "div { text-align: right; width: 40px; }";
@@ -210,23 +223,18 @@ fn test_div_text_align_right() {
     let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
     tl.draw(&arena, root_id, &term_map).unwrap();
 
+    // Find the first text cell; text "Right" (5 chars) sits at col
+    // 40 - 5 = 35 within the flush-left block.
     let text_idx = tl
         .layout
         .iter()
-        .position(|b| b.word != " ")
+        .position(|b| b.word == *"R")
         .expect("should find text");
-    let row = text_idx / cols;
-    let rstart = row * cols;
-    let left_margin = (cols - 40) / 2;
-    let text_start = rstart + left_margin;
-    let block = &tl.layout[text_start..text_start + 40];
-
-    let leading_spaces = block.iter().take_while(|b| b.word == " ").count();
-    let text_str_width = "Right".len();
-    let expected_padding = 40 - text_str_width;
+    let col = text_idx % cols;
+    let expected_padding = 40 - "Right".len();
     assert_eq!(
-        leading_spaces, expected_padding,
-        "text should be right-aligned within block"
+        col, expected_padding,
+        "text should be right-aligned within the (flush-left) 40-col block"
     );
 }
 

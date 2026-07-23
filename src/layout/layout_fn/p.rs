@@ -3,7 +3,7 @@ use anyhow::Result;
 use crate::{
     layout::{
         BoxConstraint, Cursor, LayoutBox,
-        tree::{centered_left, collect_direct_text, layout_children, resolve_block_width},
+        tree::{block_left, collect_direct_text, layout_children, resolve_block_width},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
 };
@@ -13,8 +13,10 @@ use crate::{
 /// Honors CSS `width` (default: fill containing block) and `text-align`
 /// (inherited from ancestors via `inherit_css`) — the paint phase uses
 /// the resolved `block_width` for both background fill and text-align
-/// padding, so nested `<div><p>…</p></div>` correctly centers text within
-/// the parent's width.
+/// padding, so nested `<div><p>…</p></div>` correctly positions text
+/// within the parent's width. Block sits flush left inside its parent,
+/// matching CSS `margin-left: 0` defaults; `text-align` only moves text
+/// within the block, not the block itself.
 pub fn layout_p(
     arena: &NodeArena,
     node_id: NodeId,
@@ -28,7 +30,7 @@ pub fn layout_p(
 
     let block_width =
         resolve_block_width(node.css_attr.get_width(containing.width), containing.width);
-    let x = centered_left(containing, block_width);
+    let x = block_left(containing, block_width);
     let y = cursor.allocate(1);
 
     let text = {

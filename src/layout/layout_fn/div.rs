@@ -3,18 +3,20 @@ use anyhow::Result;
 use crate::{
     layout::{
         BoxConstraint, Cursor, LayoutBox,
-        tree::{centered_left, collect_direct_text, layout_children, resolve_block_width},
+        tree::{block_left, collect_direct_text, layout_children, resolve_block_width},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
 };
 
 /// Build a [`LayoutBox`] for a `<div>` element.
 ///
-/// `<div>` is a generic block container. CSS `width` controls the centered
-/// rect, `background-color` triggers a full-rect background fill, and
-/// `text-align` is applied to direct text descendants. CSS `color` cascades
-/// to descendants through `inherit_css`, so the paint phase simply reads
-/// each descendant's own `css_attr`.
+/// `<div>` is a generic block container. CSS `width` controls the block's
+/// column count (default: fill containing block); the block sits flush left
+/// inside its parent, matching CSS `margin-left: 0` defaults.
+/// `background-color` triggers a full-rect background fill, and `text-align`
+/// is applied to direct text descendants. CSS `color` cascades to descendants
+/// through `inherit_css`, so the paint phase simply reads each descendant's
+/// own `css_attr`.
 pub fn layout_div(
     arena: &NodeArena,
     node_id: NodeId,
@@ -28,7 +30,7 @@ pub fn layout_div(
 
     let block_width =
         resolve_block_width(node.css_attr.get_width(containing.width), containing.width);
-    let x = centered_left(containing, block_width);
+    let x = block_left(containing, block_width);
     let y = cursor.allocate(1);
 
     let text = {

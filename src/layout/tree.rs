@@ -85,9 +85,17 @@ pub fn resolve_block_width(css_width: Option<usize>, containing_width: usize) ->
     css_width.unwrap_or(containing_width).min(containing_width)
 }
 
-/// Compute the centered left offset for a block of `block_width` inside a
-/// containing block of `containing_width`, starting at `containing.x`.
-pub fn centered_left(containing: BoxConstraint, block_width: usize) -> usize {
-    containing.x + containing.width.saturating_sub(block_width) / 2
+/// Compute the left offset for a block-level element inside its containing
+/// block.
+///
+/// Mirrors CSS block-layout default: a block with an explicit `width` sits
+/// flush against the containing block's left edge (i.e. `margin-left: 0`,
+/// `margin-right: auto` only when both are auto — which would need a
+/// `margin: auto` rule we don't currently parse). `text-align` is a
+/// separate concern handled in the paint phase.
+///
+/// `block_width` is ignored; it is kept in the signature so every
+/// block-level layout function can call this uniformly.
+pub fn block_left(containing: BoxConstraint, _block_width: usize) -> usize {
+    containing.x
 }
-

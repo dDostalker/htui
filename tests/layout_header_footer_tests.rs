@@ -103,6 +103,8 @@ fn test_header_solid_bg() {
 
 #[test]
 fn test_header_width_50pct() {
+    // Browser-like geometry: a `<header>` with explicit `width: 50%` sits
+    // flush left (cols 0..cols/2), NOT centered.
     init();
     let html = "<header>Half</header>";
     let css = "header { width: 50%; background-color: blue; color: white; }";
@@ -121,17 +123,14 @@ fn test_header_width_50pct() {
     let content_row = content_idx / cols;
     let row = &tl.layout[content_row * cols..(content_row + 1) * cols];
 
-    let left_margin = (cols - cols / 2) / 2;
-    for i in 0..left_margin {
-        assert!(
-            row[i].bcolor.is_none(),
-            "left margin should have no bg col={i}"
-        );
-    }
-    let block_end = left_margin + cols / 2;
+    let block_start = 0;
+    let block_end = cols / 2;
     let mut has_text = false;
-    for i in left_margin..block_end {
-        assert!(row[i].bcolor.is_some(), "block should have bg col={i}");
+    for i in block_start..block_end {
+        assert!(
+            row[i].bcolor.is_some(),
+            "block should have bg col={i} (flush left)"
+        );
         if row[i].word != " " {
             has_text = true;
         }
@@ -140,13 +139,14 @@ fn test_header_width_50pct() {
     for i in block_end..cols {
         assert!(
             row[i].bcolor.is_none(),
-            "right margin should have no bg col={i}"
+            "cols cols/2..cols should be bg-free (outside the block)"
         );
     }
 }
 
 #[test]
 fn test_header_width_fixed() {
+    // Browser-like geometry: a fixed-width `<header>` sits flush left at col 0.
     init();
     let html = "<header>Fix</header>";
     let css = "header { width: 20px; background-color: red; }";
@@ -169,7 +169,17 @@ fn test_header_width_fixed() {
     let bg_cols: Vec<usize> = (rstart..rend)
         .filter(|&i| tl.layout[i].bcolor.is_some())
         .collect();
-    assert_eq!(bg_cols.len(), 20, "background should be exactly 20 columns");
+    assert_eq!(
+        bg_cols.len(),
+        20,
+        "background should be exactly 20 columns (cols 0..20, flush left)"
+    );
+    // First bg cell must be at col 0 (flush left), not centered.
+    let first_bg_col = bg_cols[0] - rstart;
+    assert_eq!(
+        first_bg_col, 0,
+        "fixed-width header must sit flush left at col 0"
+    );
 }
 
 #[test]

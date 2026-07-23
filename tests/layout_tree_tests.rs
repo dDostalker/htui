@@ -73,11 +73,12 @@ fn two_paragraphs_land_on_different_rows() {
 }
 
 #[test]
-fn nested_paragraph_in_aside_is_separate_row() {
-    // The bug we want to lock down: previously <aside> called
-    // `collect_all_text()`, so a nested <p> was inlined into the aside row
-    // and could not honour a containing block. After the refactor, the
-    // nested <p> gets its own row and the aside's bg no longer overlaps it.
+fn nested_paragraph_shares_aside_row_with_bg() {
+    // Browser-like geometry: `<aside>` does NOT reserve an empty own row.
+    // The nested <p> sits on the same row as the aside, with the text
+    // inheriting the aside's bg via the `parent_bg` thread in `paint_box`.
+    // This locks in: aside row == paragraph row, text is yellow, bg on the
+    // same row is darkblue, and the row immediately after is bg-free.
     let (root_id, arena) = setup(
         "<aside><p>The rough-skinned newt defends itself.</p></aside>",
         "aside { background-color: darkblue; } p { color: yellow; }",
@@ -87,32 +88,41 @@ fn nested_paragraph_in_aside_is_separate_row() {
     let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
     tl.draw(&arena, root_id, &term_map).unwrap();
 
-    // Find the aside row (it has darkblue bg).
+    // Find the aside row (the row that carries darkblue bg).
     let aside_row = tl
         .layout
         .iter()
         .position(|b| b.bcolor == Some(Color::DarkBlue))
         .map(|i| i / cols)
         .expect("aside should paint a darkblue row");
-    // Find the paragraph row (it has yellow text but no bg).
+    // Find the paragraph row (it has yellow text).
     let paragraph_row = tl
         .layout
         .iter()
         .position(|b| b.fcolor == Some(Color::Yellow))
         .map(|i| i / cols)
         .expect("nested paragraph should still render yellow text");
-    assert!(
-        paragraph_row > aside_row,
-        "nested <p> must live on its own row below the aside, got rows {aside_row}/{paragraph_row}"
+    assert_eq!(
+        paragraph_row, aside_row,
+        "nested <p> must share the aside's row (no empty stripe above), got rows {aside_row}/{paragraph_row}"
     );
+    // The row after the aside must be bg-free (rect height == 1).
+    let row_after_start = (aside_row + 1) * cols;
+    if row_after_start + cols <= tl.layout.len() {
+        let row_after = &tl.layout[row_after_start..row_after_start + cols];
+        assert!(
+            row_after.iter().all(|b| b.bcolor.is_none()),
+            "row after the aside must be bg-free (aside is exactly 1 row tall)"
+        );
+    }
 }
 
 #[test]
 fn nested_paragraph_uses_parent_containing_block_for_text_align() {
     // When <aside width: 40px> contains <p> with inherited `text-align: center`,
     // the paragraph's text must be centered within the *aside* (40 cols), not
-    // within the terminal (80 cols). The aside is centered, so its inner x is
-    // 20 and the paragraph text should sit at col 20 + (40 - text_w) / 2.
+    // within the terminal (80 cols). Browser-like geometry: aside sits flush
+    // left at col 0, so the paragraph text should sit at col 0 + (40 - text_w) / 2.
     let html = "<aside><p>Centered</p></aside>";
     let css = "aside { width: 40px; background-color: darkblue; text-align: center; }";
     let (root_id, arena) = setup(html, css);
@@ -127,12 +137,12 @@ fn nested_paragraph_uses_parent_containing_block_for_text_align() {
         .position(|b| b.word == *"C")
         .expect("should find paragraph text");
     let col = text_idx % cols;
-    let aside_left = (cols - 40) / 2;
+    let aside_left = 0; // flush-left, not (cols - 40) / 2
     let text_w = "Centered".len();
     let expected = aside_left + (40 - text_w) / 2;
     assert_eq!(
         col, expected,
-        "nested <p> text must be centered within the aside, col={col} expected={expected}"
+        "nested <p> text must be centered within the (flush-left) aside, col={col} expected={expected}"
     );
 }
 

@@ -3,7 +3,7 @@ use anyhow::Result;
 use crate::{
     layout::{
         BoxConstraint, Cursor, LayoutBox,
-        tree::{centered_left, collect_direct_text, layout_children, resolve_block_width},
+        tree::{block_left, collect_direct_text, layout_children, resolve_block_width},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
 };
@@ -61,7 +61,7 @@ fn layout_block_with_tag(
 
     let block_width =
         resolve_block_width(node.css_attr.get_width(containing.width), containing.width);
-    let x = centered_left(containing, block_width);
+    let x = block_left(containing, block_width);
     let content_y = cursor.allocate(1);
     // Reserve `spacing_after` trailing rows so the next block starts with
     // visual breathing room, matching the previous `new_line(); new_line();`.

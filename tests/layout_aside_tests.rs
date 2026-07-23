@@ -80,6 +80,9 @@ fn test_aside_with_nested_div() {
 
 #[test]
 fn test_aside_width_50pct() {
+    // Browser-like geometry: a block with explicit `width` sits flush left
+    // inside its containing block (CSS `margin-left: 0` default). The 50%-wide
+    // aside occupies cols 0..cols/2; the right half is bg-free.
     init();
     let html = "<aside>Half</aside>";
     let css = "aside { width: 50%; background-color: blue; color: white; }";
@@ -90,7 +93,7 @@ fn test_aside_width_50pct() {
     let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
     tl.draw(&arena, root_id, &term_map).unwrap();
 
-    let block_left = (cols - cols / 2) / 2;
+    let block_left = 0;
     let block_width = cols / 2;
     let row = tl
         .layout
@@ -100,16 +103,17 @@ fn test_aside_width_50pct() {
         .unwrap();
     let row_start = row * cols;
     let block = &tl.layout[row_start..row_start + cols];
-    assert!(block[..block_left].iter().all(|b| b.bcolor.is_none()));
     assert!(
         block[block_left..block_left + block_width]
             .iter()
-            .all(|b| b.bcolor == Some(Color::Blue))
+            .all(|b| b.bcolor == Some(Color::Blue)),
+        "cols 0..cols/2 should all carry blue bg (block is flush left)"
     );
     assert!(
         block[block_left + block_width..]
             .iter()
-            .all(|b| b.bcolor.is_none())
+            .all(|b| b.bcolor.is_none()),
+        "cols cols/2..cols should be bg-free (outside the block)"
     );
     for cell in &block[block_left..block_left + block_width] {
         if cell.word != " " {
@@ -120,6 +124,8 @@ fn test_aside_width_50pct() {
 
 #[test]
 fn test_aside_width_fixed_px() {
+    // Browser-like geometry: a fixed-width block sits flush left. The 20-col
+    // block occupies cols 0..20; no centering offset.
     init();
     let html = "<aside>Fix</aside>";
     let css = "aside { width: 20px; background-color: red; }";
@@ -136,8 +142,18 @@ fn test_aside_width_fixed_px() {
         .map(|index| index / term_map.columns as usize)
         .unwrap();
     let row_start = row * term_map.columns as usize;
-    let block = &tl.layout[row_start + 30..row_start + 50];
-    assert!(block.iter().all(|b| b.bcolor == Some(Color::Red)));
+    // Block spans cols 0..20 (flush left, NOT cols 30..50).
+    let block = &tl.layout[row_start..row_start + 20];
+    assert!(
+        block.iter().all(|b| b.bcolor == Some(Color::Red)),
+        "cols 0..20 should all carry red bg (block is flush left, 20 wide)"
+    );
+    // Cols 20..30 must be bg-free.
+    let after = &tl.layout[row_start + 20..row_start + 30];
+    assert!(
+        after.iter().all(|b| b.bcolor.is_none()),
+        "cols 20..30 should be bg-free (outside the 20-col block)"
+    );
 }
 
 #[test]
@@ -172,6 +188,9 @@ fn test_aside_width_default_full() {
 
 #[test]
 fn test_aside_text_align_center() {
+    // Browser-like geometry: the BLOCK is flush left (cols 0..40); the TEXT
+    // inside is centered within the block (offset = (40 - len("Centered")) / 2).
+    // The block must not be centered in the terminal.
     init();
     let html = "<aside>Centered</aside>";
     let css = "aside { text-align: center; width: 40px; background-color: darkblue; }";
@@ -182,32 +201,39 @@ fn test_aside_text_align_center() {
     let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
     tl.draw(&arena, root_id, &term_map).unwrap();
 
+    // The block spans cols 0..40; text "Centered" (8 chars) is centered, so it
+    // starts at col (40 - 8) / 2 = 16.
     let text_idx = tl
         .layout
         .iter()
-        .position(|b| b.word != " ")
-        .expect("should find text");
-    let row = text_idx / cols;
-    let rstart = row * cols;
-
-    let left_margin = (cols - 40) / 2;
-    let text_start = rstart + left_margin;
-    let block = &tl.layout[text_start..text_start + 40];
-
-    let first_non_space = block
-        .iter()
-        .position(|b| b.word != " ")
-        .expect("should find text");
+        .position(|b| b.word == *"C")
+        .expect("should find first text char");
+    let col = text_idx % cols;
+    assert_eq!(
+        col, 16,
+        "text must be centered within the (flush-left) 40-col block"
+    );
+    // Block bg occupies exactly 40 cells, all within cols 0..40.
     let bg_cells: Vec<_> = tl.layout.iter().filter(|b| b.bcolor.is_some()).collect();
     assert_eq!(
         bg_cells.len(),
         40,
         "background should cover the whole block"
     );
+    let bg_cols: Vec<_> = bg_cells
+        .iter()
+        .map(|b| tl.layout.iter().position(|c| std::ptr::eq(c, *b)).unwrap() % cols)
+        .collect();
+    assert!(
+        bg_cols.iter().all(|&c| c < 40),
+        "block bg must be within cols 0..40 (flush left)"
+    );
 }
 
 #[test]
 fn test_aside_text_align_right() {
+    // Browser-like geometry: the BLOCK is flush left (cols 0..40); the TEXT
+    // inside is right-aligned within the block (offset = 40 - len("Right") = 35).
     init();
     let html = "<aside>Right</aside>";
     let css = "aside { text-align: right; width: 40px; background-color: darkblue; }";
@@ -218,26 +244,31 @@ fn test_aside_text_align_right() {
     let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
     tl.draw(&arena, root_id, &term_map).unwrap();
 
+    // The block spans cols 0..40; text "Right" (5 chars) is right-aligned, so
+    // it starts at col 40 - 5 = 35.
     let text_idx = tl
         .layout
         .iter()
-        .position(|b| b.word != " ")
-        .expect("should find text");
-    let row = text_idx / cols;
-    let rstart = row * cols;
-    let left_margin = (cols - 40) / 2;
-    let text_start = rstart + left_margin;
-    let block = &tl.layout[text_start..text_start + 40];
-
-    let first_non_space = block
-        .iter()
-        .position(|b| b.word != " ")
-        .expect("should find text");
+        .position(|b| b.word == *"R")
+        .expect("should find first text char");
+    let col = text_idx % cols;
+    assert_eq!(
+        col, 35,
+        "text must be right-aligned within the (flush-left) 40-col block"
+    );
     let bg_cells: Vec<_> = tl.layout.iter().filter(|b| b.bcolor.is_some()).collect();
     assert_eq!(
         bg_cells.len(),
         40,
         "background should cover the whole block"
+    );
+    let bg_cols: Vec<_> = bg_cells
+        .iter()
+        .map(|b| tl.layout.iter().position(|c| std::ptr::eq(c, *b)).unwrap() % cols)
+        .collect();
+    assert!(
+        bg_cols.iter().all(|&c| c < 40),
+        "block bg must be within cols 0..40 (flush left)"
     );
 }
 
@@ -249,12 +280,14 @@ fn test_aside_text_align_right() {
 
 #[test]
 fn test_aside_bg_covers_nested_p_row() {
-    // The fix: aside's rect.height must grow to include nested block
-    // children, and `paint_block` must fill every content row of the rect.
-    // Note: text characters write `bg = node.bg` (which is `None` on the
-    // nested <p>), so the row is not "all bg" — it's "bg on every non-text
-    // cell". We assert both invariants: (a) the row carries bg, (b) the
-    // row after the aside does not.
+    // Browser-like geometry: `<aside>` does NOT reserve its own empty row.
+    // The aside's rect wraps the children directly, so for
+    // `<aside><p>Nested content</p></aside>`:
+    //   - aside.rect = (x, y, w, 1)
+    //   - nested <p> sits on the same row as the aside
+    //   - the next row is bg-free
+    // Row 0 carries the aside's bg on every non-text cell; the row after
+    // the aside is bg-free.
     init();
     let html = "<aside><p>Nested content</p></aside>";
     let css = "aside { background-color: darkblue; }";
@@ -268,40 +301,34 @@ fn test_aside_bg_covers_nested_p_row() {
     let row0 = &tl.layout[0..cols];
     let row1 = &tl.layout[cols..2 * cols];
 
-    // Row 0 is the aside's own row — no direct text, so it's fully bg.
-    assert!(
-        row0.iter().all(|b| b.bcolor == Some(Color::DarkBlue)),
-        "row 0 should be fully darkblue (aside own row, no direct text)"
-    );
-    // Row 1 carries the aside bg except where text characters overwrite.
-    let row1_bg = row1
+    // Row 0 = the aside's row, which is also the nested <p>'s row. The
+    // bg covers every non-text cell.
+    let row0_bg = row0
         .iter()
         .filter(|b| b.bcolor == Some(Color::DarkBlue))
         .count();
     assert!(
-        row1_bg > 0,
-        "row 1 must carry the aside's bg (got {row1_bg} bg cells out of {cols})"
+        row0_bg > 0,
+        "row 0 must carry the aside's bg (got {row0_bg}/{cols} bg cells)"
     );
     assert!(
-        row1_bg >= cols - "Nested content".len(),
-        "row 1 bg should fill all non-text cells (got {row1_bg} bg cells, expected >= {})",
+        row0_bg >= cols - "Nested content".len(),
+        "row 0 bg should fill all non-text cells (got {row0_bg} bg cells, expected >= {})",
         cols - "Nested content".len()
     );
-    // The row after the aside must remain bg-free.
-    let row2_start = 2 * cols;
-    if row2_start + cols <= tl.layout.len() {
-        let row2 = &tl.layout[row2_start..row2_start + cols];
-        assert!(
-            row2.iter().all(|b| b.bcolor.is_none()),
-            "row 2 must not carry the aside's bg"
-        );
-    }
+    // Row 1 is outside the aside — must be bg-free.
+    assert!(
+        row1.iter().all(|b| b.bcolor.is_none()),
+        "row 1 must not carry the aside's bg (aside is exactly 1 row tall)"
+    );
 }
 
 #[test]
 fn test_aside_rect_height_includes_nested_children() {
-    // Direct check on the layout tree: the rect.height reported by the
-    // aside box must reflect the deepest nested block, not hardcoded 1.
+    // Direct check on the layout tree: the aside wraps its children on the
+    // same row, so rect.height equals the rows occupied by children (1 for
+    // a single <p>). The nested <p> starts at the aside's own y, not one
+    // row below.
     init();
     let html = "<aside><p>only child</p></aside>";
     let css = "aside { background-color: darkblue; }";
@@ -323,16 +350,21 @@ fn test_aside_rect_height_includes_nested_children() {
         })
         .expect("aside box should be present in the layout tree");
     assert_eq!(
-        aside_box.rect.height, 2,
-        "aside rect.height must include its nested <p> child"
+        aside_box.rect.height, 1,
+        "aside rect.height should NOT reserve an empty own row; it wraps the children (1 row for 1 <p>)"
     );
     assert_eq!(aside_box.children.len(), 1, "aside should have 1 child box");
-    assert_eq!(aside_box.children[0].rect.y, 1, "child should be on row 1");
+    assert_eq!(
+        aside_box.children[0].rect.y, aside_box.rect.y,
+        "child should share the aside's row (no offset)"
+    );
 }
 
 #[test]
 fn test_aside_bg_covers_two_nested_p_rows() {
-    // Two nested <p> siblings should both sit inside the aside's bg.
+    // Two nested <p> siblings share the aside's bg across rows 0 and 1.
+    // The aside's rect is exactly 2 rows tall (rows 0..2), so row 2 must
+    // be bg-free.
     init();
     let html = "<aside><p>first</p><p>second</p></aside>";
     let css = "aside { background-color: darkblue; }";
@@ -343,9 +375,9 @@ fn test_aside_bg_covers_two_nested_p_rows() {
     let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
     tl.draw(&arena, root_id, &term_map).unwrap();
 
-    // Rows 0..3 are the aside's rect. Each row must carry the bg on its
-    // non-text cells; rows 1 and 2 lose cells to "first"/"second" text.
-    for row in 0..3 {
+    // Rows 0..2 are the aside's rect. Each row carries bg on non-text
+    // cells; rows 0 and 1 lose cells to "first"/"second" text.
+    for row in 0..2 {
         let start = row * cols;
         let row_slice = &tl.layout[start..start + cols];
         let bg_count = row_slice
@@ -357,13 +389,13 @@ fn test_aside_bg_covers_two_nested_p_rows() {
             "row {row} must carry the aside's bg (got {bg_count}/{cols})"
         );
     }
-    // Row 3 must be bg-free.
-    let row3_start = 3 * cols;
-    if row3_start + cols <= tl.layout.len() {
-        let row3 = &tl.layout[row3_start..row3_start + cols];
+    // Row 2 must be bg-free (rect is exactly 2 rows).
+    let row2_start = 2 * cols;
+    if row2_start + cols <= tl.layout.len() {
+        let row2 = &tl.layout[row2_start..row2_start + cols];
         assert!(
-            row3.iter().all(|b| b.bcolor.is_none()),
-            "row 3 must not carry the aside's bg (rect should be exactly 3 rows)"
+            row2.iter().all(|b| b.bcolor.is_none()),
+            "row 2 must not carry the aside's bg (rect should be exactly 2 rows)"
         );
     }
 }
@@ -436,7 +468,10 @@ fn test_footer_spacing_rows_remain_bg_free() {
 
 #[test]
 fn test_aside_with_nested_div_extends_bg_to_div_row() {
-    // Block-level child of any kind (not just <p>) must be wrapped.
+    // Block-level child of any kind (not just <p>) shares the aside's row.
+    // For `<aside><div>block child</div></aside>` the aside rect is 1 row
+    // tall, so the bg (and the nested <div>) live on row 0; row 1 is
+    // bg-free.
     init();
     let html = "<aside><div>block child</div></aside>";
     let css = "aside { background-color: darkblue; }";
@@ -447,18 +482,24 @@ fn test_aside_with_nested_div_extends_bg_to_div_row() {
     let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
     tl.draw(&arena, root_id, &term_map).unwrap();
 
-    let row1 = &tl.layout[cols..2 * cols];
-    let row1_bg = row1
+    let row0 = &tl.layout[0..cols];
+    let row0_bg = row0
         .iter()
         .filter(|b| b.bcolor == Some(Color::DarkBlue))
         .count();
     assert!(
-        row1_bg > 0,
-        "row 1 (nested <div>) should carry the aside's bg (got {row1_bg} bg cells)"
+        row0_bg > 0,
+        "row 0 should carry the aside's bg around the nested <div> (got {row0_bg} bg cells)"
     );
     assert!(
-        row1_bg >= cols - "block child".len(),
-        "row 1 should be mostly bg except for text cells"
+        row0_bg >= cols - "block child".len(),
+        "row 0 should be mostly bg except for text cells"
+    );
+    // Row 1 is outside the aside — must be bg-free.
+    let row1 = &tl.layout[cols..2 * cols];
+    assert!(
+        row1.iter().all(|b| b.bcolor.is_none()),
+        "row 1 must not carry the aside's bg (aside is exactly 1 row tall)"
     );
 }
 
@@ -611,8 +652,9 @@ fn test_nested_p_inherits_when_parent_has_no_bg() {
 #[test]
 fn test_nested_p_in_aside_with_fixed_width_centered() {
     // Mirror the visual_test scenario exactly: `<aside width=30px bg=cyan>`
-    // containing `<p>30col</p>`. Every "30col" cell should carry cyan bg
-    // and the text should be centered within the 30-column block.
+    // containing `<p>30col</p>`. The aside sits flush left at col 0; the
+    // text "30col" (5 chars) is centered within the 30-col block, so it
+    // starts at col (30 - 5) / 2 = 12.
     init();
     let html = "<aside><p>30col</p></aside>";
     let css = "aside { width: 30px; text-align: center; background-color: cyan; color: black; }";
@@ -623,7 +665,7 @@ fn test_nested_p_in_aside_with_fixed_width_centered() {
     let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
     tl.draw(&arena, root_id, &term_map).unwrap();
 
-    let aside_left = (cols - 30) / 2;
+    let aside_left = 0;
     // Find the first text cell of "30col".
     let idx = tl
         .layout
@@ -634,15 +676,14 @@ fn test_nested_p_in_aside_with_fixed_width_centered() {
     assert_eq!(
         col,
         aside_left + (30 - 5) / 2,
-        "30col must be centered inside the aside block"
+        "30col must be centered inside the (flush-left) 30-col aside block"
     );
     // Every text cell must carry the parent's cyan bg.
     for ch in ['3', '0', 'c', 'o', 'l'] {
         let cell = cell_containing(&tl, ch);
-        assert_eq!(
-            cell.bcolor,
-            Some(Color::Cyan),
-            "cell {ch:?} must show the aside's cyan bg"
+        assert!(
+            cell.bcolor == Some(Color::Cyan),
+            "text cell {ch:?} must inherit cyan bg from the aside"
         );
     }
 }
