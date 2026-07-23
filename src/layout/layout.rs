@@ -1,9 +1,11 @@
-use anyhow::{Ok, Result};
+use anyhow::Result;
 use crossterm::terminal;
 
 use crate::{
-    layout::DEFAULT_LAYOUT,
-    tdom::node::{Node, NodeArena, NodeId, NodeType},
+    layout::{
+        BoxConstraint, Cursor, FormattingContext, paint::paint_layout_tree, tree::layout_tree,
+    },
+    tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{Block, TermLayout},
 };
 
@@ -26,7 +28,7 @@ impl TermMap {
 impl TermLayout {
     pub fn new(map: &TermMap, zoom: f32) -> Result<TermLayout> {
         let max_cells = map.columns as usize * map.rows as usize * 20;
-        let layout = vec![Block::new(" ".to_string(), None, None); max_cells];
+        let layout = vec![Block::new(" ".to_string(), None, None, false); max_cells];
         Ok(TermLayout {
             layout,
             columns: map.columns,
@@ -42,28 +44,38 @@ impl TermLayout {
 
 impl TermLayout {
     /// Draw the DOM tree onto the terminal canvas (virtual, may exceed terminal size).
+    ///
+    /// Two-phase pipeline:
+    /// 1. [`layout_tree`] walks the DOM through `DEFAULT_LAYOUT` and builds a
+    ///    `Vec<LayoutBox>` rooted at `root_id`. Each block claims a row range
+    ///    inside the containing block.
+    /// 2. [`paint_layout_tree`] writes the resulting rects into `self.layout`
+    ///    using each box's own coordinates — no shared cursor.
     pub fn draw(&mut self, arena: &NodeArena, root_id: NodeId, term_map: &TermMap) -> Result<()> {
         let root = &arena[root_id];
         assert_eq!(root.node_type, NodeType::Global);
-        let children: Vec<NodeId> = root.children.clone();
-        for child_id in children {
-            if self.is_full() {
-                break;
-            }
-            self._draw(&arena[child_id], arena, term_map)?;
-        }
-        // 绘制完成后更新 rendered_rows
-        self.rendered_rows = self.point / self.columns as u32;
+        let containing = BoxConstraint::root(term_map);
+        let mut cursor = Cursor::new();
+        let boxes = layout_tree(arena, root_id, containing, &mut cursor)?;
+        paint_layout_tree(&boxes, arena, self)?;
+        // Keep `point` consistent with the paint phase so scroll/zoom helpers
+        // continue to work (legacy fields).
+        self.point = (self.rendered_rows * self.columns as u32).min(self.max_cells() as u32);
         Ok(())
     }
+}
 
-    fn _draw(&mut self, node: &Node, arena: &NodeArena, term_map: &TermMap) -> Result<()> {
-        if self.is_full() {
-            return Ok(());
-        }
-        for draw_fn in DEFAULT_LAYOUT {
-            draw_fn(node, self, term_map, arena)?;
-        }
-        Ok(())
-    }
+/// Convenience for callers that still want the old `FormattingContext` form.
+///
+/// The two-phase pipeline passes `BoxConstraint` directly; this helper exists
+/// only so the few remaining callers in `graph_api.rs` can keep their
+/// existing call sites.
+pub fn root_context(term_map: &TermMap) -> FormattingContext {
+    FormattingContext::root(term_map)
+}
+
+#[doc(hidden)]
+pub fn text_display_width(s: &str) -> usize {
+    use crate::tui::graph_api::char_width;
+    s.chars().map(char_width).sum()
 }

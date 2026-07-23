@@ -1,44 +1,60 @@
 use anyhow::Result;
 
 use crate::{
-    layout::{DEFAULT_LAYOUT, layout::TermMap},
-    tdom::node::{Node, NodeArena, NodeType},
-    tui::graph_api::TermLayout,
+    layout::{
+        BoxConstraint, Cursor, LayoutBox,
+        tree::{block_left, collect_direct_text, layout_children, resolve_block_width},
+    },
+    tdom::node::{NodeArena, NodeId, NodeType},
 };
 
+/// Build a [`LayoutBox`] for a `<div>` element.
+///
+/// `<div>` is a generic block container. CSS `width` controls the block's
+/// column count (default: fill containing block); the block sits flush left
+/// inside its parent, matching CSS `margin-left: 0` defaults.
+/// `background-color` triggers a full-rect background fill, and `text-align`
+/// is applied to direct text descendants. CSS `color` cascades to descendants
+/// through `inherit_css`, so the paint phase simply reads each descendant's
+/// own `css_attr`.
 pub fn layout_div(
-    node: &Node,
-    term_layout: &mut TermLayout,
-    term_map: &TermMap,
     arena: &NodeArena,
-) -> Result<()> {
+    node_id: NodeId,
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+) -> Result<Option<LayoutBox>> {
+    let node = &arena[node_id];
     if node.node_type != NodeType::Div {
-        return Ok(());
-    }
-    if term_layout.is_full() {
-        return Ok(());
+        return Ok(None);
     }
 
-    term_layout.new_line();
+    let block_width =
+        resolve_block_width(node.css_attr.get_width(containing.width), containing.width);
+    let x = block_left(containing, block_width);
+    let y = cursor.allocate(1);
 
-    for child_id in node.child_ids() {
-        if term_layout.is_full() {
-            break;
-        }
-        let child = &arena[child_id];
-        match &child.node_type {
-            NodeType::Text(s) => {
-                let color = node.css_attr.get_color();
-                term_layout.paint_string(s, color, None);
-            }
-            _ => {
-                for layout_fn in DEFAULT_LAYOUT {
-                    layout_fn(child, term_layout, term_map, arena)?;
-                }
-            }
-        }
-    }
+    let text = {
+        let raw = collect_direct_text(arena, node);
+        if raw.is_empty() { None } else { Some(raw) }
+    };
 
-    term_layout.new_line();
-    Ok(())
+    let fill_bg = node.css_attr.get_bg_color().is_some();
+
+    let child_containing = BoxConstraint {
+        x,
+        width: block_width,
+    };
+    let child_cursor = &mut Cursor { y: cursor.peek() };
+    let block_children = node.children.clone();
+    let children = layout_children(arena, &block_children, child_containing, child_cursor)?;
+    cursor.y = child_cursor.y;
+
+    Ok(Some(LayoutBox::new_block(
+        node_id,
+        crate::layout::Rect::new(x, y, block_width, 1),
+        fill_bg,
+        0,
+        text,
+        children,
+    )))
 }

@@ -481,9 +481,6 @@ impl CssRule {
     pub fn add(&mut self, sel: CssSelector, attr: IndexMap<String, String>) {
         self.0.insert(sel, CssAttr(attr));
     }
-    pub fn css_to_node(&self) {
-        todo!()
-    }
 }
 
 // Parser
@@ -649,14 +646,40 @@ pub fn css_into_node(
     Ok(())
 }
 
+/// CSS properties that propagate from parent to child when the child has no explicit value.
+///
+/// Modelled as a typed enum so the set cannot drift from the accessors on [`CssAttr`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum InheritableProperty {
+    Color,
+    TextAlign,
+    FontWeight,
+}
+
+impl InheritableProperty {
+    /// Storage key used inside [`CssAttr`]'s `IndexMap`.
+    fn css_name(self) -> &'static str {
+        match self {
+            Self::Color => "color",
+            Self::TextAlign => "text-align",
+            Self::FontWeight => "font-weight",
+        }
+    }
+}
+
 /// Inheritable CSS properties: propagate from parent to child if child has no own value.
-const INHERITABLE: &[&str] = &["color", "text-align", "font-weight"];
+const INHERITABLE: &[InheritableProperty] = &[
+    InheritableProperty::Color,
+    InheritableProperty::TextAlign,
+    InheritableProperty::FontWeight,
+];
 
 fn inherit_css(arena: &mut NodeArena, node_id: NodeId, parent_attrs: &IndexMap<String, String>) {
     // Merge parent inheritable attrs into current node (if not already set)
     let node = &mut arena[node_id];
-    for key in INHERITABLE {
-        if let Some(value) = parent_attrs.get(*key) {
+    for prop in INHERITABLE {
+        let key = prop.css_name();
+        if let Some(value) = parent_attrs.get(key) {
             node.css_attr
                 .0
                 .entry(key.to_string())
@@ -666,8 +689,9 @@ fn inherit_css(arena: &mut NodeArena, node_id: NodeId, parent_attrs: &IndexMap<S
 
     // Collect inheritable attrs from this node to pass down
     let mut merged = parent_attrs.clone();
-    for key in INHERITABLE {
-        if let Some(value) = node.css_attr.0.get(*key) {
+    for prop in INHERITABLE {
+        let key = prop.css_name();
+        if let Some(value) = node.css_attr.0.get(key) {
             merged.insert(key.to_string(), value.clone());
         }
     }
