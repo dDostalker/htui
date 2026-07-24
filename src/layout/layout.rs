@@ -6,7 +6,7 @@ use crate::{
         BoxConstraint, Cursor, FormattingContext, paint::paint_layout_tree, tree::layout_tree,
     },
     tdom::node::{NodeArena, NodeId, NodeType},
-    tui::graph_api::{Block, TermLayout},
+    tui::graph_api::{Block, FontStyle, TermLayout},
 };
 
 #[derive(Debug)]
@@ -28,7 +28,7 @@ impl TermMap {
 impl TermLayout {
     pub fn new(map: &TermMap, zoom: f32) -> Result<TermLayout> {
         let max_cells = map.columns as usize * map.rows as usize * 20;
-        let layout = vec![Block::new(" ".to_string(), None, None, false); max_cells];
+        let layout = vec![Block::new(" ".to_string(), None, None, FontStyle::empty()); max_cells];
         Ok(TermLayout {
             layout,
             columns: map.columns,

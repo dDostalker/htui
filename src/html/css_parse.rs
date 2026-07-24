@@ -352,6 +352,37 @@ impl CssAttr {
             _ => FontWeight::Normal,
         }
     }
+    /// Font style (CSS `font-style`).
+    pub fn get_font_style_kind(&self) -> FontStyleKind {
+        match self.0.get("font-style").map(|s| s.as_str()) {
+            Some("italic") => FontStyleKind::Italic,
+            Some("oblique") => FontStyleKind::Oblique,
+            _ => FontStyleKind::Normal,
+        }
+    }
+    /// Text decoration (CSS `text-decoration`).
+    ///
+    /// The CSS property accepts multiple space-separated values such as
+    /// `underline line-through`; we parse the subset we render and fold the
+    /// combinations into a single variant.
+    pub fn get_text_decoration(&self) -> TextDecoration {
+        let raw = self
+            .0
+            .get("text-decoration")
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        let tokens: Vec<&str> = raw.split_whitespace().collect();
+        let underline = tokens.iter().any(|t| t.eq_ignore_ascii_case("underline"));
+        let line_through = tokens
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case("line-through"));
+        match (underline, line_through) {
+            (true, true) => TextDecoration::UnderlineLineThrough,
+            (true, false) => TextDecoration::Underline,
+            (false, true) => TextDecoration::LineThrough,
+            (false, false) => TextDecoration::None,
+        }
+    }
     /// Element width (CSS `width`).
     ///
     /// - `80%` → 80% of terminal width
@@ -469,6 +500,31 @@ pub enum TextAlign {
 pub enum FontWeight {
     Normal,
     Bold,
+}
+
+/// Font style (CSS `font-style`).
+///
+/// Mirrors the CSS values. Terminal output collapses `Italic` and `Oblique`
+/// to the same renderer flag, but the distinction is preserved here so the
+/// raw CSS decision is not lost.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontStyleKind {
+    Normal,
+    Italic,
+    Oblique,
+}
+
+/// Text decoration (CSS `text-decoration`).
+///
+/// The CSS property is space-separated and can combine multiple values; we
+/// model the subset we render (`underline`, `line-through`) as discrete
+/// variants so `==` matches expected outputs without set semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextDecoration {
+    None,
+    Underline,
+    LineThrough,
+    UnderlineLineThrough,
 }
 
 #[derive(Debug, Clone)]
@@ -641,7 +697,8 @@ pub fn css_into_node(
     for (selector, attr) in css.0.iter() {
         apply_css_rule(arena, root_id, selector, attr);
     }
-    // Propagate inheritable CSS properties (color, text-align, font-weight)
+    // Propagate inheritable CSS properties (color, text-align, font-weight,
+    // font-style, text-decoration)
     inherit_css(arena, root_id, &IndexMap::new());
     Ok(())
 }
@@ -654,6 +711,8 @@ enum InheritableProperty {
     Color,
     TextAlign,
     FontWeight,
+    FontStyle,
+    TextDecoration,
 }
 
 impl InheritableProperty {
@@ -663,6 +722,8 @@ impl InheritableProperty {
             Self::Color => "color",
             Self::TextAlign => "text-align",
             Self::FontWeight => "font-weight",
+            Self::FontStyle => "font-style",
+            Self::TextDecoration => "text-decoration",
         }
     }
 }
@@ -672,6 +733,8 @@ const INHERITABLE: &[InheritableProperty] = &[
     InheritableProperty::Color,
     InheritableProperty::TextAlign,
     InheritableProperty::FontWeight,
+    InheritableProperty::FontStyle,
+    InheritableProperty::TextDecoration,
 ];
 
 fn inherit_css(arena: &mut NodeArena, node_id: NodeId, parent_attrs: &IndexMap<String, String>) {

@@ -41,7 +41,7 @@ htui/
 ├── visual_test/          # 可视化测试工具（cargo run -p visual_test）
 │   └── src/
 │       ├── main.rs
-│       ├── all_in_one/   # HTML + CSS per test folder
+│       ├── all_in_one/   # index.html: 可直接浏览器打开，内部 <style> 内联 CSS
 │       ├── headings/
 │       ├── image/        # includes pic.png
 │       ├── colors/
@@ -50,7 +50,8 @@ htui/
 │       ├── css/
 │       ├── header_footer/
 │       ├── aside/
-│       └── helloworld/
+│       ├── helloworld/
+│       └── font_styles/  # bold / italic / underline / line-through
 ├── tests/
 │   ├── fixtures/          # HTML/CSS test fixtures + images
 │   ├── html_parse_tests.rs
@@ -157,10 +158,14 @@ CSS 字符串 ───► css_parse::Parser ──► CssRule
 | `CssAttr`          | `html::css_parse`       | 解析后的 CSS 属性         |
 | `CssRule`          | `html::css_parse`       | 完整 CSS 规则表           |
 | `CssSelector`      | `html::css_parse`       | CSS 选择器（含组合器）    |
+| `FontWeight`       | `html::css_parse`       | `font-weight` 枚举（`Normal` / `Bold`） |
+| `FontStyleKind`    | `html::css_parse`       | `font-style` 枚举（`Normal` / `Italic` / `Oblique`） |
+| `TextDecoration`   | `html::css_parse`       | `text-decoration` 枚举（`None` / `Underline` / `LineThrough` / `UnderlineLineThrough`） |
 | `LayoutFn`         | `layout::mod`           | 布局函数签名              |
 | `TermMap`          | `layout::layout`        | 终端尺寸信息              |
 | `TermLayout`       | `tui::graph_api`        | 终端画布 + 渲染方法       |
-| `Block`            | `tui::graph_api`        | 单个屏幕字符单元格        |
+| `Block`            | `tui::graph_api`        | 单个屏幕字符单元格（含 `style: FontStyle`） |
+| `FontStyle`        | `tui::graph_api`        | `Block` 的聚合样式位掩码（`BOLD` / `ITALIC` / `UNDERLINED` / `CROSSED_OUT`） |
 | `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举          |
 
 

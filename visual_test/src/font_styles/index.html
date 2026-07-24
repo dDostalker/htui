@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<!--
+  ============================================
+  htui 视觉测试 — font_styles
+  覆盖 font-weight / font-style / text-decoration
+  及其组合与父级继承
+  运行: cargo run -p visual_test -- font_styles
+  浏览器直接打开本文件即可看到与终端渲染对应相同的样式
+  ============================================
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>htui Font Style Visual Test</title>
+    <style>
+        p                { color: white;  }
+        h1               { color: cyan;   }
+        h2               { color: yellow; }
+
+        /* --- 2. Single style per row ----------------------------------- */
+        .bold            { font-weight: bold; }
+        .italic          { font-style: italic; }
+        .underline       { text-decoration: underline; }
+        .line-through    { text-decoration: line-through; }
+
+        /* --- 3. Two-style combinations --------------------------------- */
+        .bold-italic     { font-weight: bold;  font-style: italic; }
+        .bold-underline  { font-weight: bold;  text-decoration: underline; }
+        .bold-line       { font-weight: bold;  text-decoration: line-through; }
+        .italic-underline{ font-style: italic; text-decoration: underline; }
+        .italic-line     { font-style: italic; text-decoration: line-through; }
+        .underline-line  { text-decoration: underline line-through; }
+
+        /* --- 4. Three-style combinations ------------------------------- */
+        .bold-italic-underline {
+            font-weight: bold;
+            font-style: italic;
+            text-decoration: underline;
+        }
+        .bold-italic-line {
+            font-weight: bold;
+            font-style: italic;
+            text-decoration: line-through;
+        }
+
+        /* --- 5. All four styles ---------------------------------------- */
+        .all-four {
+            font-weight: bold;
+            font-style: italic;
+            text-decoration: underline line-through;
+        }
+
+        /* --- 6. Combined text-decoration syntax ------------------------ */
+        .combined-deco { text-decoration: underline line-through; }
+
+        /* --- 7. Inheritance from parent -------------------------------- */
+        .inherit-bold  { font-weight: bold; }
+        .inherit-italic{ font-style: italic; }
+
+        /* --- 8. Override on child -------------------------------------- */
+        .reset-bold        { font-weight: normal; }
+        .override-italic   { font-style: italic; }
+
+        /* --- 9. Styles + Color ----------------------------------------- */
+        .color-bold        { color: red;     font-weight: bold; }
+        .color-italic      { color: blue;    font-style: italic; }
+        .color-underline   { color: green;   text-decoration: underline; }
+        .color-all         { color: magenta; font-weight: bold; font-style: italic; text-decoration: underline; }
+
+        /* --- 10/11. Used by inline span demo --------------------------- */
+        .wrap-bold    { font-weight: bold; }
+        .wrap-italic  { font-style: italic; }
+    </style>
+</head>
+<body>
+    <div>
+        <h1>Font Style Visual Test</h1>
+        <p>Renders bold, italic, underline and line-through independently and combined.</p>
+
+        <h2>1. Baseline (no style)</h2>
+        <p>plain text — control row, no SGR flags applied.</p>
+
+        <h2>2. Single style per row</h2>
+        <p class="bold">Bold weight only — font-weight: bold.</p>
+        <p class="italic">Italic only — font-style: italic.</p>
+        <p class="underline">Underline only — text-decoration: underline.</p>
+        <p class="line-through">Strikethrough only — text-decoration: line-through.</p>
+
+        <h2>3. Two-style combinations</h2>
+        <p class="bold-italic">Bold + Italic.</p>
+        <p class="bold-underline">Bold + Underline.</p>
+        <p class="bold-line">Bold + Strikethrough.</p>
+        <p class="italic-underline">Italic + Underline.</p>
+        <p class="italic-line">Italic + Strikethrough.</p>
+        <p class="underline-line">Underline + Strikethrough (single declaration).</p>
+
+        <h2>4. Three-style combinations</h2>
+        <p class="bold-italic-underline">Bold + Italic + Underline.</p>
+        <p class="bold-italic-line">Bold + Italic + Strikethrough.</p>
+
+        <h2>5. All four styles at once</h2>
+        <p class="all-four">Bold + Italic + Underline + Strikethrough.</p>
+
+        <h2>6. Combined text-decoration syntax</h2>
+        <p class="combined-deco">Single rule: text-decoration: underline line-through.</p>
+
+        <h2>7. Inheritance from parent</h2>
+        <div class="inherit-bold">
+            <p>First child — should inherit bold from parent div.</p>
+            <p>Second child — also inherits bold.</p>
+            <div class="inherit-italic">
+                <p>Nested child — inherits BOTH bold (grandparent) and italic (parent).</p>
+            </div>
+        </div>
+
+        <h2>8. Override on child</h2>
+        <div class="inherit-bold">
+            <p class="reset-bold">Child clears parent's bold (font-weight: normal).</p>
+            <p class="override-italic">Child keeps parent bold and adds italic.</p>
+        </div>
+
+        <h2>9. Styles + Color</h2>
+        <p class="color-bold">Red + Bold.</p>
+        <p class="color-italic">Blue + Italic.</p>
+        <p class="color-underline">Green + Underline.</p>
+        <p class="color-all">Magenta + Bold + Italic + Underline.</p>
+
+        <h2>10. Multiline span impact</h2>
+        <p class="wrap-bold">
+            Bold on a long paragraph that should wrap inside the terminal width. The bold weight
+            flag should persist across every wrapped line of the same paragraph until the span ends.
+            The batch renderer groups adjacent cells with the same style, so a long bold sentence
+            produces only one opening SGR (1m) and one closing SGR (0m) per visible batch.
+        </p>
+        <p class="wrap-italic">
+            Italic on a long paragraph that should also wrap. Same batching rule applies — the
+            style flag stays active across line breaks within the element.
+        </p>
+
+        <h2>11. Mixed inline ranges</h2>
+        <p>
+            Word runs with different styles can appear in the same paragraph if you split them
+            into separate spans. Below: <span class="bold">bold</span>,
+            <span class="italic">italic</span>, <span class="underline">underlined</span>,
+            <span class="line-through">struck-through</span>, and a
+            <span class="color-underline">green-underlined</span> word.
+        </p>
+
+        <p>=== End of Font Style Test ===</p>
+    </div>
+</body>
+</html>

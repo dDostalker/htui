@@ -6,6 +6,7 @@ use std::{
 };
 
 use anyhow::{Result, anyhow};
+use bitflags::bitflags;
 use crossterm::{
     cursor::MoveTo,
     event::{self, Event, KeyCode, KeyEventKind, MouseEventKind},
@@ -21,7 +22,7 @@ use std::io::stdout;
 
 use crate::{
     TermMap,
-    html::css_parse::{FontWeight, TextAlign},
+    html::css_parse::TextAlign,
     layout::{FormattingContext, layout::text_display_width},
     tdom::node::{Node, NodeArena, NodeType, collect_text},
 };
@@ -72,12 +73,29 @@ pub fn char_width(c: char) -> usize {
 // Block
 // ============================================================
 
+bitflags! {
+    /// Display flags applied to a [`Block`].
+    ///
+    /// Aggregates the independent CSS font/text properties we render
+    /// (`font-weight: bold`, `font-style: italic`, `text-decoration:
+    /// underline`, `text-decoration: line-through`) into one bitfield so a
+    /// single character cell can carry any combination without growing the
+    /// `Block` shape on every new style attribute.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct FontStyle: u8 {
+        const BOLD        = 0b0000_0001;
+        const ITALIC      = 0b0000_0010;
+        const UNDERLINED  = 0b0000_0100;
+        const CROSSED_OUT = 0b0000_1000;
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Block {
     pub word: String,
     pub fcolor: Option<Color>,
     pub bcolor: Option<Color>,
-    pub bold: bool,
+    pub style: FontStyle,
     render: Option<RefCell<String>>,
 }
 
@@ -89,7 +107,7 @@ impl Deref for Block {
 }
 
 impl DerefMut for Block {
-    fn deref_mut(&mut self) -> &mut Self::Target {
+    fn deref_mut(&mut self) -> &mut str {
         &mut self.word
     }
 }
@@ -99,9 +117,20 @@ impl Display for Block {
         if self.is_render() {
             write!(f, "{}", self.render_str())?;
         } else {
-            let styled = self.word.clone().stylize();
-            let styled = if self.bold { styled.bold() } else { styled };
-            let styled = match (self.fcolor, self.bcolor) {
+            let mut styled = self.word.clone().stylize();
+            if self.style.contains(FontStyle::BOLD) {
+                styled = styled.bold();
+            }
+            if self.style.contains(FontStyle::ITALIC) {
+                styled = styled.italic();
+            }
+            if self.style.contains(FontStyle::UNDERLINED) {
+                styled = styled.underlined();
+            }
+            if self.style.contains(FontStyle::CROSSED_OUT) {
+                styled = styled.crossed_out();
+            }
+            styled = match (self.fcolor, self.bcolor) {
                 (Some(fg), Some(bg)) => styled.with(fg).on(bg),
                 (Some(fg), None) => styled.with(fg),
                 (None, Some(bg)) => styled.on(bg),
@@ -117,12 +146,17 @@ impl Block {
     fn is_render(&self) -> bool {
         self.render.is_some()
     }
-    pub fn new(word: String, fcolor: Option<Color>, bcolor: Option<Color>, bold: bool) -> Self {
+    pub fn new(
+        word: String,
+        fcolor: Option<Color>,
+        bcolor: Option<Color>,
+        style: FontStyle,
+    ) -> Self {
         Self {
             word,
             fcolor,
             bcolor,
-            bold,
+            style,
             render: None,
         }
     }
@@ -130,7 +164,7 @@ impl Block {
         word: String,
         fcolor: Option<Color>,
         bcolor: Option<Color>,
-        bold: bool,
+        style: FontStyle,
         render: Option<String>,
     ) -> Self {
         match render {
@@ -138,14 +172,14 @@ impl Block {
                 word,
                 fcolor,
                 bcolor,
-                bold,
+                style,
                 render: Some(RefCell::new(render)),
             },
             None => Self {
                 word,
                 fcolor,
                 bcolor,
-                bold,
+                style,
                 render: None,
             },
         }
@@ -254,7 +288,7 @@ impl TermLayout {
             let batch_start = i;
             let fg = cell.fcolor;
             let bg = cell.bcolor;
-            let is_bold = cell.bold;
+            let cell_style = cell.style;
             let is_empty = cell.word == " " && cell.bcolor.is_none();
             let mut batch = String::new();
 
@@ -272,7 +306,7 @@ impl TermLayout {
                 if c_empty != is_empty {
                     break;
                 }
-                if !c_empty && (c.fcolor != fg || c.bcolor != bg || c.bold != is_bold) {
+                if !c_empty && (c.fcolor != fg || c.bcolor != bg || c.style != cell_style) {
                     break;
                 }
                 batch.push_str(&c.word);
@@ -288,8 +322,21 @@ impl TermLayout {
                     print!("{batch}");
                 } else {
                     let styled = batch.stylize();
-                    let styled = if is_bold { styled.bold() } else { styled };
-                    let styled = match (fg, bg) {
+                    let mut styled = if cell_style.contains(FontStyle::BOLD) {
+                        styled.bold()
+                    } else {
+                        styled
+                    };
+                    if cell_style.contains(FontStyle::ITALIC) {
+                        styled = styled.italic();
+                    }
+                    if cell_style.contains(FontStyle::UNDERLINED) {
+                        styled = styled.underlined();
+                    }
+                    if cell_style.contains(FontStyle::CROSSED_OUT) {
+                        styled = styled.crossed_out();
+                    }
+                    styled = match (fg, bg) {
                         (Some(f), Some(b)) => styled.with(f).on(b),
                         (Some(f), None) => styled.with(f),
                         (None, Some(b)) => styled.on(b),
@@ -322,7 +369,7 @@ impl TermLayout {
         s: &str,
         fcolor: Option<Color>,
         bcolor: Option<Color>,
-        bold: bool,
+        style: FontStyle,
     ) -> u32 {
         if self.is_full() {
             return 0;
@@ -337,12 +384,12 @@ impl TermLayout {
                 break;
             }
             let width = char_width(c);
-            self.layout[idx] = Block::new(c.to_string(), fcolor, bcolor, bold);
+            self.layout[idx] = Block::new(c.to_string(), fcolor, bcolor, style);
             if width > 1 {
                 let next_idx = idx + 1;
                 if next_idx < max {
                     // 填充格用空字符串标记，渲染时跳过，避免终端光标偏移
-                    self.layout[next_idx] = Block::new(String::new(), fcolor, bcolor, bold);
+                    self.layout[next_idx] = Block::new(String::new(), fcolor, bcolor, style);
                 }
             }
             self.point += width as u32;
@@ -395,7 +442,7 @@ impl TermLayout {
                 }
                 let pic_idx = row * img_cols + col;
                 if let Some(cell) = picture.get(pic_idx) {
-                    self.layout[canvas_idx] = Block::new(cell.clone(), None, None, false);
+                    self.layout[canvas_idx] = Block::new(cell.clone(), None, None, FontStyle::empty());
                 }
             }
         }
@@ -675,7 +722,7 @@ pub fn render_image_at(
             }
             let pic_idx = row * img_cols + col;
             if let Some(cell) = picture.get(pic_idx) {
-                term_layout.layout[canvas_idx] = Block::new(cell.clone(), None, None, false);
+                term_layout.layout[canvas_idx] = Block::new(cell.clone(), None, None, FontStyle::empty());
             }
         }
     }
@@ -700,7 +747,7 @@ pub fn render_text(
     block_width: usize,
     _context: FormattingContext,
 ) {
-    let bold = matches!(node.css_attr.get_font_weight(), FontWeight::Bold);
+    let style = block_style(&node.css_attr);
     let text = collect_text(arena, node);
     let has_text = !text.is_empty();
 
@@ -712,7 +759,7 @@ pub fn render_text(
             TextAlign::Left => 0,
         };
         if padding > 0 {
-            term_layout.paint_string(&" ".repeat(padding), fg, bg, bold);
+            term_layout.paint_string(&" ".repeat(padding), fg, bg, style);
         }
     }
 
@@ -722,7 +769,28 @@ pub fn render_text(
         }
         let child = &arena[child_id];
         if let NodeType::Text(s) = &child.node_type {
-            term_layout.paint_string(s, fg, bg, bold);
+            term_layout.paint_string(s, fg, bg, style);
         }
     }
+}
+
+/// Aggregate the CSS font/text style on a node into a [`FontStyle`] bitfield.
+pub fn block_style(css_attr: &crate::html::css_parse::CssAttr) -> FontStyle {
+    use crate::html::css_parse::{FontStyleKind, FontWeight, TextDecoration};
+    let mut style = FontStyle::empty();
+    if matches!(css_attr.get_font_weight(), FontWeight::Bold) {
+        style |= FontStyle::BOLD;
+    }
+    if !matches!(css_attr.get_font_style_kind(), FontStyleKind::Normal) {
+        style |= FontStyle::ITALIC;
+    }
+    match css_attr.get_text_decoration() {
+        TextDecoration::Underline => style |= FontStyle::UNDERLINED,
+        TextDecoration::LineThrough => style |= FontStyle::CROSSED_OUT,
+        TextDecoration::UnderlineLineThrough => {
+            style |= FontStyle::UNDERLINED | FontStyle::CROSSED_OUT;
+        }
+        TextDecoration::None => {}
+    }
+    style
 }

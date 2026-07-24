@@ -1,35 +1,55 @@
-<!-- htui 视觉测试 — 标题层级 headings -->
-<div>
-    <h1>Heading 1: Main Title (color: cyan)</h1>
-    <p>This is the largest heading level.</p>
+<!DOCTYPE html>
+<!--
+  htui 视觉测试 — 标题层级 headings
+  运行: cargo run -p visual_test -- headings
+  浏览器直接打开本文件即可看到与终端渲染对应相同的样式
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>htui Headings Visual Test</title>
+    <style>
+        h1 { color: cyan; }
+        h2 { color: green; }
+        h3 { color: yellow; }
+        h4 { color: blue; }
+        h5 { color: magenta; }
+    </style>
+</head>
+<body>
+    <div>
+        <h1>Heading 1: Main Title (color: cyan)</h1>
+        <p>This is the largest heading level.</p>
 
-    <p>====================</p>
+        <p>====================</p>
 
-    <h2>Heading 2: Section Title (color: green)</h2>
-    <p>Second level heading for major sections.</p>
+        <h2>Heading 2: Section Title (color: green)</h2>
+        <p>Second level heading for major sections.</p>
 
-    <p>====================</p>
+        <p>====================</p>
 
-    <h3>Heading 3: Subsection Title (color: yellow)</h3>
-    <p>Third level heading for subsections.</p>
+        <h3>Heading 3: Subsection Title (color: yellow)</h3>
+        <p>Third level heading for subsections.</p>
 
-    <p>====================</p>
+        <p>====================</p>
 
-    <h4>Heading 4: Detail Title (color: blue)</h4>
-    <p>Fourth level heading for detailed divisions.</p>
+        <h4>Heading 4: Detail Title (color: blue)</h4>
+        <p>Fourth level heading for detailed divisions.</p>
 
-    <p>====================</p>
+        <p>====================</p>
 
-    <h5>Heading 5: Minor Title (color: magenta)</h5>
-    <p>Fifth level heading for fine-grained topics.</p>
+        <h5>Heading 5: Minor Title (color: magenta)</h5>
+        <p>Fifth level heading for fine-grained topics.</p>
 
-    <p>====================</p>
+        <p>====================</p>
 
-    <h1>H1 Again</h1>
-    <h2>H2 Again</h2>
-    <h3>H3 Again</h3>
-    <h4>H4 Again</h4>
-    <h5>H5 Again</h5>
+        <h1>H1 Again</h1>
+        <h2>H2 Again</h2>
+        <h3>H3 Again</h3>
+        <h4>H4 Again</h4>
+        <h5>H5 Again</h5>
 
-    <p>=== End of Headings Test ===</p>
-</div>
+        <p>=== End of Headings Test ===</p>
+    </div>
+</body>
+</html>

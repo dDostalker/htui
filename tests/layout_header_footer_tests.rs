@@ -325,6 +325,145 @@ fn test_css_attr_font_weight() {
 }
 
 #[test]
+fn test_css_attr_font_style_italic() {
+    let (_, arena) = setup("<div></div>", "div { font-style: italic; }");
+    for (_, node) in Node::descendants(&arena, arena.keys().next().unwrap()) {
+        if node.node_type == NodeType::Div {
+            assert_eq!(
+                node.css_attr.get_font_style_kind(),
+                css_parse::FontStyleKind::Italic
+            );
+            return;
+        }
+    }
+    panic!("div not found");
+}
+
+#[test]
+fn test_css_attr_font_style_oblique() {
+    let (_, arena) = setup("<div></div>", "div { font-style: oblique; }");
+    for (_, node) in Node::descendants(&arena, arena.keys().next().unwrap()) {
+        if node.node_type == NodeType::Div {
+            assert_eq!(
+                node.css_attr.get_font_style_kind(),
+                css_parse::FontStyleKind::Oblique
+            );
+            return;
+        }
+    }
+    panic!("div not found");
+}
+
+#[test]
+fn test_css_attr_text_decoration_underline() {
+    let (_, arena) = setup("<div></div>", "div { text-decoration: underline; }");
+    for (_, node) in Node::descendants(&arena, arena.keys().next().unwrap()) {
+        if node.node_type == NodeType::Div {
+            assert_eq!(
+                node.css_attr.get_text_decoration(),
+                css_parse::TextDecoration::Underline
+            );
+            return;
+        }
+    }
+    panic!("div not found");
+}
+
+#[test]
+fn test_css_attr_text_decoration_line_through() {
+    let (_, arena) = setup("<div></div>", "div { text-decoration: line-through; }");
+    for (_, node) in Node::descendants(&arena, arena.keys().next().unwrap()) {
+        if node.node_type == NodeType::Div {
+            assert_eq!(
+                node.css_attr.get_text_decoration(),
+                css_parse::TextDecoration::LineThrough
+            );
+            return;
+        }
+    }
+    panic!("div not found");
+}
+
+#[test]
+fn test_css_attr_text_decoration_combined() {
+    let (_, arena) = setup(
+        "<div></div>",
+        "div { text-decoration: underline line-through; }",
+    );
+    for (_, node) in Node::descendants(&arena, arena.keys().next().unwrap()) {
+        if node.node_type == NodeType::Div {
+            assert_eq!(
+                node.css_attr.get_text_decoration(),
+                css_parse::TextDecoration::UnderlineLineThrough
+            );
+            return;
+        }
+    }
+    panic!("div not found");
+}
+
+#[test]
+fn test_font_style_inherits_from_parent() {
+    // font-style should propagate from parent to child like browsers do.
+    let (_, arena) = setup(
+        "<div><span>x</span></div>",
+        "div { font-style: italic; }",
+    );
+    for (_, node) in Node::descendants(&arena, arena.keys().next().unwrap()) {
+        if node.node_type == NodeType::Span {
+            assert_eq!(
+                node.css_attr.get_font_style_kind(),
+                css_parse::FontStyleKind::Italic,
+                "child should inherit italic font-style from parent"
+            );
+            return;
+        }
+    }
+    panic!("span not found");
+}
+
+#[test]
+fn test_text_decoration_inherits_from_parent() {
+    let (_, arena) = setup(
+        "<div><span>x</span></div>",
+        "div { text-decoration: underline; }",
+    );
+    for (_, node) in Node::descendants(&arena, arena.keys().next().unwrap()) {
+        if node.node_type == NodeType::Span {
+            assert_eq!(
+                node.css_attr.get_text_decoration(),
+                css_parse::TextDecoration::Underline,
+                "child should inherit underline text-decoration from parent"
+            );
+            return;
+        }
+    }
+    panic!("span not found");
+}
+
+#[test]
+fn test_block_style_aggregates_font_properties() {
+    // Block-level aggregation: font-weight + font-style + text-decoration
+    // should all be visible on a single cell.
+    use htui::tui::graph_api::block_style;
+    let (_, arena) = setup(
+        "<div></div>",
+        "div { font-weight: bold; font-style: italic; text-decoration: underline; }",
+    );
+    for (_, node) in Node::descendants(&arena, arena.keys().next().unwrap()) {
+        if node.node_type == NodeType::Div {
+            let style = block_style(&node.css_attr);
+            assert!(style.contains(htui::tui::graph_api::FontStyle::BOLD));
+            assert!(style.contains(htui::tui::graph_api::FontStyle::ITALIC));
+            assert!(style.contains(htui::tui::graph_api::FontStyle::UNDERLINED));
+            assert!(!style.contains(htui::tui::graph_api::FontStyle::CROSSED_OUT));
+            return;
+        }
+    }
+    panic!("div not found");
+}
+
+#[test]
 fn test_text_display_width() {
     assert_eq!(char_width('\u{2550}'), 1);
     assert_eq!(char_width('\u{2500}'), 1);

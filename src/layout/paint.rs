@@ -9,10 +9,10 @@ use anyhow::Result;
 use crossterm::style::Color;
 
 use crate::{
-    html::css_parse::{FontWeight, TextAlign},
+    html::css_parse::TextAlign,
     layout::{BoxKind, LayoutBox, Rect},
     tdom::node::NodeArena,
-    tui::graph_api::{Block, TermLayout, char_width, render_image_at},
+    tui::graph_api::{Block, FontStyle, TermLayout, block_style, char_width, render_image_at},
 };
 
 /// Paint every box in `boxes` into `term_layout`.
@@ -90,7 +90,7 @@ fn paint_block(
 ) -> Result<()> {
     let node = &arena[lb.node_id];
     let fg = node.css_attr.get_color();
-    let bold = matches!(node.css_attr.get_font_weight(), FontWeight::Bold);
+    let style = block_style(&node.css_attr);
     let align = node.css_attr.get_text_align();
 
     // Effective bg: own bg wins; otherwise inherit the parent's bg so child
@@ -117,7 +117,7 @@ fn paint_block(
             for i in 0..r.width {
                 let idx = row_cell_start + i;
                 if idx < cells.len() {
-                    cells[idx] = Block::new(" ".to_string(), fg, bg_to_use, bold);
+                    cells[idx] = Block::new(" ".to_string(), fg, bg_to_use, style);
                 }
             }
         }
@@ -137,7 +137,7 @@ fn paint_block(
                 text,
                 fg,
                 effective_bg,
-                bold,
+                style,
             );
         }
     }
@@ -151,7 +151,7 @@ fn paint_text_row(
     text: &str,
     fg: Option<Color>,
     bg: Option<Color>,
-    bold: bool,
+    style: FontStyle,
 ) {
     let cells = term_layout.layout.as_mut_slice();
     let max = cells.len();
@@ -164,9 +164,9 @@ fn paint_text_row(
         if w == 2 && idx + 1 >= max {
             break;
         }
-        cells[idx] = Block::new(c.to_string(), fg, bg, bold);
+        cells[idx] = Block::new(c.to_string(), fg, bg, style);
         if w == 2 {
-            cells[idx + 1] = Block::new(String::new(), fg, bg, bold);
+            cells[idx + 1] = Block::new(String::new(), fg, bg, style);
         }
         idx += w;
     }
