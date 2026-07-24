@@ -464,6 +464,166 @@ fn test_block_style_aggregates_font_properties() {
 }
 
 #[test]
+fn test_styled_space_cells_carry_style_flag() {
+    // Regression: a styled paragraph like `<p>a b</p>` with underline must
+    // populate the inter-letter space cell with the underline flag too —
+    // otherwise `TermLayout::render`'s batch grouping prints the space
+    // without SGR and the underline drops out between characters.
+    use htui::tui::graph_api::FontStyle;
+    let (root_id, arena) = setup("<p>a b</p>", "p { text-decoration: underline; }");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    tl.draw(&arena, root_id, &term_map).unwrap();
+
+    let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
+    assert!(canvas.contains("a b"), "expected to see `a b` in the canvas, got: {canvas:?}");
+
+    // The space cell must carry UNDERLINED so the renderer batches it with
+    // the surrounding letters and applies the SGR.
+    let styled_spaces = tl
+        .layout
+        .iter()
+        .filter(|b| b.word == " " && b.style.contains(FontStyle::UNDERLINED))
+        .count();
+    assert!(
+        styled_spaces >= 1,
+        "expected at least one space cell to carry the underline flag, \
+         got 0 in canvas: {canvas:?}"
+    );
+}
+
+#[test]
+fn test_bold_italic_underline_all_apply_to_text_run() {
+    // The visual rendering path needs every style flag to show up on the
+    // non-space glyphs as well. This guards against any future regression
+    // where one of the flags gets dropped during aggregation or painting.
+    use htui::tui::graph_api::FontStyle;
+    let (root_id, arena) = setup(
+        "<p>xyz</p>",
+        "p { font-weight: bold; font-style: italic; text-decoration: underline line-through; }",
+    );
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    tl.draw(&arena, root_id, &term_map).unwrap();
+
+    for ch in ['x', 'y', 'z'] {
+        let idx = tl
+            .layout
+            .iter()
+            .position(|b| b.word == ch.to_string())
+            .unwrap_or_else(|| panic!("should find character {ch}"));
+        let style = tl.layout[idx].style;
+        assert!(
+            style.contains(FontStyle::BOLD),
+            "{ch} should carry BOLD"
+        );
+        assert!(
+            style.contains(FontStyle::ITALIC),
+            "{ch} should carry ITALIC"
+        );
+        assert!(
+            style.contains(FontStyle::UNDERLINED),
+            "{ch} should carry UNDERLINED"
+        );
+        assert!(
+            style.contains(FontStyle::CROSSED_OUT),
+            "{ch} should carry CROSSED_OUT"
+        );
+    }
+}
+
+#[test]
+fn test_style_persists_after_consecutive_spaces() {
+    // "a   b" (three spaces between) — each space cell should carry the
+    // underline flag, not just the first one.
+    use htui::tui::graph_api::FontStyle;
+    let (root_id, arena) = setup("<p>a   b</p>", "p { text-decoration: underline; }");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    tl.draw(&arena, root_id, &term_map).unwrap();
+
+    let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
+    assert!(canvas.contains("a   b"), "expected `a   b` in canvas");
+
+    let styled_spaces = tl
+        .layout
+        .iter()
+        .filter(|b| b.word == " " && b.style.contains(FontStyle::UNDERLINED))
+        .count();
+    assert!(
+        styled_spaces >= 3,
+        "expected all three space cells to carry underline, \
+         got {styled_spaces} in canvas: {canvas:?}"
+    );
+}
+
+#[test]
+fn test_render_emits_underline_sgr_across_spaces() {
+    // End-to-end check: after rendering `<p>a b</p>` with underline, the
+    // emitted ANSI byte stream must contain an underline SGR (`\x1B[4m`)
+    // followed by the entire `a b` run (space included). Before the fix,
+    // the renderer treated the space as "bare" and dropped the SGR.
+    let (root_id, arena) = setup("<p>a b</p>", "p { text-decoration: underline; }");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    let bytes = tl.render_to_bytes();
+    let rendered = String::from_utf8_lossy(&bytes);
+    let underline_sgr = "\x1B[4m";
+
+    assert!(
+        rendered.contains(underline_sgr),
+        "rendered output should contain underline SGR \\x1B[4m, got: {rendered:?}",
+    );
+    // The reset SGR (`\x1B[0m`) terminates a styled batch; ensure it
+    // appears after the underlined run starts so the underline is active
+    // for the whole batch including any spaces in it.
+    if let Some(open_at) = rendered.find(underline_sgr) {
+        let rest = &rendered[open_at..];
+        let close_at = rest.find("\x1B[0m").unwrap_or_else(|| {
+            panic!("styled batch must end with reset \\x1B[0m, got: {rendered:?}")
+        });
+        let batched_chars: String = rest[..close_at]
+            .chars()
+            .filter(|c| !c.is_control())
+            .collect();
+        assert!(
+            batched_chars.contains(' '),
+            "underline batch should include the inter-letter space, got: {batched_chars:?}",
+        );
+    } else {
+        panic!("underline SGR missing from rendered bytes: {rendered:?}");
+    }
+}
+
+#[test]
+fn test_is_rendered_as_bare_space_helper() {
+    use htui::tui::graph_api::{Block, FontStyle, is_rendered_as_bare_space};
+    use crossterm::style::Color;
+
+    // Plain space, no bg, no style → bare.
+    let bare = Block::new(" ".to_string(), None, None, FontStyle::empty());
+    assert!(is_rendered_as_bare_space(&bare));
+
+    // Space with underline → not bare (must keep SGR).
+    let underlined = Block::new(" ".to_string(), None, None, FontStyle::UNDERLINED);
+    assert!(!is_rendered_as_bare_space(&underlined));
+
+    // Space with bg → not bare (bg must render).
+    let with_bg = Block::new(
+        " ".to_string(),
+        None,
+        Some(Color::Blue),
+        FontStyle::empty(),
+    );
+    assert!(!is_rendered_as_bare_space(&with_bg));
+
+    // Non-space character → never bare.
+    let letter = Block::new("a".to_string(), None, None, FontStyle::empty());
+    assert!(!is_rendered_as_bare_space(&letter));
+}
+
+#[test]
 fn test_text_display_width() {
     assert_eq!(char_width('\u{2550}'), 1);
     assert_eq!(char_width('\u{2500}'), 1);
