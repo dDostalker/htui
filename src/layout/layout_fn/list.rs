@@ -2,11 +2,8 @@ use anyhow::Result;
 
 use crate::{
     layout::{
-        BoxConstraint, BoxEdges, Cursor, InlineRun, LayoutBox,
-        tree::{
-            block_left, collect_runs, compute_outer_geometry, layout_children,
-            reserve_border_box, resolve_block_width,
-        },
+        BoxConstraint, Cursor, InlineRun, LayoutBox,
+        tree::{LayoutBlockOptions, layout_block},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::block_style,
@@ -66,87 +63,32 @@ pub fn layout_li(
         return Ok(None);
     }
 
-    let (enclosing_list, ordinal) = list_context_for_li(arena, node_id);
-    let marker = match enclosing_list {
-        Some(NodeType::Ul) => "• ".to_string(),
-        Some(NodeType::Ol) => format!("{}. ", ordinal.unwrap_or(1)),
-        // Orphan `<li>` outside any list — fall back to a dash so we still
-        // render a visible marker rather than a blank row.
-        _ => "- ".to_string(),
-    };
-
-    let edges: BoxEdges = node.css_attr.get_box_edges(containing.width);
-
-    let available = containing.width.saturating_sub(edges.margin.horizontal());
-    let block_width =
-        resolve_block_width(node.css_attr.get_width(available), available).max(1);
-    let outer_width = block_width;
-    let x = block_left(containing, block_width);
-
-    let block_fg = node.css_attr.get_color();
-    let block_bg = node.css_attr.get_bg_color();
+    let marker = list_marker_for_li(arena, node_id);
     let block_font_style = block_style(&node.css_attr);
-    let body_runs = collect_runs(arena, node, block_fg, block_bg, block_font_style);
-
-    // Marker is its own inline run carried at the li's resolved style, so a
-    // <span> inside the body can still apply its own flags on top.
-    let marker_run = InlineRun::new(marker, block_font_style, block_fg, block_bg);
+    let marker_run = InlineRun::new(
+        marker.clone(),
+        block_font_style,
+        node.css_attr.get_color(),
+        node.css_attr.get_bg_color(),
+    );
     let marker_width = marker_run.width();
-    let mut runs = Vec::with_capacity(body_runs.len() + 1);
-    runs.push(marker_run);
-    runs.extend(body_runs);
 
-    cursor.skip(edges.margin.top);
-        let outer_y_top = cursor.y;
-
-    let geom = compute_outer_geometry(
-        BoxConstraint {
-            x,
-            width: outer_width,
-        },
-        outer_width,
-        edges,
-        outer_y_top,
-        1,
-    );
-
-    // Children (typically a nested <ul>/<ol>) sit on rows below the marker
-    // row, indented past the marker width so they line up with the body text.
-    let child_containing = BoxConstraint {
-        x: geom
-            .content_constraint
-            .x
-            .saturating_add(marker_width),
-        width: geom
-            .content_constraint
-            .width
-            .saturating_sub(marker_width)
-            .max(1),
-    };
-    let mut child_cursor = Cursor {
-        y: geom.outer_y
-            + edges.border.top.thickness()
-            + edges.padding.top,
-    };
-    let li_children = node.children.clone();
-    let children = layout_children(arena, &li_children, child_containing, &mut child_cursor)?;
-
-    let content_height = child_cursor.y.saturating_sub(
-        geom.outer_y + edges.border.top.thickness() + edges.padding.top,
-    );
-    let outer_height = reserve_border_box(cursor, geom.outer_y, edges, content_height, 1);
-
-    let fill_bg = block_bg.is_some();
-
-    Ok(Some(LayoutBox::new_block(
+    Ok(Some(layout_block(
+        arena,
+        node,
         node_id,
-        crate::layout::Rect::new(geom.outer_x, geom.outer_y, geom.outer_width, outer_height),
-        edges,
-        fill_bg,
-        0,
-        runs,
-        children,
-    )))
+        containing,
+        cursor,
+        LayoutBlockOptions {
+            prefix: Some(marker_run),
+            // Shift the children's containing block right by the marker
+            // width and shrink the inner width by the same amount, so a
+            // nested <ul>/<ol> sits under the body text rather than under
+            // the marker glyph.
+            child_containing_shift: Some((marker_width, -(marker_width as isize))),
+            ..Default::default()
+        },
+    )?))
 }
 
 fn layout_list(
@@ -161,69 +103,17 @@ fn layout_list(
         return Ok(None);
     }
 
-    let depth = list_depth(arena, node_id);
-    let indent = LIST_INDENT_PER_LEVEL * depth;
-    let edges: BoxEdges = node.css_attr.get_box_edges(containing.width);
-
-    let x = containing.x.saturating_add(indent) + edges.margin.left;
-    let available = containing.width
-        .saturating_sub(indent)
-        .saturating_sub(edges.margin.horizontal());
-    let block_width =
-        resolve_block_width(node.css_attr.get_width(available), available).max(1);
-    let outer_width = block_width;
-
-    // Like <aside>: peek the next row (after margin-top) without reserving
-    // an extra row for the list itself, so the rect wraps the children
-    // directly.
-    cursor.skip(edges.margin.top);
-    let outer_y_top = cursor.y;
-
-    let geom = compute_outer_geometry(
-        BoxConstraint {
-            x,
-            width: outer_width,
-        },
-        outer_width,
-        edges,
-        outer_y_top,
-        1,
-    );
-
-    let block_fg = node.css_attr.get_color();
-    let block_bg = node.css_attr.get_bg_color();
-    let block_font_style = block_style(&node.css_attr);
-    let runs = collect_runs(arena, node, block_fg, block_bg, block_font_style);
-
-    let fill_bg = block_bg.is_some();
-
-    let mut child_cursor = Cursor {
-        y: geom.outer_y
-            + edges.border.top.thickness()
-            + edges.padding.top,
-    };
-    let list_children = node.children.clone();
-    let children = layout_children(
+    Ok(Some(layout_block(
         arena,
-        &list_children,
-        geom.content_constraint,
-        &mut child_cursor,
-    )?;
-
-    let content_height = child_cursor.y.saturating_sub(
-        geom.outer_y + edges.border.top.thickness() + edges.padding.top,
-    );
-    let outer_height = reserve_border_box(cursor, geom.outer_y, edges, content_height, 1);
-
-    Ok(Some(LayoutBox::new_block(
+        node,
         node_id,
-        crate::layout::Rect::new(geom.outer_x, geom.outer_y, geom.outer_width, outer_height),
-        edges,
-        fill_bg,
-        0,
-        runs,
-        children,
-    )))
+        containing,
+        cursor,
+        LayoutBlockOptions {
+            indent: LIST_INDENT_PER_LEVEL * list_depth(arena, node_id),
+            ..Default::default()
+        },
+    )?))
 }
 
 /// Count `<ul>`/`<ol>` ancestors of `node_id`.
@@ -242,34 +132,37 @@ fn list_depth(arena: &NodeArena, node_id: NodeId) -> usize {
     depth
 }
 
-/// Detect the enclosing list type of an `<li>` and, when inside `<ol>`, the
-/// 1-based ordinal position among its `<li>` siblings.
+/// Compute the marker string for an `<li>` based on its enclosing list.
 ///
-/// Sibling text nodes and unknown inline tags are skipped so the count tracks
-/// only actual list items.
-fn list_context_for_li(arena: &NodeArena, li_id: NodeId) -> (Option<NodeType>, Option<usize>) {
-    let parent_id = match arena[li_id].parent {
-        Some(p) => p,
-        None => return (None, None),
+/// Returns `• ` inside `<ul>`, `<n>. ` inside `<ol>`, or `- ` for an orphan
+/// `<li>` (no list parent) so we still render a visible marker.
+fn list_marker_for_li(arena: &NodeArena, li_id: NodeId) -> String {
+    let Some(parent_id) = arena[li_id].parent else {
+        return "- ".to_string();
     };
     let parent = &arena[parent_id];
-    if !matches!(parent.node_type, NodeType::Ul | NodeType::Ol) {
-        return (None, None);
-    }
-    let enclosing = parent.node_type.clone();
-    let ordinal = if matches!(enclosing, NodeType::Ol) {
-        let mut count = 1usize;
-        for &child_id in &parent.children {
-            if child_id == li_id {
-                break;
-            }
-            if matches!(arena[child_id].node_type, NodeType::Li) {
-                count = count.saturating_add(1);
-            }
+    match parent.node_type {
+        NodeType::Ul => "• ".to_string(),
+        NodeType::Ol => {
+            let ordinal = li_ordinal(arena, li_id, parent_id);
+            format!("{ordinal}. ")
         }
-        Some(count)
-    } else {
-        None
-    };
-    (Some(enclosing), ordinal)
+        _ => "- ".to_string(),
+    }
+}
+
+/// Compute the 1-based ordinal of `<li>` among its `<ol>` parent's `<li>`
+/// children, skipping non-`<li>` siblings.
+fn li_ordinal(arena: &NodeArena, li_id: NodeId, parent_id: NodeId) -> usize {
+    let parent = &arena[parent_id];
+    let mut count = 1usize;
+    for &child_id in &parent.children {
+        if child_id == li_id {
+            return count;
+        }
+        if matches!(arena[child_id].node_type, NodeType::Li) {
+            count = count.saturating_add(1);
+        }
+    }
+    count
 }

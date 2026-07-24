@@ -82,11 +82,6 @@ impl BorderStyle {
             _ => BorderStyle::Solid,
         }
     }
-
-    /// True when this style produces a visible border line.
-    pub fn is_visible(&self) -> bool {
-        matches!(self, BorderStyle::Solid)
-    }
 }
 
 /// One side of a border: width, style, color.
@@ -136,16 +131,6 @@ impl BorderSides {
 
     /// True if any side has a visible border.
     pub fn any_visible(&self) -> bool {
-        self.top.thickness() > 0
-            || self.right.thickness() > 0
-            || self.bottom.thickness() > 0
-            || self.left.thickness() > 0
-    }
-
-    /// Convenience wrapper used by [`crate::layout::paint`] — same as
-    /// [`Self::any_visible`] but available as a `const` so the paint phase
-    /// can short-circuit on `BorderStyle::None` configurations.
-    pub const fn is_visible(&self) -> bool {
         self.top.thickness() > 0
             || self.right.thickness() > 0
             || self.bottom.thickness() > 0

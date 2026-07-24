@@ -1,5 +1,4 @@
 use std::{
-    cell::RefCell,
     fmt::{self, Display},
     ops::{Deref, DerefMut},
     path::PathBuf,
@@ -18,13 +17,6 @@ use image::{
 };
 use log::{debug, error, warn};
 use std::io::stdout;
-
-use crate::{
-    TermMap,
-    html::css_parse::TextAlign,
-    layout::{FormattingContext, layout::text_display_width},
-    tdom::node::{Node, NodeArena, NodeType, collect_text},
-};
 
 /// Maximum virtual canvas multiplier (relative to terminal viewport)
 const MAX_SCROLL_MULTIPLIER: usize = 20;
@@ -95,7 +87,6 @@ pub struct Block {
     pub fcolor: Option<Color>,
     pub bcolor: Option<Color>,
     pub style: FontStyle,
-    render: Option<RefCell<String>>,
 }
 
 impl Deref for Block {
@@ -113,38 +104,30 @@ impl DerefMut for Block {
 
 impl Display for Block {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.is_render() {
-            write!(f, "{}", self.render_str())?;
-        } else {
-            let mut styled = self.word.clone().stylize();
-            if self.style.contains(FontStyle::BOLD) {
-                styled = styled.bold();
-            }
-            if self.style.contains(FontStyle::ITALIC) {
-                styled = styled.italic();
-            }
-            if self.style.contains(FontStyle::UNDERLINED) {
-                styled = styled.underlined();
-            }
-            if self.style.contains(FontStyle::CROSSED_OUT) {
-                styled = styled.crossed_out();
-            }
-            styled = match (self.fcolor, self.bcolor) {
-                (Some(fg), Some(bg)) => styled.with(fg).on(bg),
-                (Some(fg), None) => styled.with(fg),
-                (None, Some(bg)) => styled.on(bg),
-                (None, None) => styled,
-            };
-            write!(f, "{styled}")?;
+        let mut styled = self.word.clone().stylize();
+        if self.style.contains(FontStyle::BOLD) {
+            styled = styled.bold();
         }
-        Ok(())
+        if self.style.contains(FontStyle::ITALIC) {
+            styled = styled.italic();
+        }
+        if self.style.contains(FontStyle::UNDERLINED) {
+            styled = styled.underlined();
+        }
+        if self.style.contains(FontStyle::CROSSED_OUT) {
+            styled = styled.crossed_out();
+        }
+        styled = match (self.fcolor, self.bcolor) {
+            (Some(fg), Some(bg)) => styled.with(fg).on(bg),
+            (Some(fg), None) => styled.with(fg),
+            (None, Some(bg)) => styled.on(bg),
+            (None, None) => styled,
+        };
+        write!(f, "{styled}")
     }
 }
 
 impl Block {
-    fn is_render(&self) -> bool {
-        self.render.is_some()
-    }
     pub fn new(
         word: String,
         fcolor: Option<Color>,
@@ -156,40 +139,6 @@ impl Block {
             fcolor,
             bcolor,
             style,
-            render: None,
-        }
-    }
-    pub fn new_render(
-        word: String,
-        fcolor: Option<Color>,
-        bcolor: Option<Color>,
-        style: FontStyle,
-        render: Option<String>,
-    ) -> Self {
-        match render {
-            Some(render) => Self {
-                word,
-                fcolor,
-                bcolor,
-                style,
-                render: Some(RefCell::new(render)),
-            },
-            None => Self {
-                word,
-                fcolor,
-                bcolor,
-                style,
-                render: None,
-            },
-        }
-    }
-    fn render_str(&self) -> String {
-        match self.render.clone() {
-            Some(render) => render.borrow().as_str().to_string(),
-            None => {
-                debug!("render not styled");
-                self.word.clone()
-            }
         }
     }
 }
@@ -762,47 +711,6 @@ pub fn render_image_at(
 /// Render text content within `block_width`, applying `align` to direct text
 /// children and dispatching element children through the layout registry.
 ///
-/// **Deprecated** — superseded by [`crate::layout::paint::paint_layout_tree`]
-/// in the two-phase pipeline. Retained for any external callers; will be
-/// removed once we can confirm no consumer relies on it.
-#[deprecated(note = "use paint_layout_tree in crate::layout::paint")]
-pub fn render_text(
-    node: &Node,
-    term_layout: &mut TermLayout,
-    _term_map: &TermMap,
-    arena: &NodeArena,
-    fg: Option<crossterm::style::Color>,
-    bg: Option<crossterm::style::Color>,
-    align: TextAlign,
-    block_width: usize,
-    _context: FormattingContext,
-) {
-    let style = block_style(&node.css_attr);
-    let text = collect_text(arena, node);
-    let has_text = !text.is_empty();
-
-    if has_text && align != TextAlign::Left {
-        let text_width = text_display_width(&text);
-        let padding = match align {
-            TextAlign::Center => (block_width.saturating_sub(text_width)) / 2,
-            TextAlign::Right => block_width.saturating_sub(text_width),
-            TextAlign::Left => 0,
-        };
-        if padding > 0 {
-            term_layout.paint_string(&" ".repeat(padding), fg, bg, style);
-        }
-    }
-
-    for child_id in node.child_ids() {
-        if term_layout.is_full() {
-            break;
-        }
-        let child = &arena[child_id];
-        if let NodeType::Text(s) = &child.node_type {
-            term_layout.paint_string(s, fg, bg, style);
-        }
-    }
-}
 
 /// Aggregate the CSS font/text style on a node into a [`FontStyle`] bitfield.
 pub fn block_style(css_attr: &crate::html::css_parse::CssAttr) -> FontStyle {

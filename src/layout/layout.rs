@@ -3,7 +3,7 @@ use crossterm::terminal;
 
 use crate::{
     layout::{
-        BoxConstraint, Cursor, FormattingContext, paint::paint_layout_tree, tree::layout_tree,
+        BoxConstraint, Cursor, paint::paint_layout_tree, tree::layout_tree,
     },
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{Block, FontStyle, TermLayout},
@@ -63,19 +63,4 @@ impl TermLayout {
         self.point = (self.rendered_rows * self.columns as u32).min(self.max_cells() as u32);
         Ok(())
     }
-}
-
-/// Convenience for callers that still want the old `FormattingContext` form.
-///
-/// The two-phase pipeline passes `BoxConstraint` directly; this helper exists
-/// only so the few remaining callers in `graph_api.rs` can keep their
-/// existing call sites.
-pub fn root_context(term_map: &TermMap) -> FormattingContext {
-    FormattingContext::root(term_map)
-}
-
-#[doc(hidden)]
-pub fn text_display_width(s: &str) -> usize {
-    use crate::tui::graph_api::char_width;
-    s.chars().map(char_width).sum()
 }

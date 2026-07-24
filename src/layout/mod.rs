@@ -44,28 +44,6 @@ impl BoxConstraint {
     }
 }
 
-/// Formatting context used to propagate containing-block constraints.
-///
-/// Currently a thin wrapper around [`BoxConstraint`]; kept as a separate type
-/// so the registry signature can grow (e.g., direction, writing-mode) without
-/// breaking every `LayoutFn`.
-#[derive(Debug, Clone, Copy)]
-pub struct FormattingContext {
-    pub containing: BoxConstraint,
-}
-
-impl FormattingContext {
-    pub fn root(term_map: &TermMap) -> Self {
-        Self {
-            containing: BoxConstraint::root(term_map),
-        }
-    }
-
-    pub fn child(self, containing: BoxConstraint) -> Self {
-        Self { containing }
-    }
-}
-
 /// Layout function signature for the two-phase pipeline.
 ///
 /// Each registered function inspects `node_id`; returns `Ok(None)` to skip

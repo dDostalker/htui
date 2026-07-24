@@ -11,7 +11,7 @@ use crossterm::style::Color;
 
 use crate::{
     html::css_parse::TextAlign,
-    layout::{BorderStyle, BoxKind, InlineRun, LayoutBox, Rect},
+    layout::{BorderStyle, BoxKind, InlineRun, LayoutBox},
     tdom::node::NodeArena,
     tui::graph_api::{Block, FontStyle, TermLayout, block_style, char_width, render_image_at},
 };
@@ -285,9 +285,7 @@ fn paint_borders(
         }
     }
 
-    // Avoid unused variable warning when all borders are skipped above but a
-    // corner is still requested — `rect` itself isn't directly referenced.
-    let _ = Rect::new(r.x, r.y, r.width, r.height);
+    // Corners / edges fully painted above; nothing more to do.
 }
 
 /// Render each run in `runs` with its own style, colour and background.

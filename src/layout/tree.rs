@@ -118,7 +118,7 @@ fn walk_runs(
     }
 }
 
-/// Resolve a block-level element's CSS width into a column count, clamped to
+/// Compute a block-level element's CSS width into a column count, clamped to
 /// the containing block.
 pub fn resolve_block_width(css_width: Option<usize>, containing_width: usize) -> usize {
     css_width.unwrap_or(containing_width).min(containing_width)
@@ -132,10 +132,7 @@ pub fn resolve_block_width(css_width: Option<usize>, containing_width: usize) ->
 /// `margin-right: auto` only when both are auto — which would need a
 /// `margin: auto` rule we don't currently parse). `text-align` is a
 /// separate concern handled in the paint phase.
-///
-/// `block_width` is ignored; it is kept in the signature so every
-/// block-level layout function can call this uniformly.
-pub fn block_left(containing: BoxConstraint, _block_width: usize) -> usize {
+pub fn block_left(containing: BoxConstraint) -> usize {
     containing.x
 }
 
@@ -162,8 +159,6 @@ pub struct OuterGeometry {
 /// - `block_width` is the resolved CSS `width` for the border-box (i.e. the
 ///   rect width). It must already include padding + border — this helper
 ///   does not add them on top.
-/// - `min_content_rows` is the minimum number of rows the content area must
-///   occupy (e.g. `1` for a `<p>` even with no nested children).
 ///
 /// The returned `content_constraint` has its `x` shifted by `border.left` +
 /// `padding.left` and its `width` reduced by the same totals on each side.
@@ -172,7 +167,6 @@ pub fn compute_outer_geometry(
     block_width: usize,
     edges: BoxEdges,
     cursor_y: usize,
-    min_content_rows: usize,
 ) -> OuterGeometry {
     let outer_x = containing.x + edges.margin.left;
     let outer_width = block_width;
@@ -185,11 +179,6 @@ pub fn compute_outer_geometry(
         x: content_x,
         width: content_width,
     };
-
-    // Mark the cursor so children laid out next start on the row *after* the
-    // minimum content height — callers shouldn't pass an empty cursor that
-    // lets the first child overlap the top padding row.
-    let _ = min_content_rows;
 
     OuterGeometry {
         outer_x,
@@ -238,4 +227,136 @@ pub fn reserve_border_box(
 /// outer height.
 pub fn build_border_rect(geom: OuterGeometry, outer_height: usize) -> Rect {
     Rect::new(geom.outer_x, geom.outer_y, geom.outer_width, outer_height)
+}
+
+/// Per-element differences layered on top of the shared block-layout pipeline.
+///
+/// All fields default to "no special behaviour" so the common case is just
+/// `LayoutBlockOptions::default()`.
+#[derive(Debug, Default, Clone)]
+pub struct LayoutBlockOptions {
+    /// Inline run prepended to the body runs (e.g. `# ` for `<h1>`, `• ` for
+    /// `<li>`). The run uses the element's own fg / bg / font style so the
+    /// body runs can layer additional styles on top.
+    pub prefix: Option<InlineRun>,
+    /// When `true`, the rect's background is filled even without an explicit
+    /// CSS `background-color` — used by `<aside>` (solid stripe) and
+    /// `<header>` / `<footer>` (chrome bands).
+    pub fill_bg_default: bool,
+    /// Trailing blank rows reserved below the rect (default 0). The paint
+    /// phase skips these rows when filling the background. `<header>` /
+    /// `<footer>` use 2 to leave breathing room before the next block.
+    pub spacing_after: usize,
+    /// Extra columns added to `containing.x` and subtracted from
+    /// `containing.width` when computing the border-box rect (used by nested
+    /// `<ul>` / `<ol>` to indent items per nesting level).
+    pub indent: usize,
+    /// `(x_offset, width_delta)` applied to the rect's content-box to
+    /// derive the children's containing block. `<li>` uses this to shift
+    /// nested children past the marker width — `width_delta` is negative
+    /// so the inner width shrinks by the same amount.
+    pub child_containing_shift: Option<(usize, isize)>,
+}
+
+/// Shared body of every block-level layout function.
+///
+/// Resolves the CSS `width`, padding / border / margin, and the inline
+/// `runs`, then reserves the border-box rows for `node` and lays out its
+/// block children. The element-specific differences are passed in via
+/// `opts` so the boilerplate (collect_runs, skip margin-top, layout
+/// children, reserve_border_box) lives in one place.
+///
+/// Returns the assembled `LayoutBox`. The caller is still responsible for
+/// checking that `node.node_type` matches the element it claims to lay out
+/// (so this helper stays type-agnostic).
+pub fn layout_block(
+    arena: &NodeArena,
+    node: &Node,
+    node_id: NodeId,
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+    opts: LayoutBlockOptions,
+) -> Result<LayoutBox> {
+    let edges: BoxEdges = node.css_attr.get_box_edges(containing.width);
+
+    let available = containing
+        .width
+        .saturating_sub(opts.indent)
+        .saturating_sub(edges.margin.horizontal());
+    let block_width =
+        resolve_block_width(node.css_attr.get_width(available), available).max(1);
+    let x = block_left(containing) + opts.indent;
+
+    let block_fg = node.css_attr.get_color();
+    let block_bg = node.css_attr.get_bg_color();
+    let block_font_style = block_style(&node.css_attr);
+    let body_runs = collect_runs(arena, node, block_fg, block_bg, block_font_style);
+
+    let fill_bg = block_bg.is_some() || opts.fill_bg_default;
+
+    cursor.skip(edges.margin.top);
+    let outer_y_top = cursor.y;
+
+    let geom = compute_outer_geometry(
+        BoxConstraint {
+            x,
+            width: block_width,
+        },
+        block_width,
+        edges,
+        outer_y_top,
+    );
+
+    let child_containing = match opts.child_containing_shift {
+        Some((x_off, w_delta)) => BoxConstraint {
+            x: geom.content_constraint.x.saturating_add(x_off),
+            width: if w_delta >= 0 {
+                geom
+                    .content_constraint
+                    .width
+                    .saturating_add(w_delta as usize)
+                    .max(1)
+            } else {
+                geom
+                    .content_constraint
+                    .width
+                    .saturating_sub((-w_delta) as usize)
+                    .max(1)
+            },
+        },
+        None => geom.content_constraint,
+    };
+    let mut child_cursor = Cursor {
+        y: geom.outer_y + edges.border.top.thickness() + edges.padding.top,
+    };
+    let block_children = node.children.clone();
+    let children = layout_children(arena, &block_children, child_containing, &mut child_cursor)?;
+
+    let content_height = child_cursor.y.saturating_sub(
+        geom.outer_y + edges.border.top.thickness() + edges.padding.top,
+    );
+    let outer_height = reserve_border_box(cursor, geom.outer_y, edges, content_height, 1);
+
+    let mut runs = body_runs;
+    if let Some(prefix) = opts.prefix {
+        runs.insert(0, prefix);
+    }
+
+    // `spacing_after` rows are reserved inside the rect (so paint can skip
+    // them when filling the background) and also advance the cursor past
+    // them so the next sibling starts with the correct vertical spacing.
+    let rect_height = outer_height + opts.spacing_after;
+    if opts.spacing_after > 0 {
+        cursor.y = cursor.y.saturating_add(opts.spacing_after);
+    }
+
+    Ok(LayoutBox::new_block(
+        node_id,
+        build_border_rect(geom, rect_height),
+        edges,
+        fill_bg,
+        opts.spacing_after,
+        runs,
+        children,
+    ))
 }

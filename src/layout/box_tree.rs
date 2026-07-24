@@ -191,10 +191,5 @@ impl Cursor {
     pub fn skip(&mut self, rows: usize) {
         self.y = self.y.saturating_add(rows);
     }
-
-    /// Peek at the next available row without advancing.
-    pub fn peek(&self) -> usize {
-        self.y
-    }
 }
 
