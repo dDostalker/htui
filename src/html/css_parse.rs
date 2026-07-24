@@ -2,8 +2,9 @@ use std::str::FromStr;
 
 use crossterm::style::Color;
 use cssparser::{
-    AtRuleParser, BasicParseErrorKind, CowRcStr, ParseError, Parser as CssParser, ParserInput,
-    ParserState, QualifiedRuleParser, StyleSheetParser,
+    AtRuleParser, BasicParseErrorKind, CowRcStr, Delimiter, ParseError, Parser as CssParser,
+    ParserInput, ParserState, QualifiedRuleParser, StyleSheetParser, Token,
+    parse_important,
 };
 use indexmap::IndexMap;
 use log::{debug, warn};
@@ -385,24 +386,20 @@ impl CssAttr {
     }
     /// Element width (CSS `width`).
     ///
-    /// - `80%` → 80% of terminal width
-    /// - `40px` → fixed 40 columns
-    /// - `auto` / missing → `None` (fill available)
+    /// - `auto` / missing / unsupported unit → `None` (fill available)
+    /// - `40px` / `40` → fixed columns
+    /// - `50%` → fraction of terminal width (rounded, minimum 1 column)
+    /// - `2em` / `2rem` → cells (1em == 1 column; terminal has no font-size)
+    ///
+    /// Floats (`1.5em`, `33.33%`) are rounded to the nearest integer cell —
+    /// terminals cannot render half columns. See [`Length::parse`] for the
+    /// underlying value type.
     pub fn get_width(&self, term_columns: usize) -> Option<usize> {
         let raw = self.0.get("width")?;
-        let s = raw.trim();
-        if s == "auto" {
-            return None;
+        match Length::parse(raw)? {
+            Length::Auto => None,
+            len => Some(len.resolve(term_columns)),
         }
-        if let Some(pct) = s.strip_suffix('%') {
-            let p: f32 = pct.trim().parse().ok()?;
-            return Some(((term_columns as f32 * p / 100.0) as usize).max(1));
-        }
-        if let Some(n) = s.strip_suffix("px") {
-            return n.trim().parse::<usize>().ok();
-        }
-        // 其他单位或无单位 → 占满
-        None
     }
 }
 
@@ -484,6 +481,141 @@ fn parse_named_color(name: &str) -> Option<Color> {
         "darkcyan" => Some(Color::DarkCyan),
         "white" => Some(Color::White),
         _ => None,
+    }
+}
+
+/// A typed CSS length value resolved against the terminal's monospace grid.
+///
+/// Terminals render in **cells**, not pixels or points. Every length we
+/// accept is normalised to an integer column count by [`Length::resolve`].
+///
+/// Accepted forms:
+/// - `auto`                         → [`Length::Auto`]   (caller decides what to fill)
+/// - `40px`, bare `40`              → [`Length::Cells(n)`]
+/// - `50%`                          → [`Length::Pct(p)`] (raw 0–100, divided at resolve)
+/// - `2em`, `1.5em`                 → [`Length::Em(n)`]
+/// - `2rem`, `1.5rem`               → [`Length::Rem(n)`]
+///
+/// Rejected (returns `None` from [`Length::parse`]):
+/// - `vw`, `vh`, `vmin`, `vmax` — the terminal has no viewport. Use `%`.
+/// - `pt`, `cm`, `mm`, `in`, `pc` — no DPI. Use `px` (= cells).
+/// - Negative or signed (`+`, `-`) values — CSS forbids these for `width`.
+/// - Trailing junk after the value.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Length {
+    /// `auto` — defer to the containing block.
+    Auto,
+    /// Absolute cell count (CSS `40px` or bare `40`).
+    Cells(usize),
+    /// Percentage 0..=100 of the containing block (CSS `50%`).
+    Pct(f32),
+    /// Em multiplier (CSS `2em`). 1em == 1 cell on the terminal grid.
+    Em(f32),
+    /// Root-em multiplier (CSS `2rem`). Same semantics as `em` here — the
+    /// terminal has no root font-size distinction.
+    Rem(f32),
+}
+
+/// Owned mirror of the cssparser [`Token`] variants we accept. Lets
+/// [`Length::parse`] release its borrow on the parser before checking for
+/// trailing junk with `is_exhausted()`.
+#[derive(Debug, Clone, Copy)]
+enum PreLength {
+    Cells(f32),
+    Pct(f32),
+    Em(f32),
+    Rem(f32),
+}
+
+impl Length {
+    /// Parse a CSS length token into a typed [`Length`].
+    ///
+    /// Returns `None` for unsupported units (`vw`/`vh`/`pt`/`cm`/...), signed
+    /// values, trailing garbage, or empty input. The literal `auto` (any case)
+    /// always returns [`Length::Auto`].
+    pub fn parse(s: &str) -> Option<Length> {
+        let s = s.trim();
+        if s.eq_ignore_ascii_case("auto") {
+            return Some(Length::Auto);
+        }
+        // cssparser's tokenizer handles `40`, `40.5`, `40px`, `1.5em`, `50%`,
+        // escapes, and unicode digits uniformly. We pin the lifetime with a
+        // named ParserInput binding — see the warning in cssparser's docs:
+        // a temporary `ParserInput::new(...)` would be dropped before the
+        // parser finished reading.
+        let mut input_buf = ParserInput::new(s);
+        let mut input = CssParser::new(&mut input_buf);
+        // Convert the borrowed `&Token` into an owned `PreLength` so we can
+        // later call `input.is_exhausted()` to check for trailing junk.
+        // Keeping the `&Token` alive would borrow `input` mutably and conflict
+        // with that second call.
+        let pre = match input.next().ok()? {
+            Token::Number {
+                value,
+                int_value,
+                has_sign: false,
+                ..
+            } => PreLength::Cells(int_value.map(|i| i as f32).unwrap_or(*value)),
+            Token::Dimension {
+                value,
+                int_value,
+                has_sign: false,
+                unit,
+                ..
+            } => {
+                let n = int_value.map(|i| i as f32).unwrap_or(*value);
+                match unit.to_ascii_lowercase().as_str() {
+                    "px" => PreLength::Cells(n),
+                    "em" => PreLength::Em(n),
+                    "rem" => PreLength::Rem(n),
+                    // vw / vh / vmin / vmax / pt / cm / mm / in / pc / ...
+                    _ => return None,
+                }
+            }
+            Token::Percentage {
+                unit_value,
+                has_sign: false,
+                ..
+            } => {
+                // cssparser divides by 100 for us (`50%` → `0.5`). Multiply back
+                // so the stored value matches what the user wrote.
+                PreLength::Pct(unit_value * 100.0)
+            }
+            _ => return None,
+        };
+        // Reject any non-whitespace junk after the value token.
+        if !input.is_exhausted() {
+            return None;
+        }
+        Some(match pre {
+            PreLength::Cells(n) => Length::Cells(n.round() as usize),
+            PreLength::Pct(p) => Length::Pct(p),
+            PreLength::Em(n) => Length::Em(n),
+            PreLength::Rem(n) => Length::Rem(n),
+        })
+    }
+
+    /// Resolve the length into a concrete column count given the containing
+    /// block's width in cells.
+    ///
+    /// - `Auto`                       → `containing` (fill the container)
+    /// - `Cells(n)`                   → `n`
+    /// - `Pct(p)`                     → round(containing * p / 100), min 1
+    /// - `Em(n)` / `Rem(n)`           → round(n), clamped at 0
+    ///
+    /// Floats round **away from zero** (Rust's `f32::round`), so `0.5em` is
+    /// 1 cell and `2.5em` is 3 cells — never zero, never half.
+    pub fn resolve(&self, containing: usize) -> usize {
+        match self {
+            Length::Auto => containing,
+            &Length::Cells(n) => n,
+            &Length::Pct(p) => {
+                let raw = (containing as f32 * p / 100.0).round();
+                (raw as usize).max(1)
+            }
+            &Length::Em(n) => n.round().max(0.0) as usize,
+            &Length::Rem(n) => n.round().max(0.0) as usize,
+        }
     }
 }
 
@@ -612,13 +744,9 @@ impl<'i> QualifiedRuleParser<'i> for CssParseState {
         _start: &ParserState,
         input: &mut CssParser<'i, 't>,
     ) -> std::result::Result<(), ParseError<'i, Self::Error>> {
-        let block_start = input.position();
-        while !input.is_exhausted() {
-            input.next().ok();
-        }
-        let block_text = input.slice_from(block_start).to_string();
-        self.rules
-            .push((prelude, parse_declaration_text(&block_text)));
+        let mut declarations = IndexMap::new();
+        parse_declarations_into(input, &mut declarations);
+        self.rules.push((prelude, declarations));
         Ok(())
     }
 }
@@ -654,37 +782,82 @@ impl<'i> AtRuleParser<'i> for CssParseState {
     }
 }
 
+/// Trim a declaration value and strip any `!important` token that survived
+/// token-level parsing (defensive — the parser usually consumes it).
+fn clean_value_text(raw: &str) -> String {
+    let trimmed = raw.trim();
+    match trimmed.find("!important") {
+        Some(idx) => trimmed[..idx].trim_end().to_string(),
+        None => trimmed.to_string(),
+    }
+}
+
 /// Parse a CSS declaration block text into key-value pairs.
+///
+/// Built on top of [`cssparser`]'s tokenizer via [`parse_declarations_into`]
+/// so it correctly handles:
+/// - `/* ... */` block comments (including those inside string literals)
+/// - the `!important` marker
+/// - missing trailing `;`
+/// - escaped identifiers and unicode in property names
+/// - quoted string values with semicolons / colons inside
 #[doc(hidden)]
 pub fn parse_declaration_text(block: &str) -> IndexMap<String, String> {
-    let mut m = IndexMap::new();
-    let mut k = String::new();
-    let mut v = String::new();
-    let mut in_v = false;
-    for c in block.chars() {
-        if !in_v {
-            if c == ':' {
-                in_v = true;
-            } else {
-                k.push(c);
-            }
-        } else if c == ';' {
-            let kt = k.trim().to_string();
-            if !kt.is_empty() {
-                m.insert(kt, v.trim().to_string());
-            }
-            k.clear();
-            v.clear();
-            in_v = false;
-        } else {
-            v.push(c);
+    let mut input_buf = ParserInput::new(block);
+    let mut input = CssParser::new(&mut input_buf);
+    let mut map = IndexMap::new();
+    parse_declarations_into(&mut input, &mut map);
+    map
+}
+
+/// Walk every `name: value [!important]` declaration in `input` and store
+/// them in `out`. Tolerates malformed input by skipping to the next `;`
+/// rather than aborting the whole block.
+fn parse_declarations_into<'i, 't>(
+    input: &mut CssParser<'i, 't>,
+    out: &mut IndexMap<String, String>,
+) {
+    loop {
+        input.skip_whitespace();
+        if input.is_exhausted() {
+            return;
         }
+        let name = match input.expect_ident() {
+            Ok(s) => s.clone(),
+            Err(_) => {
+                // Malformed declaration (e.g. starts with `;` or unknown
+                // token). Skip ahead to the next semicolon to avoid an
+                // infinite loop on the same junk token.
+                let _: Result<(), ParseError<()>> = input.parse_until_after(
+                    Delimiter::Semicolon,
+                    |_| Ok(()),
+                );
+                continue;
+            }
+        };
+        if input.expect_colon().is_err() {
+            // `name` without `:` — advance past the bogus declaration.
+            let _: Result<(), ParseError<()>> = input.parse_until_after(
+                Delimiter::Semicolon,
+                |_| Ok(()),
+            );
+            continue;
+        }
+        let value_start = input.position();
+        // Consume value tokens until `;` or `!important` is reached.
+        let _: Result<(), ParseError<()>> = input.parse_until_before(
+            Delimiter::Semicolon | Delimiter::Bang,
+            |_| Ok(()),
+        );
+        let value_text = input.slice_from(value_start);
+        let _important = input.try_parse(parse_important).is_ok();
+        let cleaned = clean_value_text(value_text);
+        if !name.is_empty() && !cleaned.is_empty() {
+            out.insert(name.to_string(), cleaned);
+        }
+        // Consume the trailing `;` if present.
+        let _ = input.try_parse(|i| i.expect_semicolon().map(|_| ()));
     }
-    let kt = k.trim().to_string();
-    if !kt.is_empty() {
-        m.insert(kt, v.trim().to_string());
-    }
-    m
 }
 
 // css_into_node
@@ -703,59 +876,56 @@ pub fn css_into_node(
     Ok(())
 }
 
-/// CSS properties that propagate from parent to child when the child has no explicit value.
+/// All CSS properties the renderer recognises by name.
 ///
-/// Modelled as a typed enum so the set cannot drift from the accessors on [`CssAttr`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum InheritableProperty {
-    Color,
-    TextAlign,
-    FontWeight,
-    FontStyle,
-    TextDecoration,
-}
+/// Single source of truth for property names. Adding support for a new property:
+///   1. Append the name here.
+///   2. Add an accessor on [`CssAttr`] (e.g. `get_padding()`).
+///   3. If it should inherit, also append to [`INHERITED_PROPS`].
+///
+/// No other site needs editing — the cascade in [`inherit_css`] drives itself
+/// from these lists.
+pub const SUPPORTED_PROPERTIES: &[&str] = &[
+    "color",
+    "background-color",
+    "background",
+    "text-align",
+    "font-weight",
+    "font-style",
+    "text-decoration",
+    "width",
+];
 
-impl InheritableProperty {
-    /// Storage key used inside [`CssAttr`]'s `IndexMap`.
-    fn css_name(self) -> &'static str {
-        match self {
-            Self::Color => "color",
-            Self::TextAlign => "text-align",
-            Self::FontWeight => "font-weight",
-            Self::FontStyle => "font-style",
-            Self::TextDecoration => "text-decoration",
-        }
-    }
-}
-
-/// Inheritable CSS properties: propagate from parent to child if child has no own value.
-const INHERITABLE: &[InheritableProperty] = &[
-    InheritableProperty::Color,
-    InheritableProperty::TextAlign,
-    InheritableProperty::FontWeight,
-    InheritableProperty::FontStyle,
-    InheritableProperty::TextDecoration,
+/// Inheritable subset of [`SUPPORTED_PROPERTIES`]: a child without an explicit
+/// value picks up its parent's.
+///
+/// Kept as a separate list because Rust const-fn filtering isn't yet stable;
+/// appending a name here is what flips a property to inheritable.
+pub const INHERITED_PROPS: &[&str] = &[
+    "color",
+    "text-align",
+    "font-weight",
+    "font-style",
+    "text-decoration",
 ];
 
 fn inherit_css(arena: &mut NodeArena, node_id: NodeId, parent_attrs: &IndexMap<String, String>) {
     // Merge parent inheritable attrs into current node (if not already set)
     let node = &mut arena[node_id];
-    for prop in INHERITABLE {
-        let key = prop.css_name();
-        if let Some(value) = parent_attrs.get(key) {
+    for key in INHERITED_PROPS {
+        if let Some(value) = parent_attrs.get(*key) {
             node.css_attr
                 .0
-                .entry(key.to_string())
+                .entry((*key).to_string())
                 .or_insert_with(|| value.clone());
         }
     }
 
     // Collect inheritable attrs from this node to pass down
     let mut merged = parent_attrs.clone();
-    for prop in INHERITABLE {
-        let key = prop.css_name();
-        if let Some(value) = node.css_attr.0.get(key) {
-            merged.insert(key.to_string(), value.clone());
+    for key in INHERITED_PROPS {
+        if let Some(value) = node.css_attr.0.get(*key) {
+            merged.insert((*key).to_string(), value.clone());
         }
     }
 

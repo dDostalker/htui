@@ -109,6 +109,9 @@ CSS 字符串 ───► css_parse::Parser ──► CssRule
 使用 `log::debug! / info! / warn! / error!`，不要使用 `println!` 进行调试输出。
 修改代码时不得随意修改已经存在的API的注释，只有实现修改导致内容和实现不符时修改，并询问用户
 
+## 禁止使用git
+本项目禁止LLM调用git
+
 ## 避免unsafe和添加足够的调试信息支持
 本项目不需要 `unsafe` 代码。如需性能优化，优先考虑算法层面。
 在必要要的情况下添加调试信息，
