@@ -28,7 +28,6 @@ pub type NodeArena = SlotMap<NodeId, Node>;
 
 #[derive(PartialEq, Eq, Debug, Clone, Hash)]
 pub enum NodeType {
-    None,
     Global,
     Span,
     Div,
@@ -144,34 +143,6 @@ impl Node {
         self.children.iter().copied()
     }
 
-    /// Get the previous sibling node.
-    pub fn prev_sibling(&self, arena: &NodeArena) -> Option<NodeId> {
-        let parent_id = self.parent?;
-        let parent = &arena[parent_id];
-        let mut prev = None;
-        for &id in &parent.children {
-            if id == self.node_id(arena) {
-                return prev;
-            }
-            prev = Some(id);
-        }
-        None
-    }
-
-    /// Get the next sibling node.
-    pub fn next_sibling(&self, arena: &NodeArena) -> Option<NodeId> {
-        let parent_id = self.parent?;
-        let parent = &arena[parent_id];
-        let children = &parent.children;
-        let self_id = self.node_id(arena);
-        for (i, &id) in children.iter().enumerate() {
-            if id == self_id && i + 1 < children.len() {
-                return Some(children[i + 1]);
-            }
-        }
-        None
-    }
-
     /// Recursively rebuild parent pointers. Call once after tree construction.
     /// (Normally maintained automatically by `append_child`; this is a bulk-repair tool.)
     pub fn fix_parent_pointers(arena: &mut NodeArena, node_id: NodeId) {
@@ -190,19 +161,6 @@ impl Node {
         }
     }
 
-    fn node_id(&self, arena: &NodeArena) -> NodeId {
-        // 在父节点的 children 中查找自己
-        if let Some(parent_id) = self.parent {
-            let parent = &arena[parent_id];
-            let self_ptr = self as *const Node;
-            for &id in &parent.children {
-                if std::ptr::eq(&arena[id] as *const Node, self_ptr) {
-                    return id;
-                }
-            }
-        }
-        panic!("Node not found in its parent's children");
-    }
 }
 
 // 迭代器

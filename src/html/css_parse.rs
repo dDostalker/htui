@@ -52,23 +52,26 @@ impl FromStr for CssSelector {
         if s.is_empty() {
             return Err(anyhow::anyhow!("empty selector"));
         }
-        let segments = split_by_combinators(s);
-        let mut compounds = Vec::new();
-        let mut combinators = Vec::new();
-        for (i, seg) in segments.iter().enumerate() {
-            let sub: Vec<&str> = seg.split_whitespace().filter(|p| !p.is_empty()).collect();
-            for (j, part) in sub.iter().enumerate() {
-                compounds.push(parse_compound(part)?);
-                if j < sub.len() - 1 {
-                    combinators.push(Combinator::Descendant);
-                }
-            }
-            if i < segments.len() - 1 {
-                combinators.push(extract_combinator(s));
-            }
-        }
-        if compounds.is_empty() {
+        // Split the selector chain into segments and the combinator that
+        // introduces each segment. Whitespace is a descendant combinator; `>`,
+        // `+`, `~` are explicit combinators. Empty segments (e.g. from `>` at
+        // the start) are dropped — they're a parse error handled by the empty
+        // check at the bottom.
+        let (segments, combinators) = split_by_combinators(s);
+        if segments.is_empty() {
             return Err(anyhow::anyhow!("empty selector"));
+        }
+        let mut compounds = Vec::with_capacity(segments.len());
+        for seg in &segments {
+            // A segment is one compound selector whose parts all apply to the
+            // same element. Whitespace within a segment is impossible because
+            // `split_by_combinators` already consumed it as a divider, but we
+            // keep the inner split for safety against future callers.
+            let mut compound = CompoundSelector::new();
+            for part in seg.split_whitespace().filter(|p| !p.is_empty()) {
+                compound.extend(parse_compound(part)?);
+            }
+            compounds.push(compound);
         }
         Ok(CssSelector {
             compounds,
@@ -77,37 +80,75 @@ impl FromStr for CssSelector {
     }
 }
 
-fn split_by_combinators(s: &str) -> Vec<&str> {
-    let mut result = Vec::new();
+/// Split a selector chain into segments and the combinator that introduces each
+/// segment after the first.
+///
+/// `div p` → `(["div", "p"], [Descendant])`
+/// `div > p` → `(["div", "p"], [Child])`
+/// `div.foo` → `(["div.foo"], [])`
+/// `div > p + span` → `(["div", "p", "span"], [Child, NextSibling])`
+fn split_by_combinators(s: &str) -> (Vec<&str>, Vec<Combinator>) {
+    let mut segments: Vec<&str> = Vec::new();
+    let mut combinators: Vec<Combinator> = Vec::new();
+    let mut iter = s.char_indices().peekable();
     let mut start = 0;
-    for (i, ch) in s.char_indices() {
-        if ch == '>' || ch == '+' || ch == '~' {
-            let before = s[start..i].trim();
-            if !before.is_empty() {
-                result.push(&s[start..i]);
-            } else {
-                result.push("");
-            }
-            start = i + ch.len_utf8();
-        }
-    }
-    let last = s[start..].trim();
-    if !last.is_empty() || result.is_empty() {
-        result.push(&s[start..]);
-    }
-    result
-}
 
-fn extract_combinator(s: &str) -> Combinator {
-    for ch in s.chars() {
-        match ch {
-            '>' => return Combinator::Child,
-            '+' => return Combinator::NextSibling,
-            '~' => return Combinator::SubsequentSibling,
-            _ => {}
+    while let Some((i, ch)) = iter.next() {
+        if !ch.is_whitespace() && !matches!(ch, '>' | '+' | '~') {
+            continue;
         }
+        let before = s[start..i].trim();
+        if !before.is_empty() {
+            segments.push(before);
+        }
+        // Skip whitespace surrounding the next segment, then look for an
+        // explicit combinator char. An explicit `>`/`+`/`~` wins over a bare
+        // whitespace (Descendant) combinator — so `div > p` is a single
+        // `Child` combinator, not `Descendant + Child`.
+        while let Some(&(_, next_ch)) = iter.peek() {
+            if next_ch.is_whitespace() {
+                iter.next();
+            } else {
+                break;
+            }
+        }
+        let mut combinator = Combinator::Descendant;
+        if let Some(&(_, next_ch)) = iter.peek() {
+            combinator = match next_ch {
+                '>' => {
+                    iter.next();
+                    Combinator::Child
+                }
+                '+' => {
+                    iter.next();
+                    Combinator::NextSibling
+                }
+                '~' => {
+                    iter.next();
+                    Combinator::SubsequentSibling
+                }
+                _ => Combinator::Descendant,
+            };
+            while let Some(&(_, next_ch)) = iter.peek() {
+                if next_ch.is_whitespace() {
+                    iter.next();
+                } else {
+                    break;
+                }
+            }
+        }
+        if iter.peek().is_some() {
+            combinators.push(combinator);
+        }
+        start = iter.peek().map(|&(i, _)| i).unwrap_or(s.len());
     }
-    Combinator::Descendant
+
+    let last = s[start..].trim();
+    if !last.is_empty() {
+        segments.push(last);
+    }
+
+    (segments, combinators)
 }
 
 fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, anyhow::Error> {

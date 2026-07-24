@@ -32,15 +32,6 @@ impl BoxConstraint {
             width: term_map.columns as usize,
         }
     }
-
-    /// Resolves a child box centered inside this containing block.
-    pub fn centered(self, width: usize) -> Self {
-        let width = width.min(self.width);
-        Self {
-            x: self.x + self.width.saturating_sub(width) / 2,
-            width,
-        }
-    }
 }
 
 /// Layout function signature for the two-phase pipeline.

@@ -15,7 +15,7 @@ use image::{
     GenericImageView,
     imageops::FilterType::{self},
 };
-use log::{debug, error, warn};
+
 use std::io::stdout;
 
 /// Maximum virtual canvas multiplier (relative to terminal viewport)
@@ -331,111 +331,6 @@ pub fn is_rendered_as_bare_space(cell: &Block) -> bool {
 // ============================================================
 // Paint methods
 // ============================================================
-
-impl TermLayout {
-    pub fn new_line(&mut self) {
-        if self.is_full() {
-            return;
-        }
-        let columns = self.columns as u32;
-        let remaining = columns - (self.point % columns);
-        let new_point = (self.point + remaining).min(self.max_cells() as u32);
-        self.point = new_point;
-    }
-
-    pub fn paint_string(
-        &mut self,
-        s: &str,
-        fcolor: Option<Color>,
-        bcolor: Option<Color>,
-        style: FontStyle,
-    ) -> u32 {
-        if self.is_full() {
-            return 0;
-        }
-
-        let max = self.max_cells();
-        let mut cell_count = 0u32;
-
-        for c in s.chars() {
-            let idx = self.point as usize;
-            if idx >= max {
-                break;
-            }
-            let width = char_width(c);
-            self.layout[idx] = Block::new(c.to_string(), fcolor, bcolor, style);
-            if width > 1 {
-                let next_idx = idx + 1;
-                if next_idx < max {
-                    // 填充格用空字符串标记，渲染时跳过，避免终端光标偏移
-                    self.layout[next_idx] = Block::new(String::new(), fcolor, bcolor, style);
-                }
-            }
-            self.point += width as u32;
-            cell_count += width as u32;
-        }
-
-        self.len += cell_count;
-
-        let current_row = self.point / self.columns as u32;
-        if current_row > self.rendered_rows {
-            self.rendered_rows = current_row;
-        }
-
-        cell_count
-    }
-
-    pub fn paint_img(&mut self, path: String, size: (u32, u32)) -> u32 {
-        if self.is_full() {
-            return 0;
-        }
-
-        debug!("Loading image: path='{}' size={:?}", path, size);
-
-        let mut img_data = Img::new(PathBuf::from(&path), size);
-        if let Err(e) = img_data._create_img() {
-            error!("Image load failed: {}: {}", path, e);
-            return 0;
-        }
-        let picture = match img_data.picture.as_ref() {
-            Some(p) => p,
-            None => {
-                warn!("Image data empty: {}", path);
-                return 0;
-            }
-        };
-
-        let img_cols = img_data.cloumns as usize;
-        let img_rows = img_data.rows as usize;
-        let canvas_cols = self.columns as usize;
-        let max = self.max_cells();
-
-        let start_row = self.point as usize / canvas_cols;
-
-        for row in 0..img_rows {
-            for col in 0..img_cols {
-                let canvas_idx = (start_row + row) * canvas_cols + col;
-                if canvas_idx >= max {
-                    warn!("Canvas overflow, row={} col={}", row, col);
-                    break;
-                }
-                let pic_idx = row * img_cols + col;
-                if let Some(cell) = picture.get(pic_idx) {
-                    self.layout[canvas_idx] = Block::new(cell.clone(), None, None, FontStyle::empty());
-                }
-            }
-        }
-
-        let total_chars = (img_rows * img_cols) as u32;
-        self.point = ((start_row + img_rows) as u32 * canvas_cols as u32).min(max as u32);
-        self.len += total_chars;
-
-        self.rendered_rows = self.point / self.columns as u32;
-
-        debug!("Image loaded, path={}, chars={}", path, total_chars);
-        total_chars
-    }
-}
 
 // ============================================================
 // trigger_refresh
