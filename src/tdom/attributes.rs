@@ -13,6 +13,18 @@ impl Attr {
         }
     }
 
+    /// Build an [`Attr`] directly from `(name, value)` pairs.
+    ///
+    /// Calling this is cheaper than `parse_from_str` — it avoids the
+    /// round-trip `key="value" key="value"` serialization that the HTML parser
+    /// used to feed into the text parser. `parse_from_str` is kept as a public
+    /// helper for tests and one-off callers; the HTML parser path uses this
+    /// constructor directly with `html5ever::Attribute` slices.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        let attributes = pairs.into_iter().collect();
+        Attr { attributes }
+    }
+
     pub fn parse_from_str(attr_str: &str) -> Self {
         debug!("开始解析属性字符串: {}", attr_str);
 

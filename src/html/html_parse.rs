@@ -53,12 +53,11 @@ fn convert_attributes(html5_attrs: &[Attribute]) -> Attr {
     if html5_attrs.is_empty() {
         return Attr::new();
     }
-    let attr_str: String = html5_attrs
-        .iter()
-        .map(|a| format!("{}=\"{}\"", a.name.local, a.value))
-        .collect::<Vec<_>>()
-        .join(" ");
-    Attr::parse_from_str(&attr_str)
+    Attr::from_pairs(
+        html5_attrs
+            .iter()
+            .map(|a| (a.name.local.to_string(), a.value.to_string())),
+    )
 }
 
 fn convert_children(
@@ -121,9 +120,14 @@ fn convert_children(
             }
             NodeData::Text { contents } => {
                 let text = contents.borrow().to_string();
-                let trimmed = text.trim().to_string();
-                if !trimmed.is_empty() {
-                    let text_id = arena.insert(Node::text(&trimmed));
+                // Drop purely-whitespace text nodes (no printable content) but
+                // preserve original whitespace within the text — `<pre>` and
+                // inline runs that depend on leading/trailing spaces will
+                // otherwise be silently truncated. Whitespace collapsing is a
+                // paint-time concern driven by `white-space`; the HTML parser
+                // should not mutate the source bytes.
+                if text.chars().any(|c| !c.is_whitespace()) {
+                    let text_id = arena.insert(Node::text(&text));
                     Node::append_child(arena, parent_id, text_id);
                 }
             }

@@ -104,27 +104,45 @@ impl DerefMut for Block {
 
 impl Display for Block {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut styled = self.word.clone().stylize();
-        if self.style.contains(FontStyle::BOLD) {
-            styled = styled.bold();
-        }
-        if self.style.contains(FontStyle::ITALIC) {
-            styled = styled.italic();
-        }
-        if self.style.contains(FontStyle::UNDERLINED) {
-            styled = styled.underlined();
-        }
-        if self.style.contains(FontStyle::CROSSED_OUT) {
-            styled = styled.crossed_out();
-        }
-        styled = match (self.fcolor, self.bcolor) {
-            (Some(fg), Some(bg)) => styled.with(fg).on(bg),
-            (Some(fg), None) => styled.with(fg),
-            (None, Some(bg)) => styled.on(bg),
-            (None, None) => styled,
-        };
-        write!(f, "{styled}")
+        write!(
+            f,
+            "{}",
+            styled_string(&self.word, self.style, self.fcolor, self.bcolor)
+        )
     }
+}
+
+/// Apply a [`FontStyle`] bitfield and optional foreground/background colors to
+/// `text` and return the rendered ANSI sequence as a `String`.
+///
+/// Used by both [`Block`]'s `Display` impl and `TermLayout::render_to_bytes`
+/// so the SGR emission lives in one place.
+fn styled_string(
+    text: &str,
+    style: FontStyle,
+    fg: Option<Color>,
+    bg: Option<Color>,
+) -> String {
+    let mut styled = text.stylize();
+    if style.contains(FontStyle::BOLD) {
+        styled = styled.bold();
+    }
+    if style.contains(FontStyle::ITALIC) {
+        styled = styled.italic();
+    }
+    if style.contains(FontStyle::UNDERLINED) {
+        styled = styled.underlined();
+    }
+    if style.contains(FontStyle::CROSSED_OUT) {
+        styled = styled.crossed_out();
+    }
+    styled = match (fg, bg) {
+        (Some(f), Some(b)) => styled.with(f).on(b),
+        (Some(f), None) => styled.with(f),
+        (None, Some(b)) => styled.on(b),
+        (None, None) => styled,
+    };
+    format!("{styled}")
 }
 
 impl Block {
@@ -292,28 +310,9 @@ impl TermLayout {
                 if is_empty {
                     out.extend_from_slice(batch.as_bytes());
                 } else {
-                    let styled = batch.stylize();
-                    let mut styled = if cell_style.contains(FontStyle::BOLD) {
-                        styled.bold()
-                    } else {
-                        styled
-                    };
-                    if cell_style.contains(FontStyle::ITALIC) {
-                        styled = styled.italic();
-                    }
-                    if cell_style.contains(FontStyle::UNDERLINED) {
-                        styled = styled.underlined();
-                    }
-                    if cell_style.contains(FontStyle::CROSSED_OUT) {
-                        styled = styled.crossed_out();
-                    }
-                    styled = match (fg, bg) {
-                        (Some(f), Some(b)) => styled.with(f).on(b),
-                        (Some(f), None) => styled.with(f),
-                        (None, Some(b)) => styled.on(b),
-                        (None, None) => styled,
-                    };
-                    out.extend_from_slice(format!("{styled}").as_bytes());
+                    out.extend_from_slice(
+                        styled_string(&batch, cell_style, fg, bg).as_bytes(),
+                    );
                 }
             }
         }

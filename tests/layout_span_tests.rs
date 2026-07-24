@@ -371,9 +371,10 @@ fn test_text_align_center_counts_all_runs() {
         .expect("bold 'A' should render");
     let row = a_idx / cols;
     let col_in_row = a_idx % cols;
-    // The HTML parser trims whitespace from text nodes, so the plain run
-    // is "CD" (no leading space). Total run width = 2 + 2 = 4.
-    let total_width = "AB".len() + "CD".len();
+    // The HTML parser preserves original whitespace within text nodes — the
+    // plain run between `<span>` and `</p>` keeps its leading space. Total
+    // run width = 2 (`"AB"`) + 3 (`" CD"`) = 5.
+    let total_width = "AB".len() + " CD".len();
     let expected_padding = (cols - total_width) / 2;
     assert_eq!(
         col_in_row, expected_padding,
@@ -403,11 +404,12 @@ fn test_layout_box_exposes_runs_for_block_with_spans() {
         .expect("<p> should expose runs when it has spans");
 
     let collected: Vec<&str> = runs.iter().map(|r: &InlineRun| r.text.as_str()).collect();
-    // The HTML parser trims whitespace from text nodes, so the plain run is
-    // "plain" (no trailing space). Run order still follows document order.
+    // The HTML parser preserves original whitespace within text nodes — the
+    // plain run between the `<span>` and the closing `</p>` keeps its trailing
+    // space. Run order still follows document order.
     assert_eq!(
         collected,
-        vec!["plain", "bold"],
+        vec!["plain ", "bold"],
         "runs should follow the document order: plain text then span text"
     );
     assert!(
