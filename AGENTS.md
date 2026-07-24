@@ -170,6 +170,24 @@ CSS 字符串 ───► css_parse::Parser ──► CssRule
 | `Block`            | `tui::graph_api`        | 单个屏幕字符单元格（含 `style: FontStyle`） |
 | `FontStyle`        | `tui::graph_api`        | `Block` 的聚合样式位掩码（`BOLD` / `ITALIC` / `UNDERLINED` / `CROSSED_OUT`） |
 | `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举          |
+| `EdgeSizes`        | `layout::box_edges`     | 四边长度（top/right/bottom/left），用于 padding / margin |
+| `BorderStyle`      | `layout::box_edges`     | `border-style` 枚举（`None` / `Solid`） |
+| `Border`           | `layout::box_edges`     | 单边 border 的 width/style/color |
+| `BorderSides`      | `layout::box_edges`     | 四边 `Border` 组合 |
+| `BoxEdges`         | `layout::box_edges`     | padding + border + margin 三件套，供布局函数使用 |
+
+### 盒模型在 `CssAttr` 上的访问器
+
+`CssAttr` 实例方法（`self` 是节点的 CSS 属性集合）：
+
+| 方法                              | 返回         | 说明 |
+| --------------------------------- | ------------ | ---- |
+| `get_padding(containing_width)`   | `EdgeSizes`  | 解析 `padding` / `padding-{top,right,bottom,left}` |
+| `get_margin(containing_width)`    | `EdgeSizes`  | 解析 `margin` / `margin-{top,right,bottom,left}`，`auto` → 0 |
+| `get_border(containing_width)`    | `BorderSides`| 解析 `border` / `border-{top,right,bottom,left}` / `border-width` / `border-style` / `border-color` |
+| `get_box_edges(containing_width)` | `BoxEdges`   | 一次性取 padding + border + margin |
+
+`containing_width` 是父级 content-box 的宽度（用于将来 `auto` / 百分比的支持）。
 
 
 

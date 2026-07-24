@@ -11,6 +11,14 @@ use log::{debug, warn};
 
 use crate::tdom::node::{Node, NodeArena, NodeId, NodeType};
 
+// ============================================================
+// Box-model edge types — re-exported for downstream callers.
+// Defined in `layout::box_edges`, imported here so `CssAttr`
+// can hand back resolved [`EdgeSizes`] / [`BorderSides`] values.
+// ============================================================
+
+pub use crate::layout::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeSizes};
+
 // CSS 选择器类型 & 匹配引擎
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -401,6 +409,93 @@ impl CssAttr {
             len => Some(len.resolve(term_columns)),
         }
     }
+
+    /// Resolve all four padding edges from `padding` / `padding-{side}`.
+    ///
+    /// Per-side longhands (`padding-top`, `padding-right`, `padding-bottom`,
+    /// `padding-left`) win over the `padding` shorthand. Shorthand expansion
+    /// follows the standard CSS 1-/2-/3-/4-value pattern; tokens we can't
+    /// parse as a [`Length`] are treated as `0`.
+    pub fn get_padding(&self, containing_width: usize) -> EdgeSizes {
+        parse_edge_sizes(&self.0, "padding", containing_width)
+    }
+
+    /// Resolve all four margin edges from `margin` / `margin-{side}`.
+    ///
+    /// `margin: auto` is currently treated as `0` (the terminal has no
+    /// centering primitive for margins). Per-side longhands win over the
+    /// shorthand.
+    pub fn get_margin(&self, containing_width: usize) -> EdgeSizes {
+        parse_edge_sizes(&self.0, "margin", containing_width)
+    }
+
+    /// Resolve all four border sides from `border` / `border-{side}` /
+    /// `border-{prop}`.
+    ///
+    /// Priority order:
+    /// 1. Per-side shorthand (`border-top: 1px solid red`)
+    /// 2. Universal properties (`border-width`, `border-style`, `border-color`)
+    /// 3. Universal shorthand (`border: 1px solid red`)
+    pub fn get_border(&self, containing_width: usize) -> BorderSides {
+        // Step 1: collect universal values (lowest priority).
+        let universal_width =
+            parse_border_width(self.0.get("border-width").map(|s| s.as_str()), containing_width);
+        let universal_style =
+            parse_border_style(self.0.get("border-style").map(|s| s.as_str()));
+        let universal_color = self
+            .0
+            .get("border-color")
+            .and_then(|s| parse_color_str(s));
+
+        let universal = Border::new(universal_width, universal_style, universal_color);
+
+        // Step 2: parse per-side longhands.
+        let top = parse_border_side(
+            self.0.get("border-top"),
+            self.0.get("border"),
+            universal,
+            containing_width,
+        );
+        let right = parse_border_side(
+            self.0.get("border-right"),
+            self.0.get("border"),
+            universal,
+            containing_width,
+        );
+        let bottom = parse_border_side(
+            self.0.get("border-bottom"),
+            self.0.get("border"),
+            universal,
+            containing_width,
+        );
+        let left = parse_border_side(
+            self.0.get("border-left"),
+            self.0.get("border"),
+            universal,
+            containing_width,
+        );
+
+        BorderSides {
+            top,
+            right,
+            bottom,
+            left,
+        }
+    }
+
+    /// Resolve the full set of box-model edges in one call.
+    ///
+    /// Equivalent to calling [`get_padding`](Self::get_padding),
+    /// [`get_margin`](Self::get_margin) and [`get_border`](Self::get_border)
+    /// separately. Layout functions use this so they only need to look up
+    /// each node's `css_attr` once.
+    pub fn get_box_edges(&self, containing_width: usize) -> BoxEdges {
+        BoxEdges {
+            padding: self.get_padding(containing_width),
+            border: self.get_border(containing_width),
+            margin: self.get_margin(containing_width),
+        }
+    }
 }
 
 /// 解析 CSS 颜色字符串 → crossterm::Color
@@ -482,6 +577,173 @@ fn parse_named_color(name: &str) -> Option<Color> {
         "white" => Some(Color::White),
         _ => None,
     }
+}
+
+// ============================================================
+// Box-model shorthand parsing
+// ============================================================
+
+/// Expand `padding` / `padding-{side}` (or `margin` / `margin-{side}`) into an
+/// [`EdgeSizes`].
+///
+/// Each value is parsed by [`Length::parse`]; unparseable tokens become `0`.
+/// Per-side longhands are layered on top of the shorthand so `padding: 0;
+/// padding-top: 5px;` resolves to top=5, others=0.
+fn parse_edge_sizes(
+    decls: &IndexMap<String, String>,
+    shorthand: &str,
+    containing_width: usize,
+) -> EdgeSizes {
+    let shorthand_raw = decls.get(shorthand);
+    let mut edges = parse_shorthand_lengths(shorthand_raw.map(|s| s.as_str()), containing_width);
+
+    // Layer per-side longhands on top (they take precedence).
+    let top_raw = decls.get(&format!("{shorthand}-top")).map(|s| s.as_str());
+    if let Some(v) = parse_length_token(top_raw, containing_width) {
+        edges.top = v;
+    }
+    let right_raw = decls
+        .get(&format!("{shorthand}-right"))
+        .map(|s| s.as_str());
+    if let Some(v) = parse_length_token(right_raw, containing_width) {
+        edges.right = v;
+    }
+    let bottom_raw = decls
+        .get(&format!("{shorthand}-bottom"))
+        .map(|s| s.as_str());
+    if let Some(v) = parse_length_token(bottom_raw, containing_width) {
+        edges.bottom = v;
+    }
+    let left_raw = decls.get(&format!("{shorthand}-left")).map(|s| s.as_str());
+    if let Some(v) = parse_length_token(left_raw, containing_width) {
+        edges.left = v;
+    }
+
+    edges
+}
+
+/// Expand a 1-/2-/3-/4-value CSS shorthand into [`EdgeSizes`].
+///
+/// Tokenisation is whitespace-driven — we split on runs of whitespace and try
+/// to parse each chunk as a [`Length`]. Unparseable tokens are skipped (treated
+/// as `0`) so a stray `auto` or junk doesn't poison the whole rule.
+fn parse_shorthand_lengths(value: Option<&str>, containing_width: usize) -> EdgeSizes {
+    let Some(value) = value else {
+        return EdgeSizes::default();
+    };
+    let tokens: Vec<&str> = value.split_whitespace().collect();
+    let parsed: Vec<usize> = tokens
+        .iter()
+        .filter_map(|t| parse_length_token(Some(t), containing_width))
+        .collect();
+    match parsed.len() {
+        0 => EdgeSizes::default(),
+        1 => EdgeSizes::new(parsed[0], parsed[0], parsed[0], parsed[0]),
+        2 => EdgeSizes::new(parsed[0], parsed[1], parsed[0], parsed[1]),
+        3 => EdgeSizes::new(parsed[0], parsed[1], parsed[2], parsed[1]),
+        _ => EdgeSizes::new(parsed[0], parsed[1], parsed[2], parsed[3]),
+    }
+}
+
+/// Parse one CSS length token to an absolute cell count.
+///
+/// `auto` / missing / unsupported unit → `None` (caller decides what default
+/// to apply).
+fn parse_length_token(value: Option<&str>, containing_width: usize) -> Option<usize> {
+    let raw = value?;
+    match Length::parse(raw)? {
+        Length::Auto => None,
+        len => Some(len.resolve(containing_width)),
+    }
+}
+
+/// Parse a `border-width` value to cells. Mirrors [`parse_length_token`]; any
+/// value CSS accepts as a length works (including `thin` / `medium` / `thick`
+/// once added to [`Length::parse`]).
+fn parse_border_width(value: Option<&str>, containing_width: usize) -> usize {
+    parse_length_token(value, containing_width).unwrap_or(0)
+}
+
+/// Map a `border-style` keyword to a [`BorderStyle`]. Unknown / missing
+/// defaults to [`BorderStyle::None`].
+fn parse_border_style(value: Option<&str>) -> BorderStyle {
+    let Some(value) = value else {
+        return BorderStyle::None;
+    };
+    BorderStyle::parse(value)
+}
+
+/// Build one [`Border`] edge from `border-{side}` (priority), falling back to
+/// the universal `border` shorthand, finally to the resolved
+/// `border-width`/`-style`/`-color` defaults.
+///
+/// The `fallback` argument already encodes the universal defaults resolved by
+/// the caller — passing it down means we don't re-parse the same map entries
+/// four times.
+fn parse_border_side(
+    side_raw: Option<&String>,
+    shorthand_raw: Option<&String>,
+    fallback: Border,
+    containing_width: usize,
+) -> Border {
+    if let Some(value) = side_raw {
+        if let Some(parsed) = parse_border_shorthand(value, containing_width) {
+            return parsed;
+        }
+        // `border-top` was present but unparseable — fall through to next
+        // priority rather than dropping the side entirely.
+    }
+    if let Some(value) = shorthand_raw {
+        if let Some(parsed) = parse_border_shorthand(value, containing_width) {
+            return parsed;
+        }
+    }
+    fallback
+}
+
+/// Parse a `border` shorthand declaration.
+///
+/// CSS allows any of width / style / color in any order, with some pieces
+/// optional. We tokenise on whitespace and classify each token; tokens we
+/// can't classify fall through (treated as missing) so a typo in one piece
+/// doesn't drop the whole border.
+fn parse_border_shorthand(value: &str, containing_width: usize) -> Option<Border> {
+    let mut width: Option<usize> = None;
+    let mut style: Option<BorderStyle> = None;
+    let mut color: Option<Color> = None;
+
+    for token in value.split_whitespace() {
+        if let Some(w) = parse_length_token(Some(token), containing_width) {
+            width = Some(w);
+            continue;
+        }
+        let lower = token.to_ascii_lowercase();
+        if matches!(
+            lower.as_str(),
+            "solid" | "dashed" | "dotted" | "double" | "none" | "hidden" | "groove" | "ridge"
+                | "inset" | "outset"
+        ) {
+            style = Some(BorderStyle::parse(token));
+            continue;
+        }
+        if let Some(c) = parse_color_str(token) {
+            color = Some(c);
+            continue;
+        }
+        // Unrecognised token — ignore (don't fail the whole rule).
+    }
+
+    // At least width or style must be present; otherwise the value wasn't a
+    // border shorthand (e.g. someone wrote `border: inherit;`).
+    if width.is_none() && style.is_none() && color.is_none() {
+        return None;
+    }
+
+    Some(Border {
+        width: width.unwrap_or(0),
+        style: style.unwrap_or(BorderStyle::None),
+        color,
+    })
 }
 
 /// A typed CSS length value resolved against the terminal's monospace grid.
@@ -894,6 +1156,25 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "font-style",
     "text-decoration",
     "width",
+    // Box-model edges
+    "padding",
+    "padding-top",
+    "padding-right",
+    "padding-bottom",
+    "padding-left",
+    "margin",
+    "margin-top",
+    "margin-right",
+    "margin-bottom",
+    "margin-left",
+    "border",
+    "border-top",
+    "border-right",
+    "border-bottom",
+    "border-left",
+    "border-width",
+    "border-style",
+    "border-color",
 ];
 
 /// Inheritable subset of [`SUPPORTED_PROPERTIES`]: a child without an explicit

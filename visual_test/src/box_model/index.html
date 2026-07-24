@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<!--
+  htui 视觉测试 — box_model
+  运行: cargo run -p visual_test -- box_model
+  浏览器直接打开本文件即可看到与终端渲染对应相同的样式
+  展示: padding / margin / border 三种盒模型属性
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>htui Box Model Demo</title>
+    <style>
+        body { color: white; }
+
+        /* 1. Padding — background extends into the padding area */
+        .pad {
+            background-color: darkblue;
+            color: yellow;
+            padding: 2px 4px;
+        }
+
+        /* 2. Margin — gap reserved around the box */
+        .gap {
+            background-color: black;
+            margin: 1px 6px;
+        }
+
+        /* 3. Border — box-drawing characters frame the box */
+        .frame {
+            border: 1px solid cyan;
+            color: cyan;
+            padding: 1px 2px;
+        }
+
+        /* 4. Mixed — card-like layout combining all three */
+        .card {
+            border: 1px solid green;
+            background-color: grey;
+            color: white;
+            padding: 1px 3px;
+            margin: 2px 4px;
+        }
+
+        .card-title { color: yellow; }
+        .card-body  { color: white; }
+    </style>
+</head>
+<body>
+    <div>
+        <h1>Box Model — Padding / Margin / Border</h1>
+
+        <h2>1. Padding</h2>
+        <p>Background fills the padding area:</p>
+        <div class="pad">Padded text</div>
+
+        <h2>2. Margin</h2>
+        <p>Two siblings, the second pushes below the first:</p>
+        <p class="gap">First paragraph</p>
+        <p class="gap">Second paragraph</p>
+
+        <h2>3. Border</h2>
+        <p>Box-drawing characters frame the box:</p>
+        <div class="frame">Framed</div>
+
+        <h2>4. Combined</h2>
+        <p>Card-like layout with border + padding + margin:</p>
+        <div class="card">
+            <p class="card-title">Card Title</p>
+            <p class="card-body">Card body lives inside the content box.</p>
+        </div>
+        <div class="card">
+            <p class="card-title">Another Card</p>
+            <p class="card-body">Margin keeps the cards apart.</p>
+        </div>
+    </div>
+</body>
+</html>

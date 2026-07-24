@@ -5,12 +5,14 @@ use crate::{
     tdom::node::{NodeArena, NodeId},
 };
 
+pub mod box_edges;
 pub mod box_tree;
 pub mod layout;
 pub mod layout_fn;
 pub mod paint;
 pub mod tree;
 
+pub use box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeSizes};
 pub use box_tree::{BoxKind, Cursor, InlineRun, LayoutBox, Rect};
 
 /// The containing block available to a layout function.
@@ -39,28 +41,6 @@ impl BoxConstraint {
             x: self.x + self.width.saturating_sub(width) / 2,
             width,
         }
-    }
-}
-
-/// Formatting context used to propagate containing-block constraints.
-///
-/// Currently a thin wrapper around [`BoxConstraint`]; kept as a separate type
-/// so the registry signature can grow (e.g., direction, writing-mode) without
-/// breaking every `LayoutFn`.
-#[derive(Debug, Clone, Copy)]
-pub struct FormattingContext {
-    pub containing: BoxConstraint,
-}
-
-impl FormattingContext {
-    pub fn root(term_map: &TermMap) -> Self {
-        Self {
-            containing: BoxConstraint::root(term_map),
-        }
-    }
-
-    pub fn child(self, containing: BoxConstraint) -> Self {
-        Self { containing }
     }
 }
 
