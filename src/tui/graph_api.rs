@@ -168,8 +168,6 @@ impl Block {
 #[derive(Debug)]
 pub struct TermLayout {
     pub layout: Vec<Block>,
-    pub point: u32,
-    pub len: u32,
     pub columns: u16,
     pub rows: u16,
     pub scroll_y: u32,
@@ -182,10 +180,6 @@ impl TermLayout {
         self.columns as usize * self.rows as usize * MAX_SCROLL_MULTIPLIER
     }
 
-    pub fn is_full(&self) -> bool {
-        self.point as usize >= self.max_cells()
-    }
-
     pub fn effective_columns(&self) -> u16 {
         (self.columns as f32 / self.zoom).round() as u16
     }
@@ -195,8 +189,8 @@ impl TermLayout {
     }
 
     pub fn max_scroll(&self) -> u32 {
-        let total_lines = self.rendered_rows.max(self.point / self.columns as u32);
-        total_lines.saturating_sub(self.rows as u32)
+        self.rendered_rows
+            .saturating_sub(self.rows as u32)
     }
 
     pub fn clamp_scroll(&mut self) {

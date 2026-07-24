@@ -15,7 +15,7 @@ fn init() {
 }
 
 fn build_test(arena: &mut NodeArena) -> (NodeId, NodeId) {
-    let root = arena.insert(Node::new());
+    let root = arena.insert(Node::from(NodeType::Global));
     let div_id = arena.insert(Node::from(NodeType::Div));
     arena[div_id].attributes = Attr::parse_from_str(r#"class="active" id="main""#);
     let p_id = arena.insert(Node::from(NodeType::P));
@@ -319,7 +319,7 @@ fn test_full_parse_pipeline_handles_important_and_comments() {
     let _rules = parser.parse().unwrap();
 
     let mut arena = NodeArena::default();
-    let root = arena.insert(Node::new());
+    let root = arena.insert(Node::from(NodeType::Global));
     let h1 = arena.insert(Node::from(NodeType::H1));
     Node::append_child(&mut arena, root, h1);
 

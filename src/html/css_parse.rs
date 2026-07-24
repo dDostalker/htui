@@ -540,34 +540,33 @@ impl CssAttr {
     }
 }
 
-/// 解析 CSS 颜色字符串 → crossterm::Color
-///
-/// 支持格式：
-/// - 命名颜色 (含 dark 变体): red, darkblue, DarkBlue, ...
-/// - 十六进制: #RRGGBB, #RGB
-/// - rgb(): rgb(255, 0, 0)
-/// - 回退到 crossterm 内置 FromStr
 /// Parse a CSS color string into a [`crossterm::style::Color`].
+///
+/// Supported formats:
+/// - Named colors including `dark` variants: `red`, `darkblue`, `DarkBlue`, ...
+/// - Hexadecimal: `#RRGGBB`, `#RGB`
+/// - Functional: `rgb(255, 0, 0)`
+/// - Fallback to `crossterm`'s built-in `Color::from_str`.
 #[doc(hidden)]
 pub fn parse_color_str(s: &str) -> Option<Color> {
     let lower = s.trim().to_lowercase();
 
-    // 1. 十六进制 #RRGGBB 或 #RGB
+    // 1. Hexadecimal #RRGGBB or #RGB
     if let Some(hex) = lower.strip_prefix('#') {
         return parse_hex_color(hex);
     }
 
-    // 2. rgb(r, g, b)
+    // 2. Functional rgb(r, g, b)
     if let Some(inner) = lower.strip_prefix("rgb(").and_then(|s| s.strip_suffix(')')) {
         return parse_rgb_color(inner);
     }
 
-    // 3. 扩展命名颜色（含 dark 变体）
+    // 3. Extended named colors including `dark` variants
     if let Some(color) = parse_named_color(&lower) {
         return Some(color);
     }
 
-    // 4. 回退到 crossterm 内置解析
+    // 4. Fall back to crossterm's built-in parser.
     Color::from_str(s).ok()
 }
 

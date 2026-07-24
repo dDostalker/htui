@@ -34,7 +34,7 @@ impl Parser {
         let dom = html5ever::parse_document(RcDom::default(), opts).one(self.input.clone());
 
         let mut arena = NodeArena::default();
-        let root_id = arena.insert(Node::new());
+        let root_id = arena.insert(Node::from(NodeType::Global));
         let mut css_sources: Vec<String> = Vec::new();
 
         convert_children(&dom.document, root_id, &mut arena, &mut css_sources);

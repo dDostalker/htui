@@ -87,16 +87,6 @@ pub struct Node {
 }
 
 impl Node {
-    pub fn new() -> Node {
-        Node {
-            node_type: NodeType::Global,
-            children: vec![],
-            parent: None,
-            attributes: Attr::new(),
-            css_attr: CssAttr::new(),
-        }
-    }
-
     pub fn from(node_type: NodeType) -> Node {
         Node {
             node_type,
@@ -129,10 +119,6 @@ impl Node {
         arena[parent_id].children.push(child_id);
     }
 
-    pub fn child(&self, index: usize) -> Option<NodeId> {
-        self.children.get(index).copied()
-    }
-
     /// Number of child nodes.
     pub fn child_count(&self) -> usize {
         self.children.len()
@@ -141,16 +127,6 @@ impl Node {
     /// Iterate over child node IDs.
     pub fn child_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.children.iter().copied()
-    }
-
-    /// Recursively rebuild parent pointers. Call once after tree construction.
-    /// (Normally maintained automatically by `append_child`; this is a bulk-repair tool.)
-    pub fn fix_parent_pointers(arena: &mut NodeArena, node_id: NodeId) {
-        let children: Vec<NodeId> = arena[node_id].children.clone();
-        for child_id in children {
-            arena[child_id].parent = Some(node_id);
-            Self::fix_parent_pointers(arena, child_id);
-        }
     }
 
     /// Depth-first traversal of all descendants (including self).
@@ -191,14 +167,4 @@ impl fmt::Display for NodeId {
         // NodeId 内部是 u64，这里只显示低 32 位版本号
         write!(f, "n#{}", self.data().as_ffi() as u32)
     }
-}
-
-pub fn collect_text(arena: &NodeArena, node: &Node) -> String {
-    let mut s = String::new();
-    for child_id in node.child_ids() {
-        if let NodeType::Text(t) = &arena[child_id].node_type {
-            s.push_str(t);
-        }
-    }
-    s
 }

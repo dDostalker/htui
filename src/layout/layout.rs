@@ -34,8 +34,6 @@ impl TermLayout {
             columns: map.columns,
             rows: map.rows,
             scroll_y: 0,
-            point: 0,
-            len: 0,
             rendered_rows: 0,
             zoom,
         })
@@ -58,9 +56,6 @@ impl TermLayout {
         let mut cursor = Cursor::new();
         let boxes = layout_tree(arena, root_id, containing, &mut cursor)?;
         paint_layout_tree(&boxes, arena, self)?;
-        // Keep `point` consistent with the paint phase so scroll/zoom helpers
-        // continue to work (legacy fields).
-        self.point = (self.rendered_rows * self.columns as u32).min(self.max_cells() as u32);
         Ok(())
     }
 }
