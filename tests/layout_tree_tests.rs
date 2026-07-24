@@ -192,7 +192,7 @@ fn layout_box_rect_is_deterministic() {
     assert_eq!(boxes1.len(), boxes2.len());
     for (a, b) in boxes1.iter().zip(boxes2.iter()) {
         assert_eq!(a.rect, b.rect, "boxes must agree across runs");
-        assert_eq!(a.text, b.text);
+        assert_eq!(a.runs, b.runs, "runs must agree across runs");
     }
 }
 

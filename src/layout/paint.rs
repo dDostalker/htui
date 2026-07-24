@@ -10,7 +10,7 @@ use crossterm::style::Color;
 
 use crate::{
     html::css_parse::TextAlign,
-    layout::{BoxKind, LayoutBox, Rect},
+    layout::{BoxKind, InlineRun, LayoutBox},
     tdom::node::NodeArena,
     tui::graph_api::{Block, FontStyle, TermLayout, block_style, char_width, render_image_at},
 };
@@ -123,26 +123,45 @@ fn paint_block(
         }
     }
 
-    if let Some(text) = &lb.text {
-        if !text.is_empty() {
-            let text_width = text.chars().map(char_width).sum::<usize>().min(r.width);
-            let offset = match align {
-                TextAlign::Left => 0,
-                TextAlign::Center => r.width.saturating_sub(text_width) / 2,
-                TextAlign::Right => r.width.saturating_sub(text_width),
-            };
-            paint_text_row(
-                term_layout,
-                cell_start + offset,
-                text,
-                fg,
-                effective_bg,
-                style,
-            );
-        }
+    if let Some(runs) = &lb.runs {
+        paint_runs(term_layout, runs, cell_start, r.width, align, effective_bg);
     }
 
     Ok(())
+}
+
+/// Render each run in `runs` with its own style, colour and background.
+///
+/// Width accounting uses [`InlineRun::width`] (which sums `char_width` per
+/// char) so a wide CJK glyph at the end of one run does not collide with
+/// the first cell of the next run. The block's `effective_bg` is applied
+/// to runs whose own background is `None`, inheriting the surrounding
+/// rect's fill (e.g. an `<aside>`'s `darkblue` strip showing through
+/// unstyled text).
+fn paint_runs(
+    term_layout: &mut TermLayout,
+    runs: &[InlineRun],
+    cell_start: usize,
+    block_width: usize,
+    align: TextAlign,
+    effective_bg: Option<Color>,
+) {
+    let total_width: usize = runs.iter().map(|r| r.width()).sum();
+    let total_width = total_width.min(block_width);
+    let offset = match align {
+        TextAlign::Left => 0,
+        TextAlign::Center => block_width.saturating_sub(total_width) / 2,
+        TextAlign::Right => block_width.saturating_sub(total_width),
+    };
+    let mut index = cell_start + offset;
+    for run in runs {
+        if run.is_empty() {
+            continue;
+        }
+        let run_bg = run.bg.or(effective_bg);
+        paint_text_row(term_layout, index, &run.text, run.fg, run_bg, run.style);
+        index += run.width();
+    }
 }
 
 fn paint_text_row(
@@ -191,15 +210,4 @@ fn paint_image(
 fn cell_index(term_layout: &TermLayout, x: usize, y: usize) -> usize {
     y.saturating_mul(term_layout.columns as usize)
         .saturating_add(x)
-}
-
-/// Build a `Rect::x = 0, width = ...` offset for the given containing block.
-#[allow(dead_code)]
-pub fn text_offset(rect: Rect, align: TextAlign, text_width: usize) -> usize {
-    let w = rect.width.min(text_width);
-    match align {
-        TextAlign::Left => 0,
-        TextAlign::Center => rect.width.saturating_sub(w) / 2,
-        TextAlign::Right => rect.width.saturating_sub(w),
-    }
 }

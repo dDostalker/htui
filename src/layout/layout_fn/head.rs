@@ -2,17 +2,20 @@ use anyhow::Result;
 
 use crate::{
     layout::{
-        BoxConstraint, Cursor, LayoutBox,
-        tree::{block_left, layout_children, resolve_block_width},
+        BoxConstraint, Cursor, InlineRun, LayoutBox,
+        tree::{block_left, collect_runs, layout_children, resolve_block_width},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
+    tui::graph_api::block_style,
 };
 
 /// Build a [`LayoutBox`] for `<h1>`…`<h5>`.
 ///
 /// Renders a `#`-marker prefix equal to the heading level (`# Heading`,
 /// `## Sub`, …) so the paint phase includes it in `text-align` width
-/// calculations, matching the previous behaviour.
+/// calculations, matching the previous behaviour. The prefix is its own
+/// `InlineRun` with the heading's resolved style; body runs are collected
+/// through `collect_runs` so `<span>` children keep their own styling.
 pub fn layout_hn(
     arena: &NodeArena,
     node_id: NodeId,
@@ -34,17 +37,26 @@ pub fn layout_hn(
     let x = block_left(containing, block_width);
     let y = cursor.allocate(1);
 
-    let prefix = "#".repeat(level);
-    let body = collect_heading_text(arena, node);
-    let combined = if body.is_empty() {
-        body
+    let block_fg = node.css_attr.get_color();
+    let block_bg = node.css_attr.get_bg_color();
+    let block_font_style = block_style(&node.css_attr);
+    let body_runs = collect_runs(arena, node, block_fg, block_bg, block_font_style);
+
+    let runs = if body_runs.is_empty() {
+        Vec::new()
     } else {
-        format!("{prefix} {body}")
-    };
-    let text = if combined.is_empty() {
-        None
-    } else {
-        Some(combined)
+        // `#`-prefix is its own run carried at the heading's resolved style,
+        // so a span in the body can still apply its own flags on top.
+        let prefix = format!("{} ", "#".repeat(level));
+        let mut all = Vec::with_capacity(body_runs.len() + 1);
+        all.push(InlineRun::new(
+            prefix,
+            block_font_style,
+            block_fg,
+            block_bg,
+        ));
+        all.extend(body_runs);
+        all
     };
 
     let child_containing = BoxConstraint {
@@ -61,24 +73,7 @@ pub fn layout_hn(
         crate::layout::Rect::new(x, y, block_width, 1),
         false,
         0,
-        text,
+        runs,
         children,
     )))
-}
-
-/// Concatenate direct text descendants into one inline run. Mirrors
-/// `tree::collect_direct_text` but kept local to the heading module so the
-/// prefix logic above stays self-contained.
-fn collect_heading_text(arena: &NodeArena, node: &crate::tdom::node::Node) -> String {
-    use crate::tdom::node::NodeType as NT;
-    let mut out = String::new();
-    for child_id in node.child_ids() {
-        let child = &arena[child_id];
-        match &child.node_type {
-            NT::Text(s) => out.push_str(s),
-            NT::Span => out.push_str(&collect_heading_text(arena, child)),
-            _ => {}
-        }
-    }
-    out
 }

@@ -11,7 +11,7 @@ pub mod layout_fn;
 pub mod paint;
 pub mod tree;
 
-pub use box_tree::{BoxKind, Cursor, LayoutBox, Rect};
+pub use box_tree::{BoxKind, Cursor, InlineRun, LayoutBox, Rect};
 
 /// The containing block available to a layout function.
 ///

@@ -14,6 +14,9 @@
 //! - [`paint_layout_tree`](crate::layout::paint::paint_layout_tree) walks the
 //!   tree and writes [`Block`] cells into the terminal canvas.
 
+use crossterm::style::Color;
+
+use crate::tui::graph_api::FontStyle;
 use crate::tdom::node::NodeId;
 
 /// Rectangle in column/row space within the virtual canvas.
@@ -49,31 +52,79 @@ pub enum BoxKind {
     Image { cols: usize, rows: usize },
 }
 
+/// One inline segment of a block-level element.
+///
+/// A block can hold multiple `InlineRun`s when its inline tree contains
+/// `<span>`s with distinct styles. Each run carries the resolved style, fg
+/// and bg that should be applied to its text. The paint phase walks `runs`
+/// in order and emits one styled cell per `char_width` column.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineRun {
+    pub text: String,
+    pub style: FontStyle,
+    pub fg: Option<Color>,
+    pub bg: Option<Color>,
+}
+
+impl InlineRun {
+    pub fn new(
+        text: impl Into<String>,
+        style: FontStyle,
+        fg: Option<Color>,
+        bg: Option<Color>,
+    ) -> Self {
+        Self {
+            text: text.into(),
+            style,
+            fg,
+            bg,
+        }
+    }
+
+    /// Returns the cell width this run occupies (`char_width` per char).
+    pub fn width(&self) -> usize {
+        use crate::tui::graph_api::char_width;
+        self.text.chars().map(char_width).sum()
+    }
+
+    /// Returns true when the run has no visible text.
+    pub fn is_empty(&self) -> bool {
+        self.text.is_empty()
+    }
+}
+
 /// One rectangle in the layout tree.
 ///
 /// `children` holds *nested block-level* boxes laid out beneath this box.
-/// Inline text content is collapsed into [`Self::text`] for the common
-/// `<p>...</p>` case; the field is `None` for purely structural containers.
+/// Inline text content lives in [`Self::runs`] as one or more
+/// [`InlineRun`]s — a single text node becomes one run, while `<span>`
+/// boundaries produce runs with their own style. The field is `None`
+/// only for purely structural containers (e.g. an `<aside>` whose text
+/// is delegated to nested block children).
 #[derive(Debug, Clone)]
 pub struct LayoutBox {
     pub node_id: NodeId,
     pub rect: Rect,
     pub kind: BoxKind,
-    pub text: Option<String>,
+    pub runs: Option<Vec<InlineRun>>,
     pub image_path: Option<String>,
     pub children: Vec<LayoutBox>,
 }
 
 impl LayoutBox {
-    /// Create a block-level box at `rect` with the given text and children.
+    /// Create a block-level box whose inline content is split into one
+    /// or more `InlineRun`s (one per `<span>` boundary, one per direct
+    /// text node). Pass an empty `Vec` when the block is purely
+    /// structural — `runs` will be stored as `None`.
     pub fn new_block(
         node_id: NodeId,
         rect: Rect,
         fill_bg: bool,
         spacing_after: usize,
-        text: Option<String>,
+        runs: Vec<InlineRun>,
         children: Vec<LayoutBox>,
     ) -> Self {
+        let runs = if runs.is_empty() { None } else { Some(runs) };
         Self {
             node_id,
             rect,
@@ -81,7 +132,7 @@ impl LayoutBox {
                 fill_bg,
                 spacing_after,
             },
-            text,
+            runs,
             image_path: None,
             children,
         }
@@ -93,7 +144,7 @@ impl LayoutBox {
             node_id,
             rect,
             kind: BoxKind::Image { cols, rows },
-            text: None,
+            runs: None,
             image_path: Some(path),
             children: vec![],
         }

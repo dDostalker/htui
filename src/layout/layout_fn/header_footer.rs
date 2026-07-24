@@ -3,9 +3,10 @@ use anyhow::Result;
 use crate::{
     layout::{
         BoxConstraint, Cursor, LayoutBox,
-        tree::{block_left, collect_direct_text, layout_children, resolve_block_width},
+        tree::{block_left, collect_runs, layout_children, resolve_block_width},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
+    tui::graph_api::block_style,
 };
 
 /// Build a [`LayoutBox`] for a `<header>` element.
@@ -67,12 +68,12 @@ fn layout_block_with_tag(
     // visual breathing room, matching the previous `new_line(); new_line();`.
     cursor.y = cursor.y.saturating_add(spacing_after);
 
-    let text = {
-        let raw = collect_direct_text(arena, node);
-        if raw.is_empty() { None } else { Some(raw) }
-    };
+    let block_fg = node.css_attr.get_color();
+    let block_bg = node.css_attr.get_bg_color();
+    let block_font_style = block_style(&node.css_attr);
+    let runs = collect_runs(arena, node, block_fg, block_bg, block_font_style);
 
-    let fill_bg = node.css_attr.get_bg_color().is_some() || fill_bg_default;
+    let fill_bg = block_bg.is_some() || fill_bg_default;
 
     let child_containing = BoxConstraint {
         x,
@@ -90,7 +91,7 @@ fn layout_block_with_tag(
         crate::layout::Rect::new(x, content_y, block_width, 1 + spacing_after),
         fill_bg,
         spacing_after,
-        text,
+        runs,
         children,
     )))
 }

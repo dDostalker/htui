@@ -3,9 +3,10 @@ use anyhow::Result;
 use crate::{
     layout::{
         BoxConstraint, Cursor, LayoutBox,
-        tree::{block_left, collect_direct_text, layout_children, resolve_block_width},
+        tree::{block_left, collect_runs, layout_children, resolve_block_width},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
+    tui::graph_api::block_style,
 };
 
 /// Build a [`LayoutBox`] for an `<aside>` element.
@@ -29,10 +30,10 @@ pub fn layout_aside(
         resolve_block_width(node.css_attr.get_width(containing.width), containing.width);
     let x = block_left(containing, block_width);
 
-    let text = {
-        let raw = collect_direct_text(arena, node);
-        if raw.is_empty() { None } else { Some(raw) }
-    };
+    let block_fg = node.css_attr.get_color();
+    let block_bg = node.css_attr.get_bg_color();
+    let block_font_style = block_style(&node.css_attr);
+    let runs = collect_runs(arena, node, block_fg, block_bg, block_font_style);
 
     // Peek the next row without reserving — the aside's children will start
     // here, so the aside's rect should encompass the children's rows rather
@@ -59,7 +60,7 @@ pub fn layout_aside(
         crate::layout::Rect::new(x, y, block_width, height),
         true,
         0,
-        text,
+        runs,
         children,
     )))
 }
