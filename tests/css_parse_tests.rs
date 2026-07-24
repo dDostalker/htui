@@ -1,8 +1,8 @@
 use crossterm::style::Color;
 use htui::html::css_parse::{
-    Combinator, CssAttr, CssRule, CssSelector, FontWeight, INHERITED_PROPS, Length, Parser,
-    SUPPORTED_PROPERTIES, css_into_node, parse_color_str, parse_declaration_text,
-    selector_chain_matches,
+    BorderStyle, Combinator, CssAttr, CssRule, CssSelector, EdgeSizes, FontWeight,
+    INHERITED_PROPS, Length, Parser, SUPPORTED_PROPERTIES, css_into_node, parse_color_str,
+    parse_declaration_text, selector_chain_matches,
 };
 use htui::tdom::{
     attributes::Attr,
@@ -152,6 +152,16 @@ fn test_supported_properties_lists_known_names() {
     assert!(SUPPORTED_PROPERTIES.contains(&"font-style"));
     assert!(SUPPORTED_PROPERTIES.contains(&"text-decoration"));
     assert!(SUPPORTED_PROPERTIES.contains(&"width"));
+    // Box-model longhands + shorthands.
+    assert!(SUPPORTED_PROPERTIES.contains(&"padding"));
+    assert!(SUPPORTED_PROPERTIES.contains(&"padding-top"));
+    assert!(SUPPORTED_PROPERTIES.contains(&"margin"));
+    assert!(SUPPORTED_PROPERTIES.contains(&"margin-left"));
+    assert!(SUPPORTED_PROPERTIES.contains(&"border"));
+    assert!(SUPPORTED_PROPERTIES.contains(&"border-top"));
+    assert!(SUPPORTED_PROPERTIES.contains(&"border-width"));
+    assert!(SUPPORTED_PROPERTIES.contains(&"border-style"));
+    assert!(SUPPORTED_PROPERTIES.contains(&"border-color"));
 }
 
 #[test]
@@ -501,4 +511,170 @@ fn css_attr_get_width_end_to_end() {
 
     // Missing property → None.
     assert_eq!(CssAttr::new().get_width(80), None);
+}
+
+// ============================================================
+// Box-model: padding / margin / border parsing
+// ============================================================
+
+fn attr_from_decl(name: &str, value: &str) -> CssAttr {
+    let mut decls = IndexMap::new();
+    decls.insert(name.into(), value.into());
+    let mut attr = CssAttr::new();
+    attr.add(CssAttr(decls));
+    attr
+}
+
+#[test]
+fn padding_shorthand_one_value_fills_all_sides() {
+    let attr = attr_from_decl("padding", "5px");
+    let edges = attr.get_padding(80);
+    assert_eq!(edges, EdgeSizes::new(5, 5, 5, 5));
+}
+
+#[test]
+fn padding_shorthand_two_values_vertical_horizontal() {
+    // `padding: 10px 20px;` → top/bottom = 10, left/right = 20
+    let attr = attr_from_decl("padding", "10px 20px");
+    assert_eq!(attr.get_padding(80), EdgeSizes::new(10, 20, 10, 20));
+}
+
+#[test]
+fn padding_shorthand_three_values_top_horizontal_bottom() {
+    // `padding: 1px 2px 3px;` → top=1, left/right=2, bottom=3
+    let attr = attr_from_decl("padding", "1px 2px 3px");
+    assert_eq!(attr.get_padding(80), EdgeSizes::new(1, 2, 3, 2));
+}
+
+#[test]
+fn padding_shorthand_four_values_clockwise() {
+    // `padding: 1px 2px 3px 4px;` → top=1, right=2, bottom=3, left=4
+    let attr = attr_from_decl("padding", "1px 2px 3px 4px");
+    assert_eq!(attr.get_padding(80), EdgeSizes::new(1, 2, 3, 4));
+}
+
+#[test]
+fn padding_longhands_override_shorthand() {
+    // `padding: 0; padding-top: 7px;` → top=7, others=0
+    let mut decls = IndexMap::new();
+    decls.insert("padding".into(), "0".into());
+    decls.insert("padding-top".into(), "7px".into());
+    let mut attr = CssAttr::new();
+    attr.add(CssAttr(decls));
+    assert_eq!(attr.get_padding(80), EdgeSizes::new(7, 0, 0, 0));
+}
+
+#[test]
+fn padding_supports_percent_and_em() {
+    let attr = attr_from_decl("padding", "50%");
+    assert_eq!(attr.get_padding(80).left, 40);
+    let attr = attr_from_decl("padding-top", "3em");
+    assert_eq!(attr.get_padding(80).top, 3);
+}
+
+#[test]
+fn margin_shorthand_mirrors_padding() {
+    let attr = attr_from_decl("margin", "2px 4px");
+    assert_eq!(attr.get_margin(80), EdgeSizes::new(2, 4, 2, 4));
+    let attr = attr_from_decl("margin-left", "6px");
+    assert_eq!(attr.get_margin(80), EdgeSizes::new(0, 0, 0, 6));
+}
+
+#[test]
+fn margin_auto_collapses_to_zero() {
+    // Terminals don't honour `margin: auto`; we surface it as 0 so callers
+    // don't need a special case.
+    let attr = attr_from_decl("margin", "auto");
+    assert_eq!(attr.get_margin(80), EdgeSizes::default());
+}
+
+#[test]
+fn border_shorthand_solid_parses_width_and_style() {
+    let attr = attr_from_decl("border", "1px solid red");
+    let sides = attr.get_border(80);
+    assert_eq!(sides.top.width, 1);
+    assert_eq!(sides.top.style, BorderStyle::Solid);
+    assert_eq!(sides.top.color, Some(Color::Red));
+    assert_eq!(sides.right.width, 1);
+    assert_eq!(sides.bottom.width, 1);
+    assert_eq!(sides.left.width, 1);
+}
+
+#[test]
+fn border_shorthand_style_alone_applies_to_all_sides() {
+    let attr = attr_from_decl("border", "solid");
+    let sides = attr.get_border(80);
+    assert_eq!(sides.top.style, BorderStyle::Solid);
+    assert_eq!(sides.bottom.style, BorderStyle::Solid);
+    assert_eq!(sides.left.style, BorderStyle::Solid);
+    assert_eq!(sides.right.style, BorderStyle::Solid);
+}
+
+#[test]
+fn border_longhand_overrides_universal_shorthand() {
+    // `border: 1px solid red; border-top: 3px solid blue;` — top wins, others
+    // come from the shorthand.
+    let mut decls = IndexMap::new();
+    decls.insert("border".into(), "1px solid red".into());
+    decls.insert("border-top".into(), "3px solid blue".into());
+    let mut attr = CssAttr::new();
+    attr.add(CssAttr(decls));
+    let sides = attr.get_border(80);
+    assert_eq!(sides.top.width, 3);
+    assert_eq!(sides.top.color, Some(Color::Blue));
+    assert_eq!(sides.right.width, 1);
+    assert_eq!(sides.right.color, Some(Color::Red));
+}
+
+#[test]
+fn border_universal_width_style_color_layers_correctly() {
+    // `border-width: 2px; border-style: solid; border-color: green;`
+    // should produce a green 2px border on every side.
+    let mut decls = IndexMap::new();
+    decls.insert("border-width".into(), "2px".into());
+    decls.insert("border-style".into(), "solid".into());
+    decls.insert("border-color".into(), "green".into());
+    let mut attr = CssAttr::new();
+    attr.add(CssAttr(decls));
+    let sides = attr.get_border(80);
+    assert_eq!(sides.top.width, 2);
+    assert_eq!(sides.top.style, BorderStyle::Solid);
+    assert_eq!(sides.top.color, Some(Color::Green));
+}
+
+#[test]
+fn border_style_none_hides_the_border() {
+    let attr = attr_from_decl("border-style", "none");
+    let sides = attr.get_border(80);
+    assert!(!sides.any_visible());
+}
+
+#[test]
+fn border_unknown_style_falls_back_to_solid() {
+    // `dashed`, `dotted`, `double` etc. all render as solid in the terminal.
+    for keyword in ["dashed", "dotted", "double", "groove"] {
+        let attr = attr_from_decl("border", &format!("1px {keyword} red"));
+        let sides = attr.get_border(80);
+        assert_eq!(
+            sides.top.style,
+            BorderStyle::Solid,
+            "keyword {keyword} should fall back to solid"
+        );
+    }
+}
+
+#[test]
+fn get_box_edges_returns_combined_padding_border_margin() {
+    let mut decls = IndexMap::new();
+    decls.insert("padding".into(), "2px".into());
+    decls.insert("margin".into(), "4px".into());
+    decls.insert("border".into(), "1px solid red".into());
+    let mut attr = CssAttr::new();
+    attr.add(CssAttr(decls));
+    let edges = attr.get_box_edges(80);
+    assert_eq!(edges.padding.top, 2);
+    assert_eq!(edges.margin.left, 4);
+    assert_eq!(edges.border.top.width, 1);
+    assert_eq!(edges.border.top.style, BorderStyle::Solid);
+    assert_eq!(edges.inner_horizontal(), 6); // 2 + 2 + 1 + 1
 }

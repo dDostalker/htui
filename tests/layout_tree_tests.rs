@@ -204,11 +204,12 @@ fn rendered_rows_walks_full_layout_tree() {
     // children of `<div>` were ignored when computing `max_y`.
     use htui::layout::tree::layout_tree;
 
-    // Layout sketch (each `<p>` and `<div>` claims one row):
-    //   row 0: <div>            (empty)
-    //   row 1: <p>A</p>
-    //   row 2: <div>            (empty)
-    //     row 3: <p>B</p>       <- deepest leaf
+    // Layout sketch (each block's rect encompasses its children — no empty
+    // placeholder row between container and children):
+    //   row 0: <div>            rect spans rows 0..1
+    //     row 0: <p>A</p>
+    //     row 1: <div>          rect spans row 1
+    //       row 1: <p>B</p>     <- deepest leaf
     let (root_id, arena) = setup("<div><p>A</p><div><p>B</p></div></div>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
@@ -225,7 +226,7 @@ fn rendered_rows_walks_full_layout_tree() {
         .map(|b| b.rect.y + b.rect.height.max(1))
         .max()
         .unwrap();
-    assert_eq!(max_leaf, 4, "deepest leaf should land on row 4");
+    assert_eq!(max_leaf, 2, "deepest leaf should land on row 2");
 
     assert_eq!(
         tl.rendered_rows as usize, max_leaf,

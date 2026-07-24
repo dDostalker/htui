@@ -2,8 +2,11 @@ use anyhow::Result;
 
 use crate::{
     layout::{
-        BoxConstraint, Cursor, LayoutBox,
-        tree::{block_left, collect_runs, layout_children, resolve_block_width},
+        BoxConstraint, BoxEdges, Cursor, LayoutBox,
+        tree::{
+            block_left, collect_runs, compute_outer_geometry, layout_children,
+            reserve_border_box, resolve_block_width,
+        },
     },
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::block_style,
@@ -15,6 +18,10 @@ use crate::{
 /// empty row for itself — the bg wraps the children directly so the rendering
 /// matches a browser (no blank stripe above the content). With no nested block
 /// children the aside still claims one row so siblings don't collide.
+///
+/// Padding / border are honoured: the inner containing block is shrunk, the
+/// background fills the full border-box, and border glyphs are drawn when
+/// `border-*` rules are present.
 pub fn layout_aside(
     arena: &NodeArena,
     node_id: NodeId,
@@ -26,8 +33,12 @@ pub fn layout_aside(
         return Ok(None);
     }
 
+    let edges: BoxEdges = node.css_attr.get_box_edges(containing.width);
+
+    let available = containing.width.saturating_sub(edges.margin.horizontal());
     let block_width =
-        resolve_block_width(node.css_attr.get_width(containing.width), containing.width);
+        resolve_block_width(node.css_attr.get_width(available), available).max(1);
+    let outer_width = block_width;
     let x = block_left(containing, block_width);
 
     let block_fg = node.css_attr.get_color();
@@ -35,29 +46,45 @@ pub fn layout_aside(
     let block_font_style = block_style(&node.css_attr);
     let runs = collect_runs(arena, node, block_fg, block_bg, block_font_style);
 
-    // Peek the next row without reserving — the aside's children will start
-    // here, so the aside's rect should encompass the children's rows rather
-    // than sitting on top of an empty "own row".
-    let y = cursor.peek();
+    // Peek the next row (after any margin-top) without reserving — the aside's
+    // children will start on this row, so the aside's rect should encompass
+    // them rather than sitting on top of an empty "own row".
+    cursor.skip(edges.margin.top);
+    let outer_y_top = cursor.y;
 
-    let child_containing = BoxConstraint {
-        x,
-        width: block_width,
+    let geom = compute_outer_geometry(
+        BoxConstraint {
+            x,
+            width: outer_width,
+        },
+        outer_width,
+        edges,
+        outer_y_top,
+        1,
+    );
+
+    let mut child_cursor = Cursor {
+        y: geom.outer_y
+            + edges.border.top.thickness()
+            + edges.padding.top,
     };
-    let mut child_cursor = Cursor { y };
     let block_children = node.children.clone();
-    let children = layout_children(arena, &block_children, child_containing, &mut child_cursor)?;
+    let children = layout_children(
+        arena,
+        &block_children,
+        geom.content_constraint,
+        &mut child_cursor,
+    )?;
 
-    // Aside height equals the number of rows occupied by its children (or 1
-    // when empty). This keeps the bg flush with the content — no empty
-    // stripe above — and leaves an empty aside at height 1 so siblings don't
-    // collide.
-    let height = child_cursor.y.saturating_sub(y).max(1);
-    cursor.y = y + height;
+    let content_height = child_cursor.y.saturating_sub(
+        geom.outer_y + edges.border.top.thickness() + edges.padding.top,
+    );
+    let outer_height = reserve_border_box(cursor, geom.outer_y, edges, content_height, 1);
 
     Ok(Some(LayoutBox::new_block(
         node_id,
-        crate::layout::Rect::new(x, y, block_width, height),
+        crate::layout::Rect::new(geom.outer_x, geom.outer_y, geom.outer_width, outer_height),
+        edges,
         true,
         0,
         runs,

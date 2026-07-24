@@ -2,8 +2,11 @@ use anyhow::Result;
 
 use crate::{
     layout::{
-        BoxConstraint, Cursor, LayoutBox,
-        tree::{block_left, collect_runs, layout_children, resolve_block_width},
+        BoxConstraint, BoxEdges, Cursor, LayoutBox,
+        tree::{
+            block_left, build_border_rect, collect_runs, compute_outer_geometry,
+            layout_children, reserve_border_box, resolve_block_width,
+        },
     },
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::block_style,
@@ -11,17 +14,16 @@ use crate::{
 
 /// Build a [`LayoutBox`] for a `<p>` element.
 ///
-/// Honors CSS `width` (default: fill containing block) and `text-align`
-/// (inherited from ancestors via `inherit_css`) — the paint phase uses
-/// the resolved `block_width` for both background fill and text-align
-/// padding, so nested `<div><p>…</p></div>` correctly positions text
-/// within the parent's width. Block sits flush left inside its parent,
-/// matching CSS `margin-left: 0` defaults; `text-align` only moves text
-/// within the block, not the block itself.
+/// Honors CSS `width` (default: fill containing block) — the resolved value is
+/// the **border-box** width, including padding + border. Padding/border
+/// shrink the content area passed to nested block children, and the inline
+/// runs are painted on the content row (after `border.top` + `padding.top`).
+/// `text-align` (inherited from ancestors via `inherit_css`) is computed
+/// against the content area's width so `text-align: center` correctly
+/// positions text within the inner content box rather than the full rect.
 ///
-/// Inline children are collected as one run per `<span>` so styled spans
-/// (`<span class="bold">bold</span>`) render with their own `FontStyle`
-/// at paint time.
+/// Margin / border / padding values are surfaced through `box_edges`; the
+/// paint phase reads them to draw border glyphs and offset content.
 pub fn layout_p(
     arena: &NodeArena,
     node_id: NodeId,
@@ -33,28 +35,55 @@ pub fn layout_p(
         return Ok(None);
     }
 
+    let edges: BoxEdges = node.css_attr.get_box_edges(containing.width);
+
+    let available = containing.width.saturating_sub(edges.margin.horizontal());
     let block_width =
-        resolve_block_width(node.css_attr.get_width(containing.width), containing.width);
+        resolve_block_width(node.css_attr.get_width(available), available).max(1);
+    let outer_width = block_width;
     let x = block_left(containing, block_width);
-    let y = cursor.allocate(1);
 
     let block_fg = node.css_attr.get_color();
     let block_bg = node.css_attr.get_bg_color();
     let block_font_style = block_style(&node.css_attr);
     let runs = collect_runs(arena, node, block_fg, block_bg, block_font_style);
 
-    let child_containing = BoxConstraint {
-        x,
-        width: block_width,
+    cursor.skip(edges.margin.top);
+        let outer_y_top = cursor.y;
+
+    let geom = compute_outer_geometry(
+        BoxConstraint {
+            x,
+            width: outer_width,
+        },
+        outer_width,
+        edges,
+        outer_y_top,
+        1,
+    );
+
+    let mut child_cursor = Cursor {
+        y: geom.outer_y
+            + edges.border.top.thickness()
+            + edges.padding.top,
     };
-    let child_cursor = &mut Cursor { y: cursor.peek() };
     let block_children = node.children.clone();
-    let children = layout_children(arena, &block_children, child_containing, child_cursor)?;
-    cursor.y = child_cursor.y;
+    let children = layout_children(
+        arena,
+        &block_children,
+        geom.content_constraint,
+        &mut child_cursor,
+    )?;
+
+    let content_height = child_cursor.y.saturating_sub(
+        geom.outer_y + edges.border.top.thickness() + edges.padding.top,
+    );
+    let outer_height = reserve_border_box(cursor, geom.outer_y, edges, content_height, 1);
 
     Ok(Some(LayoutBox::new_block(
         node_id,
-        crate::layout::Rect::new(x, y, block_width, 1),
+        build_border_rect(geom, outer_height),
+        edges,
         false,
         0,
         runs,

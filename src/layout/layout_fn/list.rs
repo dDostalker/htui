@@ -2,8 +2,11 @@ use anyhow::Result;
 
 use crate::{
     layout::{
-        BoxConstraint, Cursor, InlineRun, LayoutBox,
-        tree::{collect_runs, layout_children},
+        BoxConstraint, BoxEdges, Cursor, InlineRun, LayoutBox,
+        tree::{
+            block_left, collect_runs, compute_outer_geometry, layout_children,
+            reserve_border_box, resolve_block_width,
+        },
     },
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::block_style,
@@ -17,7 +20,8 @@ const LIST_INDENT_PER_LEVEL: usize = 2;
 /// `<ul>` is a structural list container. Each `<li>` child is rendered on its
 /// own row by [`layout_li`]; the list itself only contributes spacing and an
 /// indent for nested levels. The rect spans the indented region so any CSS
-/// `background-color` paints the whole column reserved for the list.
+/// `background-color` / `border` / `padding` paints the whole column reserved
+/// for the list.
 pub fn layout_ul(
     arena: &NodeArena,
     node_id: NodeId,
@@ -47,6 +51,10 @@ pub fn layout_ol(
 /// parent) to the body's inline runs. Nested children are then laid out in a
 /// containing block shifted past the marker so any nested `<ul>`/`<ol>` sits
 /// under the body text.
+///
+/// Padding / border / margin on an `<li>` shrink the content area and offset
+/// the marker / body runs into the content row, mirroring the behaviour of
+/// `<p>` and `<div>`.
 pub fn layout_li(
     arena: &NodeArena,
     node_id: NodeId,
@@ -67,9 +75,13 @@ pub fn layout_li(
         _ => "- ".to_string(),
     };
 
-    let block_width = containing.width;
-    let x = containing.x;
-    let y = cursor.allocate(1);
+    let edges: BoxEdges = node.css_attr.get_box_edges(containing.width);
+
+    let available = containing.width.saturating_sub(edges.margin.horizontal());
+    let block_width =
+        resolve_block_width(node.css_attr.get_width(available), available).max(1);
+    let outer_width = block_width;
+    let x = block_left(containing, block_width);
 
     let block_fg = node.css_attr.get_color();
     let block_bg = node.css_attr.get_bg_color();
@@ -84,22 +96,52 @@ pub fn layout_li(
     runs.push(marker_run);
     runs.extend(body_runs);
 
+    cursor.skip(edges.margin.top);
+        let outer_y_top = cursor.y;
+
+    let geom = compute_outer_geometry(
+        BoxConstraint {
+            x,
+            width: outer_width,
+        },
+        outer_width,
+        edges,
+        outer_y_top,
+        1,
+    );
+
     // Children (typically a nested <ul>/<ol>) sit on rows below the marker
     // row, indented past the marker width so they line up with the body text.
     let child_containing = BoxConstraint {
-        x: x.saturating_add(marker_width),
-        width: block_width.saturating_sub(marker_width).max(1),
+        x: geom
+            .content_constraint
+            .x
+            .saturating_add(marker_width),
+        width: geom
+            .content_constraint
+            .width
+            .saturating_sub(marker_width)
+            .max(1),
     };
-    let mut child_cursor = Cursor { y: cursor.peek() };
+    let mut child_cursor = Cursor {
+        y: geom.outer_y
+            + edges.border.top.thickness()
+            + edges.padding.top,
+    };
     let li_children = node.children.clone();
     let children = layout_children(arena, &li_children, child_containing, &mut child_cursor)?;
-    cursor.y = child_cursor.y;
+
+    let content_height = child_cursor.y.saturating_sub(
+        geom.outer_y + edges.border.top.thickness() + edges.padding.top,
+    );
+    let outer_height = reserve_border_box(cursor, geom.outer_y, edges, content_height, 1);
 
     let fill_bg = block_bg.is_some();
 
     Ok(Some(LayoutBox::new_block(
         node_id,
-        crate::layout::Rect::new(x, y, block_width, 1),
+        crate::layout::Rect::new(geom.outer_x, geom.outer_y, geom.outer_width, outer_height),
+        edges,
         fill_bg,
         0,
         runs,
@@ -121,12 +163,32 @@ fn layout_list(
 
     let depth = list_depth(arena, node_id);
     let indent = LIST_INDENT_PER_LEVEL * depth;
-    let x = containing.x.saturating_add(indent);
-    let width = containing.width.saturating_sub(indent).max(1);
+    let edges: BoxEdges = node.css_attr.get_box_edges(containing.width);
 
-    // Like <aside>: peek the next row without reserving an extra row for the
-    // list itself, so the rect wraps the children directly.
-    let y = cursor.peek();
+    let x = containing.x.saturating_add(indent) + edges.margin.left;
+    let available = containing.width
+        .saturating_sub(indent)
+        .saturating_sub(edges.margin.horizontal());
+    let block_width =
+        resolve_block_width(node.css_attr.get_width(available), available).max(1);
+    let outer_width = block_width;
+
+    // Like <aside>: peek the next row (after margin-top) without reserving
+    // an extra row for the list itself, so the rect wraps the children
+    // directly.
+    cursor.skip(edges.margin.top);
+    let outer_y_top = cursor.y;
+
+    let geom = compute_outer_geometry(
+        BoxConstraint {
+            x,
+            width: outer_width,
+        },
+        outer_width,
+        edges,
+        outer_y_top,
+        1,
+    );
 
     let block_fg = node.css_attr.get_color();
     let block_bg = node.css_attr.get_bg_color();
@@ -135,17 +197,28 @@ fn layout_list(
 
     let fill_bg = block_bg.is_some();
 
-    let child_containing = BoxConstraint { x, width };
-    let mut child_cursor = Cursor { y };
+    let mut child_cursor = Cursor {
+        y: geom.outer_y
+            + edges.border.top.thickness()
+            + edges.padding.top,
+    };
     let list_children = node.children.clone();
-    let children = layout_children(arena, &list_children, child_containing, &mut child_cursor)?;
+    let children = layout_children(
+        arena,
+        &list_children,
+        geom.content_constraint,
+        &mut child_cursor,
+    )?;
 
-    let height = child_cursor.y.saturating_sub(y).max(1);
-    cursor.y = y.saturating_add(height);
+    let content_height = child_cursor.y.saturating_sub(
+        geom.outer_y + edges.border.top.thickness() + edges.padding.top,
+    );
+    let outer_height = reserve_border_box(cursor, geom.outer_y, edges, content_height, 1);
 
     Ok(Some(LayoutBox::new_block(
         node_id,
-        crate::layout::Rect::new(x, y, width, height),
+        crate::layout::Rect::new(geom.outer_x, geom.outer_y, geom.outer_width, outer_height),
+        edges,
         fill_bg,
         0,
         runs,

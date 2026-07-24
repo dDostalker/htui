@@ -5,12 +5,14 @@ use crate::{
     tdom::node::{NodeArena, NodeId},
 };
 
+pub mod box_edges;
 pub mod box_tree;
 pub mod layout;
 pub mod layout_fn;
 pub mod paint;
 pub mod tree;
 
+pub use box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeSizes};
 pub use box_tree::{BoxKind, Cursor, InlineRun, LayoutBox, Rect};
 
 /// The containing block available to a layout function.

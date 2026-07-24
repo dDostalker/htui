@@ -16,6 +16,7 @@
 
 use crossterm::style::Color;
 
+use crate::layout::box_edges::BoxEdges;
 use crate::tui::graph_api::FontStyle;
 use crate::tdom::node::NodeId;
 
@@ -95,6 +96,11 @@ impl InlineRun {
 
 /// One rectangle in the layout tree.
 ///
+/// `rect` is the **border-box**: it includes the border, padding and the
+/// content area. `box_edges` carries the resolved padding / border / margin
+/// values so the paint phase can draw border glyphs around the rect's
+/// perimeter and offset inline content into the content area.
+///
 /// `children` holds *nested block-level* boxes laid out beneath this box.
 /// Inline text content lives in [`Self::runs`] as one or more
 /// [`InlineRun`]s — a single text node becomes one run, while `<span>`
@@ -106,6 +112,7 @@ pub struct LayoutBox {
     pub node_id: NodeId,
     pub rect: Rect,
     pub kind: BoxKind,
+    pub box_edges: BoxEdges,
     pub runs: Option<Vec<InlineRun>>,
     pub image_path: Option<String>,
     pub children: Vec<LayoutBox>,
@@ -119,6 +126,7 @@ impl LayoutBox {
     pub fn new_block(
         node_id: NodeId,
         rect: Rect,
+        box_edges: BoxEdges,
         fill_bg: bool,
         spacing_after: usize,
         runs: Vec<InlineRun>,
@@ -132,6 +140,7 @@ impl LayoutBox {
                 fill_bg,
                 spacing_after,
             },
+            box_edges,
             runs,
             image_path: None,
             children,
@@ -144,6 +153,7 @@ impl LayoutBox {
             node_id,
             rect,
             kind: BoxKind::Image { cols, rows },
+            box_edges: BoxEdges::default(),
             runs: None,
             image_path: Some(path),
             children: vec![],
@@ -172,6 +182,14 @@ impl Cursor {
         let start = self.y;
         self.y = self.y.saturating_add(height);
         start
+    }
+
+    /// Advance the cursor by `rows` without returning a value. Use this for
+    /// margin-top / margin-bottom gaps where the reserved rows don't belong
+    /// to any specific box — [`allocate`](Self::allocate) would mistakenly
+    /// treat those rows as the box's own row.
+    pub fn skip(&mut self, rows: usize) {
+        self.y = self.y.saturating_add(rows);
     }
 
     /// Peek at the next available row without advancing.
