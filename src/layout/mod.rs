@@ -89,4 +89,7 @@ pub static DEFAULT_LAYOUT: &[LayoutFn] = &[
     layout_fn::header_footer::layout_header,
     layout_fn::header_footer::layout_footer,
     layout_fn::aside::layout_aside,
+    layout_fn::list::layout_li,
+    layout_fn::list::layout_ol,
+    layout_fn::list::layout_ul,
 ];
