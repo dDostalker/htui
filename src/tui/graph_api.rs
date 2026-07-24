@@ -650,7 +650,7 @@ impl Img {
 /// `max_size` is the `(width, height)` in terminal cells the image should be
 /// resized to. Errors from the underlying loader are propagated; callers that
 /// want best-effort rendering should catch and log.
-pub fn paint_image_at(
+pub fn render_image_at(
     term_layout: &mut TermLayout,
     path: &str,
     origin: (usize, usize),

@@ -15,7 +15,7 @@ use htui::layout::layout::TermMap;
 use htui::layout::layout_fn::img::layout_img;
 use htui::layout::{BoxConstraint, BoxKind, Cursor};
 use htui::tdom::node::{self, NodeType};
-use htui::tui::graph_api::{TermLayout, paint_image_at};
+use htui::tui::graph_api::{TermLayout, render_image_at};
 use image::{ImageBuffer, Rgb};
 
 fn init() {
@@ -133,7 +133,7 @@ fn paint_image_at_fills_requested_cell_area() {
     // 64×64 PNG is squashed to 80×40 pixels and rasterized into 40×10 cells.
     let cell_w: u32 = 40;
     let cell_h: u32 = 10;
-    paint_image_at(
+    render_image_at(
         &mut tl,
         img_path.to_str().unwrap(),
         (0, 0),

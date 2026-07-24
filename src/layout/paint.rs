@@ -12,7 +12,7 @@ use crate::{
     html::css_parse::{FontWeight, TextAlign},
     layout::{BoxKind, LayoutBox, Rect},
     tdom::node::NodeArena,
-    tui::graph_api::{Block, TermLayout, char_width, paint_image_at},
+    tui::graph_api::{Block, TermLayout, char_width, render_image_at},
 };
 
 /// Paint every box in `boxes` into `term_layout`.
@@ -182,7 +182,7 @@ fn paint_image(
         return Ok(());
     };
     let r = lb.rect;
-    paint_image_at(term_layout, path, (r.x, r.y), (cols as u32, rows as u32)).or_else(|e| {
+    render_image_at(term_layout, path, (r.x, r.y), (cols as u32, rows as u32)).or_else(|e| {
         log::debug!("Image paint skipped for {}: {}", path, e);
         Ok(())
     })
