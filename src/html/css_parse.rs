@@ -13,11 +13,12 @@ use crate::tdom::node::{Node, NodeArena, NodeId, NodeType};
 
 // ============================================================
 // Box-model edge types — re-exported for downstream callers.
-// Defined in `layout::box_edges`, imported here so `CssAttr`
-// can hand back resolved [`EdgeSizes`] / [`BorderSides`] values.
+// Defined in `crate::html::box_edges`; `CssAttr` hands back resolved
+// [`EdgeSizes`] / [`BorderSides`] values so the layout layer can consume
+// them without re-parsing the CSS source.
 // ============================================================
 
-pub use crate::layout::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeSizes};
+pub use crate::html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeSizes};
 
 // CSS 选择器类型 & 匹配引擎
 
@@ -178,7 +179,7 @@ fn tag_str_to_node_type(tag: &str) -> std::result::Result<NodeType, anyhow::Erro
         "h3" => Ok(NodeType::H3),
         "h4" => Ok(NodeType::H4),
         "h5" => Ok(NodeType::H5),
-        "htmloption" => Ok(NodeType::HtmlOption),
+        "option" => Ok(NodeType::HtmlOption),
         "img" => Ok(NodeType::Img),
         "input" => Ok(NodeType::Input),
         "label" => Ok(NodeType::Label),

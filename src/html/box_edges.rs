@@ -24,6 +24,11 @@
 //! padding + border) is the inner [`BoxConstraint`](crate::layout::BoxConstraint)
 //! passed to nested children. Margins live *outside* the rect — they offset the
 //! rect within its containing block and reserve rows between siblings.
+//!
+//! This module lives under `html` because the edge values are a parsed-CSS
+//! concept: `css_parse::CssAttr` hands them back to `layout` as resolved
+//! values. Putting them under `html` keeps the architecture direction
+//! `html → tdom → layout → tui` instead of inverting it.
 
 use crossterm::style::Color;
 

@@ -16,7 +16,7 @@
 
 use crossterm::style::Color;
 
-use crate::layout::box_edges::BoxEdges;
+use crate::html::box_edges::BoxEdges;
 use crate::tui::graph_api::FontStyle;
 use crate::tdom::node::NodeId;
 
