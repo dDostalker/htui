@@ -10,8 +10,9 @@
 use crossterm::style::Color;
 use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
-use htui::tdom::node::{NodeArena, NodeId};
+use htui::tdom::node::{NodeArena, NodeId, NodeType};
 
+use htui::layout::LayoutBox;
 use htui::tui::graph_api::{FontStyle, TermLayout};
 
 fn init() {
@@ -62,6 +63,26 @@ fn find_cell_with_style<'a, F: Fn(FontStyle) -> bool>(
     tl.layout
         .iter()
         .position(|b| b.word == target && pred(b.style))
+}
+
+/// Recursively walk the layout tree (depth-first) and return the first box
+/// whose node type matches `target`. The top-level layout is rooted in the
+/// transparent `<html>` wrapper, so tests that want to inspect a specific
+/// element must descend through it instead of taking `boxes.first()`.
+fn find_box_by_type<'a>(
+    boxes: &'a [LayoutBox],
+    target: &NodeType,
+    arena: &NodeArena,
+) -> Option<&'a LayoutBox> {
+    for b in boxes {
+        if &arena[b.node_id].node_type == target {
+            return Some(b);
+        }
+        if let Some(found) = find_box_by_type(&b.children, target, arena) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 // ============================================================
@@ -397,7 +418,8 @@ fn test_layout_box_exposes_runs_for_block_with_spans() {
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
-    let p_box = boxes.first().expect("should have the <p> box");
+    let p_box = find_box_by_type(&boxes, &NodeType::P, &arena)
+        .expect("should have the <p> box");
     let runs = p_box
         .runs
         .as_ref()
@@ -433,7 +455,8 @@ fn test_layout_box_runs_are_materialised_for_plain_block() {
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
-    let p_box = boxes.first().expect("should have the <p> box");
+    let p_box = find_box_by_type(&boxes, &NodeType::P, &arena)
+        .expect("should have the <p> box");
     let runs = p_box.runs.as_ref().expect("plain <p> still materialises runs");
     assert_eq!(runs.len(), 1, "single text node becomes one run");
     assert_eq!(runs[0].text, "just text");
@@ -451,7 +474,8 @@ fn test_h1_prefix_is_a_separate_run() {
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
-    let h_box = boxes.first().expect("should have the <h1> box");
+    let h_box = find_box_by_type(&boxes, &NodeType::H1, &arena)
+        .expect("should have the <h1> box");
     let runs = h_box.runs.as_ref().expect("<h1> should expose runs");
     assert_eq!(
         runs.len(),

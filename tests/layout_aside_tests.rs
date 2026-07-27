@@ -2,8 +2,28 @@ use crossterm::style::Color;
 use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
 
-use htui::tdom::node::{NodeArena, NodeId};
+use htui::tdom::node::{NodeArena, NodeId, NodeType};
 use htui::tui::graph_api::TermLayout;
+
+/// Recursively walk the layout tree (depth-first) and return the first box
+/// whose node type matches `target`. The top-level layout is rooted in the
+/// transparent `<html>` wrapper, so tests that want to inspect a specific
+/// element must descend through it instead of scanning only the root slice.
+fn find_box_by_type<'a>(
+    boxes: &'a [htui::layout::LayoutBox],
+    target: &NodeType,
+    arena: &NodeArena,
+) -> Option<&'a htui::layout::LayoutBox> {
+    for b in boxes {
+        if &arena[b.node_id].node_type == target {
+            return Some(b);
+        }
+        if let Some(found) = find_box_by_type(&b.children, target, arena) {
+            return Some(found);
+        }
+    }
+    None
+}
 
 fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
@@ -340,14 +360,7 @@ fn test_aside_rect_height_includes_nested_children() {
     let mut cursor = Cursor::new();
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
 
-    let aside_box = boxes
-        .iter()
-        .find(|b| {
-            matches!(
-                arena[b.node_id].node_type,
-                htui::tdom::node::NodeType::Aside
-            )
-        })
+    let aside_box = find_box_by_type(&boxes, &NodeType::Aside, &arena)
         .expect("aside box should be present in the layout tree");
     assert_eq!(
         aside_box.rect.height, 1,
@@ -519,14 +532,7 @@ fn test_aside_without_children_still_has_height_one() {
     let mut cursor = Cursor::new();
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
 
-    let aside_box = boxes
-        .iter()
-        .find(|b| {
-            matches!(
-                arena[b.node_id].node_type,
-                htui::tdom::node::NodeType::Aside
-            )
-        })
+    let aside_box = find_box_by_type(&boxes, &NodeType::Aside, &arena)
         .expect("aside box should be present in the layout tree");
     assert_eq!(
         aside_box.rect.height, 1,

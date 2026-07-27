@@ -72,16 +72,16 @@ CSS 字符串 ──► css_parse::Parser ──► CssRule
 htui/
 ├── src/
 │   ├── lib.rs                  # render() 主入口 + 渲染线程
+│   ├── logging.rs              # 文件 logger 初始化
 │   ├── html/
 │   │   ├── mod.rs
 │   │   ├── html_parse.rs       # HTML → tdom（html5ever）
 │   │   ├── css_parse.rs        # CSS 选择器/声明解析 + css_into_node
-│   │   └── html.md             # HTML 解析器文档
+│   │   └── box_edges.rs        # BoxEdges / Border / padding / margin / width
 │   ├── tdom/
 │   │   ├── mod.rs
 │   │   ├── node.rs             # NodeType / Node / NodeArena / NodeId
-│   │   ├── attributes.rs       # Attr（HTML 属性解析与查询）
-│   │   └── element_fn/         # 元素行为函数（占位，未来扩展）
+│   │   └── attributes.rs       # Attr（HTML 属性字符串解析与查询）
 │   ├── layout/
 │   │   ├── mod.rs              # DEFAULT_LAYOUT 注册表 + LayoutFn 签名
 │   │   ├── box_tree.rs         # Rect / BoxKind / LayoutBox / Cursor
@@ -89,9 +89,11 @@ htui/
 │   │   ├── paint.rs            # paint_layout_tree() 编排器
 │   │   ├── layout.rs           # TermMap + TermLayout::draw 入口
 │   │   └── layout_fn/          # 各元素布局函数
-│   │       ├── p.rs, div.rs, head.rs
+│   │       ├── p.rs, div.rs, head.rs (h1–h5 + `<head>` no-op)
+│   │       ├── html.rs, body.rs
 │   │       ├── header_footer.rs
 │   │       ├── aside.rs
+│   │       ├── list.rs (ul / ol / li)
 │   │       └── img.rs
 │   └── tui/
 │       ├── mod.rs
@@ -133,7 +135,7 @@ pub enum RenderCmd {
 
 - `NodeArena` 是 `SlotMap<NodeId, Node>`，类型安全、Copy + Send + Sync。
 - `Node` 持有 `node_type: NodeType`、`children: Vec<NodeId>`、`parent: Option<NodeId>`、`attributes: Attr`、`css_attr: CssAttr`。
-- `NodeType` 枚举 28 种标签（参见 `src/tdom/node.rs`）。
+- `NodeType` 枚举 30 种标签（参见 `src/tdom/node.rs`）。
 
 ### 4.3 CSS 应用阶段
 
@@ -187,7 +189,7 @@ impl TermLayout {
 | `NodeId` | `tdom::node` | slotmap 类型安全 ID |
 | `NodeArena` | `tdom::node` | `SlotMap<NodeId, Node>` |
 | `Node` | `tdom::node` | DOM 节点（含子节点、属性、`css_attr`） |
-| `NodeType` | `tdom::node` | 节点类型枚举（28 种标签 + `Text(String)`） |
+| `NodeType` | `tdom::node` | 节点类型枚举（30 种标签 + `Text(String)`） |
 | `Attr` | `tdom::attributes` | HTML 属性字符串解析与查询 |
 | `CssAttr` | `html::css_parse` | 解析后的 CSS 属性（`color`、`background-color`、`text-align`、`font-weight`、`width`） |
 | `CssRule` | `html::css_parse` | 完整 CSS 规则表 |

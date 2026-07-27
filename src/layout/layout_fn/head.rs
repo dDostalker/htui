@@ -1,4 +1,3 @@
-
 use crate::{
     layout::{
         BoxConstraint, Cursor, FontContext, InlineRun, LayoutBox,
@@ -8,16 +7,29 @@ use crate::{
     tui::graph_api::block_style,
 };
 
-/// Build a [`LayoutBox`] for `<h1>`…`<h5>`.
+/// Markdown-style prefix prepended to every heading level.
 ///
-/// Renders a `#`-marker prefix equal to the heading level (`# Heading`,
-/// `## Sub`, …) so the paint phase includes it in `text-align` width
-/// calculations, matching the previous behaviour. The prefix is its own
-/// `InlineRun` with the heading's resolved style; body runs are collected
-/// through the shared pipeline so `<span>` children keep their own styling.
+/// `<h1>` → `# `, `<h2>` → `## `, etc. Up to 5 levels match the supported
+/// `NodeType::H1..H5` variants.
+fn heading_prefix(node_type: &NodeType) -> Option<&'static str> {
+    match node_type {
+        NodeType::H1 => Some("# "),
+        NodeType::H2 => Some("## "),
+        NodeType::H3 => Some("### "),
+        NodeType::H4 => Some("#### "),
+        NodeType::H5 => Some("##### "),
+        _ => None,
+    }
+}
+
+/// Build a [`LayoutBox`] for an `<h1>`–`<h5>` element.
 ///
-/// Padding / border / margin on a heading shrinks the content area and
-/// shifts the inline runs into the content row.
+/// Headings are block elements with a font-size that defaults to
+/// `2em / 1.5em / 1.17em / 1em / 0.83em` (see
+/// [`NodeType::default_font_size_em`]) and a markdown-style prefix (`# `,
+/// `## `, …) that paints in the heading's own foreground so visual nesting
+/// mirrors the source level. `text-align`, `color`, and `background-color`
+/// are applied the same way as on `<p>` / `<div>`.
 pub fn layout_hn(
     arena: &NodeArena,
     node_id: NodeId,
@@ -26,25 +38,15 @@ pub fn layout_hn(
     font_ctx: FontContext,
 ) -> Option<LayoutBox> {
     let node = &arena[node_id];
-    let level = match node.node_type {
-        NodeType::H1 => 1,
-        NodeType::H2 => 2,
-        NodeType::H3 => 3,
-        NodeType::H4 => 4,
-        NodeType::H5 => 5,
-        _ => return None,
+    let prefix_text = match heading_prefix(&node.node_type) {
+        Some(p) => p,
+        None => return None,
     };
 
-    // `#`-prefix is its own run carried at the heading's resolved style,
-    // so a span in the body can still apply its own flags on top.
-    let prefix = format!("{} ", "#".repeat(level));
+    let block_fg = node.css_attr.get_color();
+    let block_bg = node.css_attr.get_bg_color();
     let block_font_style = block_style(&node.css_attr);
-    let prefix_run = InlineRun::new(
-        prefix,
-        block_font_style,
-        node.css_attr.get_color(),
-        node.css_attr.get_bg_color(),
-    );
+    let prefix_run = InlineRun::new(prefix_text, block_font_style, block_fg, block_bg);
 
     Some(layout_block(
         arena,
@@ -58,4 +60,27 @@ pub fn layout_hn(
         },
         font_ctx,
     ))
+}
+
+/// Build a [`LayoutBox`] for a `<head>` element.
+///
+/// `<head>` is a structural-only container for document metadata (`<title>`,
+/// `<style>`, `<link>`, `<meta>`, `<script>`). It produces no visible output
+/// and reserves no rows on the terminal canvas, so it acts as a sink for
+/// flattened children that would otherwise leak into the surrounding
+/// inline runs (e.g. the text content of `<title>`). The actual side effects
+/// — CSS extraction for `<style>` and `<link rel="stylesheet">` — happen at
+/// parse time, so the layout pass can safely ignore the whole subtree.
+pub fn layout_head(
+    arena: &NodeArena,
+    node_id: NodeId,
+    _containing: BoxConstraint,
+    _cursor: &mut Cursor,
+    _font_ctx: FontContext,
+) -> Option<LayoutBox> {
+    let node = &arena[node_id];
+    if node.node_type != NodeType::Head {
+        return None;
+    }
+    None
 }
