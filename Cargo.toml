@@ -12,7 +12,7 @@ cssparser = "0.31.2"
 html5ever = "0.27"
 image = "0.25.9"
 indexmap = "2.14"
-log = "0.4.29"
+log = { version = "0.4.29", features = ["release_max_level_warn"] }
 markup5ever_rcdom = "0.3"
 slotmap = "1.1.1"
 tendril = "0.4.3"

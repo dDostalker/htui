@@ -1,5 +1,6 @@
 pub mod html;
 pub mod layout;
+pub mod logging;
 pub mod tdom;
 pub mod tui;
 

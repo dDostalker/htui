@@ -3,6 +3,10 @@
 //! Usage:
 //!   cargo run -p visual_test -- [test_name]
 //!
+//! Logs are written to `%TEMP%/htui-visual-test.log` via
+//! `htui::logging::init_file_logger`. If the file cannot be opened a warning
+//! is printed to stderr and logging is silently disabled for the run.
+//!
 //! Each test lives in its own folder under `src/`:
 //!   src/{name}/index.html    — HTML document
 //!   src/{name}/style.css     — stylesheet (optional)
@@ -24,7 +28,10 @@ macro_rules! test_case {
 }
 
 fn main() -> Result<()> {
-    env_logger::init();
+    let log_path = std::env::temp_dir().join("htui-visual-test.log");
+    if let Err(e) = htui::logging::init_file_logger(&log_path, None) {
+        eprintln!("warning: file logger init failed ({e}); logs will be dropped");
+    }
 
     // Set working dir to this crate root so relative paths in HTML
     // (e.g., <img src="src/image/pic.png">) resolve correctly.

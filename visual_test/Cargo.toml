@@ -6,5 +6,4 @@ edition = "2024"
 [dependencies]
 htui = { path = ".." }
 anyhow = "1.0.101"
-env_logger = "0.11.9"
 log = "0.4.29"
