@@ -12,9 +12,40 @@ use crate::{
     layout::{
         BoxConstraint, BoxEdges, Cursor, DEFAULT_LAYOUT, InlineRun, LayoutBox, Rect,
     },
-    tdom::node::{Node, NodeArena, NodeId, NodeType},
+    tdom::node::{Node, NodeArena, NodeId, NodeType, effective_font_size_cells},
     tui::graph_api::{FontStyle, block_style},
 };
+
+/// Font-size context propagated through layout.
+///
+/// `font_size_cells` is the parent's effective font-size (in terminal
+/// cells). `root_font_size_cells` is the root document's font-size, used to
+/// resolve `rem` lengths. Each layout function reads `font_size_cells` to
+/// compute the element's own font-size via
+/// [`effective_font_size_cells`], then forwards the result down to nested
+/// children.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FontContext {
+    pub font_size_cells: usize,
+    pub root_font_size_cells: usize,
+}
+
+impl FontContext {
+    /// Default root context: 1-cell font, 1-cell root font.
+    pub const ROOT: FontContext = FontContext {
+        font_size_cells: 1,
+        root_font_size_cells: 1,
+    };
+
+    /// Build a child context whose `em` resolves against `child_cells` and
+    /// whose `rem` still resolves against the original root.
+    pub fn child(&self, child_cells: usize) -> FontContext {
+        FontContext {
+            font_size_cells: child_cells,
+            root_font_size_cells: self.root_font_size_cells,
+        }
+    }
+}
 
 /// Build a layout forest for `root_id`'s block children.
 ///
@@ -28,7 +59,7 @@ pub fn layout_tree(
     cursor: &mut Cursor,
 ) -> Result<Vec<LayoutBox>> {
     let children: Vec<NodeId> = arena[root_id].children.clone();
-    layout_children(arena, &children, containing, cursor)
+    layout_children(arena, &children, containing, cursor, FontContext::ROOT)
 }
 
 /// Lay out a sequence of sibling node IDs under `containing`.
@@ -37,10 +68,11 @@ pub fn layout_children(
     children: &[NodeId],
     containing: BoxConstraint,
     cursor: &mut Cursor,
+    font_ctx: FontContext,
 ) -> Result<Vec<LayoutBox>> {
     let mut boxes = Vec::new();
     for &child_id in children {
-        if let Some(b) = dispatch(arena, child_id, containing, cursor)? {
+        if let Some(b) = dispatch(arena, child_id, containing, cursor, font_ctx)? {
             boxes.push(b);
         }
     }
@@ -53,9 +85,10 @@ fn dispatch(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
+    font_ctx: FontContext,
 ) -> Result<Option<LayoutBox>> {
     for layout_fn in DEFAULT_LAYOUT {
-        if let Some(b) = layout_fn(arena, node_id, containing, cursor)? {
+        if let Some(b) = layout_fn(arena, node_id, containing, cursor, font_ctx)? {
             return Ok(Some(b));
         }
     }
@@ -256,6 +289,12 @@ pub struct LayoutBlockOptions {
     /// nested children past the marker width — `width_delta` is negative
     /// so the inner width shrinks by the same amount.
     pub child_containing_shift: Option<(usize, isize)>,
+    /// Marks the block as a chrome element (`<aside>`/`<header>`/`<footer>`)
+    /// whose background always covers the full border-box regardless of
+    /// inline content width or text-align. Also covers blocks that opted
+    /// into the same semantics via `fill_bg_default` (currently just the
+    /// chrome trio).
+    pub chrome: bool,
 }
 
 /// Shared body of every block-level layout function.
@@ -265,6 +304,12 @@ pub struct LayoutBlockOptions {
 /// block children. The element-specific differences are passed in via
 /// `opts` so the boilerplate (collect_runs, skip margin-top, layout
 /// children, reserve_border_box) lives in one place.
+///
+/// `font_ctx` carries the parent's effective font-size and the root
+/// font-size so `em` / `rem` lengths inside the element resolve against the
+/// active font-size context. The element's own font-size is computed via
+/// [`effective_font_size_cells`] and forwarded to nested children so the
+/// chain remains consistent.
 ///
 /// Returns the assembled `LayoutBox`. The caller is still responsible for
 /// checking that `node.node_type` matches the element it claims to lay out
@@ -276,15 +321,32 @@ pub fn layout_block(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     opts: LayoutBlockOptions,
+    font_ctx: FontContext,
 ) -> Result<LayoutBox> {
-    let edges: BoxEdges = node.css_attr.get_box_edges(containing.width);
+    let own_font_size_cells = effective_font_size_cells(
+        arena,
+        node_id,
+        font_ctx.font_size_cells,
+        font_ctx.root_font_size_cells,
+    );
+    let child_font_ctx = font_ctx.child(own_font_size_cells);
+
+    let edges: BoxEdges = node.css_attr.get_box_edges(
+        containing.width,
+        own_font_size_cells,
+        font_ctx.root_font_size_cells,
+    );
 
     let available = containing
         .width
         .saturating_sub(opts.indent)
         .saturating_sub(edges.margin.horizontal());
-    let block_width =
-        resolve_block_width(node.css_attr.get_width(available), available).max(1);
+    let block_width = resolve_block_width(
+        node.css_attr
+            .get_width(available, own_font_size_cells, font_ctx.root_font_size_cells),
+        available,
+    )
+    .max(1);
     let x = block_left(containing) + opts.indent;
 
     let block_fg = node.css_attr.get_color();
@@ -330,12 +392,24 @@ pub fn layout_block(
         y: geom.outer_y + edges.border.top.thickness() + edges.padding.top,
     };
     let block_children = node.children.clone();
-    let children = layout_children(arena, &block_children, child_containing, &mut child_cursor)?;
+    let children = layout_children(
+        arena,
+        &block_children,
+        child_containing,
+        &mut child_cursor,
+        child_font_ctx,
+    )?;
 
     let content_height = child_cursor.y.saturating_sub(
         geom.outer_y + edges.border.top.thickness() + edges.padding.top,
     );
-    let outer_height = reserve_border_box(cursor, geom.outer_y, edges, content_height, 1);
+    let outer_height = reserve_border_box(
+        cursor,
+        geom.outer_y,
+        edges,
+        content_height,
+        own_font_size_cells.max(1),
+    );
 
     let mut runs = body_runs;
     if let Some(prefix) = opts.prefix {
@@ -350,13 +424,28 @@ pub fn layout_block(
         cursor.y = cursor.y.saturating_add(opts.spacing_after);
     }
 
-    Ok(LayoutBox::new_block(
-        node_id,
-        build_border_rect(geom, rect_height),
-        edges,
-        fill_bg,
-        opts.spacing_after,
-        runs,
-        children,
-    ))
+    if opts.chrome || opts.fill_bg_default {
+        Ok(LayoutBox::new_block_with_chrome(
+            node_id,
+            build_border_rect(geom, rect_height),
+            edges,
+            fill_bg,
+            opts.spacing_after,
+            runs,
+            children,
+            own_font_size_cells,
+            opts.chrome,
+        ))
+    } else {
+        Ok(LayoutBox::new_block(
+            node_id,
+            build_border_rect(geom, rect_height),
+            edges,
+            fill_bg,
+            opts.spacing_after,
+            runs,
+            children,
+            own_font_size_cells,
+        ))
+    }
 }

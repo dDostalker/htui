@@ -13,6 +13,7 @@ pub mod tree;
 
 pub use crate::html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeSizes};
 pub use box_tree::{BoxKind, Cursor, InlineRun, LayoutBox, Rect};
+pub use tree::FontContext;
 
 /// The containing block available to a layout function.
 ///
@@ -39,12 +40,15 @@ impl BoxConstraint {
 /// Each registered function inspects `node_id`; returns `Ok(None)` to skip
 /// (passes through to the next entry), or `Ok(Some(LayoutBox))` to claim the
 /// node. The builder in [`tree::layout_tree`] walks the registry in order and
-/// stops at the first claimer.
+/// stops at the first claimer. `font_ctx` carries the parent's effective
+/// font-size (and the root font-size) so `em` / `rem` lengths resolve against
+/// the active font-size context.
 pub type LayoutFn = fn(
     arena: &NodeArena,
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
+    font_ctx: FontContext,
 ) -> Result<Option<LayoutBox>>;
 
 /// Layout function registry.

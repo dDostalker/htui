@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use htui::html::html_parse;
 use htui::layout::layout::TermMap;
 use htui::layout::layout_fn::img::layout_img;
-use htui::layout::{BoxConstraint, BoxKind, Cursor};
+use htui::layout::{BoxConstraint, BoxKind, Cursor, FontContext};
 use htui::tdom::node::{self, NodeType};
 use htui::tui::graph_api::{TermLayout, render_image_at};
 use image::{ImageBuffer, Rgb};
@@ -54,7 +54,7 @@ fn layout_img_clamps_cols_to_containing_width() {
 
     let containing = BoxConstraint { x: 0, width: 80 };
     let mut cursor = Cursor::new();
-    let lb = layout_img(&arena, img_id, containing, &mut cursor)
+    let lb = layout_img(&arena, img_id, containing, &mut cursor, FontContext::ROOT)
         .unwrap()
         .expect("<img> should produce a LayoutBox");
 
@@ -84,7 +84,7 @@ fn layout_img_unclamped_when_img_fits() {
 
     let containing = BoxConstraint { x: 0, width: 80 };
     let mut cursor = Cursor::new();
-    let lb = layout_img(&arena, img_id, containing, &mut cursor)
+    let lb = layout_img(&arena, img_id, containing, &mut cursor, FontContext::ROOT)
         .unwrap()
         .unwrap();
 

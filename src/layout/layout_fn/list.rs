@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::{
     layout::{
-        BoxConstraint, Cursor, InlineRun, LayoutBox,
+        BoxConstraint, Cursor, FontContext, InlineRun, LayoutBox,
         tree::{LayoutBlockOptions, layout_block},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
@@ -24,8 +24,9 @@ pub fn layout_ul(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
+    font_ctx: FontContext,
 ) -> Result<Option<LayoutBox>> {
-    layout_list(arena, node_id, containing, cursor, NodeType::Ul)
+    layout_list(arena, node_id, containing, cursor, NodeType::Ul, font_ctx)
 }
 
 /// Build a [`LayoutBox`] for an `<ol>` element.
@@ -37,8 +38,9 @@ pub fn layout_ol(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
+    font_ctx: FontContext,
 ) -> Result<Option<LayoutBox>> {
-    layout_list(arena, node_id, containing, cursor, NodeType::Ol)
+    layout_list(arena, node_id, containing, cursor, NodeType::Ol, font_ctx)
 }
 
 /// Build a [`LayoutBox`] for an `<li>` element.
@@ -57,6 +59,7 @@ pub fn layout_li(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
+    font_ctx: FontContext,
 ) -> Result<Option<LayoutBox>> {
     let node = &arena[node_id];
     if node.node_type != NodeType::Li {
@@ -88,6 +91,7 @@ pub fn layout_li(
             child_containing_shift: Some((marker_width, -(marker_width as isize))),
             ..Default::default()
         },
+        font_ctx,
     )?))
 }
 
@@ -97,6 +101,7 @@ fn layout_list(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     expected: NodeType,
+    font_ctx: FontContext,
 ) -> Result<Option<LayoutBox>> {
     let node = &arena[node_id];
     if node.node_type != expected {
@@ -113,6 +118,7 @@ fn layout_list(
             indent: LIST_INDENT_PER_LEVEL * list_depth(arena, node_id),
             ..Default::default()
         },
+        font_ctx,
     )?))
 }
 

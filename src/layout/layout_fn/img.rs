@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::{
-    layout::{BoxConstraint, Cursor, LayoutBox},
+    layout::{BoxConstraint, Cursor, FontContext, LayoutBox},
     tdom::node::{NodeArena, NodeId, NodeType},
 };
 
@@ -17,6 +17,7 @@ pub fn layout_img(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
+    _font_ctx: FontContext,
 ) -> Result<Option<LayoutBox>> {
     let node = &arena[node_id];
     if node.node_type != NodeType::Img {

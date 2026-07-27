@@ -289,3 +289,72 @@ fn test_div_color_inherited_by_p() {
     let has_color = tl.layout.iter().any(|b| b.fcolor == Some(Color::Magenta));
     assert!(has_color, "div color should inherit to <p> descendant");
 }
+
+#[test]
+fn test_long_p_text_does_not_overflow_into_next_row() {
+    // Regression guard: `paint_text_row` previously wrote cells linearly
+    // with only a canvas-end check, so a long inline run would spill its
+    // overflow into the rows below and overwrite the cells of subsequent
+    // boxes (e.g. an h2 after the long p would show trailing "dth." in the
+    // p's fg color). The fix clips each row's text to the content-box
+    // right edge, so a 1-row `<p>` must NOT write past col 79.
+    init();
+    let long_text = "A longer paragraph that contains multiple sentences. This demonstrates how text wrapping and layout work in the terminal renderer. The text should flow naturally within the available terminal width.";
+    let html = format!(
+        "<p>{}</p><h2>Next</h2>",
+        long_text
+    );
+    let (root_id, arena) = setup(&html, "");
+    let term_map = mock_term_map();
+    let cols = term_map.columns as usize;
+    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    tl.draw(&arena, root_id, &term_map).unwrap();
+
+    // The <p> occupies row 0 (1 row tall). Cells row 1+ belong to the <h2>.
+    let p_row = 0;
+    let p_row_end = (p_row + 1) * cols;
+    for cell in &tl.layout[p_row_end..] {
+        // None of the <p>'s colour / chars should appear past row 0. The
+        // fix means the paint simply stops at col 79; cells beyond stay as
+        // either the empty default (no fg, no bg) or get overwritten by
+        // the next paint pass for the <h2>. We assert no p-coloured
+        // character remains in those cells.
+        let has_p_text = !cell.word.is_empty()
+            && cell.word != " "
+            && cell.fcolor == Some(Color::Grey);
+        assert!(
+            !has_p_text,
+            "p text should not bleed past row 0 — found {:?} at cell index {}",
+            cell.word,
+            p_row_end
+        );
+    }
+}
+
+#[test]
+fn test_long_p_text_stops_at_content_box_right_edge() {
+    // Companion to the overflow guard above: the last char of a long
+    // single-row <p> sits at col `cols - 1`, not at col `cols` (which would
+    // be on the next row).
+    init();
+    let long_text = "x".repeat(200);
+    let html = format!("<p>{}</p>", long_text);
+    let (root_id, arena) = setup(&html, "");
+    let term_map = mock_term_map();
+    let cols = term_map.columns as usize;
+    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    tl.draw(&arena, root_id, &term_map).unwrap();
+
+    // The <p> is 1 row tall. Row 1 should be untouched by the p (no 'x'
+    // cells in grey).
+    let row1_start = cols;
+    let row1_end = 2 * cols;
+    let p_chars_on_row1 = tl.layout[row1_start..row1_end]
+        .iter()
+        .filter(|c| c.fcolor == Some(Color::Grey) && c.word == "x")
+        .count();
+    assert_eq!(
+        p_chars_on_row1, 0,
+        "no 'x' characters should spill from the p onto row 1"
+    );
+}

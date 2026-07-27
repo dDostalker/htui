@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::{
     layout::{
-        BoxConstraint, Cursor, LayoutBox, tree::{LayoutBlockOptions, layout_block},
+        BoxConstraint, Cursor, FontContext, LayoutBox, tree::{LayoutBlockOptions, layout_block},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
 };
@@ -19,6 +19,7 @@ pub fn layout_aside(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
+    font_ctx: FontContext,
 ) -> Result<Option<LayoutBox>> {
     let node = &arena[node_id];
     if node.node_type != NodeType::Aside {
@@ -33,7 +34,9 @@ pub fn layout_aside(
         cursor,
         LayoutBlockOptions {
             fill_bg_default: true,
+            chrome: true,
             ..Default::default()
         },
+        font_ctx,
     )?))
 }

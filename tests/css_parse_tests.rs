@@ -10,6 +10,12 @@ use htui::tdom::{
 };
 use indexmap::IndexMap;
 
+/// Default font-size (in cells) used by [`Length::resolve`] tests so the
+/// em / rem branches can be exercised without a DOM. Mirrors the
+/// `FontContext::ROOT` value passed to layout.
+const DEFAULT_FONT_SIZE: usize = 1;
+const DEFAULT_ROOT_FONT_SIZE: usize = 1;
+
 fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
 }
@@ -427,37 +433,59 @@ fn length_parse_rejects_signed_and_junk() {
 #[test]
 fn length_resolve_auto_and_cells() {
     init();
-    assert_eq!(Length::Auto.resolve(80), 80);
-    assert_eq!(Length::Cells(40).resolve(80), 40);
-    assert_eq!(Length::Cells(0).resolve(80), 0); // caller clamps via resolve_block_width
-    assert_eq!(Length::Cells(1000).resolve(80), 1000); // ditto
+    assert_eq!(Length::Auto.resolve(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), 80);
+    assert_eq!(Length::Cells(40).resolve(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), 40);
+    assert_eq!(Length::Cells(0).resolve(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), 0); // caller clamps via resolve_block_width
+    assert_eq!(Length::Cells(1000).resolve(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), 1000); // ditto
 }
 
 #[test]
 fn length_resolve_pct_rounds_and_min_1() {
     init();
-    assert_eq!(Length::Pct(50.0).resolve(80), 40);
-    assert_eq!(Length::Pct(100.0).resolve(80), 80);
+    assert_eq!(Length::Pct(50.0).resolve(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), 40);
+    assert_eq!(Length::Pct(100.0).resolve(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), 80);
     // round(), not truncate: 80 * 33 / 100 = 26.4 → 26.
-    assert_eq!(Length::Pct(33.0).resolve(80), 26);
+    assert_eq!(Length::Pct(33.0).resolve(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), 26);
     // Half-percent boundary: 80 * 50.5 / 100 = 40.4 → 40 (round).
-    assert_eq!(Length::Pct(50.5).resolve(80), 40);
+    assert_eq!(Length::Pct(50.5).resolve(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), 40);
     // 80 * 50.6 / 100 = 40.48 → 40 (round).
-    assert_eq!(Length::Pct(50.6).resolve(80), 40);
+    assert_eq!(Length::Pct(50.6).resolve(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), 40);
     // Minimum 1 column: a non-zero percentage of zero yields 1, not 0.
-    assert_eq!(Length::Pct(50.0).resolve(0), 1);
-    assert_eq!(Length::Pct(0.0).resolve(80), 1); // min-1 even at 0%
+    assert_eq!(Length::Pct(50.0).resolve(0, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), 1);
+    assert_eq!(Length::Pct(0.0).resolve(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), 1); // min-1 even at 0%
 }
 
 #[test]
 fn length_resolve_em_rem_rounds_away_from_zero() {
     init();
-    assert_eq!(Length::Em(2.0).resolve(80), 2);
-    assert_eq!(Length::Em(1.5).resolve(80), 2); // 1.5 rounds away → 2
-    assert_eq!(Length::Em(0.5).resolve(80), 1); // 0.5 rounds away → 1
-    assert_eq!(Length::Em(2.5).resolve(80), 3); // 2.5 rounds away → 3
-    assert_eq!(Length::Rem(1.5).resolve(80), 2);
-    assert_eq!(Length::Rem(0.0).resolve(80), 0);
+    // With the default font-size / root-font-size of 1, em and rem collapse
+    // to `n.round()`, so the existing round-away-from-zero behaviour holds.
+    assert_eq!(Length::Em(2.0).resolve(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), 2);
+    assert_eq!(Length::Em(1.5).resolve(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), 2); // 1.5 rounds away → 2
+    assert_eq!(Length::Em(0.5).resolve(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), 1); // 0.5 rounds away → 1
+    assert_eq!(Length::Em(2.5).resolve(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), 3); // 2.5 rounds away → 3
+    assert_eq!(Length::Rem(1.5).resolve(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), 2);
+    assert_eq!(Length::Rem(0.0).resolve(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), 0);
+}
+
+#[test]
+fn length_resolve_em_scales_with_font_size() {
+    init();
+    // em resolves against the element's font-size: 2em at font-size=2
+    // yields 4 cells, 1.5em at font-size=3 yields 5 cells (round away).
+    assert_eq!(Length::Em(2.0).resolve(80, 2, 1), 4);
+    assert_eq!(Length::Em(1.5).resolve(80, 3, 1), 5);
+    assert_eq!(Length::Em(0.5).resolve(80, 2, 1), 1);
+}
+
+#[test]
+fn length_resolve_rem_scales_with_root_font_size() {
+    init();
+    // rem ignores the element's font-size and uses the root font-size: 2rem
+    // at root font-size=3 yields 6 cells, regardless of the element's size.
+    assert_eq!(Length::Rem(2.0).resolve(80, 1, 3), 6);
+    assert_eq!(Length::Rem(1.5).resolve(80, 2, 4), 6);
+    assert_eq!(Length::Rem(0.0).resolve(80, 5, 5), 0);
 }
 
 #[test]
@@ -470,47 +498,47 @@ fn css_attr_get_width_end_to_end() {
     let mut decls = IndexMap::new();
     decls.insert("width".into(), "auto".into());
     attr.add(CssAttr(decls));
-    assert_eq!(attr.get_width(80), None);
+    assert_eq!(attr.get_width(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), None);
 
     let mut attr = CssAttr::new();
     let mut decls = IndexMap::new();
     decls.insert("width".into(), "40px".into());
     attr.add(CssAttr(decls));
-    assert_eq!(attr.get_width(80), Some(40));
+    assert_eq!(attr.get_width(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), Some(40));
 
     let mut attr = CssAttr::new();
     let mut decls = IndexMap::new();
     decls.insert("width".into(), "50%".into());
     attr.add(CssAttr(decls));
-    assert_eq!(attr.get_width(80), Some(40));
+    assert_eq!(attr.get_width(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), Some(40));
 
     let mut attr = CssAttr::new();
     let mut decls = IndexMap::new();
     decls.insert("width".into(), "2em".into());
     attr.add(CssAttr(decls));
-    assert_eq!(attr.get_width(80), Some(2));
+    assert_eq!(attr.get_width(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), Some(2));
 
     let mut attr = CssAttr::new();
     let mut decls = IndexMap::new();
     decls.insert("width".into(), "1.5em".into());
     attr.add(CssAttr(decls));
-    assert_eq!(attr.get_width(80), Some(2)); // 1.5 rounds away
+    assert_eq!(attr.get_width(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), Some(2)); // 1.5 rounds away
 
     let mut attr = CssAttr::new();
     let mut decls = IndexMap::new();
     decls.insert("width".into(), "2rem".into());
     attr.add(CssAttr(decls));
-    assert_eq!(attr.get_width(80), Some(2));
+    assert_eq!(attr.get_width(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), Some(2));
 
     // Unsupported units collapse to None (fill the container).
     let mut attr = CssAttr::new();
     let mut decls = IndexMap::new();
     decls.insert("width".into(), "50vw".into());
     attr.add(CssAttr(decls));
-    assert_eq!(attr.get_width(80), None);
+    assert_eq!(attr.get_width(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), None);
 
     // Missing property → None.
-    assert_eq!(CssAttr::new().get_width(80), None);
+    assert_eq!(CssAttr::new().get_width(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), None);
 }
 
 // ============================================================
@@ -528,7 +556,7 @@ fn attr_from_decl(name: &str, value: &str) -> CssAttr {
 #[test]
 fn padding_shorthand_one_value_fills_all_sides() {
     let attr = attr_from_decl("padding", "5px");
-    let edges = attr.get_padding(80);
+    let edges = attr.get_padding(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE);
     assert_eq!(edges, EdgeSizes::new(5, 5, 5, 5));
 }
 
@@ -536,21 +564,21 @@ fn padding_shorthand_one_value_fills_all_sides() {
 fn padding_shorthand_two_values_vertical_horizontal() {
     // `padding: 10px 20px;` → top/bottom = 10, left/right = 20
     let attr = attr_from_decl("padding", "10px 20px");
-    assert_eq!(attr.get_padding(80), EdgeSizes::new(10, 20, 10, 20));
+    assert_eq!(attr.get_padding(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), EdgeSizes::new(10, 20, 10, 20));
 }
 
 #[test]
 fn padding_shorthand_three_values_top_horizontal_bottom() {
     // `padding: 1px 2px 3px;` → top=1, left/right=2, bottom=3
     let attr = attr_from_decl("padding", "1px 2px 3px");
-    assert_eq!(attr.get_padding(80), EdgeSizes::new(1, 2, 3, 2));
+    assert_eq!(attr.get_padding(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), EdgeSizes::new(1, 2, 3, 2));
 }
 
 #[test]
 fn padding_shorthand_four_values_clockwise() {
     // `padding: 1px 2px 3px 4px;` → top=1, right=2, bottom=3, left=4
     let attr = attr_from_decl("padding", "1px 2px 3px 4px");
-    assert_eq!(attr.get_padding(80), EdgeSizes::new(1, 2, 3, 4));
+    assert_eq!(attr.get_padding(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), EdgeSizes::new(1, 2, 3, 4));
 }
 
 #[test]
@@ -561,23 +589,23 @@ fn padding_longhands_override_shorthand() {
     decls.insert("padding-top".into(), "7px".into());
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));
-    assert_eq!(attr.get_padding(80), EdgeSizes::new(7, 0, 0, 0));
+    assert_eq!(attr.get_padding(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), EdgeSizes::new(7, 0, 0, 0));
 }
 
 #[test]
 fn padding_supports_percent_and_em() {
     let attr = attr_from_decl("padding", "50%");
-    assert_eq!(attr.get_padding(80).left, 40);
+    assert_eq!(attr.get_padding(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE).left, 40);
     let attr = attr_from_decl("padding-top", "3em");
-    assert_eq!(attr.get_padding(80).top, 3);
+    assert_eq!(attr.get_padding(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE).top, 3);
 }
 
 #[test]
 fn margin_shorthand_mirrors_padding() {
     let attr = attr_from_decl("margin", "2px 4px");
-    assert_eq!(attr.get_margin(80), EdgeSizes::new(2, 4, 2, 4));
+    assert_eq!(attr.get_margin(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), EdgeSizes::new(2, 4, 2, 4));
     let attr = attr_from_decl("margin-left", "6px");
-    assert_eq!(attr.get_margin(80), EdgeSizes::new(0, 0, 0, 6));
+    assert_eq!(attr.get_margin(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), EdgeSizes::new(0, 0, 0, 6));
 }
 
 #[test]
@@ -585,13 +613,13 @@ fn margin_auto_collapses_to_zero() {
     // Terminals don't honour `margin: auto`; we surface it as 0 so callers
     // don't need a special case.
     let attr = attr_from_decl("margin", "auto");
-    assert_eq!(attr.get_margin(80), EdgeSizes::default());
+    assert_eq!(attr.get_margin(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), EdgeSizes::default());
 }
 
 #[test]
 fn border_shorthand_solid_parses_width_and_style() {
     let attr = attr_from_decl("border", "1px solid red");
-    let sides = attr.get_border(80);
+    let sides = attr.get_border(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE);
     assert_eq!(sides.top.width, 1);
     assert_eq!(sides.top.style, BorderStyle::Solid);
     assert_eq!(sides.top.color, Some(Color::Red));
@@ -603,7 +631,7 @@ fn border_shorthand_solid_parses_width_and_style() {
 #[test]
 fn border_shorthand_style_alone_applies_to_all_sides() {
     let attr = attr_from_decl("border", "solid");
-    let sides = attr.get_border(80);
+    let sides = attr.get_border(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE);
     assert_eq!(sides.top.style, BorderStyle::Solid);
     assert_eq!(sides.bottom.style, BorderStyle::Solid);
     assert_eq!(sides.left.style, BorderStyle::Solid);
@@ -619,7 +647,7 @@ fn border_longhand_overrides_universal_shorthand() {
     decls.insert("border-top".into(), "3px solid blue".into());
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));
-    let sides = attr.get_border(80);
+    let sides = attr.get_border(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE);
     assert_eq!(sides.top.width, 3);
     assert_eq!(sides.top.color, Some(Color::Blue));
     assert_eq!(sides.right.width, 1);
@@ -636,7 +664,7 @@ fn border_universal_width_style_color_layers_correctly() {
     decls.insert("border-color".into(), "green".into());
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));
-    let sides = attr.get_border(80);
+    let sides = attr.get_border(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE);
     assert_eq!(sides.top.width, 2);
     assert_eq!(sides.top.style, BorderStyle::Solid);
     assert_eq!(sides.top.color, Some(Color::Green));
@@ -645,7 +673,7 @@ fn border_universal_width_style_color_layers_correctly() {
 #[test]
 fn border_style_none_hides_the_border() {
     let attr = attr_from_decl("border-style", "none");
-    let sides = attr.get_border(80);
+    let sides = attr.get_border(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE);
     assert!(!sides.any_visible());
 }
 
@@ -654,7 +682,7 @@ fn border_unknown_style_falls_back_to_solid() {
     // `dashed`, `dotted`, `double` etc. all render as solid in the terminal.
     for keyword in ["dashed", "dotted", "double", "groove"] {
         let attr = attr_from_decl("border", &format!("1px {keyword} red"));
-        let sides = attr.get_border(80);
+        let sides = attr.get_border(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE);
         assert_eq!(
             sides.top.style,
             BorderStyle::Solid,
@@ -671,10 +699,67 @@ fn get_box_edges_returns_combined_padding_border_margin() {
     decls.insert("border".into(), "1px solid red".into());
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));
-    let edges = attr.get_box_edges(80);
+    let edges = attr.get_box_edges(80, DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE);
     assert_eq!(edges.padding.top, 2);
     assert_eq!(edges.margin.left, 4);
     assert_eq!(edges.border.top.width, 1);
     assert_eq!(edges.border.top.style, BorderStyle::Solid);
     assert_eq!(edges.inner_horizontal(), 6); // 2 + 2 + 1 + 1
+}
+
+// ============================================================
+// font-size — em / rem resolve against the active font-size context.
+// ============================================================
+
+#[test]
+fn font_size_parses_to_length() {
+    init();
+    // `font-size: 2em` → Length::Em(2.0); missing property → None.
+    let attr = attr_from_decl("font-size", "2em");
+    assert_eq!(attr.get_font_size(), Some(Length::Em(2.0)));
+    let attr = attr_from_decl("font-size", "1.5rem");
+    assert_eq!(attr.get_font_size(), Some(Length::Rem(1.5)));
+    let attr = attr_from_decl("font-size", "16px");
+    assert_eq!(attr.get_font_size(), Some(Length::Cells(16)));
+    let attr = attr_from_decl("font-size", "120%");
+    assert_eq!(attr.get_font_size(), Some(Length::Pct(120.0)));
+    assert_eq!(CssAttr::new().get_font_size(), None);
+}
+
+#[test]
+fn font_size_property_is_supported_and_inheritable() {
+    init();
+    assert!(
+        SUPPORTED_PROPERTIES.contains(&"font-size"),
+        "font-size should be a supported CSS property"
+    );
+    assert!(
+        INHERITED_PROPS.contains(&"font-size"),
+        "font-size should inherit from the parent so nested spans keep the same em base"
+    );
+}
+
+#[test]
+fn padding_em_scales_with_element_font_size() {
+    init();
+    // `padding: 1em` on an element whose effective font-size is 2 should
+    // resolve to 2 cells, not 1.
+    let attr = attr_from_decl("padding", "1em");
+    assert_eq!(attr.get_padding(80, 2, 1).top, 2);
+    // Same property on an element with font-size 3 yields 3 cells.
+    assert_eq!(attr.get_padding(80, 3, 1).top, 3);
+    // On the default font-size of 1 it stays at 1.
+    assert_eq!(attr.get_padding(80, 1, 1).top, 1);
+}
+
+#[test]
+fn margin_rem_uses_root_font_size_not_element() {
+    init();
+    // rem ignores the element's font-size; it always resolves against the
+    // root's font-size. So `margin: 2rem` is 6 cells regardless of the
+    // element's own size.
+    let attr = attr_from_decl("margin", "2rem");
+    assert_eq!(attr.get_margin(80, 1, 3).top, 6);
+    assert_eq!(attr.get_margin(80, 5, 3).top, 6);
+    assert_eq!(attr.get_margin(80, 1, 1).top, 2);
 }

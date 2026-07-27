@@ -69,6 +69,59 @@ impl NodeType {
     pub fn is_self_closing(&self) -> bool {
         matches!(self, NodeType::Img | NodeType::Input)
     }
+
+    /// CSS default `font-size` in `em` units for this element type.
+    ///
+    /// Browser defaults for headings (CSS 2.1 / user-agent stylesheet):
+    /// `h1 = 2em`, `h2 = 1.5em`, `h3 = 1.17em`, `h4 = 1em`,
+    /// `h5 = 0.83em`. Every other element inherits the parent's font-size
+    /// (returns `None`).
+    ///
+    /// Values are rounded toward the nearest integer cell when applied
+    /// (`1.5em` → 2 cells, `0.83em` → 1 cell); see
+    /// [`default_font_size_cells_for`].
+    pub fn default_font_size_em(&self) -> Option<f32> {
+        match self {
+            NodeType::H1 => Some(2.0),
+            NodeType::H2 => Some(1.5),
+            NodeType::H3 => Some(1.17),
+            NodeType::H4 => Some(1.0),
+            NodeType::H5 => Some(0.83),
+            _ => None,
+        }
+    }
+}
+
+/// Resolve the effective font-size of `node_id` to a concrete cell count.
+///
+/// CSS precedence (highest to lowest):
+/// 1. Explicit `font-size` rule on the node
+/// 2. The element's built-in default (headings only — see
+///    [`NodeType::default_font_size_em`])
+/// 3. The inherited value from `parent_font_size_cells` (which itself
+///    follows the same chain)
+///
+/// The root element's font-size is **always** `1` cell unless a CSS rule
+/// explicitly sets `font-size` on `<html>` (rendered as the
+/// [`NodeType::Global`] root). `em` units inside `font-size` resolve
+/// against `parent_font_size_cells`; `rem` units resolve against
+/// `root_font_size_cells`.
+pub fn effective_font_size_cells(
+    arena: &NodeArena,
+    node_id: NodeId,
+    parent_font_size_cells: usize,
+    root_font_size_cells: usize,
+) -> usize {
+    let node = &arena[node_id];
+    let declared = node.css_attr.get_font_size();
+    if let Some(len) = declared {
+        return len.resolve(parent_font_size_cells, parent_font_size_cells, root_font_size_cells);
+    }
+    if let Some(em) = node.node_type.default_font_size_em() {
+        let raw = em * parent_font_size_cells as f32;
+        return raw.round().max(1.0) as usize;
+    }
+    parent_font_size_cells.max(1)
 }
 
 // ============================================================

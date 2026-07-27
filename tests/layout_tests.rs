@@ -172,7 +172,7 @@ fn test_layout_h1_text_align_center() {
         .position(|b| b.word == "#")
         .expect("should find heading '#' prefix");
     let col_in_row = text_idx % cols;
-    let rendered_width = "# Title".len();
+    let rendered_width = "# Title".chars().count() * 2;
     let expected_padding = (cols - rendered_width) / 2;
     assert_eq!(
         col_in_row, expected_padding,
@@ -197,7 +197,7 @@ fn test_layout_h2_text_align_right() {
         .position(|b| b.word == "#")
         .expect("should find heading '#' prefix");
     let col_in_row = text_idx % cols;
-    let rendered_width = "## Sub".len();
+    let rendered_width = "## Sub".chars().count() * 2;
     let expected_padding = cols - rendered_width;
     assert_eq!(
         col_in_row, expected_padding,
@@ -222,7 +222,7 @@ fn test_layout_heading_text_align_inherited_from_div() {
         .position(|b| b.word == "#")
         .expect("should find heading prefix");
     let col_in_row = text_idx % cols;
-    let rendered_width = "# Heading".len();
+    let rendered_width = "# Heading".chars().count() * 2;
     let expected_padding = (cols - rendered_width) / 2;
     assert_eq!(
         col_in_row, expected_padding,

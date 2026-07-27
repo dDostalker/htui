@@ -11,16 +11,10 @@ use log::{debug, warn};
 
 use crate::tdom::node::{Node, NodeArena, NodeId, NodeType};
 
-// ============================================================
-// Box-model edge types — re-exported for downstream callers.
-// Defined in `crate::html::box_edges`; `CssAttr` hands back resolved
-// [`EdgeSizes`] / [`BorderSides`] values so the layout layer can consume
-// them without re-parsing the CSS source.
-// ============================================================
+
 
 pub use crate::html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeSizes};
 
-// CSS 选择器类型 & 匹配引擎
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Selector {
@@ -241,9 +235,6 @@ fn tag_str_to_node_type(tag: &str) -> std::result::Result<NodeType, anyhow::Erro
     }
 }
 
-// ============================================================
-// 匹配引擎 — 使用 arena + NodeId
-// ============================================================
 
 fn matches_css(node: &Node, sel: &Selector) -> bool {
     match sel {
@@ -439,16 +430,58 @@ impl CssAttr {
     /// - `auto` / missing / unsupported unit → `None` (fill available)
     /// - `40px` / `40` → fixed columns
     /// - `50%` → fraction of terminal width (rounded, minimum 1 column)
-    /// - `2em` / `2rem` → cells (1em == 1 column; terminal has no font-size)
+    /// - `2em` → cells (resolved against the current element's font-size)
+    /// - `2rem` → cells (resolved against the root's font-size)
     ///
-    /// Floats (`1.5em`, `33.33%`) are rounded to the nearest integer cell —
-    /// terminals cannot render half columns. See [`Length::parse`] for the
-    /// underlying value type.
-    pub fn get_width(&self, term_columns: usize) -> Option<usize> {
+    /// `em` / `rem` units are multiplied by `font_size_cells` /
+    /// `root_font_size_cells` so they reflect the relative size specified by
+    /// CSS. Floats (`1.5em`, `33.33%`) are rounded to the nearest integer
+    /// cell — terminals cannot render half columns. See [`Length::parse`]
+    /// for the underlying value type.
+    pub fn get_width(
+        &self,
+        term_columns: usize,
+        font_size_cells: usize,
+        root_font_size_cells: usize,
+    ) -> Option<usize> {
         let raw = self.0.get("width")?;
         match Length::parse(raw)? {
             Length::Auto => None,
-            len => Some(len.resolve(term_columns)),
+            len => Some(len.resolve(term_columns, font_size_cells, root_font_size_cells)),
+        }
+    }
+
+    /// Return the raw `font-size` declaration as a [`Length`], if any.
+    ///
+    /// Callers resolve it via [`Length::resolve`] with the active font-size
+    /// context (so `em` values inside `font-size` refer to the inherited
+    /// font-size). Returns `None` when the property is unset — use
+    /// [`default_font_size_cells_for`](crate::tdom::node::default_font_size_cells_for)
+    /// to fall back to the per-element default.
+    pub fn get_font_size(&self) -> Option<Length> {
+        self.0.get("font-size").and_then(|raw| Length::parse(raw))
+    }
+
+    /// Resolve the full set of box-model edges in one call.
+    ///
+    /// Equivalent to calling [`get_padding`](Self::get_padding),
+    /// [`get_margin`](Self::get_margin) and [`get_border`](Self::get_border)
+    /// separately. Layout functions use this so they only need to look up
+    /// each node's `css_attr` once.
+    ///
+    /// `font_size_cells` / `root_font_size_cells` are forwarded to every
+    /// inner resolution so `em` / `rem` lengths track the element's relative
+    /// font-size.
+    pub fn get_box_edges(
+        &self,
+        containing_width: usize,
+        font_size_cells: usize,
+        root_font_size_cells: usize,
+    ) -> BoxEdges {
+        BoxEdges {
+            padding: self.get_padding(containing_width, font_size_cells, root_font_size_cells),
+            border: self.get_border(containing_width, font_size_cells, root_font_size_cells),
+            margin: self.get_margin(containing_width, font_size_cells, root_font_size_cells),
         }
     }
 
@@ -458,8 +491,23 @@ impl CssAttr {
     /// `padding-left`) win over the `padding` shorthand. Shorthand expansion
     /// follows the standard CSS 1-/2-/3-/4-value pattern; tokens we can't
     /// parse as a [`Length`] are treated as `0`.
-    pub fn get_padding(&self, containing_width: usize) -> EdgeSizes {
-        parse_edge_sizes(&self.0, "padding", containing_width)
+    ///
+    /// `em` / `rem` lengths are scaled by `font_size_cells` /
+    /// `root_font_size_cells` so they reflect the relative size of the
+    /// element's font.
+    pub fn get_padding(
+        &self,
+        containing_width: usize,
+        font_size_cells: usize,
+        root_font_size_cells: usize,
+    ) -> EdgeSizes {
+        parse_edge_sizes(
+            &self.0,
+            "padding",
+            containing_width,
+            font_size_cells,
+            root_font_size_cells,
+        )
     }
 
     /// Resolve all four margin edges from `margin` / `margin-{side}`.
@@ -467,8 +515,19 @@ impl CssAttr {
     /// `margin: auto` is currently treated as `0` (the terminal has no
     /// centering primitive for margins). Per-side longhands win over the
     /// shorthand.
-    pub fn get_margin(&self, containing_width: usize) -> EdgeSizes {
-        parse_edge_sizes(&self.0, "margin", containing_width)
+    pub fn get_margin(
+        &self,
+        containing_width: usize,
+        font_size_cells: usize,
+        root_font_size_cells: usize,
+    ) -> EdgeSizes {
+        parse_edge_sizes(
+            &self.0,
+            "margin",
+            containing_width,
+            font_size_cells,
+            root_font_size_cells,
+        )
     }
 
     /// Resolve all four border sides from `border` / `border-{side}` /
@@ -478,10 +537,19 @@ impl CssAttr {
     /// 1. Per-side shorthand (`border-top: 1px solid red`)
     /// 2. Universal properties (`border-width`, `border-style`, `border-color`)
     /// 3. Universal shorthand (`border: 1px solid red`)
-    pub fn get_border(&self, containing_width: usize) -> BorderSides {
+    pub fn get_border(
+        &self,
+        containing_width: usize,
+        font_size_cells: usize,
+        root_font_size_cells: usize,
+    ) -> BorderSides {
         // Step 1: collect universal values (lowest priority).
-        let universal_width =
-            parse_border_width(self.0.get("border-width").map(|s| s.as_str()), containing_width);
+        let universal_width = parse_border_width(
+            self.0.get("border-width").map(|s| s.as_str()),
+            containing_width,
+            font_size_cells,
+            root_font_size_cells,
+        );
         let universal_style =
             parse_border_style(self.0.get("border-style").map(|s| s.as_str()));
         let universal_color = self
@@ -497,24 +565,32 @@ impl CssAttr {
             self.0.get("border"),
             universal,
             containing_width,
+            font_size_cells,
+            root_font_size_cells,
         );
         let right = parse_border_side(
             self.0.get("border-right"),
             self.0.get("border"),
             universal,
             containing_width,
+            font_size_cells,
+            root_font_size_cells,
         );
         let bottom = parse_border_side(
             self.0.get("border-bottom"),
             self.0.get("border"),
             universal,
             containing_width,
+            font_size_cells,
+            root_font_size_cells,
         );
         let left = parse_border_side(
             self.0.get("border-left"),
             self.0.get("border"),
             universal,
             containing_width,
+            font_size_cells,
+            root_font_size_cells,
         );
 
         BorderSides {
@@ -522,20 +598,6 @@ impl CssAttr {
             right,
             bottom,
             left,
-        }
-    }
-
-    /// Resolve the full set of box-model edges in one call.
-    ///
-    /// Equivalent to calling [`get_padding`](Self::get_padding),
-    /// [`get_margin`](Self::get_margin) and [`get_border`](Self::get_border)
-    /// separately. Layout functions use this so they only need to look up
-    /// each node's `css_attr` once.
-    pub fn get_box_edges(&self, containing_width: usize) -> BoxEdges {
-        BoxEdges {
-            padding: self.get_padding(containing_width),
-            border: self.get_border(containing_width),
-            margin: self.get_margin(containing_width),
         }
     }
 }
@@ -634,29 +696,56 @@ fn parse_edge_sizes(
     decls: &IndexMap<String, String>,
     shorthand: &str,
     containing_width: usize,
+    font_size_cells: usize,
+    root_font_size_cells: usize,
 ) -> EdgeSizes {
     let shorthand_raw = decls.get(shorthand);
-    let mut edges = parse_shorthand_lengths(shorthand_raw.map(|s| s.as_str()), containing_width);
+    let mut edges = parse_shorthand_lengths(
+        shorthand_raw.map(|s| s.as_str()),
+        containing_width,
+        font_size_cells,
+        root_font_size_cells,
+    );
 
     // Layer per-side longhands on top (they take precedence).
     let top_raw = decls.get(&format!("{shorthand}-top")).map(|s| s.as_str());
-    if let Some(v) = parse_length_token(top_raw, containing_width) {
+    if let Some(v) = parse_length_token(
+        top_raw,
+        containing_width,
+        font_size_cells,
+        root_font_size_cells,
+    ) {
         edges.top = v;
     }
     let right_raw = decls
         .get(&format!("{shorthand}-right"))
         .map(|s| s.as_str());
-    if let Some(v) = parse_length_token(right_raw, containing_width) {
+    if let Some(v) = parse_length_token(
+        right_raw,
+        containing_width,
+        font_size_cells,
+        root_font_size_cells,
+    ) {
         edges.right = v;
     }
     let bottom_raw = decls
         .get(&format!("{shorthand}-bottom"))
         .map(|s| s.as_str());
-    if let Some(v) = parse_length_token(bottom_raw, containing_width) {
+    if let Some(v) = parse_length_token(
+        bottom_raw,
+        containing_width,
+        font_size_cells,
+        root_font_size_cells,
+    ) {
         edges.bottom = v;
     }
     let left_raw = decls.get(&format!("{shorthand}-left")).map(|s| s.as_str());
-    if let Some(v) = parse_length_token(left_raw, containing_width) {
+    if let Some(v) = parse_length_token(
+        left_raw,
+        containing_width,
+        font_size_cells,
+        root_font_size_cells,
+    ) {
         edges.left = v;
     }
 
@@ -668,14 +757,26 @@ fn parse_edge_sizes(
 /// Tokenisation is whitespace-driven — we split on runs of whitespace and try
 /// to parse each chunk as a [`Length`]. Unparseable tokens are skipped (treated
 /// as `0`) so a stray `auto` or junk doesn't poison the whole rule.
-fn parse_shorthand_lengths(value: Option<&str>, containing_width: usize) -> EdgeSizes {
+fn parse_shorthand_lengths(
+    value: Option<&str>,
+    containing_width: usize,
+    font_size_cells: usize,
+    root_font_size_cells: usize,
+) -> EdgeSizes {
     let Some(value) = value else {
         return EdgeSizes::default();
     };
     let tokens: Vec<&str> = value.split_whitespace().collect();
     let parsed: Vec<usize> = tokens
         .iter()
-        .filter_map(|t| parse_length_token(Some(t), containing_width))
+        .filter_map(|t| {
+            parse_length_token(
+                Some(t),
+                containing_width,
+                font_size_cells,
+                root_font_size_cells,
+            )
+        })
         .collect();
     match parsed.len() {
         0 => EdgeSizes::default(),
@@ -690,19 +791,35 @@ fn parse_shorthand_lengths(value: Option<&str>, containing_width: usize) -> Edge
 ///
 /// `auto` / missing / unsupported unit → `None` (caller decides what default
 /// to apply).
-fn parse_length_token(value: Option<&str>, containing_width: usize) -> Option<usize> {
+fn parse_length_token(
+    value: Option<&str>,
+    containing_width: usize,
+    font_size_cells: usize,
+    root_font_size_cells: usize,
+) -> Option<usize> {
     let raw = value?;
     match Length::parse(raw)? {
         Length::Auto => None,
-        len => Some(len.resolve(containing_width)),
+        len => Some(len.resolve(containing_width, font_size_cells, root_font_size_cells)),
     }
 }
 
 /// Parse a `border-width` value to cells. Mirrors [`parse_length_token`]; any
 /// value CSS accepts as a length works (including `thin` / `medium` / `thick`
 /// once added to [`Length::parse`]).
-fn parse_border_width(value: Option<&str>, containing_width: usize) -> usize {
-    parse_length_token(value, containing_width).unwrap_or(0)
+fn parse_border_width(
+    value: Option<&str>,
+    containing_width: usize,
+    font_size_cells: usize,
+    root_font_size_cells: usize,
+) -> usize {
+    parse_length_token(
+        value,
+        containing_width,
+        font_size_cells,
+        root_font_size_cells,
+    )
+    .unwrap_or(0)
 }
 
 /// Map a `border-style` keyword to a [`BorderStyle`]. Unknown / missing
@@ -726,16 +843,22 @@ fn parse_border_side(
     shorthand_raw: Option<&String>,
     fallback: Border,
     containing_width: usize,
+    font_size_cells: usize,
+    root_font_size_cells: usize,
 ) -> Border {
     if let Some(value) = side_raw {
-        if let Some(parsed) = parse_border_shorthand(value, containing_width) {
+        if let Some(parsed) =
+            parse_border_shorthand(value, containing_width, font_size_cells, root_font_size_cells)
+        {
             return parsed;
         }
         // `border-top` was present but unparseable — fall through to next
         // priority rather than dropping the side entirely.
     }
     if let Some(value) = shorthand_raw {
-        if let Some(parsed) = parse_border_shorthand(value, containing_width) {
+        if let Some(parsed) =
+            parse_border_shorthand(value, containing_width, font_size_cells, root_font_size_cells)
+        {
             return parsed;
         }
     }
@@ -748,13 +871,23 @@ fn parse_border_side(
 /// optional. We tokenise on whitespace and classify each token; tokens we
 /// can't classify fall through (treated as missing) so a typo in one piece
 /// doesn't drop the whole border.
-fn parse_border_shorthand(value: &str, containing_width: usize) -> Option<Border> {
+fn parse_border_shorthand(
+    value: &str,
+    containing_width: usize,
+    font_size_cells: usize,
+    root_font_size_cells: usize,
+) -> Option<Border> {
     let mut width: Option<usize> = None;
     let mut style: Option<BorderStyle> = None;
     let mut color: Option<Color> = None;
 
     for token in value.split_whitespace() {
-        if let Some(w) = parse_length_token(Some(token), containing_width) {
+        if let Some(w) = parse_length_token(
+            Some(token),
+            containing_width,
+            font_size_cells,
+            root_font_size_cells,
+        ) {
             width = Some(w);
             continue;
         }
@@ -882,7 +1015,14 @@ impl Length {
             } => {
                 // cssparser divides by 100 for us (`50%` → `0.5`). Multiply back
                 // so the stored value matches what the user wrote.
-                PreLength::Pct(unit_value * 100.0)
+                let percent = unit_value * 100.0;
+                let nearest_integer = percent.round();
+                let percent = if (percent - nearest_integer).abs() < 0.0001 {
+                    nearest_integer
+                } else {
+                    percent
+                };
+                PreLength::Pct(percent)
             }
             _ => return None,
         };
@@ -899,16 +1039,28 @@ impl Length {
     }
 
     /// Resolve the length into a concrete column count given the containing
-    /// block's width in cells.
+    /// block's width in cells and the active font-size context.
     ///
-    /// - `Auto`                       → `containing` (fill the container)
-    /// - `Cells(n)`                   → `n`
-    /// - `Pct(p)`                     → round(containing * p / 100), min 1
-    /// - `Em(n)` / `Rem(n)`           → round(n), clamped at 0
+    /// - `Auto`              → `containing` (fill the container)
+    /// - `Cells(n)`          → `n`
+    /// - `Pct(p)`            → round(containing * p / 100), min 1
+    /// - `Em(n)`             → round(n * font_size_cells), clamped at 0
+    /// - `Rem(n)`            → round(n * root_font_size_cells), clamped at 0
     ///
-    /// Floats round **away from zero** (Rust's `f32::round`), so `0.5em` is
-    /// 1 cell and `2.5em` is 3 cells — never zero, never half.
-    pub fn resolve(&self, containing: usize) -> usize {
+    /// `em` resolves against the **current element's** effective font-size
+    /// (in cells); `rem` resolves against the **root's** font-size. On a
+    /// terminal the root font-size is 1 cell by default — it grows when the
+    /// document root sets an explicit `font-size` rule.
+    ///
+    /// Floats round **away from zero** (Rust's `f32::round`), so `0.5em` at
+    /// font-size=2 yields 1 cell and `2.5em` at font-size=2 yields 5 cells —
+    /// never zero, never half.
+    pub fn resolve(
+        &self,
+        containing: usize,
+        font_size_cells: usize,
+        root_font_size_cells: usize,
+    ) -> usize {
         match self {
             Length::Auto => containing,
             &Length::Cells(n) => n,
@@ -916,8 +1068,8 @@ impl Length {
                 let raw = (containing as f32 * p / 100.0).round();
                 (raw as usize).max(1)
             }
-            &Length::Em(n) => n.round().max(0.0) as usize,
-            &Length::Rem(n) => n.round().max(0.0) as usize,
+            &Length::Em(n) => (n * font_size_cells as f32).round().max(0.0) as usize,
+            &Length::Rem(n) => (n * root_font_size_cells as f32).round().max(0.0) as usize,
         }
     }
 }
@@ -1196,6 +1348,7 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "font-weight",
     "font-style",
     "text-decoration",
+    "font-size",
     "width",
     // Box-model edges
     "padding",
@@ -1229,6 +1382,7 @@ pub const INHERITED_PROPS: &[&str] = &[
     "font-weight",
     "font-style",
     "text-decoration",
+    "font-size",
 ];
 
 fn inherit_css(arena: &mut NodeArena, node_id: NodeId, parent_attrs: &IndexMap<String, String>) {

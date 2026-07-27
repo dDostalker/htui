@@ -47,8 +47,16 @@ pub enum BoxKind {
     /// painted with the element's background color (always true for `<aside>`
     /// even without an explicit `background-color`, so it visually forms a
     /// solid stripe). `spacing_after` adds trailing blank rows below the box
-    /// (used by `<header>` / `<footer>`).
-    Block { fill_bg: bool, spacing_after: usize },
+    /// (used by `<header>` / `<footer>`). `chrome` marks chrome elements
+    /// (`<aside>`/`<header>`/`<footer>`) whose background always covers the
+    /// full border-box — even when an explicit `background-color` is
+    /// supplied — so the block reads as a solid chrome strip regardless of
+    /// the inline content's text-align / font-size.
+    Block {
+        fill_bg: bool,
+        spacing_after: usize,
+        chrome: bool,
+    },
     /// `<img>`: rasterized into a fixed-size grid of `cols` × `rows` cells.
     Image { cols: usize, rows: usize },
 }
@@ -82,10 +90,28 @@ impl InlineRun {
         }
     }
 
-    /// Returns the cell width this run occupies (`char_width` per char).
+    /// Returns the cell width this run occupies at the default
+    /// (un-expanded) font-size: `char_width` per char, so a wide CJK glyph
+    /// at the end of one run does not collide with the first cell of the
+    /// next. Layouts that need the width at a larger font-size should call
+    /// [`Self::width_at`].
     pub fn width(&self) -> usize {
         use crate::tui::graph_api::char_width;
         self.text.chars().map(char_width).sum()
+    }
+
+    /// Cell width this run occupies at the supplied `font_size_cells`. Each
+    /// character is treated as `max(char_width(c), font_size_cells)` cells
+    /// wide (matching the expansion the paint phase applies), so a heading
+    /// with font-size=2 has its `text-align` measured against the expanded
+    /// width — not the single-cell-per-char default.
+    pub fn width_at(&self, font_size_cells: usize) -> usize {
+        use crate::tui::graph_api::char_width;
+        let font_size = font_size_cells.max(1);
+        self.text
+            .chars()
+            .map(|c| char_width(c).max(font_size))
+            .sum()
     }
 
     /// Returns true when the run has no visible text.
@@ -107,6 +133,13 @@ impl InlineRun {
 /// boundaries produce runs with their own style. The field is `None`
 /// only for purely structural containers (e.g. an `<aside>` whose text
 /// is delegated to nested block children).
+///
+/// `font_size_cells` is the **effective font-size** of this box in terminal
+/// cells. It is used by the paint phase to expand each character cell by
+/// this factor (so `<h1>` with the default 2em font-size renders each
+/// character across 2 cells, with the second cell filled with the run's
+/// background). When `font_size_cells == 1` the rendering is byte-identical
+/// to the pre-font-size layout.
 #[derive(Debug, Clone)]
 pub struct LayoutBox {
     pub node_id: NodeId,
@@ -116,6 +149,8 @@ pub struct LayoutBox {
     pub runs: Option<Vec<InlineRun>>,
     pub image_path: Option<String>,
     pub children: Vec<LayoutBox>,
+    /// Effective font-size of this box in terminal cells (≥ 1).
+    pub font_size_cells: usize,
 }
 
 impl LayoutBox {
@@ -131,6 +166,7 @@ impl LayoutBox {
         spacing_after: usize,
         runs: Vec<InlineRun>,
         children: Vec<LayoutBox>,
+        font_size_cells: usize,
     ) -> Self {
         let runs = if runs.is_empty() { None } else { Some(runs) };
         Self {
@@ -139,11 +175,49 @@ impl LayoutBox {
             kind: BoxKind::Block {
                 fill_bg,
                 spacing_after,
+                chrome: false,
             },
             box_edges,
             runs,
             image_path: None,
             children,
+            font_size_cells,
+        }
+    }
+
+    /// Create a block-level box whose inline content is split into one
+    /// or more `InlineRun`s (one per `<span>` boundary, one per direct
+    /// text node). Pass an empty `Vec` when the block is purely
+    /// structural — `runs` will be stored as `None`.
+    ///
+    /// `chrome` marks the box as a chrome container (`<aside>` /
+    /// `<header>` / `<footer>`) whose background always covers the
+    /// full border-box regardless of inline content.
+    pub fn new_block_with_chrome(
+        node_id: NodeId,
+        rect: Rect,
+        box_edges: BoxEdges,
+        fill_bg: bool,
+        spacing_after: usize,
+        runs: Vec<InlineRun>,
+        children: Vec<LayoutBox>,
+        font_size_cells: usize,
+        chrome: bool,
+    ) -> Self {
+        let runs = if runs.is_empty() { None } else { Some(runs) };
+        Self {
+            node_id,
+            rect,
+            kind: BoxKind::Block {
+                fill_bg,
+                spacing_after,
+                chrome,
+            },
+            box_edges,
+            runs,
+            image_path: None,
+            children,
+            font_size_cells,
         }
     }
 
@@ -157,6 +231,7 @@ impl LayoutBox {
             runs: None,
             image_path: Some(path),
             children: vec![],
+            font_size_cells: 1,
         }
     }
 }

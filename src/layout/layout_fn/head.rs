@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::{
     layout::{
-        BoxConstraint, Cursor, InlineRun, LayoutBox,
+        BoxConstraint, Cursor, FontContext, InlineRun, LayoutBox,
         tree::{LayoutBlockOptions, layout_block},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
@@ -24,6 +24,7 @@ pub fn layout_hn(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
+    font_ctx: FontContext,
 ) -> Result<Option<LayoutBox>> {
     let node = &arena[node_id];
     let level = match node.node_type {
@@ -56,5 +57,6 @@ pub fn layout_hn(
             prefix: Some(prefix_run),
             ..Default::default()
         },
+        font_ctx,
     )?))
 }

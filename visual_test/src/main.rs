@@ -51,6 +51,7 @@ fn main() -> Result<()> {
             "font_styles" => test_case!(font_styles, no_css),
             "list" => test_case!(list, no_css),
             "box_model" => test_case!(box_model, no_css),
+            "font_size" => test_case!(font_size, no_css),
             _ => {
                     let available = [
                         "all_in_one",
@@ -66,6 +67,7 @@ fn main() -> Result<()> {
                         "font_styles",
                         "list",
                         "box_model",
+                        "font_size",
                     ];
                     eprintln!(
                         "Unknown test: '{test_name}'\nAvailable tests: {}",
