@@ -1,4 +1,3 @@
-use anyhow::Result;
 
 use crate::{
     layout::{
@@ -20,13 +19,13 @@ pub fn layout_aside(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     font_ctx: FontContext,
-) -> Result<Option<LayoutBox>> {
+) -> Option<LayoutBox> {
     let node = &arena[node_id];
     if node.node_type != NodeType::Aside {
-        return Ok(None);
+        return None;
     }
 
-    Ok(Some(layout_block(
+    Some(layout_block(
         arena,
         node,
         node_id,
@@ -38,5 +37,5 @@ pub fn layout_aside(
             ..Default::default()
         },
         font_ctx,
-    )?))
+    ))
 }

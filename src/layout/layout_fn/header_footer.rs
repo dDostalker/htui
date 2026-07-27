@@ -1,4 +1,3 @@
-use anyhow::Result;
 
 use crate::{
     layout::{
@@ -16,7 +15,7 @@ pub fn layout_header(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     font_ctx: FontContext,
-) -> Result<Option<LayoutBox>> {
+) -> Option<LayoutBox>{
     layout_block_with_tag(arena, node_id, containing, cursor, NodeType::Header, font_ctx)
 }
 
@@ -27,7 +26,7 @@ pub fn layout_footer(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     font_ctx: FontContext,
-) -> Result<Option<LayoutBox>> {
+) -> Option<LayoutBox> {
     layout_block_with_tag(arena, node_id, containing, cursor, NodeType::Footer, font_ctx)
 }
 
@@ -38,13 +37,13 @@ fn layout_block_with_tag(
     cursor: &mut Cursor,
     expected: NodeType,
     font_ctx: FontContext,
-) -> Result<Option<LayoutBox>> {
+) -> Option<LayoutBox> {
     let node = &arena[node_id];
     if node.node_type != expected {
-        return Ok(None);
+        return None;
     }
 
-    Ok(Some(layout_block(
+    Some(layout_block(
         arena,
         node,
         node_id,
@@ -57,5 +56,5 @@ fn layout_block_with_tag(
             ..Default::default()
         },
         font_ctx,
-    )?))
+    ))
 }

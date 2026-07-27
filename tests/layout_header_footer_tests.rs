@@ -11,7 +11,7 @@ fn init() {
 
 fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     let mut html_parser = html_parse::Parser::new(html);
-    let (root_id, mut arena, embedded) = html_parser.parse().unwrap();
+    let (root_id, mut arena, embedded) = html_parser.parse();
     let combined = if css.is_empty() {
         embedded
     } else if embedded.is_empty() {
@@ -21,8 +21,8 @@ fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     };
     if !combined.trim().is_empty() {
         let mut css_parser = css_parse::Parser::new(&combined);
-        let rules = css_parser.parse().unwrap();
-        css_parse::css_into_node(&mut arena, root_id, &rules).unwrap();
+        let rules = css_parser.parse();
+        css_parse::css_into_node(&mut arena, root_id, &rules);
     }
     (root_id, arena)
 }
@@ -42,7 +42,7 @@ fn test_header_basic() {
     init();
     let (root_id, arena) = setup("<header>My Site</header>", "");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("My Site"), "header should contain text");
@@ -53,7 +53,7 @@ fn test_footer_basic() {
     init();
     let (root_id, arena) = setup("<footer>(c) 2024</footer>", "");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("(c) 2024"), "footer should contain text");
@@ -66,7 +66,7 @@ fn test_header_with_color() {
     let css = "header { color: blue; background-color: yellow; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     let has_fg = tl.layout.iter().any(|b| b.fcolor == Some(Color::Blue));
     let has_bg = tl.layout.iter().any(|b| b.bcolor == Some(Color::Yellow));
@@ -83,7 +83,7 @@ fn test_header_solid_bg() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let content_idx = tl
@@ -112,7 +112,7 @@ fn test_header_width_50pct() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let content_idx = tl
@@ -154,7 +154,7 @@ fn test_header_width_fixed() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let content_idx = tl
@@ -191,7 +191,7 @@ fn test_header_layout_structure() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -230,7 +230,7 @@ fn test_footer_layout_structure() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -257,7 +257,7 @@ fn test_header_center_align() {
     let css = "header { text-align: center; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("Centered"));
@@ -270,7 +270,7 @@ fn test_header_right_align() {
     let css = "header { text-align: right; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("Right"));
@@ -472,7 +472,7 @@ fn test_styled_space_cells_carry_style_flag() {
     use htui::tui::graph_api::FontStyle;
     let (root_id, arena) = setup("<p>a b</p>", "p { text-decoration: underline; }");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -503,7 +503,7 @@ fn test_bold_italic_underline_all_apply_to_text_run() {
         "p { font-weight: bold; font-style: italic; text-decoration: underline line-through; }",
     );
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     for ch in ['x', 'y', 'z'] {
@@ -539,7 +539,7 @@ fn test_style_persists_after_consecutive_spaces() {
     use htui::tui::graph_api::FontStyle;
     let (root_id, arena) = setup("<p>a   b</p>", "p { text-decoration: underline; }");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -565,7 +565,7 @@ fn test_render_emits_underline_sgr_across_spaces() {
     // the renderer treated the space as "bare" and dropped the SGR.
     let (root_id, arena) = setup("<p>a b</p>", "p { text-decoration: underline; }");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     let bytes = tl.render_to_bytes();
     let rendered = String::from_utf8_lossy(&bytes);

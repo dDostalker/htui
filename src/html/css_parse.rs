@@ -1140,7 +1140,7 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self) -> std::result::Result<CssRule, anyhow::Error> {
+    pub fn parse(&mut self) -> CssRule {
         let mut parser_input = ParserInput::new(&self.context);
         let mut parser = CssParser::new(&mut parser_input);
         let mut state = CssParseState::new();
@@ -1160,7 +1160,7 @@ impl Parser {
             }
         }
         debug!("CSS parsed: {} rules", css.0.len());
-        Ok(css)
+        css
     }
 }
 
@@ -1321,14 +1321,14 @@ pub fn css_into_node(
     arena: &mut NodeArena,
     root_id: NodeId,
     css: &CssRule,
-) -> std::result::Result<(), anyhow::Error> {
+) {
     for (selector, attr) in css.0.iter() {
         apply_css_rule(arena, root_id, selector, attr);
     }
     // Propagate inheritable CSS properties (color, text-align, font-weight,
     // font-style, text-decoration)
     inherit_css(arena, root_id, &IndexMap::new());
-    Ok(())
+
 }
 
 /// All CSS properties the renderer recognises by name.

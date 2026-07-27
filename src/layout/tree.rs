@@ -5,7 +5,6 @@
 //! Block-level children of the document share a single vertical [`Cursor`],
 //! so each block claims a deterministic row range.
 
-use anyhow::Result;
 use crossterm::style::Color;
 
 use crate::{
@@ -57,7 +56,7 @@ pub fn layout_tree(
     root_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-) -> Result<Vec<LayoutBox>> {
+) -> Vec<LayoutBox> {
     let children: Vec<NodeId> = arena[root_id].children.clone();
     layout_children(arena, &children, containing, cursor, FontContext::ROOT)
 }
@@ -69,14 +68,14 @@ pub fn layout_children(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     font_ctx: FontContext,
-) -> Result<Vec<LayoutBox>> {
+) -> Vec<LayoutBox> {
     let mut boxes = Vec::new();
     for &child_id in children {
-        if let Some(b) = dispatch(arena, child_id, containing, cursor, font_ctx)? {
+        if let Some(b) = dispatch(arena, child_id, containing, cursor, font_ctx) {
             boxes.push(b);
         }
     }
-    Ok(boxes)
+    boxes
 }
 
 /// Iterate the layout registry; first claim wins.
@@ -86,14 +85,14 @@ fn dispatch(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     font_ctx: FontContext,
-) -> Result<Option<LayoutBox>> {
+) -> Option<LayoutBox> {
     for layout_fn in DEFAULT_LAYOUT {
-        if let Some(b) = layout_fn(arena, node_id, containing, cursor, font_ctx)? {
-            return Ok(Some(b));
+        if let Some(b) = layout_fn(arena, node_id, containing, cursor, font_ctx) {
+            return Some(b);
         }
     }
     log::debug!("No layout handler for {:?}", arena[node_id].node_type);
-    Ok(None)
+    None
 }
 
 /// Collect inline runs from a block's inline tree, preserving `<span>` style
@@ -322,7 +321,7 @@ pub fn layout_block(
     cursor: &mut Cursor,
     opts: LayoutBlockOptions,
     font_ctx: FontContext,
-) -> Result<LayoutBox> {
+) -> LayoutBox {
     let own_font_size_cells = effective_font_size_cells(
         arena,
         node_id,
@@ -398,7 +397,7 @@ pub fn layout_block(
         child_containing,
         &mut child_cursor,
         child_font_ctx,
-    )?;
+    );
 
     let content_height = child_cursor.y.saturating_sub(
         geom.outer_y + edges.border.top.thickness() + edges.padding.top,
@@ -425,7 +424,7 @@ pub fn layout_block(
     }
 
     if opts.chrome || opts.fill_bg_default {
-        Ok(LayoutBox::new_block_with_chrome(
+        LayoutBox::new_block_with_chrome(
             node_id,
             build_border_rect(geom, rect_height),
             edges,
@@ -435,9 +434,9 @@ pub fn layout_block(
             children,
             own_font_size_cells,
             opts.chrome,
-        ))
+        )
     } else {
-        Ok(LayoutBox::new_block(
+        LayoutBox::new_block(
             node_id,
             build_border_rect(geom, rect_height),
             edges,
@@ -446,6 +445,6 @@ pub fn layout_block(
             runs,
             children,
             own_font_size_cells,
-        ))
+        )
     }
 }

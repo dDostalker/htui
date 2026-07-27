@@ -1,4 +1,3 @@
-use anyhow::Result;
 
 use crate::{
     layout::{
@@ -25,7 +24,7 @@ pub fn layout_ul(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     font_ctx: FontContext,
-) -> Result<Option<LayoutBox>> {
+) -> Option<LayoutBox> {
     layout_list(arena, node_id, containing, cursor, NodeType::Ul, font_ctx)
 }
 
@@ -39,7 +38,7 @@ pub fn layout_ol(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     font_ctx: FontContext,
-) -> Result<Option<LayoutBox>> {
+) -> Option<LayoutBox> {
     layout_list(arena, node_id, containing, cursor, NodeType::Ol, font_ctx)
 }
 
@@ -60,10 +59,10 @@ pub fn layout_li(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     font_ctx: FontContext,
-) -> Result<Option<LayoutBox>> {
+) -> Option<LayoutBox> {
     let node = &arena[node_id];
     if node.node_type != NodeType::Li {
-        return Ok(None);
+        return None;
     }
 
     let marker = list_marker_for_li(arena, node_id);
@@ -76,7 +75,7 @@ pub fn layout_li(
     );
     let marker_width = marker_run.width();
 
-    Ok(Some(layout_block(
+    Some(layout_block(
         arena,
         node,
         node_id,
@@ -92,7 +91,7 @@ pub fn layout_li(
             ..Default::default()
         },
         font_ctx,
-    )?))
+    ))
 }
 
 fn layout_list(
@@ -102,13 +101,13 @@ fn layout_list(
     cursor: &mut Cursor,
     expected: NodeType,
     font_ctx: FontContext,
-) -> Result<Option<LayoutBox>> {
+) -> Option<LayoutBox> {
     let node = &arena[node_id];
     if node.node_type != expected {
-        return Ok(None);
+        return None;
     }
 
-    Ok(Some(layout_block(
+    Some(layout_block(
         arena,
         node,
         node_id,
@@ -119,7 +118,7 @@ fn layout_list(
             ..Default::default()
         },
         font_ctx,
-    )?))
+    ))
 }
 
 /// Count `<ul>`/`<ol>` ancestors of `node_id`.

@@ -1,4 +1,3 @@
-use anyhow::Result;
 
 use crate::{
     layout::{BoxConstraint, Cursor, FontContext, LayoutBox},
@@ -18,15 +17,15 @@ pub fn layout_img(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     _font_ctx: FontContext,
-) -> Result<Option<LayoutBox>> {
+) -> Option<LayoutBox> {
     let node = &arena[node_id];
     if node.node_type != NodeType::Img {
-        return Ok(None);
+        return None;
     }
 
     let src = match node.attributes.get_src() {
         Some(s) => s.clone(),
-        None => return Ok(None),
+        None => return None,
     };
 
     let max_w = node
@@ -52,13 +51,13 @@ pub fn layout_img(
     let x = centered_left(containing, block_width);
     let y = cursor.allocate(img_rows);
 
-    Ok(Some(LayoutBox::new_image(
+    Some(LayoutBox::new_image(
         node_id,
         crate::layout::Rect::new(x, y, block_width, img_rows),
         block_width,
         img_rows,
         src,
-    )))
+    ))
 }
 
 fn centered_left(containing: BoxConstraint, block_width: usize) -> usize {

@@ -1,4 +1,3 @@
-use anyhow::Result;
 
 use crate::{
     layout::layout::TermMap,
@@ -49,7 +48,7 @@ pub type LayoutFn = fn(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     font_ctx: FontContext,
-) -> Result<Option<LayoutBox>>;
+) -> Option<LayoutBox>;
 
 /// Layout function registry.
 ///

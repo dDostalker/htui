@@ -1,7 +1,6 @@
 use std::fs;
 use std::path::Path;
 
-use anyhow::Result;
 use html5ever::Attribute;
 use html5ever::driver::ParseOpts;
 use html5ever::tendril::TendrilSink;
@@ -27,7 +26,7 @@ impl Parser {
     }
 
     /// Parse HTML and return (root_id, arena, embedded_css).
-    pub fn parse(&mut self) -> Result<(NodeId, NodeArena, String)> {
+    pub fn parse(&mut self) -> (NodeId, NodeArena, String) {
         debug!("html5ever 解析 HTML，{} 字节", self.input.len());
 
         let opts = ParseOpts::default();
@@ -45,7 +44,7 @@ impl Parser {
             arena.len(),
             css_sources.join("\n").len()
         );
-        Ok((root_id, arena, css_sources.join("\n")))
+        (root_id, arena, css_sources.join("\n"))
     }
 }
 

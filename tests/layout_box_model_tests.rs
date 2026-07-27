@@ -23,7 +23,7 @@ fn init() {
 
 fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     let mut html_parser = html_parse::Parser::new(html);
-    let (root_id, mut arena, embedded) = html_parser.parse().unwrap();
+    let (root_id, mut arena, embedded) = html_parser.parse();
     let combined = if css.is_empty() {
         embedded
     } else if embedded.is_empty() {
@@ -33,8 +33,8 @@ fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     };
     if !combined.trim().is_empty() {
         let mut css_parser = css_parse::Parser::new(&combined);
-        let rules = css_parser.parse().unwrap();
-        css_parse::css_into_node(&mut arena, root_id, &rules).unwrap();
+        let rules = css_parser.parse();
+        css_parse::css_into_node(&mut arena, root_id, &rules);
     }
     (root_id, arena)
 }
@@ -53,7 +53,7 @@ fn mock_term_map() -> TermMap {
 fn draw(html: &str, css: &str) -> (TermMap, TermLayout) {
     let term_map = mock_term_map();
     let (root_id, arena) = setup(html, css);
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     (term_map, tl)
 }

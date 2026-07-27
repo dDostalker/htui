@@ -20,7 +20,7 @@ fn init() {
 
 fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     let mut html_parser = html_parse::Parser::new(html);
-    let (root_id, mut arena, embedded) = html_parser.parse().unwrap();
+    let (root_id, mut arena, embedded) = html_parser.parse();
     let combined = if css.is_empty() {
         embedded
     } else if embedded.is_empty() {
@@ -30,8 +30,8 @@ fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     };
     if !combined.trim().is_empty() {
         let mut css_parser = css_parse::Parser::new(&combined);
-        let rules = css_parser.parse().unwrap();
-        css_parse::css_into_node(&mut arena, root_id, &rules).unwrap();
+        let rules = css_parser.parse();
+        css_parse::css_into_node(&mut arena, root_id, &rules);
     }
     (root_id, arena)
 }
@@ -49,7 +49,7 @@ fn mock_term_map() -> TermMap {
 fn draw(html: &str, css: &str) -> (TermMap, TermLayout) {
     let term_map = mock_term_map();
     let (root_id, arena) = setup(html, css);
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     (term_map, tl)
 }
@@ -470,7 +470,7 @@ fn render_to_bytes_includes_bg_sgr_on_pad_cells_for_padded_em_block() {
     // `background-color: darkgreen` SGR. Before the fix, the bg-pad
     // cells were skipped by `render_to_bytes`, leaving gaps of un-bged
     // cells between letters (the user-visible jaggedness).
-    let (term_map, tl) = draw(
+    let (_term_map, tl) = draw(
         r#"<p class="pad-em">em padding</p>"#,
         "p.pad-em { font-size: 2em; padding: 0.5em 1em; background-color: darkgreen; color: white; }",
     );
@@ -507,10 +507,13 @@ fn render_to_bytes_includes_bg_sgr_on_pad_cells_for_padded_em_block() {
         .find(" e m   p a d d i n g")
         .expect("text row batch should be present in the ANSI stream");
     // Walk backwards from there looking for the position cursor for that
-    // row; verify the very first SGR after it is the bg (not the reset).
+    // row. The MoveTo escape ends with `H` (`\u{1b}[<row>;<col>H`); SGR
+    // codes end with `m`, so we use a row-position-aware match.
     let preceding = &rendered[..text_row_start];
     let last_move_to = preceding
-        .rfind("\u{1b}[")
+        .rfind("H\u{1b}[")
+        .map(|i| i + 1) // include the trailing ESC[
+        .or_else(|| preceding.rfind("\u{1b}["))
         .expect("must have a preceding ANSI escape");
     let after_move_to = &preceding[last_move_to..];
     assert!(
@@ -602,7 +605,7 @@ fn debug_dump_box_model_layout() {
     use htui::layout::BoxConstraint;
     let mut cursor = htui::layout::Cursor::new();
     let containing = BoxConstraint::root(&term_map);
-    let boxes = layout_tree(&arena, root_id, containing, &mut cursor).unwrap();
+    let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
     for b in &boxes {
         eprintln!("rect={:?} font_size={} padding={:?} border={:?} margin={:?} runs={:?}",
             b.rect, b.font_size_cells,

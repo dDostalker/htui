@@ -22,7 +22,7 @@ const ROWS: u16 = 24;
 
 fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     let mut html_parser = html_parse::Parser::new(html);
-    let (root_id, mut arena, embedded) = html_parser.parse().unwrap();
+    let (root_id, mut arena, embedded) = html_parser.parse();
     let combined = if css.is_empty() {
         embedded
     } else if embedded.is_empty() {
@@ -32,8 +32,8 @@ fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     };
     if !combined.trim().is_empty() {
         let mut css_parser = css_parse::Parser::new(&combined);
-        let rules = css_parser.parse().unwrap();
-        css_parse::css_into_node(&mut arena, root_id, &rules).unwrap();
+        let rules = css_parser.parse();
+        css_parse::css_into_node(&mut arena, root_id, &rules);
     }
     (root_id, arena)
 }
@@ -50,7 +50,7 @@ fn two_paragraphs_land_on_different_rows() {
     let (root_id, arena) = setup("<p>first</p><p>second</p>", "");
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let first_idx = tl
@@ -85,7 +85,7 @@ fn nested_paragraph_shares_aside_row_with_bg() {
     );
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     // Find the aside row (the row that carries darkblue bg).
@@ -128,7 +128,7 @@ fn nested_paragraph_uses_parent_containing_block_for_text_align() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let text_idx = tl
@@ -153,7 +153,7 @@ fn nested_div_in_div_stacks_below_outer_div() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let outer_idx = tl
@@ -186,9 +186,9 @@ fn layout_box_rect_is_deterministic() {
     );
     let containing = BoxConstraint::root(&mock_term_map());
     let mut c1 = Cursor::new();
-    let boxes1 = layout_tree(&arena, root_id, containing, &mut c1).unwrap();
+    let boxes1 = layout_tree(&arena, root_id, containing, &mut c1);
     let mut c2 = Cursor::new();
-    let boxes2 = layout_tree(&arena, root_id, containing, &mut c2).unwrap();
+    let boxes2 = layout_tree(&arena, root_id, containing, &mut c2);
     assert_eq!(boxes1.len(), boxes2.len());
     for (a, b) in boxes1.iter().zip(boxes2.iter()) {
         assert_eq!(a.rect, b.rect, "boxes must agree across runs");
@@ -212,13 +212,13 @@ fn rendered_rows_walks_full_layout_tree() {
     //       row 1: <p>B</p>     <- deepest leaf
     let (root_id, arena) = setup("<div><p>A</p><div><p>B</p></div></div>", "");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     // Sanity-check via the layout tree itself.
     use htui::layout::{BoxConstraint, Cursor};
     let mut cursor = Cursor::new();
-    let boxes = layout_tree(&arena, root_id, BoxConstraint::root(&term_map), &mut cursor).unwrap();
+    let boxes = layout_tree(&arena, root_id, BoxConstraint::root(&term_map), &mut cursor);
     let max_leaf = boxes
         .iter()
         .flat_map(|b| std::iter::once(b).chain(b.children.iter()))
@@ -249,7 +249,7 @@ fn scroll_limits_match_layout_depth() {
         columns: 80,
         rows: 10,
     };
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     assert!(
         tl.rendered_rows > term_map.rows as u32,

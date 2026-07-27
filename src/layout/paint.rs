@@ -6,7 +6,6 @@
 //! own `rect`, `kind`, and `box_edges` plus the CSS attributes stored on the
 //! source node.
 
-use anyhow::Result;
 use crossterm::style::Color;
 
 use crate::{
@@ -24,15 +23,14 @@ pub fn paint_layout_tree(
     boxes: &[LayoutBox],
     arena: &NodeArena,
     term_layout: &mut TermLayout,
-) -> Result<()> {
+) {
     let mut max_y = 0usize;
     for b in boxes {
-        paint_box(b, arena, term_layout, &mut max_y, None)?;
+        paint_box(b, arena, term_layout, &mut max_y, None);
     }
     if max_y as u32 > term_layout.rendered_rows {
         term_layout.rendered_rows = max_y as u32;
     }
-    Ok(())
 }
 
 fn paint_box(
@@ -41,7 +39,7 @@ fn paint_box(
     term_layout: &mut TermLayout,
     max_y: &mut usize,
     parent_bg: Option<Color>,
-) -> Result<()> {
+) {
     let bottom = lb.rect.y.saturating_add(lb.rect.height.max(1));
     if bottom > *max_y {
         *max_y = bottom;
@@ -65,10 +63,10 @@ fn paint_box(
                 chrome,
                 my_bg,
                 parent_bg,
-            )?;
+            );
         }
         BoxKind::Image { cols, rows } => {
-            paint_image(lb, term_layout, cols, rows)?;
+            paint_image(lb, term_layout, cols, rows);
         }
     }
     // The effective bg visible at this box's rect becomes the parent bg for
@@ -77,9 +75,9 @@ fn paint_box(
     // render the text with cyan bg even though `<p>` itself has no bg.
     let effective_bg = my_bg.or(parent_bg);
     for child in &lb.children {
-        paint_box(child, arena, term_layout, max_y, effective_bg)?;
+        paint_box(child, arena, term_layout, max_y, effective_bg);
     }
-    Ok(())
+
 }
 
 fn paint_block(
@@ -91,7 +89,7 @@ fn paint_block(
     chrome: bool,
     my_bg: Option<Color>,
     parent_bg: Option<Color>,
-) -> Result<()> {
+)  {
     let node = &arena[lb.node_id];
     let fg = node.css_attr.get_color();
     let style = block_style(&node.css_attr);
@@ -225,7 +223,7 @@ fn paint_block(
         );
     }
 
-    Ok(())
+
 }
 
 /// Render the four border edges of a block-level box.
@@ -487,15 +485,14 @@ fn paint_image(
     term_layout: &mut TermLayout,
     cols: usize,
     rows: usize,
-) -> Result<()> {
+) {
     let Some(path) = lb.image_path.as_ref() else {
-        return Ok(());
+        return;
     };
     let r = lb.rect;
-    render_image_at(term_layout, path, (r.x, r.y), (cols as u32, rows as u32)).or_else(|e| {
-        log::debug!("Image paint skipped for {}: {}", path, e);
-        Ok(())
-    })
+    if let Err(error) = render_image_at(term_layout, path, (r.x, r.y), (cols as u32, rows as u32)) {
+        log::debug!("Image paint skipped for {}: {}", path, error);
+    }
 }
 
 fn cell_index(term_layout: &TermLayout, x: usize, y: usize) -> usize {

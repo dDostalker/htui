@@ -10,7 +10,7 @@ fn init() {
 
 fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     let mut html_parser = html_parse::Parser::new(html);
-    let (root_id, mut arena, embedded) = html_parser.parse().unwrap();
+    let (root_id, mut arena, embedded) = html_parser.parse();
     let combined = if css.is_empty() {
         embedded
     } else if embedded.is_empty() {
@@ -20,8 +20,8 @@ fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     };
     if !combined.trim().is_empty() {
         let mut css_parser = css_parse::Parser::new(&combined);
-        let rules = css_parser.parse().unwrap();
-        css_parse::css_into_node(&mut arena, root_id, &rules).unwrap();
+        let rules = css_parser.parse();
+        css_parse::css_into_node(&mut arena, root_id, &rules);
     }
     (root_id, arena)
 }
@@ -41,7 +41,7 @@ fn test_div_basic() {
     init();
     let (root_id, arena) = setup("<div>hello</div>", "");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("hello"), "div should render text");
@@ -54,7 +54,7 @@ fn test_div_with_color() {
     let css = "div { color: blue; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     let has_fg = tl.layout.iter().any(|b| b.fcolor == Some(Color::Blue));
     assert!(has_fg, "div color should be applied to text cells");
@@ -67,7 +67,7 @@ fn test_div_background_color() {
     let css = "div { background-color: yellow; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     let has_bg = tl.layout.iter().any(|b| b.bcolor == Some(Color::Yellow));
     assert!(has_bg, "div background-color should be applied");
@@ -81,7 +81,7 @@ fn test_div_bg_fills_full_row_default() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let content_idx = tl
@@ -110,7 +110,7 @@ fn test_div_width_50pct_left() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let content_idx = tl
@@ -153,7 +153,7 @@ fn test_div_width_fixed() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let content_idx = tl
@@ -192,7 +192,7 @@ fn test_div_text_align_center() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     // Find the first text cell; text "Centered" (8 chars) sits at col
@@ -220,7 +220,7 @@ fn test_div_text_align_right() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     // Find the first text cell; text "Right" (5 chars) sits at col
@@ -244,7 +244,7 @@ fn test_div_nested_preserves_text() {
     let html = "<div><p>A</p><div><p>B</p></div></div>";
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("A"), "outer div should contain A");
@@ -260,7 +260,7 @@ fn test_div_no_bg_does_not_fill_row() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let text_idx = tl.layout.iter().position(|b| b.word != " ").unwrap();
@@ -284,7 +284,7 @@ fn test_div_color_inherited_by_p() {
     let css = "div { color: magenta; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     let has_color = tl.layout.iter().any(|b| b.fcolor == Some(Color::Magenta));
     assert!(has_color, "div color should inherit to <p> descendant");
@@ -307,7 +307,7 @@ fn test_long_p_text_does_not_overflow_into_next_row() {
     let (root_id, arena) = setup(&html, "");
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     // The <p> occupies row 0 (1 row tall). Cells row 1+ belong to the <h2>.
@@ -342,7 +342,7 @@ fn test_long_p_text_stops_at_content_box_right_edge() {
     let (root_id, arena) = setup(&html, "");
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     // The <p> is 1 row tall. Row 1 should be untouched by the p (no 'x'

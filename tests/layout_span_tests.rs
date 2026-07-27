@@ -20,7 +20,7 @@ fn init() {
 
 fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     let mut html_parser = html_parse::Parser::new(html);
-    let (root_id, mut arena, embedded) = html_parser.parse().unwrap();
+    let (root_id, mut arena, embedded) = html_parser.parse();
     let combined = if css.is_empty() {
         embedded
     } else if embedded.is_empty() {
@@ -30,8 +30,8 @@ fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     };
     if !combined.trim().is_empty() {
         let mut css_parser = css_parse::Parser::new(&combined);
-        let rules = css_parser.parse().unwrap();
-        css_parse::css_into_node(&mut arena, root_id, &rules).unwrap();
+        let rules = css_parser.parse();
+        css_parse::css_into_node(&mut arena, root_id, &rules);
     }
     (root_id, arena)
 }
@@ -75,7 +75,7 @@ fn test_p_with_bold_span_paints_bold_run() {
     let css = ".b { font-weight: bold; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     // The "b" of "bold" must carry the BOLD flag.
@@ -101,7 +101,7 @@ fn test_p_with_italic_span_paints_italic_run() {
     let css = ".i { font-style: italic; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let italic_idx = find_cell_with_style(&tl, "i", |s| s.contains(FontStyle::ITALIC))
@@ -116,7 +116,7 @@ fn test_p_with_underline_span_paints_underline_run() {
     let css = ".u { text-decoration: underline; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let u_idx = find_cell_with_style(&tl, "u", |s| s.contains(FontStyle::UNDERLINED))
@@ -131,7 +131,7 @@ fn test_p_with_line_through_span_paints_crossed_run() {
     let css = ".lt { text-decoration: line-through; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let idx = find_cell_with_style(&tl, "x", |s| s.contains(FontStyle::CROSSED_OUT))
@@ -152,7 +152,7 @@ fn test_p_mixed_styles_in_single_row() {
     let css = ".b { font-weight: bold; } .i { font-style: italic; } .u { text-decoration: underline; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     // All four cells sit on the same row.
@@ -207,7 +207,7 @@ fn test_span_color_overrides_parent() {
     let css = ".red { color: red; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let r_idx = find_cell(&tl, "r").expect("'r' of 'red' should render");
@@ -231,7 +231,7 @@ fn test_span_color_with_inherited_parent_color() {
     let css = "div { color: magenta; } .green { color: green; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let g_idx = find_cell(&tl, "g").expect("'g' of 'go' should render");
@@ -254,7 +254,7 @@ fn test_nested_spans_accumulate_styles() {
         ".b { font-weight: bold; } .i { font-style: italic; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let b_idx = find_cell(&tl, "B").expect("outer 'B' should render");
@@ -304,7 +304,7 @@ fn test_span_inherits_parent_color_when_no_own() {
     let css = "div { color: magenta; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let x_idx = find_cell(&tl, "x").expect("span 'x' should render");
@@ -329,7 +329,7 @@ fn test_unstyled_runs_inherit_aside_bg() {
     let css = "aside { background-color: darkblue; } .b { font-weight: bold; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let p_idx = find_cell(&tl, "p").expect("plain 'p' should render");
@@ -364,7 +364,7 @@ fn test_text_align_center_counts_all_runs() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let a_idx = find_cell_with_style(&tl, "A", |s| s.contains(FontStyle::BOLD))
@@ -396,7 +396,7 @@ fn test_layout_box_exposes_runs_for_block_with_spans() {
     );
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
-    let boxes = layout_tree(&arena, root_id, containing, &mut cursor).unwrap();
+    let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
     let p_box = boxes.first().expect("should have the <p> box");
     let runs = p_box
         .runs
@@ -432,7 +432,7 @@ fn test_layout_box_runs_are_materialised_for_plain_block() {
     let (root_id, arena) = setup("<p>just text</p>", "");
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
-    let boxes = layout_tree(&arena, root_id, containing, &mut cursor).unwrap();
+    let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
     let p_box = boxes.first().expect("should have the <p> box");
     let runs = p_box.runs.as_ref().expect("plain <p> still materialises runs");
     assert_eq!(runs.len(), 1, "single text node becomes one run");
@@ -450,7 +450,7 @@ fn test_h1_prefix_is_a_separate_run() {
     let (root_id, arena) = setup("<h1>Title</h1>", "h1 { color: cyan; }");
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
-    let boxes = layout_tree(&arena, root_id, containing, &mut cursor).unwrap();
+    let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
     let h_box = boxes.first().expect("should have the <h1> box");
     let runs = h_box.runs.as_ref().expect("<h1> should expose runs");
     assert_eq!(
@@ -486,7 +486,7 @@ fn test_pure_span_inside_p_renders_text() {
     let css = "";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -518,7 +518,7 @@ fn test_font_styles_visual_test_mixed_inline() {
         .cu { color: green; text-decoration: underline; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     // Bold span first letter 'b'.

@@ -11,7 +11,7 @@ fn init() {
 
 fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     let mut html_parser = html_parse::Parser::new(html);
-    let (root_id, mut arena, embedded) = html_parser.parse().unwrap();
+    let (root_id, mut arena, embedded) = html_parser.parse();
     let combined = if css.is_empty() {
         embedded
     } else if embedded.is_empty() {
@@ -21,8 +21,8 @@ fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     };
     if !combined.trim().is_empty() {
         let mut css_parser = css_parse::Parser::new(&combined);
-        let rules = css_parser.parse().unwrap();
-        css_parse::css_into_node(&mut arena, root_id, &rules).unwrap();
+        let rules = css_parser.parse();
+        css_parse::css_into_node(&mut arena, root_id, &rules);
     }
     (root_id, arena)
 }
@@ -42,7 +42,7 @@ fn test_aside_basic() {
     init();
     let (root_id, arena) = setup("<aside>Side note</aside>", "");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("Side note"), "aside should contain text");
@@ -55,7 +55,7 @@ fn test_aside_with_color() {
     let css = "aside { color: blue; background-color: yellow; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     let has_fg = tl.layout.iter().any(|b| b.fcolor == Some(Color::Blue));
     let has_bg = tl.layout.iter().any(|b| b.bcolor == Some(Color::Yellow));
@@ -69,7 +69,7 @@ fn test_aside_with_nested_div() {
     let html = "<aside><div>Inner div</div></aside>";
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(
@@ -90,7 +90,7 @@ fn test_aside_width_50pct() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let block_left = 0;
@@ -132,7 +132,7 @@ fn test_aside_width_fixed_px() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let row = tl
@@ -164,7 +164,7 @@ fn test_aside_width_default_full() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let row = tl
@@ -198,7 +198,7 @@ fn test_aside_text_align_center() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     // The block spans cols 0..40; text "Centered" (8 chars) is centered, so it
@@ -241,7 +241,7 @@ fn test_aside_text_align_right() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     // The block spans cols 0..40; text "Right" (5 chars) is right-aligned, so
@@ -295,7 +295,7 @@ fn test_aside_bg_covers_nested_p_row() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let row0 = &tl.layout[0..cols];
@@ -338,7 +338,7 @@ fn test_aside_rect_height_includes_nested_children() {
     use htui::layout::{BoxConstraint, Cursor, tree::layout_tree};
     let containing = BoxConstraint::root(&term_map);
     let mut cursor = Cursor::new();
-    let boxes = layout_tree(&arena, root_id, containing, &mut cursor).unwrap();
+    let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
 
     let aside_box = boxes
         .iter()
@@ -372,7 +372,7 @@ fn test_aside_bg_covers_two_nested_p_rows() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     // Rows 0..2 are the aside's rect. Each row carries bg on non-text
@@ -412,7 +412,7 @@ fn test_header_spacing_rows_remain_bg_free() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     // Row 0: header content row — must be filled.
@@ -444,7 +444,7 @@ fn test_footer_spacing_rows_remain_bg_free() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     // Layout: row 0 = <p>, row 1 = footer content, rows 2 & 3 = spacing.
@@ -479,7 +479,7 @@ fn test_aside_with_nested_div_extends_bg_to_div_row() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let row0 = &tl.layout[0..cols];
@@ -517,7 +517,7 @@ fn test_aside_without_children_still_has_height_one() {
     use htui::layout::{BoxConstraint, Cursor, tree::layout_tree};
     let containing = BoxConstraint::root(&term_map);
     let mut cursor = Cursor::new();
-    let boxes = layout_tree(&arena, root_id, containing, &mut cursor).unwrap();
+    let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
 
     let aside_box = boxes
         .iter()
@@ -564,7 +564,7 @@ fn test_nested_p_text_inherits_aside_bg() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     for ch in ['3', '0', 'c', 'o', 'l'] {
@@ -591,7 +591,7 @@ fn test_nested_p_text_bg_wins_over_parent() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     for ch in ['k', 'i', 'd'] {
@@ -615,7 +615,7 @@ fn test_nested_p_inherits_through_intermediate_div() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let cell = cell_containing(&tl, 'X');
@@ -637,7 +637,7 @@ fn test_nested_p_inherits_when_parent_has_no_bg() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     for ch in ['f', 'o'] {
@@ -662,7 +662,7 @@ fn test_nested_p_in_aside_with_fixed_width_centered() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
 
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let aside_left = 0;

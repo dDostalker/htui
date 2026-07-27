@@ -36,7 +36,7 @@ fn build_test(arena: &mut NodeArena) -> (NodeId, NodeId) {
 fn test_parse_simple() {
     init();
     let mut p = Parser::new("p { color: red; }");
-    assert_eq!(p.parse().unwrap().0.len(), 1);
+    assert_eq!(p.parse().0.len(), 1);
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn test_css_into_node() {
     let mut m = IndexMap::new();
     m.insert("color".into(), "red".into());
     css.add(sel, m);
-    css_into_node(&mut arena, root, &css).unwrap();
+    css_into_node(&mut arena, root, &css);
     let div_id = arena[root].children[0];
     let p_id = arena[div_id].children[0];
     assert!(arena[p_id].css_attr.get_color().is_some());
@@ -270,7 +270,7 @@ fn test_background_color_does_not_inherit() {
     let mut m = IndexMap::new();
     m.insert("background-color".into(), "yellow".into());
     css.add(sel, m);
-    css_into_node(&mut arena, root, &css).unwrap();
+    css_into_node(&mut arena, root, &css);
 
     let div_id = arena[root].children[0];
     let p_id = arena[div_id].children[0];
@@ -298,7 +298,7 @@ fn test_color_does_inherit() {
     let mut m = IndexMap::new();
     m.insert("color".into(), "red".into());
     css.add(sel, m);
-    css_into_node(&mut arena, root, &css).unwrap();
+    css_into_node(&mut arena, root, &css);
 
     let div_id = arena[root].children[0];
     let p_id = arena[div_id].children[0];
@@ -322,7 +322,7 @@ fn test_full_parse_pipeline_handles_important_and_comments() {
          h1 { color: red !important; font-weight: bold; }\n\
          h2 { /* nothing */ font-style: italic; }",
     );
-    let _rules = parser.parse().unwrap();
+    let _rules = parser.parse();
 
     let mut arena = NodeArena::default();
     let root = arena.insert(Node::from(NodeType::Global));
@@ -335,7 +335,7 @@ fn test_full_parse_pipeline_handles_important_and_comments() {
     decls.insert("color".into(), "red".into());
     decls.insert("font-weight".into(), "bold".into());
     css.add(sel_h1, decls);
-    css_into_node(&mut arena, root, &css).unwrap();
+    css_into_node(&mut arena, root, &css);
 
     assert_eq!(arena[h1].css_attr.get_color(), Some(Color::Red));
     assert_eq!(arena[h1].css_attr.get_font_weight(), FontWeight::Bold);

@@ -49,13 +49,12 @@ fn find_img_node(arena: &node::NodeArena, root_id: node::NodeId) -> node::NodeId
 fn layout_img_clamps_cols_to_containing_width() {
     init();
     let mut p = html_parse::Parser::new(r#"<img src="x.png" width="200" height="100">"#);
-    let (root_id, arena, _) = p.parse().unwrap();
+    let (root_id, arena, _) = p.parse();
     let img_id = find_img_node(&arena, root_id);
 
     let containing = BoxConstraint { x: 0, width: 80 };
     let mut cursor = Cursor::new();
     let lb = layout_img(&arena, img_id, containing, &mut cursor, FontContext::ROOT)
-        .unwrap()
         .expect("<img> should produce a LayoutBox");
 
     match lb.kind {
@@ -79,13 +78,12 @@ fn layout_img_clamps_cols_to_containing_width() {
 fn layout_img_unclamped_when_img_fits() {
     init();
     let mut p = html_parse::Parser::new(r#"<img src="x.png" width="120" height="60">"#);
-    let (root_id, arena, _) = p.parse().unwrap();
+    let (root_id, arena, _) = p.parse();
     let img_id = find_img_node(&arena, root_id);
 
     let containing = BoxConstraint { x: 0, width: 80 };
     let mut cursor = Cursor::new();
     let lb = layout_img(&arena, img_id, containing, &mut cursor, FontContext::ROOT)
-        .unwrap()
         .unwrap();
 
     // 120 px / 2 = 60 cells (no clamp), 60 px / 4 = 15 cells.
@@ -126,7 +124,7 @@ fn paint_image_at_fills_requested_cell_area() {
     write_test_png(&img_path);
 
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
 
     // Request 40 cells wide × 10 cells tall. After the fix, `_create_img`
     // multiplies by (2, 4) internally and uses `resize_exact` so the source

@@ -7,7 +7,6 @@ use std::io::{Write, stdout};
 use std::sync::Arc;
 use std::sync::mpsc;
 
-use anyhow::Result;
 use crossterm::{
     cursor::{Hide, MoveTo, Show},
     event::{DisableMouseCapture, EnableMouseCapture},
@@ -27,16 +26,16 @@ use crate::{
     tui::graph_api::{RenderCmd, TermLayout, trigger_refresh},
 };
 
-fn parse_and_apply(html: &str, css_rules: &CssRule) -> Result<(NodeId, NodeArena)> {
+fn parse_and_apply(html: &str, css_rules: &CssRule) -> (NodeId, NodeArena) {
     let mut html_parser = html::html_parse::Parser::new(html);
-    let (root_id, mut arena, _embedded) = html_parser.parse()?;
-    css_parse::css_into_node(&mut arena, root_id, css_rules)?;
-    Ok((root_id, arena))
+    let (root_id, mut arena, _embedded) = html_parser.parse();
+    css_parse::css_into_node(&mut arena, root_id, css_rules);
+    (root_id, arena)
 }
 
-fn build_css_rules(html: &str, css: &str) -> Result<CssRule> {
+fn build_css_rules(html: &str, css: &str) -> CssRule {
     let mut html_parser = html::html_parse::Parser::new(html);
-    let (_root_id, _arena, embedded_css) = html_parser.parse()?;
+    let (_root_id, _arena, embedded_css) = html_parser.parse();
 
     let combined = if css.is_empty() {
         embedded_css
@@ -45,7 +44,7 @@ fn build_css_rules(html: &str, css: &str) -> Result<CssRule> {
     };
 
     if combined.trim().is_empty() {
-        return Ok(CssRule::new());
+        return CssRule::new();
     }
 
     let mut css_parser = css_parse::Parser::new(&combined);
@@ -92,13 +91,7 @@ fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css_rules: Arc<C
             }
 
             RenderCmd::Redraw { scroll_y, zoom } => {
-                let (root_id, arena) = match parse_and_apply(&html, &css_rules) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        log::error!("Parse failed: {}", e);
-                        continue;
-                    }
-                };
+                let (root_id, arena) = parse_and_apply(&html, &css_rules);
 
                 let term_map = match TermMap::get_ter_map() {
                     Ok(m) => m,
@@ -107,13 +100,7 @@ fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css_rules: Arc<C
                         continue;
                     }
                 };
-                let mut tl = match TermLayout::new(&term_map, zoom) {
-                    Ok(t) => t,
-                    Err(e) => {
-                        log::error!("Failed to create layout: {}", e);
-                        continue;
-                    }
-                };
+                let mut tl = TermLayout::new(&term_map, zoom);
                 if let Err(e) = tl.draw(&arena, root_id, &term_map) {
                     log::error!("Layout failed: {}", e);
                     continue;
@@ -153,13 +140,7 @@ pub fn render(html: &str, css: &str) {
         return;
     }
 
-    let css_rules = match build_css_rules(html, css) {
-        Ok(r) => Arc::new(r),
-        Err(e) => {
-            log::error!("CSS parse failed: {}", e);
-            Arc::new(CssRule::new())
-        }
-    };
+    let css_rules = Arc::new(build_css_rules(html, css)); 
 
     let html: Arc<str> = Arc::from(html);
     let (tx, rx) = mpsc::channel::<RenderCmd>();

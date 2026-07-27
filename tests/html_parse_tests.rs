@@ -23,7 +23,7 @@ fn test_tag_map() {
 fn test_parse_basic() {
     init();
     let mut p = Parser::new("<div><p>Hello</p></div>");
-    let (root, arena, _) = p.parse().unwrap();
+    let (root, arena, _) = p.parse();
     assert!(arena[root].child_count() > 0);
 }
 
@@ -31,6 +31,6 @@ fn test_parse_basic() {
 fn test_style_extract() {
     init();
     let mut p = Parser::new("<div><style>p{color:red}</style><p>Hi</p></div>");
-    let (_root, _arena, css) = p.parse().unwrap();
+    let (_root, _arena, css) = p.parse();
     assert!(css.contains("p{color:red}"));
 }

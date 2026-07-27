@@ -1,4 +1,3 @@
-use anyhow::Result;
 
 use crate::{
     layout::{
@@ -25,7 +24,7 @@ pub fn layout_hn(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     font_ctx: FontContext,
-) -> Result<Option<LayoutBox>> {
+) -> Option<LayoutBox> {
     let node = &arena[node_id];
     let level = match node.node_type {
         NodeType::H1 => 1,
@@ -33,7 +32,7 @@ pub fn layout_hn(
         NodeType::H3 => 3,
         NodeType::H4 => 4,
         NodeType::H5 => 5,
-        _ => return Ok(None),
+        _ => return None,
     };
 
     // `#`-prefix is its own run carried at the heading's resolved style,
@@ -47,7 +46,7 @@ pub fn layout_hn(
         node.css_attr.get_bg_color(),
     );
 
-    Ok(Some(layout_block(
+    Some(layout_block(
         arena,
         node,
         node_id,
@@ -58,5 +57,5 @@ pub fn layout_hn(
             ..Default::default()
         },
         font_ctx,
-    )?))
+    ))
 }

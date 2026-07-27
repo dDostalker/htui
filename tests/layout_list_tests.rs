@@ -11,7 +11,7 @@ fn init() {
 
 fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     let mut html_parser = html_parse::Parser::new(html);
-    let (root_id, mut arena, embedded) = html_parser.parse().unwrap();
+    let (root_id, mut arena, embedded) = html_parser.parse();
     let combined = if css.is_empty() {
         embedded
     } else if embedded.is_empty() {
@@ -21,8 +21,8 @@ fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     };
     if !combined.trim().is_empty() {
         let mut css_parser = css_parse::Parser::new(&combined);
-        let rules = css_parser.parse().unwrap();
-        css_parse::css_into_node(&mut arena, root_id, &rules).unwrap();
+        let rules = css_parser.parse();
+        css_parse::css_into_node(&mut arena, root_id, &rules);
     }
     (root_id, arena)
 }
@@ -69,7 +69,7 @@ fn test_ul_renders_bullet_markers() {
     init();
     let (root_id, arena) = setup("<ul><li>One</li><li>Two</li></ul>", "");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -86,7 +86,7 @@ fn test_ol_renders_sequential_markers() {
         "",
     );
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -104,7 +104,7 @@ fn test_ol_ordinal_skips_non_li_siblings() {
     init();
     let (root_id, arena) = setup("<ol><li>A</li>garbage<li>B</li></ol>", "");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -118,7 +118,7 @@ fn test_empty_li_still_renders_marker() {
     init();
     let (root_id, arena) = setup("<ul><li></li><li>Two</li></ul>", "");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -134,7 +134,7 @@ fn test_li_items_each_occupy_their_own_row() {
     init();
     let (root_id, arena) = setup("<ul><li>A</li><li>B</li></ul>", "");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let (a_idx, a_row, _) = cell_containing(&tl, "A").expect("missing 'A'");
@@ -149,7 +149,7 @@ fn test_ul_marker_sits_left_of_body() {
     init();
     let (root_id, arena) = setup("<ul><li>Hello</li></ul>", "");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let (_bullet_idx, bullet_row, bullet_col) =
@@ -170,7 +170,7 @@ fn test_nested_ul_indents_inner_items() {
     let html = "<ul><li>Outer A<ul><li>Inner A</li></ul></li><li>Outer B</li></ul>";
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     // Find all bullet markers. The first one (row 0) belongs to the outer
@@ -221,7 +221,7 @@ fn test_nested_ol_in_ul_renders_mixed_markers() {
     let html = "<ul><li>Outer<ol><li>Inner One</li><li>Inner Two</li></ol></li></ul>";
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -237,7 +237,7 @@ fn test_li_with_span_styling() {
     let css = "ul li .bold { font-weight: bold; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -264,7 +264,7 @@ fn test_li_with_css_color() {
     let css = "ul li { color: red; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let has_red = tl.layout.iter().any(|b| b.fcolor == Some(Color::Red));
@@ -278,7 +278,7 @@ fn test_ul_with_bg_color_fills_list_rect() {
     let css = "ul { background-color: yellow; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let yellow_count = tl
@@ -297,7 +297,7 @@ fn test_orphan_li_uses_dash_marker() {
     init();
     let (root_id, arena) = setup("<li>orphan</li>", "");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
@@ -318,7 +318,7 @@ fn test_ol_double_digit_ordinals() {
         "<ol><li>a</li><li>b</li><li>c</li><li>d</li><li>e</li><li>f</li><li>g</li><li>h</li><li>i</li><li>j</li></ol>";
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();

@@ -32,7 +32,7 @@ fn mock_term_map() -> TermMap {
 fn draw(html: &str, css: &str) -> (TermMap, TermLayout) {
     let term_map = mock_term_map();
     let mut html_parser = html_parse::Parser::new(html);
-    let (root_id, mut arena, embedded) = html_parser.parse().unwrap();
+    let (root_id, mut arena, embedded) = html_parser.parse();
     let combined = if css.is_empty() {
         embedded
     } else if embedded.is_empty() {
@@ -42,10 +42,10 @@ fn draw(html: &str, css: &str) -> (TermMap, TermLayout) {
     };
     if !combined.trim().is_empty() {
         let mut css_parser = css_parse::Parser::new(&combined);
-        let rules = css_parser.parse().unwrap();
-        css_parse::css_into_node(&mut arena, root_id, &rules).unwrap();
+        let rules = css_parser.parse();
+        css_parse::css_into_node(&mut arena, root_id, &rules);
     }
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
     (term_map, tl)
 }
@@ -123,15 +123,15 @@ fn dump_font_size_wide_canvas() {
     let html = include_str!("../visual_test/src/font_size/index.html");
     let term_map = TermMap { columns: 240, rows: 60 };
     let mut html_parser = html_parse::Parser::new(html);
-    let (root_id, mut arena, embedded) = html_parser.parse().unwrap();
+    let (root_id, mut arena, embedded) = html_parser.parse();
     if !embedded.trim().is_empty() {
         let mut css_parser = css_parse::Parser::new(&embedded);
-        let rules = css_parser.parse().unwrap();
-        css_parse::css_into_node(&mut arena, root_id, &rules).unwrap();
+        let rules = css_parser.parse();
+        css_parse::css_into_node(&mut arena, root_id, &rules);
     }
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     let mut cursor = Cursor::new();
-    let boxes = layout_tree(&arena, root_id, BoxConstraint::root(&term_map), &mut cursor).unwrap();
+    let boxes = layout_tree(&arena, root_id, BoxConstraint::root(&term_map), &mut cursor);
     fn walk(boxes: &[htui::layout::LayoutBox], depth: usize) {
         for b in boxes {
             let indent = " ".repeat(depth);
@@ -185,7 +185,7 @@ fn dump_pad_em_text_node() {
     use htui::html::html_parse;
     let html = include_str!("../visual_test/src/font_size/index.html");
     let mut html_parser = html_parse::Parser::new(html);
-    let (root_id, arena, _embedded) = html_parser.parse().unwrap();
+    let (root_id, arena, _embedded) = html_parser.parse();
     fn walk(arena: &htui::tdom::node::NodeArena, id: htui::tdom::node::NodeId, depth: usize) {
         let node = &arena[id];
         let indent = " ".repeat(depth);
@@ -333,16 +333,16 @@ fn dump_layout_for_pad_em() {
 "##;
     let term_map = TermMap { columns: COLS, rows: ROWS };
     let mut html_parser = html_parse::Parser::new(html);
-    let (root_id, mut arena, embedded) = html_parser.parse().unwrap();
+    let (root_id, mut arena, embedded) = html_parser.parse();
     let combined = if embedded.is_empty() { String::new() } else { embedded };
     if !combined.trim().is_empty() {
         let mut css_parser = css_parse::Parser::new(&combined);
-        let rules = css_parser.parse().unwrap();
-        css_parse::css_into_node(&mut arena, root_id, &rules).unwrap();
+        let rules = css_parser.parse();
+        css_parse::css_into_node(&mut arena, root_id, &rules);
     }
-    let mut tl = TermLayout::new(&term_map, 1.0).unwrap();
+    let mut tl = TermLayout::new(&term_map, 1.0);
     let mut cursor = Cursor::new();
-    let boxes = layout_tree(&arena, root_id, BoxConstraint::root(&term_map), &mut cursor).unwrap();
+    let boxes = layout_tree(&arena, root_id, BoxConstraint::root(&term_map), &mut cursor);
     fn walk(boxes: &[htui::layout::LayoutBox], depth: usize) {
         for b in boxes {
             let indent = " ".repeat(depth);
@@ -365,7 +365,7 @@ fn dump_layout_for_pad_em() {
         }
     }
     walk(&boxes, 0);
-    paint_layout_tree(&boxes, &arena, &mut tl).unwrap();
+    paint_layout_tree(&boxes, &arena, &mut tl);
     let cols = term_map.columns as usize;
     let total = (tl.rendered_rows as usize).min(ROWS as usize);
     eprintln!("---- pad-em test ----");
