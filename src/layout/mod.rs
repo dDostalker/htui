@@ -59,6 +59,8 @@ pub static DEFAULT_LAYOUT: &[LayoutFn] = &[
     layout_fn::head::layout_hn,
     layout_fn::img::layout_img,
     layout_fn::div::layout_div,
+    layout_fn::html::layout_html,
+    layout_fn::body::layout_body,
     layout_fn::header_footer::layout_header,
     layout_fn::header_footer::layout_footer,
     layout_fn::aside::layout_aside,
