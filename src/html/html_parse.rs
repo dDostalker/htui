@@ -76,7 +76,6 @@ fn convert_children(
                 let tag = name.local.as_ref();
                 match tag_name_to_node_type(tag) {
                     Some(node_type) => {
-                        // ---- <style>: 提取 CSS ----
                         if node_type == NodeType::Style {
                             let css = extract_text_content(child_handle);
                             if !css.trim().is_empty() {
@@ -85,7 +84,6 @@ fn convert_children(
                             }
                             return;
                         }
-                        // ---- <link>: 读取外部 CSS ----
                         if node_type == NodeType::Link {
                             let a = {
                                 let ar = attrs.borrow();

@@ -27,7 +27,7 @@ impl TermMap {
 
 impl TermLayout {
     pub fn new(map: &TermMap, zoom: f32) -> Result<TermLayout> {
-        let max_cells = map.columns as usize * map.rows as usize * 20;
+        let max_cells = map.columns as usize * map.rows as usize * 2;
         let layout = vec![Block::new(" ".to_string(), None, None, FontStyle::empty()); max_cells];
         Ok(TermLayout {
             layout,
