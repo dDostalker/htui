@@ -48,9 +48,17 @@ impl Parser {
         }
         let mut css = CssRule::new();
         for (sel_text, declarations) in state.rules.drain(..) {
-            match CssSelector::from_str(&sel_text) {
-                std::result::Result::Ok(sel) => css.add(sel, declarations),
-                std::result::Result::Err(e) => warn!("Selector parse fail: {}: {}", sel_text, e),
+            // Split comma-separated selectors: `table, td { ... }` is two
+            // independent rules targeting distinct node types. Each
+            // sub-selector is parsed in isolation so it can stand on its
+            // own when applied via the cascade.
+            for sub_sel in split_top_level_commas(&sel_text) {
+                match CssSelector::from_str(sub_sel) {
+                    std::result::Result::Ok(sel) => css.add(sel, declarations.clone()),
+                    std::result::Result::Err(e) => {
+                        warn!("Selector parse fail: {}: {}", sub_sel, e);
+                    }
+                }
             }
         }
         debug!("CSS parsed: {} rules", css.0.len());
@@ -139,6 +147,36 @@ fn clean_value_text(raw: &str) -> String {
         Some(idx) => trimmed[..idx].trim_end().to_string(),
         None => trimmed.to_string(),
     }
+}
+
+/// Split a comma-separated selector list at top-level commas only.
+///
+/// Commas inside `()` (e.g. `:not(a, b)`) are preserved so pseudo-class
+/// argument lists stay intact. The returned slices are trimmed and any
+/// empty entries (caused by stray commas) are dropped.
+fn split_top_level_commas(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    let mut last = 0usize;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                let part = s[last..i].trim();
+                if !part.is_empty() {
+                    out.push(part);
+                }
+                last = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let tail = s[last..].trim();
+    if !tail.is_empty() {
+        out.push(tail);
+    }
+    out
 }
 
 /// Parse a CSS declaration block text into key-value pairs.

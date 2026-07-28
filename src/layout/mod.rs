@@ -68,4 +68,9 @@ pub static DEFAULT_LAYOUT: &[LayoutFn] = &[
     layout_fn::list::layout_li,
     layout_fn::list::layout_ol,
     layout_fn::list::layout_ul,
+    layout_fn::table::layout_table,
+    layout_fn::table::layout_tr,
+    layout_fn::table::layout_th,
+    layout_fn::table::layout_td,
+    layout_fn::table::layout_row_group,
 ];

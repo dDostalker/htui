@@ -1,0 +1,78 @@
+<!doctype html>
+<!--
+  ============================================
+  htui 表格视觉测试 — table
+  覆盖：基础表格、表头、宽窄列、行分组、单元格样式
+  浏览器直接打开本文件即可看到与终端渲染对应相同的样式
+  ============================================
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>htui Table Visual Test</title>
+    <style>
+        body { color: white; }
+        h1 { color: cyan; }
+        h2 { color: yellow; }
+        table { border: 1px solid white; padding: 0; }
+        th { font-weight: bold; text-align: center; }
+        td { color: white; }
+        tr:nth-child(even) td { background-color: darkgrey; }
+        tr:nth-child(odd) td { background-color: black; }
+        th { color: cyan; background-color: darkblue; }
+        .num { text-align: right; color: yellow; }
+        .small { color: green; }
+    </style>
+</head>
+<body>
+    <h1>htui Table Visual Test</h1>
+
+    <h2>1. Basic table</h2>
+    <table>
+        <tr><th>Name</th><th>Role</th><th>City</th></tr>
+        <tr><td>Alice</td><td>Engineer</td><td>Berlin</td></tr>
+        <tr><td>Bob</td><td>Designer</td><td>Tokyo</td></tr>
+        <tr><td>Cleo</td><td>Manager</td><td>Paris</td></tr>
+    </table>
+
+    <h2>2. Header section (thead)</h2>
+    <table>
+        <thead>
+            <tr><th>ID</th><th>Item</th><th>Qty</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>1</td><td>Apple</td><td class="num">12</td></tr>
+            <tr><td>2</td><td>Banana</td><td class="num">7</td></tr>
+            <tr><td>3</td><td>Cherry</td><td class="num">3</td></tr>
+        </tbody>
+    </table>
+
+    <h2>3. With tfoot</h2>
+    <table>
+        <thead>
+            <tr><th>Item</th><th>Price</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>Coffee</td><td class="num">3</td></tr>
+            <tr><td>Tea</td><td class="num">2</td></tr>
+        </tbody>
+        <tfoot>
+            <tr><td>Total</td><td class="num">5</td></tr>
+        </tfoot>
+    </table>
+
+    <h2>4. Width auto-sized to content</h2>
+    <table>
+        <tr><th>A</th><th>Longer Header</th><th>X</th></tr>
+        <tr><td>x</td><td>medium</td><td>y</td></tr>
+        <tr><td>longer cell text</td><td>m</td><td>z</td></tr>
+    </table>
+
+    <h2>5. Cells with rich content</h2>
+    <table>
+        <tr><th>Feature</th><th>Status</th></tr>
+        <tr><td>Tables</td><td class="small">OK</td></tr>
+        <tr><td>Lists</td><td class="small">OK</td></tr>
+    </table>
+</body>
+</html>

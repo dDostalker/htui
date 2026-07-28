@@ -7,3 +7,4 @@ pub mod html;
 pub mod img;
 pub mod list;
 pub mod p;
+pub mod table;
