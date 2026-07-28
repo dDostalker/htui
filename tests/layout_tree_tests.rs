@@ -287,3 +287,39 @@ fn layout_buffer_holds_full_document() {
         tl.rendered_rows, layout_rows,
     );
 }
+
+#[test]
+fn draw_is_reusable_across_redraws() {
+    // Re-rendering into the same canvas must clear stale cells from the
+    // previous tree, otherwise ghost content remains at rows the new tree
+    // does not touch. Compare a fresh canvas against one that has been
+    // drawn into twice — the resulting `layout` Vec must be byte-identical.
+    fn snapshot(html: &str) -> Vec<u8> {
+        let (root_id, arena) = setup(html, "");
+        let term_map = TermMap { columns: 80, rows: 24 };
+        let mut tl = TermLayout::new(&term_map, 1.0);
+        tl.draw(&arena, root_id, &term_map).unwrap();
+        tl.layout.iter().flat_map(|b| b.word.as_bytes().iter().copied()).collect()
+    }
+
+    let first_html = "<p>hello world</p>";
+    let second_html = "<p>goodbye</p><p>extra row below</p>";
+
+    let fresh = snapshot(second_html);
+
+    let term_map = TermMap { columns: 80, rows: 24 };
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    let (root1, arena1) = setup(first_html, "");
+    tl.draw(&arena1, root1, &term_map).unwrap();
+    let (root2, arena2) = setup(second_html, "");
+    tl.draw(&arena2, root2, &term_map).unwrap();
+
+    let reused: Vec<u8> = tl.layout.iter()
+        .flat_map(|b| b.word.as_bytes().iter().copied())
+        .collect();
+
+    assert_eq!(
+        fresh, reused,
+        "second draw on reused canvas must wipe stale cells from the first draw"
+    );
+}

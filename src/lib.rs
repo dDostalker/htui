@@ -101,7 +101,21 @@ fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css_rules: Arc<C
                         continue;
                     }
                 };
-                let mut tl = TermLayout::new(&term_map, zoom);
+
+                // Reuse the existing canvas when its dimensions still match
+                // the terminal. Only allocate a fresh Vec on the first render
+                // or after a terminal resize, when the buffer size must change.
+                let size_changed = match term_layout.as_ref() {
+                    Some(tl) => tl.columns != term_map.columns || tl.rows != term_map.rows,
+                    None => true,
+                };
+                if size_changed {
+                    term_layout = Some(TermLayout::new(&term_map, zoom));
+                }
+                let tl = term_layout
+                    .as_mut()
+                    .expect("TermLayout just allocated above or reused from prior render");
+
                 if let Err(e) = tl.draw(&arena, root_id, &term_map) {
                     log::error!("Layout failed: {}", e);
                     continue;
@@ -117,8 +131,6 @@ fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css_rules: Arc<C
                 if let Err(e) = stdout().flush() {
                     log::error!("Failed to flush stdout: {}", e);
                 }
-
-                term_layout = Some(tl);
             }
         }
     }
