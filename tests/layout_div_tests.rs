@@ -300,10 +300,7 @@ fn test_long_p_text_does_not_overflow_into_next_row() {
     // right edge, so a 1-row `<p>` must NOT write past col 79.
     init();
     let long_text = "A longer paragraph that contains multiple sentences. This demonstrates how text wrapping and layout work in the terminal renderer. The text should flow naturally within the available terminal width.";
-    let html = format!(
-        "<p>{}</p><h2>Next</h2>",
-        long_text
-    );
+    let html = format!("<p>{}</p><h2>Next</h2>", long_text);
     let (root_id, arena) = setup(&html, "");
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
@@ -319,14 +316,12 @@ fn test_long_p_text_does_not_overflow_into_next_row() {
         // either the empty default (no fg, no bg) or get overwritten by
         // the next paint pass for the <h2>. We assert no p-coloured
         // character remains in those cells.
-        let has_p_text = !cell.word.is_empty()
-            && cell.word != " "
-            && cell.fcolor == Some(Color::Grey);
+        let has_p_text =
+            !cell.word.is_empty() && cell.word != " " && cell.fcolor == Some(Color::Grey);
         assert!(
             !has_p_text,
             "p text should not bleed past row 0 — found {:?} at cell index {}",
-            cell.word,
-            p_row_end
+            cell.word, p_row_end
         );
     }
 }

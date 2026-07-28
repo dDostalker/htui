@@ -10,10 +10,10 @@
 //! cargo test --test layout_box_model_debug_tests -- --nocapture
 //! ```
 
+use crossterm::style::Color as CtColor;
 use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
 use htui::tui::graph_api::TermLayout;
-use crossterm::style::Color as CtColor;
 
 fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
@@ -26,7 +26,10 @@ const ROWS: u16 = 60;
 // holds up at non-typical widths (e.g. 200+).
 
 fn mock_term_map() -> TermMap {
-    TermMap { columns: COLS, rows: ROWS }
+    TermMap {
+        columns: COLS,
+        rows: ROWS,
+    }
 }
 
 fn draw(html: &str, css: &str) -> (TermMap, TermLayout) {
@@ -118,10 +121,13 @@ fn dump_visual_font_size() {
 fn dump_font_size_wide_canvas() {
     init();
     use htui::html::html_parse;
-    use htui::layout::{BoxConstraint, Cursor};
     use htui::layout::tree::layout_tree;
+    use htui::layout::{BoxConstraint, Cursor};
     let html = include_str!("../visual_test/src/font_size/index.html");
-    let term_map = TermMap { columns: 240, rows: 60 };
+    let term_map = TermMap {
+        columns: 240,
+        rows: 60,
+    };
     let mut html_parser = html_parse::Parser::new(html);
     let (root_id, mut arena, embedded) = html_parser.parse();
     if !embedded.trim().is_empty() {
@@ -135,19 +141,36 @@ fn dump_font_size_wide_canvas() {
     fn walk(boxes: &[htui::layout::LayoutBox], depth: usize) {
         for b in boxes {
             let indent = " ".repeat(depth);
-            let runs_dbg: Vec<String> = b.runs.as_ref().map(|rs| {
-                rs.iter().map(|r| format!("text={:?} bg={:?}", r.text, r.bg)).collect()
-            }).unwrap_or_default();
+            let runs_dbg: Vec<String> = b
+                .runs
+                .as_ref()
+                .map(|rs| {
+                    rs.iter()
+                        .map(|r| format!("text={:?} bg={:?}", r.text, r.bg))
+                        .collect()
+                })
+                .unwrap_or_default();
             eprintln!(
                 "{indent}node={:?} rect=({},{},w={},h={}) kind={:?} fs={} pad=t{}r{}b{}l{} border=t{}r{}b{}l{} mar=t{}r{}b{}l{} runs={:?}",
                 b.node_id,
-                b.rect.x, b.rect.y, b.rect.width, b.rect.height,
+                b.rect.x,
+                b.rect.y,
+                b.rect.width,
+                b.rect.height,
                 b.kind,
                 b.font_size_cells,
-                b.box_edges.padding.top, b.box_edges.padding.right, b.box_edges.padding.bottom, b.box_edges.padding.left,
-                b.box_edges.border.top.thickness(), b.box_edges.border.right.thickness(),
-                b.box_edges.border.bottom.thickness(), b.box_edges.border.left.thickness(),
-                b.box_edges.margin.top, b.box_edges.margin.right, b.box_edges.margin.bottom, b.box_edges.margin.left,
+                b.box_edges.padding.top,
+                b.box_edges.padding.right,
+                b.box_edges.padding.bottom,
+                b.box_edges.padding.left,
+                b.box_edges.border.top.thickness(),
+                b.box_edges.border.right.thickness(),
+                b.box_edges.border.bottom.thickness(),
+                b.box_edges.border.left.thickness(),
+                b.box_edges.margin.top,
+                b.box_edges.margin.right,
+                b.box_edges.margin.bottom,
+                b.box_edges.margin.left,
                 runs_dbg,
             );
             walk(&b.children, depth + 1);
@@ -261,16 +284,21 @@ fn dump_full_font_size_per_cell() {
 #[test]
 fn dump_visual_font_size_with_markers() {
     init();
-    let (term_map, tl) = draw(
-        include_str!("../visual_test/src/font_size/index.html"),
-        "",
-    );
+    let (term_map, tl) = draw(include_str!("../visual_test/src/font_size/index.html"), "");
     let cols = term_map.columns as usize;
-    eprintln!("---- cols={cols} layout_len={} rendered_rows={} ----", tl.layout.len(), tl.rendered_rows);
+    eprintln!(
+        "---- cols={cols} layout_len={} rendered_rows={} ----",
+        tl.layout.len(),
+        tl.rendered_rows
+    );
     let total = (tl.rendered_rows as usize).min(ROWS as usize);
     // Build a column ruler.
-    let ruler1 = (0..cols).map(|c| (b'0' + (c % 10) as u8) as char).collect::<String>();
-    let ruler2 = (0..(cols / 10)).map(|c| char::from(b'0' + c as u8)).collect::<String>();
+    let ruler1 = (0..cols)
+        .map(|c| (b'0' + (c % 10) as u8) as char)
+        .collect::<String>();
+    let ruler2 = (0..(cols / 10))
+        .map(|c| char::from(b'0' + c as u8))
+        .collect::<String>();
     eprintln!("       {}", ruler2);
     eprintln!("       {}", ruler1);
     for r in 28..=42 {
@@ -290,7 +318,15 @@ fn dump_visual_font_size_with_markers() {
                 line.push('.');
             }
         }
-        eprintln!("row {r:>2}: {} |len={}| bytes={}", line, line.len(), line.bytes().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" "));
+        eprintln!(
+            "row {r:>2}: {} |len={}| bytes={}",
+            line,
+            line.len(),
+            line.bytes()
+                .map(|b| format!("{b:02x}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
         if r == 32 {
             eprintln!("    ---- chars 0-25 of line ----");
             for (i, ch) in line.chars().take(25).enumerate() {
@@ -311,8 +347,16 @@ fn dump_visual_font_size_with_markers() {
                 } else {
                     ".".to_string()
                 };
-                let line_char = chars.get(c).copied().map(|x| x.to_string()).unwrap_or_else(|| "<oob>".into());
-                eprintln!("    col {c:>3}: cell.value={v:?} | line_char={line_char:?} | line.len={} chars.len={}", line.len(), chars.len());
+                let line_char = chars
+                    .get(c)
+                    .copied()
+                    .map(|x| x.to_string())
+                    .unwrap_or_else(|| "<oob>".into());
+                eprintln!(
+                    "    col {c:>3}: cell.value={v:?} | line_char={line_char:?} | line.len={} chars.len={}",
+                    line.len(),
+                    chars.len()
+                );
             }
         }
     }
@@ -322,19 +366,26 @@ fn dump_visual_font_size_with_markers() {
 fn dump_layout_for_pad_em() {
     init();
     use htui::html::html_parse;
-    use htui::layout::{BoxConstraint, Cursor};
-    use htui::layout::tree::layout_tree;
     use htui::layout::paint::paint_layout_tree;
+    use htui::layout::tree::layout_tree;
+    use htui::layout::{BoxConstraint, Cursor};
 
     let html = r##"<!DOCTYPE html>
 <html><head><style>
 .pad-em { font-size: 2em; padding: 0.5em 1em; background-color: darkgreen; color: white; }
 </style></head><body><div><p class="pad-em">em padding</p></div></body></html>
 "##;
-    let term_map = TermMap { columns: COLS, rows: ROWS };
+    let term_map = TermMap {
+        columns: COLS,
+        rows: ROWS,
+    };
     let mut html_parser = html_parse::Parser::new(html);
     let (root_id, mut arena, embedded) = html_parser.parse();
-    let combined = if embedded.is_empty() { String::new() } else { embedded };
+    let combined = if embedded.is_empty() {
+        String::new()
+    } else {
+        embedded
+    };
     if !combined.trim().is_empty() {
         let mut css_parser = css_parse::Parser::new(&combined);
         let rules = css_parser.parse();
@@ -346,19 +397,36 @@ fn dump_layout_for_pad_em() {
     fn walk(boxes: &[htui::layout::LayoutBox], depth: usize) {
         for b in boxes {
             let indent = " ".repeat(depth);
-            let runs_dbg: Vec<String> = b.runs.as_ref().map(|rs| {
-                rs.iter().map(|r| format!("text={:?} bg={:?}", r.text, r.bg)).collect()
-            }).unwrap_or_default();
+            let runs_dbg: Vec<String> = b
+                .runs
+                .as_ref()
+                .map(|rs| {
+                    rs.iter()
+                        .map(|r| format!("text={:?} bg={:?}", r.text, r.bg))
+                        .collect()
+                })
+                .unwrap_or_default();
             eprintln!(
                 "{indent}node={:?} rect=({},{},w={},h={}) kind={:?} fs={} pad=t{}r{}b{}l{} border=t{}r{}b{}l{} mar=t{}r{}b{}l{} runs={:?}",
                 b.node_id,
-                b.rect.x, b.rect.y, b.rect.width, b.rect.height,
+                b.rect.x,
+                b.rect.y,
+                b.rect.width,
+                b.rect.height,
                 b.kind,
                 b.font_size_cells,
-                b.box_edges.padding.top, b.box_edges.padding.right, b.box_edges.padding.bottom, b.box_edges.padding.left,
-                b.box_edges.border.top.thickness(), b.box_edges.border.right.thickness(),
-                b.box_edges.border.bottom.thickness(), b.box_edges.border.left.thickness(),
-                b.box_edges.margin.top, b.box_edges.margin.right, b.box_edges.margin.bottom, b.box_edges.margin.left,
+                b.box_edges.padding.top,
+                b.box_edges.padding.right,
+                b.box_edges.padding.bottom,
+                b.box_edges.padding.left,
+                b.box_edges.border.top.thickness(),
+                b.box_edges.border.right.thickness(),
+                b.box_edges.border.bottom.thickness(),
+                b.box_edges.border.left.thickness(),
+                b.box_edges.margin.top,
+                b.box_edges.margin.right,
+                b.box_edges.margin.bottom,
+                b.box_edges.margin.left,
                 runs_dbg,
             );
             walk(&b.children, depth + 1);

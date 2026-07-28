@@ -60,13 +60,9 @@ impl<W: Write + Send> Write for MutexWriter<W> {
     }
 }
 
-fn build_builder<W: Write + Send + 'static>(
-    writer: W,
-    level: LevelFilter,
-) -> env_logger::Builder {
-    let mut builder = env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or(level.as_str()),
-    );
+fn build_builder<W: Write + Send + 'static>(writer: W, level: LevelFilter) -> env_logger::Builder {
+    let mut builder =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(level.as_str()));
     builder.target(env_logger::Target::Pipe(Box::new(MutexWriter::new(writer))));
     builder
 }
@@ -78,16 +74,12 @@ fn build_builder<W: Write + Send + 'static>(
 ///
 /// Returns an error if the file cannot be opened, or if the global logger
 /// has already been initialized.
-pub fn init_file_logger(
-    path: impl AsRef<Path>,
-    level: Option<LevelFilter>,
-) -> Result<()> {
+pub fn init_file_logger(path: impl AsRef<Path>, level: Option<LevelFilter>) -> Result<()> {
     let path = path.as_ref();
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create log directory: {}", parent.display())
-            })?;
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create log directory: {}", parent.display()))?;
         }
     }
     let file = File::options()

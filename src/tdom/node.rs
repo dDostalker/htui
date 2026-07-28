@@ -118,7 +118,11 @@ pub fn effective_font_size_cells(
     let node = &arena[node_id];
     let declared = node.css_attr.get_font_size();
     if let Some(len) = declared {
-        return len.resolve(parent_font_size_cells, parent_font_size_cells, root_font_size_cells);
+        return len.resolve(
+            parent_font_size_cells,
+            parent_font_size_cells,
+            root_font_size_cells,
+        );
     }
     if let Some(em) = node.node_type.default_font_size_em() {
         let raw = em * parent_font_size_cells as f32;
@@ -168,7 +172,6 @@ impl Node {
         }
     }
 
-
     /// Append a child node to the current node (also sets child's parent).
     pub fn append_child(arena: &mut NodeArena, parent_id: NodeId, child_id: NodeId) {
         let child_parent = &mut arena[child_id].parent;
@@ -194,7 +197,6 @@ impl Node {
             stack: vec![start_id],
         }
     }
-
 }
 
 // 迭代器

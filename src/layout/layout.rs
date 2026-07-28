@@ -2,9 +2,7 @@ use anyhow::{Ok, Result};
 use crossterm::terminal;
 
 use crate::{
-    layout::{
-        BoxConstraint, Cursor, paint::paint_layout_tree, tree::layout_tree,
-    },
+    layout::{BoxConstraint, Cursor, paint::paint_layout_tree, tree::layout_tree},
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{Block, FontStyle, TermLayout},
 };
@@ -49,7 +47,7 @@ impl TermLayout {
     ///    inside the containing block.
     /// 2. [`paint_layout_tree`] writes the resulting rects into `self.layout`
     ///    using each box's own coordinates — no shared cursor.
-    pub fn draw(&mut self, arena: &NodeArena, root_id: NodeId, term_map: &TermMap)->Result<()> {
+    pub fn draw(&mut self, arena: &NodeArena, root_id: NodeId, term_map: &TermMap) -> Result<()> {
         let root = &arena[root_id];
         assert_eq!(root.node_type, NodeType::Global);
         let containing = BoxConstraint::root(term_map);

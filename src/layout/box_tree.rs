@@ -17,8 +17,8 @@
 use crossterm::style::Color;
 
 use crate::html::box_edges::BoxEdges;
-use crate::tui::graph_api::FontStyle;
 use crate::tdom::node::NodeId;
+use crate::tui::graph_api::FontStyle;
 
 /// Rectangle in column/row space within the virtual canvas.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -267,4 +267,3 @@ impl Cursor {
         self.y = self.y.saturating_add(rows);
     }
 }
-

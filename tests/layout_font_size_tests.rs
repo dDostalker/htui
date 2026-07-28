@@ -8,11 +8,11 @@
 //! "extra space" a larger font would visually consume on a graphical
 //! canvas.
 
+use crossterm::style::Color as CtColor;
 use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
 use htui::tdom::node::{NodeArena, NodeId};
 use htui::tui::graph_api::TermLayout;
-use crossterm::style::Color as CtColor;
 
 fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
@@ -222,10 +222,7 @@ fn em_padding_top_scales_with_font_size() {
     // `<p>` with `font-size: 2em` and `padding-top: 1em`: the body's
     // first row should land at row 2 (= 1em × 2-cell font-size), not
     // row 1. Padding-left is 0 so the body text starts at col 0.
-    let (term_map, tl) = draw(
-        "<p>X</p>",
-        "p { font-size: 2em; padding-top: 1em; }",
-    );
+    let (term_map, tl) = draw("<p>X</p>", "p { font-size: 2em; padding-top: 1em; }");
     let cols = term_map.columns as usize;
     let idx = tl.layout.iter().position(|b| b.word == "X").unwrap();
     let row = idx / cols;
@@ -301,7 +298,10 @@ fn explicit_font_size_3em_grows_block_height_to_three_rows() {
         .expect("second <p> 'f' should render");
     let first_row = first_idx / cols;
     let after_row = after_idx / cols;
-    assert_eq!(first_row, 1, "3em baseline sits on the middle row of the 3-row rect");
+    assert_eq!(
+        first_row, 1,
+        "3em baseline sits on the middle row of the 3-row rect"
+    );
     assert_eq!(
         after_row, 3,
         "second <p> must start at row 3 (first <p> occupies 3 rows for 3em)"
@@ -322,7 +322,10 @@ fn h1_2em_vertical_baseline_renders_text_on_middle_row() {
         .position(|b| b.word == "H")
         .expect("h1 'H' should render");
     let h_row = h_idx / cols;
-    assert_eq!(h_row, 0, "h1 baseline sits on the top row of its 2-row rect (middle row is the rect's first row when font_size=2)");
+    assert_eq!(
+        h_row, 0,
+        "h1 baseline sits on the top row of its 2-row rect (middle row is the rect's first row when font_size=2)"
+    );
 }
 
 // ============================================================
@@ -362,7 +365,10 @@ fn explicit_bg_with_large_font_size_clamps_to_text_row_and_width() {
     let cyan_in_text_band = (col..col + 6)
         .filter(|&i| cells[i].bcolor == Some(CtColor::Cyan))
         .count();
-    assert_eq!(cyan_in_text_band, 6, "all 6 text cells must carry the cyan bg");
+    assert_eq!(
+        cyan_in_text_band, 6,
+        "all 6 text cells must carry the cyan bg"
+    );
 
     // Cells past the text band stay bg-free on the text row.
     for i in (col + 6)..cols {
@@ -392,10 +398,7 @@ fn explicit_bg_at_default_font_size_still_fills_full_row() {
     // At font-size 1 the bg keeps the original CSS behaviour of filling
     // the full border-box (padding-box) — this matches existing tests
     // like `test_div_bg_fills_full_row_default`.
-    let (term_map, tl) = draw(
-        "<div>hi</div>",
-        "div { background-color: red; }",
-    );
+    let (term_map, tl) = draw("<div>hi</div>", "div { background-color: red; }");
     let cols = term_map.columns as usize;
     let red_count = tl.layout[0..cols]
         .iter()
@@ -445,8 +448,7 @@ fn bg_pad_cells_carry_space_and_bg_into_rendered_output() {
     // The bg-pad cell must hold a space (not an empty string) so the
     // renderer emits it and the bg spans the slot.
     assert_eq!(
-        row_cells[1].word,
-        " ",
+        row_cells[1].word, " ",
         "bg-pad cell must hold a space so the renderer keeps the bg between glyphs",
     );
     assert_eq!(
@@ -601,16 +603,23 @@ fn debug_dump_box_model_layout() {
     let (term_map2, tl2) = draw(html2, css2);
     let _ = (term_map2, tl2);
     let (root_id, arena) = setup(html2, css2);
-    use htui::layout::tree::layout_tree;
     use htui::layout::BoxConstraint;
+    use htui::layout::tree::layout_tree;
     let mut cursor = htui::layout::Cursor::new();
     let containing = BoxConstraint::root(&term_map);
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
     for b in &boxes {
-        eprintln!("rect={:?} font_size={} padding={:?} border={:?} margin={:?} runs={:?}",
-            b.rect, b.font_size_cells,
-            b.box_edges.padding, b.box_edges.border, b.box_edges.margin,
-            b.runs.as_ref().map(|rs| rs.iter().map(|r| (r.text.clone(), r.bg.is_some())).collect::<Vec<_>>())
+        eprintln!(
+            "rect={:?} font_size={} padding={:?} border={:?} margin={:?} runs={:?}",
+            b.rect,
+            b.font_size_cells,
+            b.box_edges.padding,
+            b.box_edges.border,
+            b.box_edges.margin,
+            b.runs.as_ref().map(|rs| rs
+                .iter()
+                .map(|r| (r.text.clone(), r.bg.is_some()))
+                .collect::<Vec<_>>())
         );
     }
     for r in 0..28 {

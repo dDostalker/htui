@@ -141,7 +141,7 @@ pub fn render(html: &str, css: &str) {
         return;
     }
 
-    let css_rules = Arc::new(build_css_rules(html, css)); 
+    let css_rules = Arc::new(build_css_rules(html, css));
 
     let html: Arc<str> = Arc::from(html);
     let (tx, rx) = mpsc::channel::<RenderCmd>();

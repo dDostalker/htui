@@ -1,7 +1,7 @@
-
 use crate::{
     layout::{
-        BoxConstraint, Cursor, FontContext, LayoutBox, tree::{LayoutBlockOptions, layout_block},
+        BoxConstraint, Cursor, FontContext, LayoutBox,
+        tree::{LayoutBlockOptions, layout_block},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
 };

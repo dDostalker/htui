@@ -1,7 +1,7 @@
-
 use crate::{
     layout::{
-        BoxConstraint, Cursor, FontContext, LayoutBox, tree::{LayoutBlockOptions, layout_block},
+        BoxConstraint, Cursor, FontContext, LayoutBox,
+        tree::{LayoutBlockOptions, layout_block},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
 };
@@ -15,8 +15,15 @@ pub fn layout_header(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     font_ctx: FontContext,
-) -> Option<LayoutBox>{
-    layout_block_with_tag(arena, node_id, containing, cursor, NodeType::Header, font_ctx)
+) -> Option<LayoutBox> {
+    layout_block_with_tag(
+        arena,
+        node_id,
+        containing,
+        cursor,
+        NodeType::Header,
+        font_ctx,
+    )
 }
 
 /// Build a [`LayoutBox`] for a `<footer>` element.
@@ -27,7 +34,14 @@ pub fn layout_footer(
     cursor: &mut Cursor,
     font_ctx: FontContext,
 ) -> Option<LayoutBox> {
-    layout_block_with_tag(arena, node_id, containing, cursor, NodeType::Footer, font_ctx)
+    layout_block_with_tag(
+        arena,
+        node_id,
+        containing,
+        cursor,
+        NodeType::Footer,
+        font_ctx,
+    )
 }
 
 fn layout_block_with_tag(

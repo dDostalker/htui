@@ -169,8 +169,10 @@ fn test_p_mixed_styles_in_single_row() {
     // The visual_test font_styles §11 case: bold + italic + plain text
     // interleaved in a single <p>. Each piece must carry its own style.
     init();
-    let html = "<p>a<span class=\"b\">B</span><span class=\"i\">I</span><span class=\"u\">U</span></p>";
-    let css = ".b { font-weight: bold; } .i { font-style: italic; } .u { text-decoration: underline; }";
+    let html =
+        "<p>a<span class=\"b\">B</span><span class=\"i\">I</span><span class=\"u\">U</span></p>";
+    let css =
+        ".b { font-weight: bold; } .i { font-style: italic; } .u { text-decoration: underline; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
@@ -271,8 +273,7 @@ fn test_span_color_with_inherited_parent_color() {
 fn test_nested_spans_accumulate_styles() {
     init();
     let html = "<p><span class=\"b\">B<span class=\"i\">I</span>b</span></p>";
-    let css =
-        ".b { font-weight: bold; } .i { font-style: italic; }";
+    let css = ".b { font-weight: bold; } .i { font-style: italic; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
@@ -418,8 +419,7 @@ fn test_layout_box_exposes_runs_for_block_with_spans() {
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
-    let p_box = find_box_by_type(&boxes, &NodeType::P, &arena)
-        .expect("should have the <p> box");
+    let p_box = find_box_by_type(&boxes, &NodeType::P, &arena).expect("should have the <p> box");
     let runs = p_box
         .runs
         .as_ref()
@@ -455,9 +455,11 @@ fn test_layout_box_runs_are_materialised_for_plain_block() {
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
-    let p_box = find_box_by_type(&boxes, &NodeType::P, &arena)
-        .expect("should have the <p> box");
-    let runs = p_box.runs.as_ref().expect("plain <p> still materialises runs");
+    let p_box = find_box_by_type(&boxes, &NodeType::P, &arena).expect("should have the <p> box");
+    let runs = p_box
+        .runs
+        .as_ref()
+        .expect("plain <p> still materialises runs");
     assert_eq!(runs.len(), 1, "single text node becomes one run");
     assert_eq!(runs[0].text, "just text");
 }
@@ -474,8 +476,7 @@ fn test_h1_prefix_is_a_separate_run() {
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
-    let h_box = find_box_by_type(&boxes, &NodeType::H1, &arena)
-        .expect("should have the <h1> box");
+    let h_box = find_box_by_type(&boxes, &NodeType::H1, &arena).expect("should have the <h1> box");
     let runs = h_box.runs.as_ref().expect("<h1> should expose runs");
     assert_eq!(
         runs.len(),

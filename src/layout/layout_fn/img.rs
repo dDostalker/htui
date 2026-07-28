@@ -1,4 +1,3 @@
-
 use crate::{
     layout::{BoxConstraint, Cursor, FontContext, LayoutBox},
     tdom::node::{NodeArena, NodeId, NodeType},
@@ -28,16 +27,12 @@ pub fn layout_img(
         None => return None,
     };
 
-    let max_w = node
-        .get_width()
-        .unwrap_or(containing.width as u32 * 2);
+    let max_w = node.get_width().unwrap_or(containing.width as u32 * 2);
     // `BoxConstraint` only exposes the containing block width, so the default
     // height is approximated as 4× that in pixels (i.e. a 2:1 portrait by
     // default once converted to cells). The picture always scrolls
     // vertically, so we never need to clamp to the terminal height.
-    let max_h = node
-        .get_height()
-        .unwrap_or(containing.width as u32 * 4);
+    let max_h = node.get_height().unwrap_or(containing.width as u32 * 4);
 
     // Each terminal cell represents a 2×4 pixel block (see Img::_create_img).
     let img_cols = max_w.div_ceil(2).max(1) as usize;

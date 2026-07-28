@@ -73,7 +73,10 @@ fn test_ul_renders_bullet_markers() {
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
-    assert!(canvas.contains("•"), "unordered list must emit a bullet glyph");
+    assert!(
+        canvas.contains("•"),
+        "unordered list must emit a bullet glyph"
+    );
     assert!(canvas.contains("One"), "first item text missing");
     assert!(canvas.contains("Two"), "second item text missing");
 }
@@ -81,10 +84,7 @@ fn test_ul_renders_bullet_markers() {
 #[test]
 fn test_ol_renders_sequential_markers() {
     init();
-    let (root_id, arena) = setup(
-        "<ol><li>First</li><li>Second</li><li>Third</li></ol>",
-        "",
-    );
+    let (root_id, arena) = setup("<ol><li>First</li><li>Second</li><li>Third</li></ol>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
@@ -109,7 +109,10 @@ fn test_ol_ordinal_skips_non_li_siblings() {
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("1."), "first <li> should still be '1.'");
-    assert!(canvas.contains("2."), "second <li> should be '2.', not '3.'");
+    assert!(
+        canvas.contains("2."),
+        "second <li> should be '2.', not '3.'"
+    );
     assert!(!canvas.contains("3."), "counter must not skip ahead");
 }
 
@@ -152,8 +155,7 @@ fn test_ul_marker_sits_left_of_body() {
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
-    let (_bullet_idx, bullet_row, bullet_col) =
-        cell_containing(&tl, "•").expect("bullet missing");
+    let (_bullet_idx, bullet_row, bullet_col) = cell_containing(&tl, "•").expect("bullet missing");
     let (h_idx, h_row, h_col) = cell_containing(&tl, "H").expect("missing 'H'");
     assert_eq!(bullet_row, h_row, "bullet and body share the marker row");
     assert_eq!(bullet_col, 0, "bullet sits at column 0 for a top-level ul");
@@ -268,7 +270,10 @@ fn test_li_with_css_color() {
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let has_red = tl.layout.iter().any(|b| b.fcolor == Some(Color::Red));
-    assert!(has_red, "ul li should pick up `color: red` via selector match");
+    assert!(
+        has_red,
+        "ul li should pick up `color: red` via selector match"
+    );
 }
 
 #[test]
@@ -314,8 +319,7 @@ fn test_orphan_li_uses_dash_marker() {
 fn test_ol_double_digit_ordinals() {
     init();
     // Item 10 -> marker "10. " (4 cells), still ahead of items 1..9.
-    let html =
-        "<ol><li>a</li><li>b</li><li>c</li><li>d</li><li>e</li><li>f</li><li>g</li><li>h</li><li>i</li><li>j</li></ol>";
+    let html = "<ol><li>a</li><li>b</li><li>c</li><li>d</li><li>e</li><li>f</li><li>g</li><li>h</li><li>i</li><li>j</li></ol>";
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
@@ -328,5 +332,3 @@ fn test_ol_double_digit_ordinals() {
         assert!(canvas.contains(letter), "missing item body '{letter}'");
     }
 }
-
-

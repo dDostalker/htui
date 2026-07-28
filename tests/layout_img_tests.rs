@@ -83,8 +83,7 @@ fn layout_img_unclamped_when_img_fits() {
 
     let containing = BoxConstraint { x: 0, width: 80 };
     let mut cursor = Cursor::new();
-    let lb = layout_img(&arena, img_id, containing, &mut cursor, FontContext::ROOT)
-        .unwrap();
+    let lb = layout_img(&arena, img_id, containing, &mut cursor, FontContext::ROOT).unwrap();
 
     // 120 px / 2 = 60 cells (no clamp), 60 px / 4 = 15 cells.
     match lb.kind {

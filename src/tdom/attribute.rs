@@ -1,14 +1,14 @@
 use crate::tdom::node::Node;
 
-    // ----------------------------------------------------------
-    // Attribute accessors
-    //
-    // Only the handful of attribute reads that carry parsing semantics
-    // (class tokenisation, numeric coercion, id lookup) live here. Plain
-    // `attributes.get("foo")` is preferred for one-off keys so we don't
-    // grow the surface to match every HTML standard attribute.
-    // ----------------------------------------------------------
-impl Node{
+// ----------------------------------------------------------
+// Attribute accessors
+//
+// Only the handful of attribute reads that carry parsing semantics
+// (class tokenisation, numeric coercion, id lookup) live here. Plain
+// `attributes.get("foo")` is preferred for one-off keys so we don't
+// grow the surface to match every HTML standard attribute.
+// ----------------------------------------------------------
+impl Node {
     /// Look up the `id` attribute (used by CSS `#id` selectors).
     pub fn get_id(&self) -> Option<&String> {
         self.attributes.get("id")
@@ -43,4 +43,3 @@ impl Node{
         self.attributes.get("height").and_then(|v| v.parse().ok())
     }
 }
-

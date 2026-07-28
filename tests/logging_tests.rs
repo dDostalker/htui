@@ -42,8 +42,14 @@ fn file_logger_writes_lines() {
     let content = read_log(&path);
     assert!(content.contains("hello-info"), "content: {content}");
     assert!(content.contains("hello-warn"), "content: {content}");
-    assert!(content.contains("INFO") || content.contains("info"), "content: {content}");
-    assert!(content.contains("WARN") || content.contains("warn"), "content: {content}");
+    assert!(
+        content.contains("INFO") || content.contains("info"),
+        "content: {content}"
+    );
+    assert!(
+        content.contains("WARN") || content.contains("warn"),
+        "content: {content}"
+    );
 }
 
 #[test]
@@ -66,10 +72,8 @@ fn file_logger_respects_custom_level() {
 
 #[test]
 fn file_logger_creates_parent_directory() {
-    let dir = std::env::temp_dir().join(format!(
-        "htui-logging-test-{}-nested",
-        std::process::id(),
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("htui-logging-test-{}-nested", std::process::id(),));
     let path = dir.join("subdir").join("test.log");
     let _ = fs::remove_dir_all(&dir);
 
@@ -79,7 +83,11 @@ fn file_logger_creates_parent_directory() {
     }
 
     log::error!("nested-dir-test");
-    assert!(path.exists(), "log file should be created at {}", path.display());
+    assert!(
+        path.exists(),
+        "log file should be created at {}",
+        path.display()
+    );
 }
 
 #[test]

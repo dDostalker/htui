@@ -119,7 +119,10 @@ fn padding_background_fills_padding_box() {
 
     // Row 0 is a padding row — must carry cyan bg.
     let row0 = &tl.layout[0..cols];
-    let cyan_count = row0.iter().filter(|b| b.bcolor == Some(Color::Cyan)).count();
+    let cyan_count = row0
+        .iter()
+        .filter(|b| b.bcolor == Some(Color::Cyan))
+        .count();
     assert_eq!(
         cyan_count, cols,
         "padding-top row must be filled with the bg (full width)"
@@ -169,10 +172,7 @@ fn margin_top_reserves_rows_above() {
     // Two paragraphs: each `margin-top` row must land above its own box.
     // First sits at row 3 (margin-top=3); Second sits at row 7
     // (= 3 + 1 own + 3 margin-top).
-    let (term_map, tl) = draw(
-        "<p>First</p><p>Second</p>",
-        "p { margin-top: 3px; }",
-    );
+    let (term_map, tl) = draw("<p>First</p><p>Second</p>", "p { margin-top: 3px; }");
     let cols = term_map.columns as usize;
     let first_idx = tl
         .layout
@@ -199,10 +199,7 @@ fn margin_shorthand_two_values_applies_to_top_bottom_and_left_right() {
     init();
     // `margin: 2px 8px` → top/bottom=2, left/right=8. Both X and Y carry
     // margin-top=2, so Y sits 1 own-row + 2 margin-top below X.
-    let (term_map, tl) = draw(
-        "<p>X</p><p>Y</p>",
-        "p { margin: 2px 8px; }",
-    );
+    let (term_map, tl) = draw("<p>X</p><p>Y</p>", "p { margin: 2px 8px; }");
     let cols = term_map.columns as usize;
     let x_idx = tl.layout.iter().position(|b| b.word == "X").unwrap();
     let y_idx = tl.layout.iter().position(|b| b.word == "Y").unwrap();
@@ -266,7 +263,10 @@ fn border_draws_four_edges_with_corners() {
         let has_left = row[0].word == BOX_V;
         let has_right = row[4].word == BOX_V;
         assert!(has_left, "left border glyph should appear on row {row_idx}");
-        assert!(has_right, "right border glyph should appear on row {row_idx}");
+        assert!(
+            has_right,
+            "right border glyph should appear on row {row_idx}"
+        );
     }
     // Make sure the four corners are present.
     assert!(
@@ -296,7 +296,11 @@ fn border_color_overrides_text_color() {
     let border_cells: Vec<_> = tl
         .layout
         .iter()
-        .filter(|b| b.word == BOX_H || b.word == BOX_V || matches!(b.word.as_str(), BOX_TL | BOX_TR | BOX_BL | BOX_BR))
+        .filter(|b| {
+            b.word == BOX_H
+                || b.word == BOX_V
+                || matches!(b.word.as_str(), BOX_TL | BOX_TR | BOX_BL | BOX_BR)
+        })
         .collect();
     assert!(!border_cells.is_empty(), "border glyphs should render");
     for b in &border_cells {
@@ -331,10 +335,12 @@ fn border_style_none_hides_the_border() {
         "<div></div>",
         "div { width: 5px; padding: 1px; border-style: none; border-color: red; }",
     );
-    let has_border = tl
-        .layout
-        .iter()
-        .any(|b| matches!(b.word.as_str(), BOX_H | BOX_V | BOX_TL | BOX_TR | BOX_BL | BOX_BR));
+    let has_border = tl.layout.iter().any(|b| {
+        matches!(
+            b.word.as_str(),
+            BOX_H | BOX_V | BOX_TL | BOX_TR | BOX_BL | BOX_BR
+        )
+    });
     assert!(
         !has_border,
         "border-style: none should suppress all border glyphs"
@@ -362,8 +368,16 @@ fn combined_padding_border_margin_size_correctly() {
         .iter()
         .position(|b| b.word == "H")
         .expect("'Hi' should render");
-    assert_eq!(text_idx / cols, 6, "row should account for margin+border+padding");
-    assert_eq!(text_idx % cols, 6, "col should account for margin+border+padding");
+    assert_eq!(
+        text_idx / cols,
+        6,
+        "row should account for margin+border+padding"
+    );
+    assert_eq!(
+        text_idx % cols,
+        6,
+        "col should account for margin+border+padding"
+    );
 
     // The border-box rect's total rows should fit margin+border+padding+content
     // + margin-bottom.

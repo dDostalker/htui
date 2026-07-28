@@ -45,44 +45,44 @@ fn main() -> Result<()> {
     };
 
     let (html, css) = match test_name {
-            "all_in_one" => test_case!(all_in_one, no_css),
-            "headings" => test_case!(headings, no_css),
-            "image" => test_case!(image, no_css),
-            "colors" => test_case!(colors, no_css),
-            "nested" => test_case!(nested, no_css),
-            "text" => test_case!(text, no_css),
-            "css" => test_case!(css, no_css),
-            "header_footer" => test_case!(header_footer, no_css),
-            "aside" => test_case!(aside, no_css),
-            "helloworld" => test_case!(helloworld, no_css),
-            "font_styles" => test_case!(font_styles, no_css),
-            "list" => test_case!(list, no_css),
-            "box_model" => test_case!(box_model, no_css),
-            "font_size" => test_case!(font_size, no_css),
-            _ => {
-                    let available = [
-                        "all_in_one",
-                        "headings",
-                        "image",
-                        "colors",
-                        "nested",
-                        "text",
-                        "css",
-                        "header_footer",
-                        "aside",
-                        "helloworld",
-                        "font_styles",
-                        "list",
-                        "box_model",
-                        "font_size",
-                    ];
-                    eprintln!(
-                        "Unknown test: '{test_name}'\nAvailable tests: {}",
-                        available.join(", ")
-                    );
-                    return Ok(());
-                }
-            };
+        "all_in_one" => test_case!(all_in_one, no_css),
+        "headings" => test_case!(headings, no_css),
+        "image" => test_case!(image, no_css),
+        "colors" => test_case!(colors, no_css),
+        "nested" => test_case!(nested, no_css),
+        "text" => test_case!(text, no_css),
+        "css" => test_case!(css, no_css),
+        "header_footer" => test_case!(header_footer, no_css),
+        "aside" => test_case!(aside, no_css),
+        "helloworld" => test_case!(helloworld, no_css),
+        "font_styles" => test_case!(font_styles, no_css),
+        "list" => test_case!(list, no_css),
+        "box_model" => test_case!(box_model, no_css),
+        "font_size" => test_case!(font_size, no_css),
+        _ => {
+            let available = [
+                "all_in_one",
+                "headings",
+                "image",
+                "colors",
+                "nested",
+                "text",
+                "css",
+                "header_footer",
+                "aside",
+                "helloworld",
+                "font_styles",
+                "list",
+                "box_model",
+                "font_size",
+            ];
+            eprintln!(
+                "Unknown test: '{test_name}'\nAvailable tests: {}",
+                available.join(", ")
+            );
+            return Ok(());
+        }
+    };
 
     info!(
         "Running visual test: '{test_name}' (HTML: {} bytes, CSS: {} bytes)",

@@ -405,10 +405,7 @@ fn test_css_attr_text_decoration_combined() {
 #[test]
 fn test_font_style_inherits_from_parent() {
     // font-style should propagate from parent to child like browsers do.
-    let (_, arena) = setup(
-        "<div><span>x</span></div>",
-        "div { font-style: italic; }",
-    );
+    let (_, arena) = setup("<div><span>x</span></div>", "div { font-style: italic; }");
     for (_, node) in Node::descendants(&arena, arena.keys().next().unwrap()) {
         if node.node_type == NodeType::Span {
             assert_eq!(
@@ -476,7 +473,10 @@ fn test_styled_space_cells_carry_style_flag() {
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
-    assert!(canvas.contains("a b"), "expected to see `a b` in the canvas, got: {canvas:?}");
+    assert!(
+        canvas.contains("a b"),
+        "expected to see `a b` in the canvas, got: {canvas:?}"
+    );
 
     // The space cell must carry UNDERLINED so the renderer batches it with
     // the surrounding letters and applies the SGR.
@@ -513,10 +513,7 @@ fn test_bold_italic_underline_all_apply_to_text_run() {
             .position(|b| b.word == ch.to_string())
             .unwrap_or_else(|| panic!("should find character {ch}"));
         let style = tl.layout[idx].style;
-        assert!(
-            style.contains(FontStyle::BOLD),
-            "{ch} should carry BOLD"
-        );
+        assert!(style.contains(FontStyle::BOLD), "{ch} should carry BOLD");
         assert!(
             style.contains(FontStyle::ITALIC),
             "{ch} should carry ITALIC"
@@ -598,8 +595,8 @@ fn test_render_emits_underline_sgr_across_spaces() {
 
 #[test]
 fn test_is_rendered_as_bare_space_helper() {
-    use htui::tui::graph_api::{Block, FontStyle, is_rendered_as_bare_space};
     use crossterm::style::Color;
+    use htui::tui::graph_api::{Block, FontStyle, is_rendered_as_bare_space};
 
     // Plain space, no bg, no style → bare.
     let bare = Block::new(" ".to_string(), None, None, FontStyle::empty());
@@ -610,12 +607,7 @@ fn test_is_rendered_as_bare_space_helper() {
     assert!(!is_rendered_as_bare_space(&underlined));
 
     // Space with bg → not bare (bg must render).
-    let with_bg = Block::new(
-        " ".to_string(),
-        None,
-        Some(Color::Blue),
-        FontStyle::empty(),
-    );
+    let with_bg = Block::new(" ".to_string(), None, Some(Color::Blue), FontStyle::empty());
     assert!(!is_rendered_as_bare_space(&with_bg));
 
     // Non-space character → never bare.

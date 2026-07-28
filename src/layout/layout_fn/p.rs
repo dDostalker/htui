@@ -1,7 +1,7 @@
-
 use crate::{
     layout::{
-        BoxConstraint, Cursor, FontContext, LayoutBox, tree::{LayoutBlockOptions, layout_block},
+        BoxConstraint, Cursor, FontContext, LayoutBox,
+        tree::{LayoutBlockOptions, layout_block},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
 };
@@ -24,7 +24,7 @@ pub fn layout_p(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     font_ctx: FontContext,
-) -> Option<LayoutBox>{
+) -> Option<LayoutBox> {
     let node = &arena[node_id];
     if node.node_type != NodeType::P {
         return None;
