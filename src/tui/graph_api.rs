@@ -6,6 +6,7 @@ mod render;
 mod style;
 mod text;
 
+pub(crate) use canvas::MAX_SCROLL_MULTIPLIER;
 pub use canvas::TermLayout;
 pub use cell::{Block, FontStyle};
 pub use image::{Img, render_image_at};

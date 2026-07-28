@@ -25,7 +25,14 @@ impl TermMap {
 
 impl TermLayout {
     pub fn new(map: &TermMap, zoom: f32) -> TermLayout {
-        let max_cells = map.columns as usize * map.rows as usize * 2;
+        // Buffer up to MAX_SCROLL_MULTIPLIER screens of content so documents
+        // taller than the visible viewport (e.g. an image-heavy page that
+        // produces 200+ rows) keep their trailing boxes in the canvas and
+        // remain reachable through scrolling instead of being silently dropped
+        // at the layout boundary.
+        let max_cells = map.columns as usize
+            * map.rows as usize
+            * crate::tui::graph_api::MAX_SCROLL_MULTIPLIER;
         let layout = vec![Block::new(" ".to_string(), None, None, FontStyle::empty()); max_cells];
         TermLayout {
             layout,

@@ -128,12 +128,12 @@ pub fn render_image_at(
     let img_cols = img_data.cloumns as usize;
     let img_rows = img_data.rows as usize;
     let canvas_cols = term_layout.columns as usize;
-    let max = term_layout.max_cells();
-    for row in 0..img_rows {
+    let max = term_layout.layout.len();
+    'outer: for row in 0..img_rows {
         for col in 0..img_cols {
             let canvas_idx = (y + row) * canvas_cols + (x + col);
             if canvas_idx >= max {
-                break;
+                break 'outer;
             }
             let pic_idx = row * img_cols + col;
             if let Some(cell) = picture.get(pic_idx) {

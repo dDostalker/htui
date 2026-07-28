@@ -260,3 +260,30 @@ fn scroll_limits_match_layout_depth() {
         "scroll must be enabled when content overflows"
     );
 }
+
+const IMAGE_TEST_HTML: &str = include_str!("../visual_test/src/image/index.html");
+
+#[test]
+fn layout_buffer_holds_full_document() {
+    // Regression: `TermLayout::new` once allocated only `cols * rows * 2` cells,
+    // so documents taller than two screens had their trailing rows silently
+    // dropped at the layout boundary (paint_block / paint_text_row both clamp
+    // via `idx < cells.len()`). The canvas exposes
+    // `MAX_SCROLL_MULTIPLIER` precisely so the buffer matches `max_cells()` —
+    // assert that every rendered row fits inside the layout Vec.
+    let (root_id, arena) = setup(IMAGE_TEST_HTML, "");
+    let term_map = TermMap {
+        columns: 120,
+        rows: 30,
+    };
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map).unwrap();
+
+    let layout_rows = tl.layout.len() / term_map.columns as usize;
+    assert!(
+        tl.rendered_rows as usize <= layout_rows,
+        "rendered_rows ({}) must fit inside layout capacity ({} rows); \
+         trailing content would be dropped before the user can scroll to it",
+        tl.rendered_rows, layout_rows,
+    );
+}

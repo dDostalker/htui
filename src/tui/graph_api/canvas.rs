@@ -1,6 +1,11 @@
 use super::cell::Block;
 
-const MAX_SCROLL_MULTIPLIER: usize = 20;
+/// Maximum number of terminal screens the virtual canvas can hold. The layout
+/// Vec is sized to `columns * rows * MAX_SCROLL_MULTIPLIER` cells so content
+/// taller than the visible viewport (across multiple `<img>`, `<p>`, etc.)
+/// remains in the buffer and is reachable through scrolling instead of being
+/// silently dropped at the layout boundary.
+pub(crate) const MAX_SCROLL_MULTIPLIER: usize = 20;
 
 #[derive(Debug)]
 pub struct TermLayout {
