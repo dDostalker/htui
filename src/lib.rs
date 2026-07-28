@@ -6,6 +6,7 @@ pub mod tui;
 
 use std::io::{Write, stdout};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -57,7 +58,12 @@ fn build_css_rules(html: &str, css: &str) -> CssRule {
 // Render thread
 // ============================================================
 
-fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css_rules: Arc<CssRule>) {
+fn render_thread(
+    rx: mpsc::Receiver<RenderCmd>,
+    html: Arc<str>,
+    css_rules: Arc<CssRule>,
+    max_scroll: Arc<AtomicU32>,
+) {
     let mut term_layout: Option<TermLayout> = None;
 
     loop {
@@ -79,16 +85,27 @@ fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css_rules: Arc<C
             RenderCmd::Quit => break,
 
             RenderCmd::Rerender { scroll_y } => {
-                if let Some(ref mut tl) = term_layout {
-                    tl.scroll_y = scroll_y;
-                    tl.clamp_scroll();
-                    if let Err(e) = execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0)) {
-                        log::error!("Failed to clear screen: {}", e);
-                    }
-                    tl.render();
-                    if let Err(e) = stdout().flush() {
-                        log::error!("Failed to flush stdout: {}", e);
-                    }
+                let Some(tl) = term_layout.as_mut() else {
+                    continue;
+                };
+                let prev = tl.scroll_y;
+                tl.scroll_y = scroll_y;
+                tl.clamp_scroll();
+                // Defense in depth: drop rerenders whose resolved scroll
+                // position is unchanged after clamping. Most such events are
+                // already filtered in the input thread, but if a `Rerender`
+                // slips past (e.g. races between a Redraw updating the
+                // max_scroll ceiling and a queued scroll event) we still
+                // avoid re-emitting Clear+render.
+                if tl.scroll_y == prev {
+                    continue;
+                }
+                if let Err(e) = execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0)) {
+                    log::error!("Failed to clear screen: {}", e);
+                }
+                tl.render();
+                if let Err(e) = stdout().flush() {
+                    log::error!("Failed to flush stdout: {}", e);
                 }
             }
 
@@ -121,6 +138,13 @@ fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css_rules: Arc<C
                     log::error!("Layout failed: {}", e);
                     continue;
                 }
+
+                // Publish the new upper bound of `scroll_y` so the input
+                // loop can drop events that would no-op against it.
+                // u32::MAX is used as the startup placeholder (no upper
+                // bound known yet), and the first successful layout will
+                // overwrite it with the real value.
+                max_scroll.store(tl.max_scroll(), Ordering::Relaxed);
 
                 tl.scroll_y = scroll_y;
                 tl.clamp_scroll();
@@ -217,13 +241,18 @@ pub fn render(html: &str, css: &str) {
     let css_rules = Arc::new(build_css_rules(html, css));
 
     let html: Arc<str> = Arc::from(html);
+    // Shared scroll upper bound — initial value `u32::MAX` means "not yet
+    // known" (the first layout hasn't run); the render thread overwrites it
+    // on every successful `Redraw` with the real `tl.max_scroll()`.
+    let max_scroll = Arc::new(AtomicU32::new(u32::MAX));
     let (tx, rx) = mpsc::channel::<RenderCmd>();
 
     let render_handle = std::thread::spawn({
         let html_clone = Arc::clone(&html);
         let css_clone = Arc::clone(&css_rules);
+        let max_scroll_clone = Arc::clone(&max_scroll);
         move || {
-            render_thread(rx, html_clone, css_clone);
+            render_thread(rx, html_clone, css_clone, max_scroll_clone);
         }
     });
 
@@ -258,6 +287,7 @@ pub fn render(html: &str, css: &str) {
             &mut scroll_y,
             &mut zoom,
             rows,
+            max_scroll.load(Ordering::Relaxed),
             Some(Duration::from_millis(100)),
         ) {
             Some(RenderCmd::Quit) => {

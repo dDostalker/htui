@@ -22,10 +22,20 @@ const ZOOM_MAX: f32 = 5.0;
 /// - `Some(duration)` returns `None` when no event arrives within the
 ///   duration, giving the caller a chance to check other state (e.g.
 ///   whether the render thread is still alive).
+///
+/// `max_scroll` is the largest `scroll_y` the canvas currently allows
+/// (i.e. `rendered_rows - viewport_rows`). It is supplied by the render
+/// thread after each layout pass. Scroll events that would push past the
+/// boundary in either direction are dropped here at the source instead of
+/// being forwarded as a no-op `Rerender` — the render thread already had a
+/// guard for that, but every dropped command here is one fewer channel
+/// send and, more importantly, one fewer frame that risks a visible flash
+/// at the scroll bounds.
 pub fn trigger_refresh(
     scroll_y: &mut u32,
     zoom: &mut f32,
     rows: u16,
+    max_scroll: u32,
     timeout: Option<Duration>,
 ) -> Option<RenderCmd> {
     if let Some(t) = timeout {
@@ -73,18 +83,30 @@ pub fn trigger_refresh(
                 KeyCode::Esc | KeyCode::Char('q') => return Some(RenderCmd::Quit),
 
                 KeyCode::Up | KeyCode::Char('k') => {
-                    *scroll_y = scroll_y.saturating_sub(1);
+                    // Already at the top boundary — drop the event instead
+                    // of forwarding a no-op scroll to the render thread.
+                    if *scroll_y == 0 {
+                        return None;
+                    }
+                    *scroll_y -= 1;
                     return Some(RenderCmd::Rerender {
                         scroll_y: *scroll_y,
                     });
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    *scroll_y = scroll_y.saturating_add(1);
+                    // Already at the bottom boundary — drop the event.
+                    if *scroll_y >= max_scroll {
+                        return None;
+                    }
+                    *scroll_y += 1;
                     return Some(RenderCmd::Rerender {
                         scroll_y: *scroll_y,
                     });
                 }
                 KeyCode::PageUp => {
+                    if *scroll_y == 0 {
+                        return None;
+                    }
                     let step = (rows as u32).saturating_sub(1).max(1);
                     *scroll_y = scroll_y.saturating_sub(step);
                     return Some(RenderCmd::Rerender {
@@ -92,6 +114,9 @@ pub fn trigger_refresh(
                     });
                 }
                 KeyCode::PageDown => {
+                    if *scroll_y >= max_scroll {
+                        return None;
+                    }
                     let step = (rows as u32).saturating_sub(1).max(1);
                     *scroll_y = scroll_y.saturating_add(step);
                     return Some(RenderCmd::Rerender {
@@ -99,13 +124,23 @@ pub fn trigger_refresh(
                     });
                 }
                 KeyCode::Home => {
+                    // No-op move — drop to avoid a wasted rerender.
+                    if *scroll_y == 0 {
+                        return None;
+                    }
                     *scroll_y = 0;
                     return Some(RenderCmd::Rerender {
                         scroll_y: *scroll_y,
                     });
                 }
                 KeyCode::End => {
-                    *scroll_y = u32::MAX;
+                    // No-op move (already at the bottom) — drop.
+                    if *scroll_y >= max_scroll {
+                        return None;
+                    }
+                    // Use the actual upper bound rather than u32::MAX so the
+                    // render thread receives a value it doesn't have to clamp.
+                    *scroll_y = max_scroll;
                     return Some(RenderCmd::Rerender {
                         scroll_y: *scroll_y,
                     });
@@ -126,6 +161,9 @@ pub fn trigger_refresh(
                             zoom: *zoom,
                         })
                     } else {
+                        if *scroll_y == 0 {
+                            return None;
+                        }
                         *scroll_y = scroll_y.saturating_sub(SCROLL_LINES_PER_TICK);
                         Some(RenderCmd::Rerender {
                             scroll_y: *scroll_y,
@@ -140,6 +178,9 @@ pub fn trigger_refresh(
                             zoom: *zoom,
                         })
                     } else {
+                        if *scroll_y >= max_scroll {
+                            return None;
+                        }
                         *scroll_y = scroll_y.saturating_add(SCROLL_LINES_PER_TICK);
                         Some(RenderCmd::Rerender {
                             scroll_y: *scroll_y,
