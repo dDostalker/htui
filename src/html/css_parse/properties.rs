@@ -18,6 +18,16 @@ impl CssAttr {
     pub fn add(&mut self, css: CssAttr) {
         self.0.extend(css.0);
     }
+    /// Whether `property` has been explicitly set on this node — either by a
+    /// matching CSS rule or by inheritance from an ancestor that had it set.
+    ///
+    /// Used to apply user-agent defaults that must yield to anything the
+    /// author has already declared (e.g. `<a>` underlines: apply the default
+    /// underline only when neither a CSS rule nor an inherited value has
+    /// specified `text-decoration`).
+    pub fn is_set(&self, property: &str) -> bool {
+        self.0.contains_key(property)
+    }
     /// Foreground color (CSS `color`).
     pub fn get_color(&self) -> Option<Color> {
         self.0.get("color").and_then(|c| parse_color_str(c))

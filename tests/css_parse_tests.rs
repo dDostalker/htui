@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crossterm::style::Color;
 use htui::html::css_parse::{
     BorderStyle, Combinator, CssAttr, CssRule, CssSelector, EdgeSizes, FontWeight, INHERITED_PROPS,
-    Length, Parser, SUPPORTED_PROPERTIES, css_into_node, parse_color_str, parse_declaration_text,
-    selector_chain_matches,
+    Length, Parser, SUPPORTED_PROPERTIES, TextDecoration, css_into_node, parse_color_str,
+    parse_declaration_text, selector_chain_matches,
 };
 use htui::tdom::node::{Node, NodeArena, NodeId, NodeType};
 use indexmap::IndexMap;
@@ -104,6 +104,28 @@ fn test_css_selector_matches_title_and_meta() {
     // Cross-tag sanity: the wrong selector must not match.
     assert!(!selector_chain_matches(&arena, meta_id, &title_sel));
     assert!(!selector_chain_matches(&arena, title_id, &meta_sel));
+}
+
+#[test]
+fn test_is_set_distinguishes_unset_from_explicit_none() {
+    // `is_set` is the public hook the `<a>` renderer uses to decide whether
+    // to apply the user-agent default underline — it must report `false`
+    // when the property was never declared, and `true` once a declaration
+    // (even `none`) is recorded in the underlying map.
+    init();
+    let mut attr = CssAttr::new();
+    assert!(!attr.is_set("text-decoration"));
+    assert!(!attr.is_set("color"));
+
+    let declared = parse_declaration_text("text-decoration: none;");
+    attr.add(CssAttr(declared));
+    assert!(
+        attr.is_set("text-decoration"),
+        "explicit `none` declaration must still count as set"
+    );
+    // Parsed accessor folds `none` back to the variant, but `is_set` only
+    // looks at the raw key.
+    assert_eq!(attr.get_text_decoration(), TextDecoration::None);
 }
 
 #[test]

@@ -10,14 +10,17 @@ use crate::{
 /// boundaries.
 ///
 /// Walks `node`'s direct children in document order. Each `Text` leaf becomes
-/// one run that inherits the currently-active style. `<span>` boundaries push
-/// a new style onto the stack: the span's own `font-weight` / `font-style` /
-/// `text-decoration` flags are OR-ed into the inherited `FontStyle`, and the
-/// span's own `color` / `background-color` override the inherited `fg` / `bg`
-/// when present. Block-level children are skipped — they are dispatched as
-/// their own `LayoutBox` by the layout registry, so folding them into the
-/// parent's runs would either double-render them or wrap them in an
-/// unintended inline context.
+/// one run that inherits the currently-active style. `<span>` and `<a>`
+/// boundaries push a new style onto the stack: the element's own
+/// `font-weight` / `font-style` / `text-decoration` flags are OR-ed into the
+/// inherited `FontStyle`, and its own `color` / `background-color` override
+/// the inherited `fg` / `bg` when present. `<a>` additionally applies
+/// browser-style user-agent defaults (blue foreground, underline) whenever
+/// the matching property has not been declared on the link itself or on any
+/// ancestor — matching CSS cascade precedence for UA defaults. Block-level
+/// children are skipped — they are dispatched as their own `LayoutBox` by
+/// the layout registry, so folding them into the parent's runs would either
+/// double-render them or wrap them in an unintended inline context.
 pub fn collect_runs(
     arena: &NodeArena,
     node: &Node,
@@ -52,6 +55,25 @@ fn walk_runs(
                 let span_bg = child.css_attr.get_bg_color().or(bg);
                 let span_style = style | block_style(&child.css_attr);
                 walk_runs(arena, child, span_fg, span_bg, span_style, runs);
+            }
+            NodeType::A => {
+                // User-agent defaults: unstyled links are blue and
+                // underlined, matching browser behaviour. Both defaults
+                // yield to anything the author (or an ancestor CSS rule)
+                // has already declared for the matching property, so
+                // `a { text-decoration: none }` or `a { color: green }`
+                // take effect normally.
+                let a_fg = if child.css_attr.is_set("color") {
+                    child.css_attr.get_color().or(fg)
+                } else {
+                    Some(Color::Blue)
+                };
+                let a_bg = child.css_attr.get_bg_color().or(bg);
+                let mut a_style = style | block_style(&child.css_attr);
+                if !child.css_attr.is_set("text-decoration") {
+                    a_style |= FontStyle::UNDERLINED;
+                }
+                walk_runs(arena, child, a_fg, a_bg, a_style, runs);
             }
             // Block-level nested elements live in their own LayoutBox;
             // unknown inline tags are flattened by the HTML parser so they
