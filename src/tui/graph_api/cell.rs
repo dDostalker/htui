@@ -87,6 +87,31 @@ pub(super) fn styled_string(
     format!("{styled}")
 }
 
+impl Default for Block {
+    /// A blank cell: a single space with no color, no style, and no
+    /// foreground/background. Used as the starting state for the canvas
+    /// (`vec![Block::default(); n]`) and as a reusable template by the
+    /// painters so each per-cell fill no longer needs to spell out
+    /// `" ".to_string()` at the call site.
+    ///
+    /// The `word` buffer is pre-sized to 4 bytes so painters can `clear()`
+    /// + `push(c)` any single UTF-8 character (1–4 bytes) without triggering
+    /// a reallocation. Background fills keep the trailing 3 bytes wasted
+    /// (harmless: 16K × 3 = 48 KB once), while border glyphs (`─`, `│`,
+    /// `┌`, `┐`, `└`, `┘` are all 3 bytes) and text chars fit without
+    /// reallocating the buffer.
+    fn default() -> Self {
+        let mut word = String::with_capacity(4);
+        word.push(' ');
+        Self {
+            word,
+            fcolor: None,
+            bcolor: None,
+            style: FontStyle::empty(),
+        }
+    }
+}
+
 impl Block {
     pub fn new(
         word: String,

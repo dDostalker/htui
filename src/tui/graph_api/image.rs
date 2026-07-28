@@ -144,3 +144,45 @@ pub fn render_image_at(
     }
     Ok(())
 }
+
+/// Slice-based variant of [`render_image_at`] for the parallel paint
+/// pipeline. Each parallel task re-borrows its part of the canvas as a
+/// `&mut [Block]`, so the image loader must be able to write through that
+/// slice instead of the full `TermLayout`.
+pub fn render_image_at_slice(
+    layout: &mut [Block],
+    canvas_cols: u16,
+    path: &str,
+    origin: (usize, usize),
+    max_size: (u32, u32),
+) -> Result<()> {
+    let (x, y) = origin;
+    let mut img_data = Img::new(PathBuf::from(path), max_size);
+    img_data._create_img()?;
+    let picture = img_data
+        .picture
+        .as_ref()
+        .ok_or_else(|| anyhow!("Image data empty: {}", path))?;
+    let img_cols = img_data.cloumns as usize;
+    let img_rows = img_data.rows as usize;
+    let canvas_cols = canvas_cols as usize;
+    let max = layout.len();
+    'outer: for row in 0..img_rows {
+        for col in 0..img_cols {
+            let canvas_idx = (y + row) * canvas_cols + (x + col);
+            if canvas_idx >= max {
+                break 'outer;
+            }
+            let pic_idx = row * img_cols + col;
+            if let Some(cell) = picture.get(pic_idx) {
+                // `picture` holds pre-styled ANSI strings (one cell each),
+                // so the `word` field is the full content. Replace the
+                // cell rather than trying to find a multi-byte push that
+                // fits — the byte length is unbounded here.
+                layout[canvas_idx] =
+                    Block::new(cell.clone(), None, None, FontStyle::empty());
+            }
+        }
+    }
+    Ok(())
+}

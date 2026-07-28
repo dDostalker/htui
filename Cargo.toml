@@ -16,6 +16,7 @@ log = { version = "0.4.29", features = ["release_max_level_warn"] }
 markup5ever_rcdom = "0.3"
 slotmap = "1.1.1"
 tendril = "0.4.3"
+rayon = "1.12.0"
 
 [dev-dependencies]
 criterion = "0.8"

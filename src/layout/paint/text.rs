@@ -3,8 +3,10 @@ use crossterm::style::Color;
 use crate::{
     html::css_parse::TextAlign,
     layout::InlineRun,
-    tui::graph_api::{Block, FontStyle, TermLayout, char_width},
+    tui::graph_api::{FontStyle, char_width},
 };
+
+use super::PaintCanvas;
 
 /// Render each run in `runs` with its own style, colour and background.
 ///
@@ -21,7 +23,7 @@ use crate::{
 /// the run's background, mirroring the empty space a larger font would leave
 /// around its glyphs).
 pub(super) fn paint_runs(
-    term_layout: &mut TermLayout,
+    canvas: &mut PaintCanvas<'_>,
     runs: &[InlineRun],
     cell_start: usize,
     block_width: usize,
@@ -49,7 +51,7 @@ pub(super) fn paint_runs(
         }
         let run_bg = run.bg.or(effective_bg);
         paint_text_row(
-            term_layout,
+            canvas,
             index,
             &run.text,
             run.fg,
@@ -63,7 +65,7 @@ pub(super) fn paint_runs(
 }
 
 fn paint_text_row(
-    term_layout: &mut TermLayout,
+    canvas: &mut PaintCanvas<'_>,
     start: usize,
     text: &str,
     fg: Option<Color>,
@@ -72,8 +74,7 @@ fn paint_text_row(
     font_size_cells: usize,
     row_end: usize,
 ) {
-    let cells = term_layout.layout.as_mut_slice();
-    let max = cells.len();
+    let max = canvas.layout.len();
     let mut idx = start;
     let font_size = font_size_cells.max(1);
     for c in text.chars() {
@@ -92,9 +93,23 @@ fn paint_text_row(
         if w == 2 && idx + 1 >= max {
             break;
         }
-        cells[idx] = Block::new(c.to_string(), fg, bg, style);
+        // In-place mutation: the 4-byte buffer from `Block::default()` fits
+        // any single UTF-8 char (1–4 bytes) so `push(c)` reuses it.
+        let cell = &mut canvas.layout[idx];
+        cell.word.clear();
+        cell.word.push(c);
+        cell.fcolor = fg;
+        cell.bcolor = bg;
+        cell.style = style;
         if w == 2 {
-            cells[idx + 1] = Block::new(String::new(), fg, bg, style);
+            // Wide CJK glyphs occupy two columns; the second column is
+            // marked with an empty word so the renderer (`render_to_bytes`)
+            // skips it and doesn't double-print the glyph.
+            let pad = &mut canvas.layout[idx + 1];
+            pad.word.clear();
+            pad.fcolor = fg;
+            pad.bcolor = bg;
+            pad.style = style;
         }
         // Fill the remaining columns the "font" would occupy beyond the glyph
         // itself. Each character cell is expanded to `font_size` columns
@@ -118,7 +133,12 @@ fn paint_text_row(
             if w == 2 && pad == 1 {
                 continue;
             }
-            cells[target] = Block::new(" ".to_string(), fg, bg, style);
+            let pad_cell = &mut canvas.layout[target];
+            pad_cell.word.clear();
+            pad_cell.word.push(' ');
+            pad_cell.fcolor = fg;
+            pad_cell.bcolor = bg;
+            pad_cell.style = style;
         }
         // Advance to the next character: the slot is `font_size` columns
         // wide (or `w` columns wide, whichever is larger — `w > font_size`

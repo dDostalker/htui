@@ -4,15 +4,15 @@ use crate::{
     html::css_parse::TextAlign,
     layout::LayoutBox,
     tdom::node::NodeArena,
-    tui::graph_api::{Block, TermLayout, block_style},
+    tui::graph_api::block_style,
 };
 
-use super::{border::paint_borders, cell_index, text::paint_runs};
+use super::{PaintCanvas, border::paint_borders, text::paint_runs};
 
 pub(super) fn paint_block(
     lb: &LayoutBox,
     arena: &NodeArena,
-    term_layout: &mut TermLayout,
+    canvas: &mut PaintCanvas<'_>,
     fill_bg: bool,
     spacing_after: usize,
     chrome: bool,
@@ -29,8 +29,8 @@ pub(super) fn paint_block(
     let effective_bg = my_bg.or(parent_bg);
 
     let r = lb.rect;
-    let cols = term_layout.columns as usize;
-    let cell_start = cell_index(term_layout, r.x, r.y);
+    let cols = canvas.columns as usize;
+    let cell_start = canvas.cell_index(r.x, r.y);
 
     if fill_bg {
         // Paint the background across every row of the rect that is *not* a
@@ -94,7 +94,6 @@ pub(super) fn paint_block(
             .height
             .saturating_sub(spacing_after)
             .saturating_sub(border_top);
-        let cells = term_layout.layout.as_mut_slice();
         for row_offset in 0..rows_to_fill {
             if text_clamped && row_offset != text_row_offset {
                 continue;
@@ -102,8 +101,17 @@ pub(super) fn paint_block(
             let row_cell_start = cell_start + (row_offset + border_top) * cols;
             for i in 0..bg_width {
                 let idx = row_cell_start + (bg_start_x - r.x) + i;
-                if idx < cells.len() {
-                    cells[idx] = Block::new(" ".to_string(), fg, bg_to_use, style);
+                if idx < canvas.layout.len() {
+                    // Mutate in place: `clear()` keeps the 4-byte buffer from
+                    // `Block::default()`, `push(' ')` reuses it, then the
+                    // colour fields flip. This avoids the per-cell
+                    // alloc/free of `cells[idx] = Block::new(...)`.
+                    let cell = &mut canvas.layout[idx];
+                    cell.word.clear();
+                    cell.word.push(' ');
+                    cell.fcolor = fg;
+                    cell.bcolor = bg_to_use;
+                    cell.style = style;
                 }
             }
         }
@@ -112,7 +120,7 @@ pub(super) fn paint_block(
     // Border glyphs overlay the border cells (after fill). When no border is
     // configured this is a no-op. Borders use the same fg / bg as the box;
     // individual border colors are layered on top when set.
-    paint_borders(lb, term_layout, fg, effective_bg);
+    paint_borders(lb, canvas, fg, effective_bg);
 
     if let Some(runs) = &lb.runs {
         // Inline content sits in the content-box (rect shrunk by border +
@@ -139,7 +147,7 @@ pub(super) fn paint_block(
             + content_x_offset
             + vertical_offset;
         paint_runs(
-            term_layout,
+            canvas,
             runs,
             content_row,
             content_width,

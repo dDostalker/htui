@@ -33,7 +33,7 @@ impl TermLayout {
         let max_cells = map.columns as usize
             * map.rows as usize
             * crate::tui::graph_api::MAX_SCROLL_MULTIPLIER;
-        let layout = vec![Block::new(" ".to_string(), None, None, FontStyle::empty()); max_cells];
+        let layout = vec![Block::default(); max_cells];
         TermLayout {
             layout,
             columns: map.columns,
@@ -75,9 +75,13 @@ impl TermLayout {
 
     /// Reset every cell to a blank space and clear `rendered_rows`.
     ///
-    /// Re-uses each `Block`'s existing `word` allocation (via `clear` +
+    /// Re-uses each `Block`'s existing `word` buffer (via `clear` +
     /// `push(' ')`) so the amortised cost is just field writes — no fresh
-    /// `String` allocations per cell.
+    /// `String` allocations per cell. We intentionally do *not* use
+    /// `Block::default()` + clone here: `default()` itself allocates a
+    /// 1-byte `String` for the `" "` word, so cloning it once per cell
+    /// would re-introduce the per-frame heap traffic this loop was
+    /// designed to avoid.
     fn reset_canvas(&mut self) {
         for cell in self.layout.iter_mut() {
             cell.word.clear();

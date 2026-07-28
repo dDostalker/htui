@@ -16,8 +16,8 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use htui::tui::graph_api::TermLayout;
 
 /// Allocate a fresh `TermLayout` per iteration. Captures the cost of
-/// `reset_canvas` and the `Block::new` string allocations during canvas
-/// initialisation.
+/// `reset_canvas` and the canvas initialisation (`vec![Block::default(); n]`
+/// allocates one `String` per cell here).
 fn bench_paint_alloc_small(c: &mut Criterion) {
     let (root_id, arena) = common::build_fixture(common::HTML_SMALL, "");
     let map = common::bench_term_map();

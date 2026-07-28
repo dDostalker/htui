@@ -2,10 +2,10 @@ use crossterm::style::Color;
 
 use crate::{
     layout::{BorderStyle, LayoutBox},
-    tui::graph_api::{Block, FontStyle, TermLayout},
+    tui::graph_api::FontStyle,
 };
 
-use super::cell_index;
+use super::PaintCanvas;
 
 /// Render the four border edges of a block-level box.
 ///
@@ -17,7 +17,7 @@ use super::cell_index;
 /// content area, so any width > 1 is treated as 1.
 pub(super) fn paint_borders(
     lb: &LayoutBox,
-    term_layout: &mut TermLayout,
+    canvas: &mut PaintCanvas<'_>,
     fg: Option<Color>,
     bg: Option<Color>,
 ) {
@@ -30,9 +30,9 @@ pub(super) fn paint_borders(
         return;
     }
 
-    let cols = term_layout.columns as usize;
-    let cell_start = cell_index(term_layout, r.x, r.y);
-    let max_cells = term_layout.layout.len();
+    let cols = canvas.columns as usize;
+    let cell_start = canvas.cell_index(r.x, r.y);
+    let max_cells = canvas.layout.len();
 
     // Effective border thickness per side, clamped to the rect size and
     // collapsed to 1 — see function-level note.
@@ -54,13 +54,20 @@ pub(super) fn paint_borders(
 
     // Top edge: rows 0..top_t, columns from left_t to right_col_start.
     if sides.top.style == BorderStyle::Solid && top_t > 0 {
-        let horiz = "─";
         for row_offset in 0..top_t {
             let row_start = cell_start + row_offset * cols;
             for col in left_t..right_col_start {
                 let idx = row_start + col;
                 if idx < max_cells {
-                    term_layout.layout[idx] = Block::new(horiz.to_string(), top_color, bg, style);
+                    // In-place: capsule-reuse the 4-byte buffer from
+                    // `Block::default()` to push `─` (3 bytes) without
+                    // reallocating.
+                    let cell = &mut canvas.layout[idx];
+                    cell.word.clear();
+                    cell.word.push('─');
+                    cell.fcolor = top_color;
+                    cell.bcolor = bg;
+                    cell.style = style;
                 }
             }
         }
@@ -68,15 +75,18 @@ pub(super) fn paint_borders(
 
     // Bottom edge: rows (height-bottom_t)..height, columns left_t..right_col_start.
     if sides.bottom.style == BorderStyle::Solid && bottom_t > 0 {
-        let horiz = "─";
         let bottom_row = cell_start + (r.height - bottom_t) * cols;
         for row_offset in 0..bottom_t {
             let row_start = bottom_row + row_offset * cols;
             for col in left_t..right_col_start {
                 let idx = row_start + col;
                 if idx < max_cells {
-                    term_layout.layout[idx] =
-                        Block::new(horiz.to_string(), bottom_color, bg, style);
+                    let cell = &mut canvas.layout[idx];
+                    cell.word.clear();
+                    cell.word.push('─');
+                    cell.fcolor = bottom_color;
+                    cell.bcolor = bg;
+                    cell.style = style;
                 }
             }
         }
@@ -84,13 +94,17 @@ pub(super) fn paint_borders(
 
     // Left edge: rows top_t..(height-bottom_t), columns 0..left_t.
     if sides.left.style == BorderStyle::Solid && left_t > 0 {
-        let vert = "│";
         for row_offset in top_t..r.height.saturating_sub(bottom_t) {
             let row_start = cell_start + row_offset * cols;
             for col_offset in 0..left_t {
                 let idx = row_start + col_offset;
                 if idx < max_cells {
-                    term_layout.layout[idx] = Block::new(vert.to_string(), left_color, bg, style);
+                    let cell = &mut canvas.layout[idx];
+                    cell.word.clear();
+                    cell.word.push('│');
+                    cell.fcolor = left_color;
+                    cell.bcolor = bg;
+                    cell.style = style;
                 }
             }
         }
@@ -98,20 +112,24 @@ pub(super) fn paint_borders(
 
     // Right edge: rows top_t..(height-bottom_t), columns right_col_start..width.
     if sides.right.style == BorderStyle::Solid && right_t > 0 {
-        let vert = "│";
         for row_offset in top_t..r.height.saturating_sub(bottom_t) {
             let row_start = cell_start + row_offset * cols;
             for col_offset in 0..right_t {
                 let idx = row_start + right_col_start + col_offset;
                 if idx < max_cells {
-                    term_layout.layout[idx] = Block::new(vert.to_string(), right_color, bg, style);
+                    let cell = &mut canvas.layout[idx];
+                    cell.word.clear();
+                    cell.word.push('│');
+                    cell.fcolor = right_color;
+                    cell.bcolor = bg;
+                    cell.style = style;
                 }
             }
         }
     }
 
     // Corners: overwrite the 4 corner cells so the edges join cleanly.
-    let corner_chars = ["┌", "┐", "└", "┘"];
+    let corner_chars = ['┌', '┐', '└', '┘'];
     let corner_positions: [(usize, usize); 4] = [
         (0, 0),
         (right_col_start, 0),
@@ -130,7 +148,12 @@ pub(super) fn paint_borders(
         let color = corner_colors[i];
         let idx = cell_start + cy * cols + cx;
         if idx < max_cells {
-            term_layout.layout[idx] = Block::new(ch.to_string(), color, bg, style);
+            let cell = &mut canvas.layout[idx];
+            cell.word.clear();
+            cell.word.push(ch);
+            cell.fcolor = color;
+            cell.bcolor = bg;
+            cell.style = style;
         }
     }
 
