@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crossterm::style::Color;
 use htui::html::css_parse::{
     BorderStyle, Combinator, CssAttr, CssRule, CssSelector, EdgeSizes, FontWeight, INHERITED_PROPS,
-    Length, Parser, SUPPORTED_PROPERTIES, TextDecoration, css_into_node, parse_color_str,
+    Length, NthExpr, Parser, SUPPORTED_PROPERTIES, TextDecoration, css_into_node, parse_color_str,
     parse_declaration_text, selector_chain_matches,
 };
 use htui::tdom::node::{Node, NodeArena, NodeId, NodeType};
@@ -64,6 +64,174 @@ fn test_matches_descendant() {
     let div_id = arena[root].children[0];
     let p_id = arena[div_id].children[0];
     assert!(selector_chain_matches(&arena, p_id, &sel));
+}
+
+#[test]
+fn test_nth_child_even_matches_second_child() {
+    // `:nth-child(even)` (== `2n`) must match the 2nd, 4th, … siblings and
+    // skip the 1st, 3rd, … . Build a 4-row parent and verify each index.
+    init();
+    let mut arena = NodeArena::default();
+    let parent = arena.insert(Node::from(NodeType::Div));
+    let mut children = Vec::new();
+    for _ in 0..4 {
+        let id = arena.insert(Node::from(NodeType::P));
+        Node::append_child(&mut arena, parent, id);
+        children.push(id);
+    }
+    let sel: CssSelector = ":nth-child(even)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, children[0], &sel));
+    assert!(selector_chain_matches(&arena, children[1], &sel));
+    assert!(!selector_chain_matches(&arena, children[2], &sel));
+    assert!(selector_chain_matches(&arena, children[3], &sel));
+}
+
+#[test]
+fn test_nth_child_odd_matches_first_child() {
+    // `:nth-child(odd)` (== `2n+1`) must match the 1st, 3rd, … siblings.
+    init();
+    let mut arena = NodeArena::default();
+    let parent = arena.insert(Node::from(NodeType::Div));
+    let mut children = Vec::new();
+    for _ in 0..3 {
+        let id = arena.insert(Node::from(NodeType::P));
+        Node::append_child(&mut arena, parent, id);
+        children.push(id);
+    }
+    let sel: CssSelector = ":nth-child(odd)".parse().unwrap();
+    assert!(selector_chain_matches(&arena, children[0], &sel));
+    assert!(!selector_chain_matches(&arena, children[1], &sel));
+    assert!(selector_chain_matches(&arena, children[2], &sel));
+}
+
+#[test]
+fn test_nth_child_bare_integer_matches_exact_position() {
+    // `:nth-child(2)` must match only the 2nd child. `a=0` in the NthExpr
+    // exercises the "single position" branch.
+    init();
+    let mut arena = NodeArena::default();
+    let parent = arena.insert(Node::from(NodeType::Div));
+    let mut children = Vec::new();
+    for _ in 0..4 {
+        let id = arena.insert(Node::from(NodeType::P));
+        Node::append_child(&mut arena, parent, id);
+        children.push(id);
+    }
+    let sel: CssSelector = ":nth-child(2)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, children[0], &sel));
+    assert!(selector_chain_matches(&arena, children[1], &sel));
+    assert!(!selector_chain_matches(&arena, children[2], &sel));
+}
+
+#[test]
+fn test_nth_child_an_plus_b_form() {
+    // `:nth-child(3n+2)` must match indices 2, 5, 8, …
+    init();
+    let mut arena = NodeArena::default();
+    let parent = arena.insert(Node::from(NodeType::Div));
+    let mut children = Vec::new();
+    for _ in 0..9 {
+        let id = arena.insert(Node::from(NodeType::P));
+        Node::append_child(&mut arena, parent, id);
+        children.push(id);
+    }
+    let sel: CssSelector = ":nth-child(3n+2)".parse().unwrap();
+    for (i, id) in children.iter().enumerate() {
+        let expected = (i + 1 == 2) || (i + 1 == 5) || (i + 1 == 8);
+        assert_eq!(
+            selector_chain_matches(&arena, *id, &sel),
+            expected,
+            "3n+2 should match index {} → {}",
+            i + 1,
+            expected
+        );
+    }
+}
+
+#[test]
+fn test_nth_child_compound_with_tag() {
+    // `tr:nth-child(even)` — the visual-test form. The tag prefix must not
+    // disturb the nth-child evaluation.
+    init();
+    let mut arena = NodeArena::default();
+    let table = arena.insert(Node::from(NodeType::Table));
+    let tr_ids: Vec<_> = (0..3)
+        .map(|_| {
+            let id = arena.insert(Node::from(NodeType::Tr));
+            Node::append_child(&mut arena, table, id);
+            id
+        })
+        .collect();
+    let sel: CssSelector = "tr:nth-child(even)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, tr_ids[0], &sel));
+    assert!(selector_chain_matches(&arena, tr_ids[1], &sel));
+    assert!(!selector_chain_matches(&arena, tr_ids[2], &sel));
+
+    // A non-`<tr>` element at the same index must not match — the tag
+    // filter is applied first.
+    let span = arena.insert(Node::from(NodeType::Span));
+    Node::append_child(&mut arena, table, span);
+    assert!(!selector_chain_matches(&arena, span, &sel));
+}
+
+#[test]
+fn test_nth_child_descendant_combinator() {
+    // `table tr:nth-child(even)` — the exact selector used by the
+    // `table/index.html` visual test for striping. The descendant
+    // combinator must still walk ancestors correctly.
+    init();
+    let mut arena = NodeArena::default();
+    let table = arena.insert(Node::from(NodeType::Table));
+    let tr_ids: Vec<_> = (0..4)
+        .map(|_| {
+            let id = arena.insert(Node::from(NodeType::Tr));
+            Node::append_child(&mut arena, table, id);
+            id
+        })
+        .collect();
+    let sel: CssSelector = "table tr:nth-child(even)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, tr_ids[0], &sel));
+    assert!(selector_chain_matches(&arena, tr_ids[1], &sel));
+    assert!(!selector_chain_matches(&arena, tr_ids[2], &sel));
+    assert!(selector_chain_matches(&arena, tr_ids[3], &sel));
+}
+
+#[test]
+fn test_nth_child_nth_expr_matches_predicate() {
+    // Direct unit test on NthExpr — covers the even/odd constants and the
+    // `a*n + b` math without needing an arena.
+    init();
+    assert_eq!(NthExpr::EVEN.matches(1), false);
+    assert_eq!(NthExpr::EVEN.matches(2), true);
+    assert_eq!(NthExpr::EVEN.matches(3), false);
+    assert_eq!(NthExpr::EVEN.matches(4), true);
+    assert_eq!(NthExpr::ODD.matches(1), true);
+    assert_eq!(NthExpr::ODD.matches(2), false);
+    assert_eq!(NthExpr::ODD.matches(3), true);
+    let expr = NthExpr { a: 3, b: 2 };
+    assert_eq!(expr.matches(2), true);
+    assert_eq!(expr.matches(5), true);
+    assert_eq!(expr.matches(8), true);
+    assert_eq!(expr.matches(1), false);
+    assert_eq!(expr.matches(4), false);
+    // Degenerate a=0 → only the exact position matches.
+    let single = NthExpr { a: 0, b: 3 };
+    assert_eq!(single.matches(3), true);
+    assert_eq!(single.matches(2), false);
+    assert_eq!(single.matches(4), false);
+}
+
+#[test]
+fn test_nth_child_unsupported_forms_fail_parse() {
+    // Forms outside the supported subset (bare `n`, negative coefficients,
+    // signed offsets) must fail to parse so we never silently mis-match.
+    init();
+    assert!(":nth-child(n)".parse::<CssSelector>().is_err());
+    assert!(":nth-child(-n+3)".parse::<CssSelector>().is_err());
+    assert!(":nth-child(2n-1)".parse::<CssSelector>().is_err());
+    assert!(":nth-child(0)".parse::<CssSelector>().is_err());
+    // The bare-nth-child token without parentheses must also be rejected.
+    assert!(":nth-child".parse::<CssSelector>().is_err());
 }
 
 #[test]

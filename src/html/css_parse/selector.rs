@@ -2,11 +2,45 @@ use std::str::FromStr;
 
 use crate::tdom::node::NodeType;
 
+/// `an + b` expression used by the `:nth-child()` pseudo-class.
+///
+/// The selector matches an element when its 1-based index among its parent's
+/// siblings equals `a*n + b` for some non-negative integer `n`. This is the
+/// minimal subset of the CSS formula that the existing visual tests need
+/// (`even` → `2n`, `odd` → `2n+1`, and bare integers like `:nth-child(2)`).
+/// More complex forms (`-n+3`, `n+2` with implicit coefficient) are rejected
+/// during parsing so we never silently mis-match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NthExpr {
+    /// Step. `0` means the expression degenerates to "match only index `b`".
+    pub a: usize,
+    /// 1-based offset (matches indices `b`, `a + b`, `2a + b`, …).
+    pub b: usize,
+}
+
+impl NthExpr {
+    /// `2n` — every 2nd child starting at the 2nd.
+    pub const EVEN: NthExpr = NthExpr { a: 2, b: 0 };
+    /// `2n + 1` — every 2nd child starting at the 1st.
+    pub const ODD: NthExpr = NthExpr { a: 2, b: 1 };
+
+    /// Evaluate the expression against a 1-based sibling index.
+    pub fn matches(self, index_1based: usize) -> bool {
+        if self.a == 0 {
+            return index_1based == self.b;
+        }
+        index_1based >= self.b && (index_1based - self.b) % self.a == 0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Selector {
     Tag(NodeType),
     Class(String),
     Id(String),
+    /// `:nth-child(<expr>)` — match when the element is the n-th child of its
+    /// parent (counting all siblings, including text nodes, per CSS spec).
+    NthChild(NthExpr),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -67,13 +101,34 @@ impl FromStr for CssSelector {
 /// `div > p` → `(["div", "p"], [Child])`
 /// `div.foo` → `(["div.foo"], [])`
 /// `div > p + span` → `(["div", "p", "span"], [Child, NextSibling])`
+///
+/// `(` and `[` open a balanced group; combinator chars inside a group
+/// (e.g. the `+` in `:nth-child(3n+2)`) are kept as part of the segment
+/// instead of being promoted to a sibling/child combinator.
 fn split_by_combinators(s: &str) -> (Vec<&str>, Vec<Combinator>) {
     let mut segments: Vec<&str> = Vec::new();
     let mut combinators: Vec<Combinator> = Vec::new();
     let mut iter = s.char_indices().peekable();
     let mut start = 0;
+    let mut depth: usize = 0;
 
     while let Some((i, ch)) = iter.next() {
+        // Track parentheses / brackets so combinator chars inside an
+        // argument list (`:nth-child(3n+2)`, `:not(a > b)`) stay put.
+        match ch {
+            '(' | '[' => {
+                depth = depth.saturating_add(1);
+                continue;
+            }
+            ')' | ']' => {
+                depth = depth.saturating_sub(1);
+                continue;
+            }
+            _ => {}
+        }
+        if depth > 0 {
+            continue;
+        }
         if !ch.is_whitespace() && !matches!(ch, '>' | '+' | '~') {
             continue;
         }
@@ -144,7 +199,7 @@ fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, anyhow::Erro
             '.' => {
                 i += 1;
                 let start = i;
-                while i < chars.len() && chars[i] != '.' && chars[i] != '#' {
+                while i < chars.len() && chars[i] != '.' && chars[i] != '#' && chars[i] != ':' {
                     i += 1;
                 }
                 let name: String = chars[start..i].iter().collect();
@@ -156,7 +211,7 @@ fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, anyhow::Erro
             '#' => {
                 i += 1;
                 let start = i;
-                while i < chars.len() && chars[i] != '.' && chars[i] != '#' {
+                while i < chars.len() && chars[i] != '.' && chars[i] != '#' && chars[i] != ':' {
                     i += 1;
                 }
                 let name: String = chars[start..i].iter().collect();
@@ -165,9 +220,45 @@ fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, anyhow::Erro
                 }
                 out.push(Selector::Id(name));
             }
+            ':' => {
+                // Pseudo-class (currently only `:nth-child(<expr>)` is
+                // recognised). Pull the identifier, expect `(...)`, parse
+                // the argument, and emit the corresponding Selector variant.
+                i += 1;
+                let name_start = i;
+                while i < chars.len()
+                    && chars[i] != '('
+                    && chars[i] != '.'
+                    && chars[i] != '#'
+                    && chars[i] != ':'
+                {
+                    i += 1;
+                }
+                let name: String = chars[name_start..i].iter().collect();
+                if name.eq_ignore_ascii_case("nth-child") {
+                    if i >= chars.len() || chars[i] != '(' {
+                        return Err(anyhow::anyhow!(":nth-child requires `(...)`"));
+                    }
+                    i += 1;
+                    let arg_start = i;
+                    while i < chars.len() && chars[i] != ')' {
+                        i += 1;
+                    }
+                    if i >= chars.len() {
+                        return Err(anyhow::anyhow!(":nth-child(...) missing ')'"));
+                    }
+                    let arg: String = chars[arg_start..i].iter().collect();
+                    i += 1; // consume ')'
+                    let expr = parse_nth_child_arg(&arg)
+                        .ok_or_else(|| anyhow::anyhow!("invalid :nth-child arg: {arg:?}"))?;
+                    out.push(Selector::NthChild(expr));
+                } else {
+                    return Err(anyhow::anyhow!("unsupported pseudo-class: :{name}"));
+                }
+            }
             _ => {
                 let start = i;
-                while i < chars.len() && chars[i] != '.' && chars[i] != '#' {
+                while i < chars.len() && chars[i] != '.' && chars[i] != '#' && chars[i] != ':' {
                     i += 1;
                 }
                 let tag: String = chars[start..i].iter().collect();
@@ -179,6 +270,76 @@ fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, anyhow::Erro
         }
     }
     Ok(out)
+}
+
+/// Parse the argument of `:nth-child(...)`.
+///
+/// Accepted forms (matching the subset of the CSS `an+b` grammar that the
+/// visual tests use):
+/// - `even`     → `2n`     (every 2nd starting at 2)
+/// - `odd`      → `2n + 1` (every 2nd starting at 1)
+/// - `<n>`      → bare integer, matches exactly that 1-based index
+/// - `<a>n`     → e.g. `3n` matches the 3rd, 6th, 9th, …
+/// - `<a>n+<b>` / `<a>n-<b>` → e.g. `2n+1` matches the 1st, 3rd, 5th, …
+///
+/// Returns `None` for unsupported forms (`-n+3`, `n+2` with implicit `1n`,
+/// `n` alone, signed/zero coefficients, trailing junk) so the parser can
+/// surface them as errors instead of silently mis-matching.
+fn parse_nth_child_arg(s: &str) -> Option<NthExpr> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let lower = s.to_ascii_lowercase();
+    if lower == "even" {
+        return Some(NthExpr::EVEN);
+    }
+    if lower == "odd" {
+        return Some(NthExpr::ODD);
+    }
+    // Bare integer → fixed position.
+    if let Ok(n) = s.parse::<usize>() {
+        if n == 0 {
+            return None;
+        }
+        return Some(NthExpr { a: 0, b: n });
+    }
+    // Otherwise expect `<a>n[+|-<b>]`. Reject sign on `a`, implicit `1n`,
+    // signed offsets, and trailing whitespace/junk.
+    let (coef_part, tail) = match lower.find('n') {
+        Some(idx) => lower.split_at(idx),
+        None => return None,
+    };
+    let tail = &tail[1..]; // skip the 'n' itself
+    let a: usize = if coef_part.is_empty() {
+        return None; // bare `n` is not supported
+    } else {
+        coef_part.parse().ok()?
+    };
+    if a == 0 {
+        return None;
+    }
+    let tail = tail.trim();
+    if tail.is_empty() {
+        return Some(NthExpr { a, b: 0 });
+    }
+    let (sign, num) = match tail.chars().next()? {
+        '+' => (1i32, &tail[1..]),
+        '-' => (-1i32, &tail[1..]),
+        _ => return None,
+    };
+    let n: i32 = num.trim().parse().ok()?;
+    if n == 0 {
+        return None;
+    }
+    let b_signed = n * sign;
+    if b_signed <= 0 {
+        return None;
+    }
+    Some(NthExpr {
+        a,
+        b: b_signed as usize,
+    })
 }
 
 fn tag_str_to_node_type(tag: &str) -> std::result::Result<NodeType, anyhow::Error> {
@@ -200,6 +361,7 @@ fn tag_str_to_node_type(tag: &str) -> std::result::Result<NodeType, anyhow::Erro
         "tbody" => Ok(NodeType::Tbody),
         "tfoot" => Ok(NodeType::Tfoot),
         "div" => Ok(NodeType::Div),
+        "em" => Ok(NodeType::Em),
         "figcaption" => Ok(NodeType::Figcaption),
         "figure" => Ok(NodeType::Figure),
         "footer" => Ok(NodeType::Footer),

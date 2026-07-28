@@ -10,16 +10,17 @@ use crate::{
 /// boundaries.
 ///
 /// Walks `node`'s direct children in document order. Each `Text` leaf becomes
-/// one run that inherits the currently-active style. `<span>` and `<a>`
-/// boundaries push a new style onto the stack: the element's own
+/// one run that inherits the currently-active style. `<span>`, `<a>` and
+/// `<em>` boundaries push a new style onto the stack: the element's own
 /// `font-weight` / `font-style` / `text-decoration` flags are OR-ed into the
 /// inherited `FontStyle`, and its own `color` / `background-color` override
 /// the inherited `fg` / `bg` when present. `<a>` additionally applies
 /// browser-style user-agent defaults (blue foreground, underline) whenever
 /// the matching property has not been declared on the link itself or on any
-/// ancestor — matching CSS cascade precedence for UA defaults. Block-level
-/// children are skipped — they are dispatched as their own `LayoutBox` by
-/// the layout registry, so folding them into the parent's runs would either
+/// ancestor; `<em>` applies an italic default for the same reason — both
+/// match CSS cascade precedence for UA defaults. Block-level children are
+/// skipped — they are dispatched as their own `LayoutBox` by the layout
+/// registry, so folding them into the parent's runs would either
 /// double-render them or wrap them in an unintended inline context.
 pub fn collect_runs(
     arena: &NodeArena,
@@ -74,6 +75,19 @@ fn walk_runs(
                     a_style |= FontStyle::UNDERLINED;
                 }
                 walk_runs(arena, child, a_fg, a_bg, a_style, runs);
+            }
+            NodeType::Em => {
+                // User-agent default: `<em>` renders italic. Anything the
+                // author (or an ancestor rule) declared for `font-style`
+                // takes precedence — `em { font-style: normal }` or
+                // `em { font-style: oblique }` are honoured.
+                let em_fg = child.css_attr.get_color().or(fg);
+                let em_bg = child.css_attr.get_bg_color().or(bg);
+                let mut em_style = style | block_style(&child.css_attr);
+                if !child.css_attr.is_set("font-style") {
+                    em_style |= FontStyle::ITALIC;
+                }
+                walk_runs(arena, child, em_fg, em_bg, em_style, runs);
             }
             // Block-level nested elements live in their own LayoutBox;
             // unknown inline tags are flattened by the HTML parser so they
