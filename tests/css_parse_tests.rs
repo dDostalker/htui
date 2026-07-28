@@ -1,13 +1,12 @@
+use std::collections::HashMap;
+
 use crossterm::style::Color;
 use htui::html::css_parse::{
     BorderStyle, Combinator, CssAttr, CssRule, CssSelector, EdgeSizes, FontWeight,
     INHERITED_PROPS, Length, Parser, SUPPORTED_PROPERTIES, css_into_node, parse_color_str,
     parse_declaration_text, selector_chain_matches,
 };
-use htui::tdom::{
-    attributes::Attr,
-    node::{Node, NodeArena, NodeId, NodeType},
-};
+use htui::tdom::node::{Node, NodeArena, NodeId, NodeType};
 use indexmap::IndexMap;
 
 /// Default font-size (in cells) used by [`Length::resolve`] tests so the
@@ -23,7 +22,10 @@ fn init() {
 fn build_test(arena: &mut NodeArena) -> (NodeId, NodeId) {
     let root = arena.insert(Node::from(NodeType::Global));
     let div_id = arena.insert(Node::from(NodeType::Div));
-    arena[div_id].attributes = Attr::parse_from_str(r#"class="active" id="main""#);
+    arena[div_id].attributes = HashMap::from([
+        ("class".to_string(), "active".to_string()),
+        ("id".to_string(), "main".to_string()),
+    ]);
     let p_id = arena.insert(Node::from(NodeType::P));
     let text_id = arena.insert(Node::text("Hello"));
     Node::append_child(arena, p_id, text_id);

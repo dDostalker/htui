@@ -1,9 +1,9 @@
+use std::collections::HashMap;
 use std::fmt;
 
 use slotmap::{Key, SlotMap, new_key_type};
 
 use crate::html::css_parse::CssAttr;
-use crate::tdom::attributes::Attr;
 
 // ============================================================
 // NodeId — slotmap 生成的类型安全索引
@@ -138,7 +138,12 @@ pub struct Node {
     pub children: Vec<NodeId>,
     /// Parent node ID. `None` for the root node.
     pub parent: Option<NodeId>,
-    pub attributes: Attr,
+    /// Raw HTML attributes as a `(name, value)` map.
+    ///
+    /// Use the inherent helpers below (`get_id`, `get_class`, …) for the few
+    /// lookups that carry domain semantics; everything else should go through
+    /// `attributes.get(...)` directly so the surface stays minimal.
+    pub attributes: HashMap<String, String>,
     pub css_attr: CssAttr,
 }
 
@@ -148,7 +153,7 @@ impl Node {
             node_type,
             children: vec![],
             parent: None,
-            attributes: Attr::new(),
+            attributes: HashMap::new(),
             css_attr: CssAttr::new(),
         }
     }
@@ -158,14 +163,11 @@ impl Node {
             node_type: NodeType::Text(data.to_string()),
             children: vec![],
             parent: None,
-            attributes: Attr::new(),
+            attributes: HashMap::new(),
             css_attr: CssAttr::new(),
         }
     }
 
-    // ============================================================
-    // 树操作辅助（需配合 arena 使用）
-    // ============================================================
 
     /// Append a child node to the current node (also sets child's parent).
     pub fn append_child(arena: &mut NodeArena, parent_id: NodeId, child_id: NodeId) {

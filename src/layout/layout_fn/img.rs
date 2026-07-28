@@ -23,13 +23,12 @@ pub fn layout_img(
         return None;
     }
 
-    let src = match node.attributes.get_src() {
+    let src = match node.get_src() {
         Some(s) => s.clone(),
         None => return None,
     };
 
     let max_w = node
-        .attributes
         .get_width()
         .unwrap_or(containing.width as u32 * 2);
     // `BoxConstraint` only exposes the containing block width, so the default
@@ -37,7 +36,6 @@ pub fn layout_img(
     // default once converted to cells). The picture always scrolls
     // vertically, so we never need to clamp to the terminal height.
     let max_h = node
-        .attributes
         .get_height()
         .unwrap_or(containing.width as u32 * 4);
 

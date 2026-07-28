@@ -242,9 +242,8 @@ fn tag_str_to_node_type(tag: &str) -> std::result::Result<NodeType, anyhow::Erro
 fn matches_css(node: &Node, sel: &Selector) -> bool {
     match sel {
         Selector::Tag(nt) => node.node_type == *nt,
-        Selector::Class(name) => node.attributes.has_class(name),
+        Selector::Class(name) => node.has_class(name),
         Selector::Id(id) => node
-            .attributes
             .get_id()
             .map(|s| s.as_str() == id.as_str())
             .unwrap_or(false),

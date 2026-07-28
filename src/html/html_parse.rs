@@ -1,16 +1,13 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use html5ever::Attribute;
 use html5ever::driver::ParseOpts;
 use html5ever::tendril::TendrilSink;
 use log::{debug, info, warn};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
-use crate::tdom::{
-    attributes::Attr,
-    node::{Node, NodeArena, NodeId, NodeType},
-};
+use crate::tdom::node::{Node, NodeArena, NodeId, NodeType};
 
 /// HTML parser (slotmap arena-based).
 #[derive(Debug)]
@@ -48,15 +45,11 @@ impl Parser {
     }
 }
 
-fn convert_attributes(html5_attrs: &[Attribute]) -> Attr {
-    if html5_attrs.is_empty() {
-        return Attr::new();
-    }
-    Attr::from_pairs(
-        html5_attrs
-            .iter()
-            .map(|a| (a.name.local.to_string(), a.value.to_string())),
-    )
+fn convert_attributes(html5_attrs: &[html5ever::Attribute]) -> HashMap<String, String> {
+    html5_attrs
+        .iter()
+        .map(|a| (a.name.local.to_string(), a.value.to_string()))
+        .collect()
 }
 
 fn convert_children(
@@ -84,11 +77,12 @@ fn convert_children(
                             return;
                         }
                         if node_type == NodeType::Link {
-                            let a = {
+                            let link_attrs = {
                                 let ar = attrs.borrow();
                                 convert_attributes(&ar)
                             };
-                            if let (Some(rel), Some(href)) = (a.get("rel"), a.get("href"))
+                            if let (Some(rel), Some(href)) =
+                                (link_attrs.get("rel"), link_attrs.get("href"))
                                 && rel.to_lowercase().contains("stylesheet")
                             {
                                 info!("外部样式表: {}", href);
