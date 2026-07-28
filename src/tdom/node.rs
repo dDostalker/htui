@@ -37,6 +37,8 @@ pub enum NodeType {
     Html,
     Body,
     Head,
+    Title,
+    Meta,
     H1,
     H2,
     H3,
@@ -56,6 +58,16 @@ pub enum NodeType {
     Ul,
     Ol,
     Li,
+    Table,
+    Thead,
+    Tbody,
+    Tfoot,
+    Tr,
+    Th,
+    Td,
+    Caption,
+    Colgroup,
+    Col,
     Input,
     Form,
     Select,
@@ -70,7 +82,7 @@ pub enum NodeType {
 
 impl NodeType {
     pub fn is_self_closing(&self) -> bool {
-        matches!(self, NodeType::Img | NodeType::Input)
+        matches!(self, NodeType::Img | NodeType::Input | NodeType::Meta)
     }
 
     /// CSS default `font-size` in `em` units for this element type.

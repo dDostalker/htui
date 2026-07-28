@@ -37,16 +37,6 @@ fn mock_term_map() -> TermMap {
 }
 
 #[test]
-fn test_term_map_mock() {
-    let map = TermMap {
-        columns: 80,
-        rows: 24,
-    };
-    assert_eq!(map.columns, 80);
-    assert_eq!(map.rows, 24);
-}
-
-#[test]
 fn test_layout_p() {
     let mut p = Parser::new("<p>Hello</p><p>World</p>");
     let (root, arena, _) = p.parse();

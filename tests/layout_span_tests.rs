@@ -125,9 +125,8 @@ fn test_p_with_italic_span_paints_italic_run() {
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
-    let italic_idx = find_cell_with_style(&tl, "i", |s| s.contains(FontStyle::ITALIC))
+    find_cell_with_style(&tl, "i", |s| s.contains(FontStyle::ITALIC))
         .expect("italic span should paint cells with ITALIC flag");
-    let _ = italic_idx;
 }
 
 #[test]
@@ -244,7 +243,6 @@ fn test_span_color_overrides_parent() {
         tl.layout[p_idx].fcolor.is_none() || tl.layout[p_idx].fcolor == Some(Color::Red),
         "plain cell should not pick up the span's red"
     );
-    let _ = p_idx;
 }
 
 #[test]
