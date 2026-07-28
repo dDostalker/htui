@@ -15,8 +15,30 @@ impl CssRule {
     pub fn new() -> Self {
         CssRule(IndexMap::new())
     }
+
+    /// Insert a `(selector, declarations)` pair.
+    ///
+    /// If `sel` is already present, the new declarations are merged into the
+    /// existing rule instead of overwriting it — later rules with the same
+    /// selector win for any single property (matching the CSS cascade), but
+    /// properties only present in the earlier rule are preserved. Without
+    /// this merge, two rules like `.a, .grow { background: red }` and
+    /// `.grow { flex-grow: 1 }` would leave `.grow` with only `flex-grow`,
+    /// silently dropping `background`.
     pub fn add(&mut self, sel: CssSelector, attr: IndexMap<String, String>) {
-        self.0.insert(sel, CssAttr(attr));
+        if let Some(existing) = self.0.get_mut(&sel) {
+            for (k, v) in attr {
+                existing.0.insert(k, v);
+            }
+        } else {
+            self.0.insert(sel, CssAttr(attr));
+        }
+    }
+}
+
+impl Default for CssRule {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

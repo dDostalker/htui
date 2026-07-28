@@ -1,9 +1,7 @@
 use crossterm::style::Color;
 
 use crate::{
-    html::css_parse::TextAlign,
-    layout::LayoutBox,
-    tdom::node::NodeArena,
+    html::css_parse::TextAlign, layout::LayoutBox, tdom::node::NodeArena,
     tui::graph_api::block_style,
 };
 

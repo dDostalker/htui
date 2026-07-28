@@ -37,7 +37,9 @@ htui/
 │   │       ├── header_footer.rs
 │   │       ├── aside.rs
 │   │       ├── list.rs (ul / ol / li)
-│   │       └── img.rs
+│   │       ├── img.rs
+│   │       ├── table.rs     # <table> 布局
+│   │       └── flex.rs      # CSS flexbox (display: flex 入口)
 │   └── tui/
 │       ├── mod.rs
 │       └── graph_api.rs    # Block / TermLayout / RenderCmd / 图像加载
@@ -58,7 +60,8 @@ htui/
 │       ├── font_styles/  # bold / italic / underline / line-through
 │       ├── list/
 │       ├── box_model/
-│       └── font_size/
+│       ├── font_size/
+│       └── flex/
 ├── tests/
 │   ├── html_parse_tests.rs
 │   ├── css_parse_tests.rs
@@ -75,6 +78,7 @@ htui/
 │   ├── layout_font_size_tests.rs
 │   ├── layout_tree_tests.rs
 │   ├── layout_html_body_tests.rs
+│   ├── layout_flex_tests.rs   # CSS flexbox (display: flex) 布局测试
 │   └── logging_tests.rs
 ```
 

@@ -46,6 +46,7 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "text-decoration",
     "font-size",
     "width",
+    "height",
     // Box-model edges
     "padding",
     "padding-top",
@@ -65,6 +66,21 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "border-width",
     "border-style",
     "border-color",
+    // Flexbox
+    "display",
+    "flex-direction",
+    "flex-wrap",
+    "justify-content",
+    "align-items",
+    "align-self",
+    "align-content",
+    "flex-grow",
+    "flex-shrink",
+    "flex-basis",
+    "order",
+    "gap",
+    "row-gap",
+    "column-gap",
 ];
 
 /// Inheritable subset of [`SUPPORTED_PROPERTIES`]: a child without an explicit

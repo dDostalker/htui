@@ -53,7 +53,14 @@ pub type LayoutFn = fn(
 ///
 /// Each element type that needs custom layout declares a function here. The
 /// dispatcher iterates this list and uses the first non-`None` result.
+///
+/// The first entry is the flex dispatcher: it claims every block element
+/// that opts into `display: flex`, regardless of its tag. For non-flex
+/// nodes it returns `None` and the registry falls through to the
+/// element-specific block layout, so flex and the existing block
+/// layout are mutually exclusive without duplicating code.
 pub static DEFAULT_LAYOUT: &[LayoutFn] = &[
+    layout_fn::flex::layout_flex_dispatch,
     layout_fn::p::layout_p,
     layout_fn::head::layout_hn,
     layout_fn::img::layout_img,

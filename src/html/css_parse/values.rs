@@ -529,3 +529,222 @@ pub enum TextDecoration {
     LineThrough,
     UnderlineLineThrough,
 }
+
+// ============================================================
+// Flexbox property values
+//
+// Parsers and enums for the CSS flex properties supported by the
+// renderer. Kept in `values.rs` alongside the other typed enums
+// because they're plain value-types with no DOM / layout coupling.
+// The flex layout itself lives in `layout::layout_fn::flex`.
+// ============================================================
+
+/// Main axis direction (CSS `flex-direction`).
+///
+/// Only the two forward variants are exposed in v1; `*-reverse` is rejected
+/// at parse time so callers can rely on `Row` / `Column` being the only
+/// possibilities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlexDirection {
+    /// Items laid out left-to-right along the main axis.
+    Row,
+    /// Items laid out top-to-bottom along the main axis.
+    Column,
+}
+
+#[doc(hidden)]
+pub fn parse_flex_direction(s: &str) -> Option<FlexDirection> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "row" => Some(FlexDirection::Row),
+        "column" => Some(FlexDirection::Column),
+        _ => None,
+    }
+}
+
+/// Wrapping behaviour (CSS `flex-wrap`).
+///
+/// Only the forward variants are exposed in v1; `wrap-reverse` is rejected
+/// at parse time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlexWrap {
+    /// All items on a single line; items may shrink to fit.
+    NoWrap,
+    /// Items wrap onto additional lines when the main axis overflows.
+    Wrap,
+}
+
+#[doc(hidden)]
+pub fn parse_flex_wrap(s: &str) -> Option<FlexWrap> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "nowrap" => Some(FlexWrap::NoWrap),
+        "wrap" => Some(FlexWrap::Wrap),
+        _ => None,
+    }
+}
+
+/// Main-axis distribution (CSS `justify-content`).
+///
+/// `SpaceAround` / `SpaceEvenly` are distinct because they differ in how the
+/// leading / trailing edges are spaced — merging them would lose the visual
+/// difference. The `align-content` property reuses this same enum because
+/// it has the same value grammar in CSS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JustifyContent {
+    FlexStart,
+    FlexEnd,
+    Center,
+    SpaceBetween,
+    SpaceAround,
+    SpaceEvenly,
+}
+
+#[doc(hidden)]
+pub fn parse_justify_content(s: &str) -> Option<JustifyContent> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "flex-start" | "start" => Some(JustifyContent::FlexStart),
+        "flex-end" | "end" => Some(JustifyContent::FlexEnd),
+        "center" => Some(JustifyContent::Center),
+        "space-between" => Some(JustifyContent::SpaceBetween),
+        "space-around" => Some(JustifyContent::SpaceAround),
+        "space-evenly" => Some(JustifyContent::SpaceEvenly),
+        _ => None,
+    }
+}
+
+/// Cross-axis alignment (CSS `align-items` and `align-self`).
+///
+/// `Baseline` is intentionally absent — terminal text has no real baseline
+/// to align against. The default `Stretch` only takes effect when the
+/// container has a known cross-axis size (e.g. an explicit `height` for
+/// row direction).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlignItems {
+    Stretch,
+    FlexStart,
+    FlexEnd,
+    Center,
+}
+
+#[doc(hidden)]
+pub fn parse_align_items(s: &str) -> Option<AlignItems> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "stretch" => Some(AlignItems::Stretch),
+        "flex-start" | "start" => Some(AlignItems::FlexStart),
+        "flex-end" | "end" => Some(AlignItems::FlexEnd),
+        "center" => Some(AlignItems::Center),
+        _ => None,
+    }
+}
+
+/// Resolved `flex-basis` value.
+///
+/// `Auto` defers to the item's `width` (for row direction) or `height`
+/// (for column direction), then to its measured content size. The variants
+/// mirror [`Length`] but keep the `auto` case separate so a missing
+/// declaration and an explicit `auto` share a single value type.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FlexBasis {
+    Auto,
+    Length(Length),
+}
+
+#[doc(hidden)]
+pub fn parse_flex_basis(s: &str) -> Option<FlexBasis> {
+    let trimmed = s.trim();
+    if trimmed.eq_ignore_ascii_case("auto") {
+        return Some(FlexBasis::Auto);
+    }
+    Length::parse(trimmed).map(FlexBasis::Length)
+}
+
+/// Resolve a `flex-basis` against the containing main-axis size and the
+/// active font-size context.
+///
+/// `Auto` returns `None` so callers can apply their own fallback chain
+/// (item's `width` → content size → distribute equally).
+pub fn resolve_flex_basis(
+    basis: FlexBasis,
+    containing_main: usize,
+    font_size_cells: usize,
+    root_font_size_cells: usize,
+) -> Option<usize> {
+    match basis {
+        FlexBasis::Auto => None,
+        FlexBasis::Length(len) => {
+            Some(len.resolve(containing_main, font_size_cells, root_font_size_cells))
+        }
+    }
+}
+
+/// Parse a non-negative number used by `flex-grow` / `flex-shrink` / `order`.
+///
+/// Accepts integers (`0`, `1`, `2`) and decimals (`0.5`, `1.25`). Negative
+/// values and non-numeric input return `None` so the parser surfaces
+/// malformed rules rather than silently defaulting.
+#[doc(hidden)]
+pub fn parse_non_negative_number(s: &str) -> Option<f32> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let v: f32 = trimmed.parse().ok()?;
+    if v < 0.0 || !v.is_finite() {
+        return None;
+    }
+    Some(v)
+}
+
+/// Parse a signed integer used by `order`.
+///
+/// `order` accepts any integer (positive moves later, negative earlier).
+#[doc(hidden)]
+pub fn parse_order(s: &str) -> Option<i32> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let v: i32 = trimmed.parse().ok()?;
+    Some(v)
+}
+
+/// Row / column gap sizes (CSS `gap` / `row-gap` / `column-gap`).
+///
+/// `gap: <length>` applies the same value to both axes; `gap: <row>
+/// <column>` is two values. `row-gap` / `column-gap` longhands override
+/// the corresponding shorthand component.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GapSizes {
+    /// Gap between lines (rows for `flex-direction: row`, columns for column).
+    pub row: usize,
+    /// Gap between items on the same line.
+    pub column: usize,
+}
+
+#[doc(hidden)]
+pub fn parse_gap_shorthand(s: &str) -> Option<GapSizes> {
+    // 1- or 2-value gap grammar. Each value is a length; unparseable
+    // tokens become 0 so a single bad component doesn't kill the rule.
+    let mut parts = s.split_whitespace();
+    let first = parts.next()?;
+    let first_len = Length::parse(first);
+    let Some(second) = parts.next() else {
+        let v = first_len?;
+        return Some(GapSizes {
+            row: v.resolve(usize::MAX, 1, 1),
+            column: v.resolve(usize::MAX, 1, 1),
+        });
+    };
+    // CSS allows more than two values for row-gap-style properties, but the
+    // visual test corpus never uses them. Reject any trailing token so we
+    // never silently mis-parse.
+    if parts.next().is_some() {
+        return None;
+    }
+    let second_len = Length::parse(second);
+    let row = first_len?;
+    let column = second_len?;
+    Some(GapSizes {
+        row: row.resolve(usize::MAX, 1, 1),
+        column: column.resolve(usize::MAX, 1, 1),
+    })
+}

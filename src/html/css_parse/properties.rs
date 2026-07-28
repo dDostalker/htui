@@ -4,8 +4,11 @@ use indexmap::IndexMap;
 use crate::html::box_edges::{Border, BorderSides, BoxEdges, EdgeSizes};
 
 use super::values::{
-    FontStyleKind, FontWeight, Length, TextAlign, TextDecoration, parse_border_side,
-    parse_border_style, parse_border_width, parse_color_str, parse_edge_sizes,
+    AlignItems, FlexBasis, FlexDirection, FlexWrap, FontStyleKind, FontWeight, GapSizes,
+    JustifyContent, Length, TextAlign, TextDecoration, parse_align_items, parse_border_side,
+    parse_border_style, parse_border_width, parse_color_str, parse_edge_sizes, parse_flex_basis,
+    parse_flex_direction, parse_flex_wrap, parse_gap_shorthand, parse_justify_content,
+    parse_non_negative_number, parse_order, resolve_flex_basis,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -258,4 +261,193 @@ impl CssAttr {
             left,
         }
     }
+
+    // ------------------------------------------------------------
+    // Flexbox accessors
+    //
+    // Each getter is tolerant: an unparseable value falls back to the
+    // CSS initial value so a single typo never silently disables flex
+    // for the element. Callers (the flex layout in
+    // `layout::layout_fn::flex`) consume the typed result directly.
+    // ------------------------------------------------------------
+
+    /// Whether this element opts into flex layout.
+    ///
+    /// Only the literal `flex` is recognised. `inline-flex` is treated as
+    /// `block` (i.e. not flex) for v1 because the renderer is block-only.
+    pub fn is_flex(&self) -> bool {
+        matches!(
+            self.0.get("display").map(|s| s.trim().to_ascii_lowercase()),
+            Some(ref v) if v == "flex"
+        )
+    }
+
+    /// `flex-direction` (defaults to `Row`).
+    pub fn get_flex_direction(&self) -> FlexDirection {
+        self.0
+            .get("flex-direction")
+            .and_then(|v| parse_flex_direction(v))
+            .unwrap_or(FlexDirection::Row)
+    }
+
+    /// `flex-wrap` (defaults to `NoWrap`).
+    pub fn get_flex_wrap(&self) -> FlexWrap {
+        self.0
+            .get("flex-wrap")
+            .and_then(|v| parse_flex_wrap(v))
+            .unwrap_or(FlexWrap::NoWrap)
+    }
+
+    /// `justify-content` (defaults to `FlexStart`).
+    pub fn get_justify_content(&self) -> JustifyContent {
+        self.0
+            .get("justify-content")
+            .and_then(|v| parse_justify_content(v))
+            .unwrap_or(JustifyContent::FlexStart)
+    }
+
+    /// `align-items` for the container (defaults to `Stretch`).
+    pub fn get_align_items(&self) -> AlignItems {
+        self.0
+            .get("align-items")
+            .and_then(|v| parse_align_items(v))
+            .unwrap_or(AlignItems::Stretch)
+    }
+
+    /// `align-self` for a single flex item (defaults to `Auto`).
+    ///
+    /// `Auto` means "inherit the parent's `align-items`"; the layout
+    /// applies the fallback at item-resolution time so a parent change
+    /// is honoured without re-parsing the child.
+    pub fn get_align_self(&self) -> AlignSelf {
+        match self
+            .0
+            .get("align-self")
+            .map(|s| s.trim().to_ascii_lowercase())
+        {
+            Some(v) if v == "auto" => AlignSelf::Auto,
+            Some(_) => AlignSelf::Value(
+                self.0
+                    .get("align-self")
+                    .and_then(|v| parse_align_items(v))
+                    .unwrap_or(AlignItems::Stretch),
+            ),
+            None => AlignSelf::Auto,
+        }
+    }
+
+    /// `align-content` for multi-line flex containers (defaults to
+    /// `FlexStart`).
+    pub fn get_align_content(&self) -> JustifyContent {
+        self.0
+            .get("align-content")
+            .and_then(|v| parse_justify_content(v))
+            .unwrap_or(JustifyContent::FlexStart)
+    }
+
+    /// `flex-grow` (defaults to `0`).
+    pub fn get_flex_grow(&self) -> f32 {
+        self.0
+            .get("flex-grow")
+            .and_then(|v| parse_non_negative_number(v))
+            .unwrap_or(0.0)
+    }
+
+    /// `flex-shrink` (defaults to `1`).
+    pub fn get_flex_shrink(&self) -> f32 {
+        self.0
+            .get("flex-shrink")
+            .and_then(|v| parse_non_negative_number(v))
+            .unwrap_or(1.0)
+    }
+
+    /// `flex-basis` (defaults to `Auto`).
+    pub fn get_flex_basis(&self) -> FlexBasis {
+        self.0
+            .get("flex-basis")
+            .and_then(|v| parse_flex_basis(v))
+            .unwrap_or(FlexBasis::Auto)
+    }
+
+    /// Resolve `flex-basis` against the containing main-axis size.
+    ///
+    /// Returns `None` for `Auto` so the caller can apply its own fallback
+    /// chain (`width` / `height` → content measure → equal share).
+    pub fn get_flex_basis_resolved(
+        &self,
+        containing_main: usize,
+        font_size_cells: usize,
+        root_font_size_cells: usize,
+    ) -> Option<usize> {
+        resolve_flex_basis(
+            self.get_flex_basis(),
+            containing_main,
+            font_size_cells,
+            root_font_size_cells,
+        )
+    }
+
+    /// `order` (defaults to `0`).
+    pub fn get_order(&self) -> i32 {
+        self.0
+            .get("order")
+            .and_then(|v| parse_order(v))
+            .unwrap_or(0)
+    }
+
+    /// Resolve `gap` / `row-gap` / `column-gap` into a [`GapSizes`].
+    ///
+    /// `gap` is the shorthand (1- or 2-value). `row-gap` / `column-gap`
+    /// longhands override the corresponding shorthand component when
+    /// both are present. Anything unparseable collapses to `0`.
+    pub fn get_gap(&self) -> GapSizes {
+        let shorthand = self.0.get("gap").and_then(|v| parse_gap_shorthand(v));
+        let row = self
+            .0
+            .get("row-gap")
+            .and_then(|v| Length::parse(v))
+            .map(|l| l.resolve(usize::MAX, 1, 1))
+            .or_else(|| shorthand.map(|g| g.row))
+            .unwrap_or(0);
+        let column = self
+            .0
+            .get("column-gap")
+            .and_then(|v| Length::parse(v))
+            .map(|l| l.resolve(usize::MAX, 1, 1))
+            .or_else(|| shorthand.map(|g| g.column))
+            .unwrap_or(0);
+        GapSizes { row, column }
+    }
+
+    /// Element height (CSS `height`).
+    ///
+    /// Mirrors [`get_width`](Self::get_width) for the cross-axis size. Used
+    /// by the flex layout to detect an explicit container height so
+    /// `align-items: stretch` can take effect (stretch is otherwise a no-op
+    /// in v1 — see `layout_fn::flex` for the rationale).
+    pub fn get_height(
+        &self,
+        containing_width: usize,
+        font_size_cells: usize,
+        root_font_size_cells: usize,
+    ) -> Option<usize> {
+        let raw = self.0.get("height")?;
+        match Length::parse(raw)? {
+            Length::Auto => None,
+            len => Some(len.resolve(containing_width, font_size_cells, root_font_size_cells)),
+        }
+    }
+}
+
+/// `align-self` resolution result.
+///
+/// The CSS property is either the keyword `auto` (inherit the parent's
+/// `align-items`) or any of the [`AlignItems`] values. Modeled as a sum
+/// type so the layout doesn't need to re-parse the raw value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlignSelf {
+    /// Inherit the container's `align-items`.
+    Auto,
+    /// Explicit cross-axis alignment for this item.
+    Value(AlignItems),
 }
