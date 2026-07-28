@@ -210,6 +210,7 @@ fn tag_str_to_node_type(tag: &str) -> std::result::Result<NodeType, anyhow::Erro
         "li" => Ok(NodeType::Li),
         "link" => Ok(NodeType::Link),
         "main" => Ok(NodeType::Main),
+        "meta" => Ok(NodeType::Meta),
         "nav" => Ok(NodeType::Nav),
         "ol" => Ok(NodeType::Ol),
         "p" => Ok(NodeType::P),
@@ -219,6 +220,7 @@ fn tag_str_to_node_type(tag: &str) -> std::result::Result<NodeType, anyhow::Erro
         "style" => Ok(NodeType::Style),
         "summary" => Ok(NodeType::Summary),
         "textarea" => Ok(NodeType::Textarea),
+        "title" => Ok(NodeType::Title),
         "ul" => Ok(NodeType::Ul),
         _ => Err(anyhow::anyhow!("unsupported CSS tag: {:?}", tag)),
     }

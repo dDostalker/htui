@@ -83,6 +83,30 @@ fn test_css_into_node() {
 }
 
 #[test]
+fn test_css_selector_matches_title_and_meta() {
+    // The `tag` branch of the selector parser must recognise the metadata
+    // tags so that user CSS targeting `<title>` / `<meta>` parses and
+    // matches the corresponding DOM nodes.
+    init();
+    let mut arena = NodeArena::default();
+    let root = arena.insert(Node::from(NodeType::Html));
+    let head_id = arena.insert(Node::from(NodeType::Head));
+    Node::append_child(&mut arena, root, head_id);
+    let title_id = arena.insert(Node::from(NodeType::Title));
+    let meta_id = arena.insert(Node::from(NodeType::Meta));
+    Node::append_child(&mut arena, head_id, title_id);
+    Node::append_child(&mut arena, head_id, meta_id);
+
+    let title_sel: CssSelector = "title".parse().unwrap();
+    let meta_sel: CssSelector = "meta".parse().unwrap();
+    assert!(selector_chain_matches(&arena, title_id, &title_sel));
+    assert!(selector_chain_matches(&arena, meta_id, &meta_sel));
+    // Cross-tag sanity: the wrong selector must not match.
+    assert!(!selector_chain_matches(&arena, meta_id, &title_sel));
+    assert!(!selector_chain_matches(&arena, title_id, &meta_sel));
+}
+
+#[test]
 fn test_color_name_parsing() {
     assert_eq!(parse_color_str("darkblue"), Some(Color::DarkBlue));
     assert_eq!(parse_color_str("DarkBlue"), Some(Color::DarkBlue));

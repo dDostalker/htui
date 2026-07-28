@@ -84,3 +84,47 @@ pub fn layout_head(
     }
     None
 }
+
+/// Build a [`LayoutBox`] for a `<title>` element.
+///
+/// `<title>` is document metadata rendered as the terminal title (or browser
+/// window title). It must not appear in the rendered output, so this layout
+/// function is a sink that drops the title's text content — the parsed `Text`
+/// child of `<title>` is never reached because the dispatcher only recurses
+/// into children of nodes that claim a [`LayoutBox`]. Treating it as a sink
+/// also makes the title invisible regardless of where it appears in the DOM
+/// (e.g. outside `<head>`), matching browser behaviour.
+pub fn layout_title(
+    arena: &NodeArena,
+    node_id: NodeId,
+    _containing: BoxConstraint,
+    _cursor: &mut Cursor,
+    _font_ctx: FontContext,
+) -> Option<LayoutBox> {
+    let node = &arena[node_id];
+    if node.node_type != NodeType::Title {
+        return None;
+    }
+    None
+}
+
+/// Build a [`LayoutBox`] for a `<meta>` element.
+///
+/// `<meta>` is a void element carrying document metadata (`charset`, `name`,
+/// `content`, `http-equiv`, etc.). It has no rendered content and reserves no
+/// rows on the terminal canvas, so it acts as a sink in the layout pass.
+/// CSS rules targeting `<meta>` still parse and apply to its [`CssAttr`], but
+/// have no visible effect because the element is never painted.
+pub fn layout_meta(
+    arena: &NodeArena,
+    node_id: NodeId,
+    _containing: BoxConstraint,
+    _cursor: &mut Cursor,
+    _font_ctx: FontContext,
+) -> Option<LayoutBox> {
+    let node = &arena[node_id];
+    if node.node_type != NodeType::Meta {
+        return None;
+    }
+    None
+}

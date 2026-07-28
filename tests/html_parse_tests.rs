@@ -28,6 +28,27 @@ fn test_tag_map() {
 }
 
 #[test]
+fn test_tag_map_metadata() {
+    init();
+    assert_eq!(
+        html_parse::tag_name_to_node_type("title"),
+        Some(NodeType::Title)
+    );
+    assert_eq!(
+        html_parse::tag_name_to_node_type("TITLE"),
+        Some(NodeType::Title)
+    );
+    assert_eq!(
+        html_parse::tag_name_to_node_type("meta"),
+        Some(NodeType::Meta)
+    );
+    assert_eq!(
+        html_parse::tag_name_to_node_type("META"),
+        Some(NodeType::Meta)
+    );
+}
+
+#[test]
 fn test_parse_basic() {
     init();
     let mut p = Parser::new("<div><p>Hello</p></div>");
@@ -84,4 +105,57 @@ fn test_parse_html_body_style_inside_head() {
         Parser::new("<html><head><style>body{color:white}</style></head><body>x</body></html>");
     let (_root, _arena, css) = p.parse();
     assert!(css.contains("body{color:white}"));
+}
+
+#[test]
+fn test_parse_title_preserves_tree() {
+    // After promoting <title> to a recognised NodeType, the title becomes
+    // its own element with the title text as its child. The title is not
+    // flattened up to <head> any more.
+    init();
+    let mut p = Parser::new("<html><head><title>My Doc</title></head><body></body></html>");
+    let (root, arena, _) = p.parse();
+    let html_id = arena[root].children[0];
+    let head_id = arena[html_id].children[0];
+    let head_node = &arena[head_id];
+    assert_eq!(head_node.node_type, NodeType::Head);
+
+    let title_id = head_node
+        .children
+        .iter()
+        .copied()
+        .find(|&cid| arena[cid].node_type == NodeType::Title)
+        .expect("<title> should be a child of <head>");
+    let title_node = &arena[title_id];
+    assert_eq!(title_node.child_count(), 1, "<title> retains its text child");
+    match &arena[title_node.children[0]].node_type {
+        NodeType::Text(s) => assert_eq!(s, "My Doc"),
+        other => panic!("expected Text child, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_parse_meta_void_element() {
+    // <meta> is a void element: html5ever should produce a Meta node with
+    // no children, while the next sibling is parsed normally.
+    init();
+    let mut p = Parser::new(
+        "<html><head><meta charset=\"utf-8\"><title>T</title></head><body></body></html>",
+    );
+    let (root, arena, _) = p.parse();
+    let html_id = arena[root].children[0];
+    let head_id = arena[html_id].children[0];
+    let head_node = &arena[head_id];
+    let meta_id = head_node
+        .children
+        .iter()
+        .copied()
+        .find(|&cid| arena[cid].node_type == NodeType::Meta)
+        .expect("<meta> should be a child of <head>");
+    let meta_node = &arena[meta_id];
+    assert_eq!(meta_node.child_count(), 0, "<meta> is void");
+    assert_eq!(
+        meta_node.attributes.get("charset").map(String::as_str),
+        Some("utf-8")
+    );
 }

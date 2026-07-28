@@ -57,11 +57,9 @@ fn test_html_body_renders_body_content() {
 
 #[test]
 fn test_html_body_with_head_title_not_rendered() {
-    // <title> lives inside <head>. After parsing, <head> is a proper no-op
-    // element and <title> is flattened — the title's text becomes a Text
-    // child of <head>. Because <head>'s layout function is a no-op, none of
-    // its children are recursed into and the title text must not appear in
-    // the output.
+    // <title> lives inside <head>. <title> itself is a sink in the layout
+    // registry, so its Text child is never visited by the dispatcher and the
+    // title text must not appear in the output.
     init();
     let html = "<html><head><title>SecretTitle</title></head><body><p>visible</p></body></html>";
     let (root_id, arena) = setup(html, "");
@@ -73,6 +71,46 @@ fn test_html_body_with_head_title_not_rendered() {
     assert!(
         !canvas.contains("SecretTitle"),
         "<title> text inside <head> must not appear in the output"
+    );
+}
+
+#[test]
+fn test_title_outside_head_not_rendered() {
+    // Even when <title> appears outside <head> (which is invalid HTML but
+    // still occurs in user input), its text must never reach the canvas.
+    init();
+    let html = "<html><body><title>Leak</title><p>ok</p></body></html>";
+    let (root_id, arena) = setup(html, "");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    let canvas = canvas_string(&tl);
+    assert!(canvas.contains("ok"), "body content must be rendered");
+    assert!(
+        !canvas.contains("Leak"),
+        "<title> text outside <head> must not be rendered either"
+    );
+}
+
+#[test]
+fn test_meta_in_head_does_not_render() {
+    // <meta> is a void metadata element. It must never contribute content
+    // to the canvas, regardless of the attributes it carries.
+    init();
+    let html = "<html><head><meta charset=\"utf-8\"><meta name=\"description\" content=\"d\"></head><body><p>shown</p></body></html>";
+    let (root_id, arena) = setup(html, "");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    let canvas = canvas_string(&tl);
+    assert!(canvas.contains("shown"), "body content must be rendered");
+    assert!(
+        !canvas.contains("utf-8"),
+        "<meta charset> attribute must not appear in the output"
+    );
+    assert!(
+        !canvas.contains("description"),
+        "<meta name> attribute must not appear in the output"
     );
 }
 

@@ -172,6 +172,7 @@ pub fn tag_name_to_node_type(tag: &str) -> Option<NodeType> {
         "li" => Some(NodeType::Li),
         "link" => Some(NodeType::Link),
         "main" => Some(NodeType::Main),
+        "meta" => Some(NodeType::Meta),
         "nav" => Some(NodeType::Nav),
         "ol" => Some(NodeType::Ol),
         "option" => Some(NodeType::HtmlOption),
@@ -182,6 +183,7 @@ pub fn tag_name_to_node_type(tag: &str) -> Option<NodeType> {
         "style" => Some(NodeType::Style),
         "summary" => Some(NodeType::Summary),
         "textarea" => Some(NodeType::Textarea),
+        "title" => Some(NodeType::Title),
         "ul" => Some(NodeType::Ul),
         _ => None,
     }
