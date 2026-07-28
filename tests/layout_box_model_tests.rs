@@ -89,22 +89,15 @@ fn padding_expands_rect_vertically() {
     init();
     // An empty `<div>` with padding-top=4, padding-bottom=2 should still
     // own a border-box of `1 (own row) + 6 (padding)` = 7 rows.
-    let (term_map, tl) = draw("<div></div>", "div { padding: 4px 0 2px 0; }");
-    let cols = term_map.columns as usize;
+    let (_term_map, tl) = draw("<div></div>", "div { padding: 4px 0 2px 0; }");
 
-    let first_filled = tl
-        .layout
-        .iter()
-        .position(|b| b.bcolor.is_some())
-        .map(|i| i / cols);
-    // No bg → no filled cells; we instead inspect `rendered_rows` which
-    // tracks the deepest descendant's bottom row.
+    // No bg → no filled cells; we inspect `rendered_rows` which tracks the
+    // deepest descendant's bottom row.
     assert!(
         tl.rendered_rows >= 7,
         "padding should grow the div's rect to at least 7 rows, got {}",
         tl.rendered_rows
     );
-    let _ = first_filled;
 }
 
 #[test]
@@ -281,7 +274,6 @@ fn border_draws_four_edges_with_corners() {
         tl.layout.iter().any(|b| b.word == BOX_BR),
         "bottom-right corner should render"
     );
-    let _ = term_map;
 }
 
 #[test]
@@ -397,7 +389,6 @@ fn combined_padding_border_margin_size_correctly() {
             "row {row} should be yellow (part of border-box bg)"
         );
     }
-    let _ = term_map;
 }
 
 #[test]

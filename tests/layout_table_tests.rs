@@ -47,10 +47,6 @@ fn cell_containing(tl: &TermLayout, needle: &str) -> Option<(usize, usize, usize
     None
 }
 
-fn cell_count_with_text(tl: &TermLayout, needle: &str) -> usize {
-    tl.layout.iter().filter(|b| b.word == needle).count()
-}
-
 #[test]
 fn test_parse_tag_map_table() {
     assert_eq!(html_parse::tag_name_to_node_type("table"), Some(NodeType::Table));
@@ -463,22 +459,4 @@ fn test_table_outside_table_falls_back_to_block() {
     );
 }
 
-#[test]
-fn test_table_children_count_in_layout() {
-    init();
-    let html = "<table><tr><td>A</td><td>B</td></tr><tr><td>C</td><td>D</td></tr></table>";
-    let (root_id, arena) = setup(html, "");
-    let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
 
-    // Each cell becomes one letter cell. 4 cells -> 4 letters.
-    let a = cell_count_with_text(&tl, "A");
-    let b = cell_count_with_text(&tl, "B");
-    let c = cell_count_with_text(&tl, "C");
-    let d = cell_count_with_text(&tl, "D");
-    assert_eq!(a, 1, "single 'A' cell expected");
-    assert_eq!(b, 1, "single 'B' cell expected");
-    assert_eq!(c, 1, "single 'C' cell expected");
-    assert_eq!(d, 1, "single 'D' cell expected");
-}

@@ -140,9 +140,6 @@ fn test_color_name_parsing() {
 }
 
 #[test]
-fn test_color_darkblue_parsing() {}
-
-#[test]
 fn test_color_hex_parsing() {
     assert_eq!(
         parse_color_str("#1e293b"),
