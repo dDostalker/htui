@@ -7,6 +7,7 @@ pub mod tui;
 use std::io::{Write, stdout};
 use std::sync::Arc;
 use std::sync::mpsc;
+use std::time::Duration;
 
 use crossterm::{
     cursor::{Hide, MoveTo, Show},
@@ -136,11 +137,71 @@ fn render_thread(rx: mpsc::Receiver<RenderCmd>, html: Arc<str>, css_rules: Arc<C
     }
 }
 
+// debug panic hook
+// this fun only used in debug to hook render panic
+
+#[cfg(debug_assertions)]
+use std::panic;
+#[cfg(debug_assertions)]
+use std::sync::Once;
+#[cfg(debug_assertions)]
+use std::backtrace::Backtrace;
+
+#[cfg(debug_assertions)]
+fn install_debug_panic_hook() {
+    static INSTALL_HOOK: Once = Once::new();
+
+    INSTALL_HOOK.call_once(|| {
+        let default_hook = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            default_hook(info);
+
+            let message = if let Some(message) = info.payload().downcast_ref::<&str>() {
+                *message
+            } else if let Some(message) = info.payload().downcast_ref::<String>() {
+                message.as_str()
+            } else {
+                "non-string panic payload"
+            };
+            let location = info
+                .location()
+                .map(|location| {
+                    format!(
+                        "{}:{}:{}",
+                        location.file(),
+                        location.line(),
+                        location.column()
+                    )
+                })
+                .unwrap_or_else(|| "unknown location".to_owned());
+            let thread = std::thread::current();
+            let thread_name = thread.name().unwrap_or("unnamed");
+            let backtrace = Backtrace::force_capture();
+
+            log::error!(
+                "Thread '{thread_name}' panicked at {location}: {message}\nBacktrace:\n{backtrace}"
+            );
+        }));
+    });
+}
+
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        message
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.as_str()
+    } else {
+        "non-string panic payload"
+    }
+}
+
 // ============================================================
 // Entry point
 // ============================================================
 
 pub fn render(html: &str, css: &str) {
+    #[cfg(debug_assertions)]
+    install_debug_panic_hook();
     if let Err(e) = enable_raw_mode() {
         log::error!("Failed to enable raw mode: {}", e);
         return;
@@ -184,7 +245,21 @@ pub fn render(html: &str, css: &str) {
     }
 
     loop {
-        match trigger_refresh(&mut scroll_y, &mut zoom, rows) {
+        // Detect a dead render thread (e.g. from a panic) promptly. Rust's
+        // spawned-thread panic handler swallows the panic and kills just the
+        // worker, so without this check the main loop would keep polling
+        // events, fail to send, and only exit when the user presses a key.
+        if render_handle.is_finished() {
+            log::error!("Render thread has terminated unexpectedly");
+            break;
+        }
+
+        match trigger_refresh(
+            &mut scroll_y,
+            &mut zoom,
+            rows,
+            Some(Duration::from_millis(100)),
+        ) {
             Some(RenderCmd::Quit) => {
                 if let Err(e) = tx.send(RenderCmd::Quit) {
                     log::error!("Failed to send Quit: {}", e);
@@ -206,8 +281,8 @@ pub fn render(html: &str, css: &str) {
         }
     }
 
-    if let Err(e) = render_handle.join() {
-        log::error!("Render thread panicked: {:?}", e);
+    if let Err(payload) = render_handle.join() {
+        log::error!("Render thread panicked: {}", panic_message(payload.as_ref()));
     }
 
     if let Err(e) = execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture, Show) {

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseEventKind};
 
 const SCROLL_LINES_PER_TICK: u32 = 3;
@@ -12,7 +14,28 @@ const ZOOM_STEP: f32 = 0.1;
 const ZOOM_MIN: f32 = 0.2;
 const ZOOM_MAX: f32 = 5.0;
 
-pub fn trigger_refresh(scroll_y: &mut u32, zoom: &mut f32, rows: u16) -> Option<RenderCmd> {
+/// Wait for the next input event and translate it into a [`RenderCmd`].
+///
+/// `timeout` controls how long to block on `event::poll`:
+/// - `None` blocks indefinitely (legacy behaviour, suitable for tests or
+///   one-shot tools that don't need to react to the render thread dying).
+/// - `Some(duration)` returns `None` when no event arrives within the
+///   duration, giving the caller a chance to check other state (e.g.
+///   whether the render thread is still alive).
+pub fn trigger_refresh(
+    scroll_y: &mut u32,
+    zoom: &mut f32,
+    rows: u16,
+    timeout: Option<Duration>,
+) -> Option<RenderCmd> {
+    if let Some(t) = timeout {
+        // `poll` returns `Ok(false)` on timeout and `Err` on a system error;
+        // both cases should be surfaced as `None` so the outer loop can
+        // re-check the render thread instead of blocking forever.
+        if !event::poll(t).unwrap_or(false) {
+            return None;
+        }
+    }
     match event::read() {
         Ok(Event::Key(key)) => {
             if key.kind == KeyEventKind::Release {
