@@ -17,5 +17,28 @@ markup5ever_rcdom = "0.3"
 slotmap = "1.1.1"
 tendril = "0.4.3"
 
+[dev-dependencies]
+criterion = "0.8"
+
+[[bench]]
+name = "parse"
+harness = false
+
+[[bench]]
+name = "cascade"
+harness = false
+
+[[bench]]
+name = "paint"
+harness = false
+
+[[bench]]
+name = "render_to_bytes"
+harness = false
+
+[[bench]]
+name = "full_redraw"
+harness = false
+
 [workspace]
 members = ["visual_test"]

@@ -147,7 +147,7 @@ pub fn effective_font_size_cells(
 // Node — 纯数据，不含所有权
 // ============================================================
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Node {
     pub node_type: NodeType,
     /// Child node IDs (insertion order).
