@@ -1,4 +1,7 @@
-use cssparser::{AtRuleParser, BasicParseErrorKind, CowRcStr, Delimiter, ParseError, Parser as CssParser, ParserInput, ParserState, QualifiedRuleParser, StyleSheetParser, parse_important};
+use cssparser::{
+    AtRuleParser, BasicParseErrorKind, CowRcStr, Delimiter, ParseError, Parser as CssParser,
+    ParserInput, ParserState, QualifiedRuleParser, StyleSheetParser, parse_important,
+};
 use indexmap::IndexMap;
 use log::{debug, warn};
 
@@ -174,27 +177,21 @@ fn parse_declarations_into<'i, 't>(
                 // Malformed declaration (e.g. starts with `;` or unknown
                 // token). Skip ahead to the next semicolon to avoid an
                 // infinite loop on the same junk token.
-                let _: Result<(), ParseError<()>> = input.parse_until_after(
-                    Delimiter::Semicolon,
-                    |_| Ok(()),
-                );
+                let _: Result<(), ParseError<()>> =
+                    input.parse_until_after(Delimiter::Semicolon, |_| Ok(()));
                 continue;
             }
         };
         if input.expect_colon().is_err() {
             // `name` without `:` — advance past the bogus declaration.
-            let _: Result<(), ParseError<()>> = input.parse_until_after(
-                Delimiter::Semicolon,
-                |_| Ok(()),
-            );
+            let _: Result<(), ParseError<()>> =
+                input.parse_until_after(Delimiter::Semicolon, |_| Ok(()));
             continue;
         }
         let value_start = input.position();
         // Consume value tokens until `;` or `!important` is reached.
-        let _: Result<(), ParseError<()>> = input.parse_until_before(
-            Delimiter::Semicolon | Delimiter::Bang,
-            |_| Ok(()),
-        );
+        let _: Result<(), ParseError<()>> =
+            input.parse_until_before(Delimiter::Semicolon | Delimiter::Bang, |_| Ok(()));
         let value_text = input.slice_from(value_start);
         let _important = input.try_parse(parse_important).is_ok();
         let cleaned = clean_value_text(value_text);

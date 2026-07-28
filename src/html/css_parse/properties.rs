@@ -3,7 +3,10 @@ use indexmap::IndexMap;
 
 use crate::html::box_edges::{Border, BorderSides, BoxEdges, EdgeSizes};
 
-use super::values::{FontStyleKind, FontWeight, Length, TextAlign, TextDecoration, parse_border_side, parse_border_style, parse_border_width, parse_color_str, parse_edge_sizes};
+use super::values::{
+    FontStyleKind, FontWeight, Length, TextAlign, TextDecoration, parse_border_side,
+    parse_border_style, parse_border_width, parse_color_str, parse_edge_sizes,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct CssAttr(pub IndexMap<String, String>);
@@ -199,12 +202,8 @@ impl CssAttr {
             font_size_cells,
             root_font_size_cells,
         );
-        let universal_style =
-            parse_border_style(self.0.get("border-style").map(|s| s.as_str()));
-        let universal_color = self
-            .0
-            .get("border-color")
-            .and_then(|s| parse_color_str(s));
+        let universal_style = parse_border_style(self.0.get("border-style").map(|s| s.as_str()));
+        let universal_color = self.0.get("border-color").and_then(|s| parse_color_str(s));
 
         let universal = Border::new(universal_width, universal_style, universal_color);
 

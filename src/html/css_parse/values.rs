@@ -121,9 +121,7 @@ pub(super) fn parse_edge_sizes(
     ) {
         edges.top = v;
     }
-    let right_raw = decls
-        .get(&format!("{shorthand}-right"))
-        .map(|s| s.as_str());
+    let right_raw = decls.get(&format!("{shorthand}-right")).map(|s| s.as_str());
     if let Some(v) = parse_length_token(
         right_raw,
         containing_width,
@@ -251,18 +249,24 @@ pub(super) fn parse_border_side(
     root_font_size_cells: usize,
 ) -> Border {
     if let Some(value) = side_raw {
-        if let Some(parsed) =
-            parse_border_shorthand(value, containing_width, font_size_cells, root_font_size_cells)
-        {
+        if let Some(parsed) = parse_border_shorthand(
+            value,
+            containing_width,
+            font_size_cells,
+            root_font_size_cells,
+        ) {
             return parsed;
         }
         // `border-top` was present but unparseable — fall through to next
         // priority rather than dropping the side entirely.
     }
     if let Some(value) = shorthand_raw {
-        if let Some(parsed) =
-            parse_border_shorthand(value, containing_width, font_size_cells, root_font_size_cells)
-        {
+        if let Some(parsed) = parse_border_shorthand(
+            value,
+            containing_width,
+            font_size_cells,
+            root_font_size_cells,
+        ) {
             return parsed;
         }
     }
@@ -298,8 +302,16 @@ fn parse_border_shorthand(
         let lower = token.to_ascii_lowercase();
         if matches!(
             lower.as_str(),
-            "solid" | "dashed" | "dotted" | "double" | "none" | "hidden" | "groove" | "ridge"
-                | "inset" | "outset"
+            "solid"
+                | "dashed"
+                | "dotted"
+                | "double"
+                | "none"
+                | "hidden"
+                | "groove"
+                | "ridge"
+                | "inset"
+                | "outset"
         ) {
             style = Some(BorderStyle::parse(token));
             continue;

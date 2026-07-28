@@ -2,7 +2,10 @@ use indexmap::IndexMap;
 
 use crate::tdom::node::{NodeArena, NodeId};
 
-use super::{matcher::selector_chain_matches, properties::CssAttr, selector::CssSelector, stylesheet::CssRule};
+use super::{
+    matcher::selector_chain_matches, properties::CssAttr, selector::CssSelector,
+    stylesheet::CssRule,
+};
 
 fn apply_css_rule(arena: &mut NodeArena, node_id: NodeId, selector: &CssSelector, css: &CssAttr) {
     if selector_chain_matches(arena, node_id, selector) {
@@ -15,18 +18,13 @@ fn apply_css_rule(arena: &mut NodeArena, node_id: NodeId, selector: &CssSelector
 }
 // css_into_node
 
-pub fn css_into_node(
-    arena: &mut NodeArena,
-    root_id: NodeId,
-    css: &CssRule,
-) {
+pub fn css_into_node(arena: &mut NodeArena, root_id: NodeId, css: &CssRule) {
     for (selector, attr) in css.0.iter() {
         apply_css_rule(arena, root_id, selector, attr);
     }
     // Propagate inheritable CSS properties (color, text-align, font-weight,
     // font-style, text-decoration)
     inherit_css(arena, root_id, &IndexMap::new());
-
 }
 
 /// All CSS properties the renderer recognises by name.
