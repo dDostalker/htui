@@ -13,4 +13,4 @@ pub use image::{Img, render_image_at, render_image_at_slice};
 pub use input::{RenderCmd, trigger_refresh};
 pub use render::is_rendered_as_bare_space;
 pub use style::block_style;
-pub use text::char_width;
+pub use text::{char_width, grapheme_width};

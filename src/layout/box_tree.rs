@@ -15,6 +15,7 @@
 //!   tree and writes [`Block`] cells into the terminal canvas.
 
 use crossterm::style::Color;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::html::box_edges::BoxEdges;
 use crate::tdom::node::NodeId;
@@ -91,26 +92,31 @@ impl InlineRun {
     }
 
     /// Returns the cell width this run occupies at the default
-    /// (un-expanded) font-size: `char_width` per char, so a wide CJK glyph
-    /// at the end of one run does not collide with the first cell of the
-    /// next. Layouts that need the width at a larger font-size should call
-    /// [`Self::width_at`].
+    /// (un-expanded) font-size: `grapheme_width` per grapheme cluster, so a
+    /// wide CJK glyph (or a 2-column emoji) at the end of one run does not
+    /// collide with the first cell of the next. Layouts that need the width
+    /// at a larger font-size should call [`Self::width_at`].
+    ///
+    /// Iterating graphemes rather than `char`s lets multi-codepoint emoji
+    /// (`👨‍👩‍👧`, `👍🏽`, `❤️`) count as a single cluster — `char_width`
+    /// would either over- or under-count them depending on how many
+    /// combining / ZWJ codepoints the cluster contains.
     pub fn width(&self) -> usize {
-        use crate::tui::graph_api::char_width;
-        self.text.chars().map(char_width).sum()
+        use crate::tui::graph_api::grapheme_width;
+        self.text.graphemes(true).map(grapheme_width).sum()
     }
 
     /// Cell width this run occupies at the supplied `font_size_cells`. Each
-    /// character is treated as `max(char_width(c), font_size_cells)` cells
-    /// wide (matching the expansion the paint phase applies), so a heading
-    /// with font-size=2 has its `text-align` measured against the expanded
-    /// width — not the single-cell-per-char default.
+    /// grapheme is treated as `max(grapheme_width(g), font_size_cells)`
+    /// cells wide (matching the expansion the paint phase applies), so a
+    /// heading with font-size=2 has its `text-align` measured against the
+    /// expanded width — not the single-cell-per-char default.
     pub fn width_at(&self, font_size_cells: usize) -> usize {
-        use crate::tui::graph_api::char_width;
+        use crate::tui::graph_api::grapheme_width;
         let font_size = font_size_cells.max(1);
         self.text
-            .chars()
-            .map(|c| char_width(c).max(font_size))
+            .graphemes(true)
+            .map(|g| grapheme_width(g).max(font_size))
             .sum()
     }
 

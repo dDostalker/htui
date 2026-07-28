@@ -94,14 +94,16 @@ impl Default for Block {
     /// painters so each per-cell fill no longer needs to spell out
     /// `" ".to_string()` at the call site.
     ///
-    /// The `word` buffer is pre-sized to 4 bytes so painters can `clear()`
-    /// + `push(c)` any single UTF-8 character (1–4 bytes) without triggering
-    /// a reallocation. Background fills keep the trailing 3 bytes wasted
-    /// (harmless: 16K × 3 = 48 KB once), while border glyphs (`─`, `│`,
-    /// `┌`, `┐`, `└`, `┘` are all 3 bytes) and text chars fit without
-    /// reallocating the buffer.
+    /// The `word` buffer is pre-sized to 32 bytes so painters can `clear()`
+    /// + `push_str(g)` any single grapheme cluster without triggering a
+    /// reallocation. Practically every cluster (including the longest
+    /// ZWJ-flag sequences we expect, such as 👨‍👩‍👧‍👦 plus regional
+    /// indicators) fits comfortably under 32 bytes; background fills keep
+    /// the trailing capacity wasted (harmless: 16K × 32 ≈ 512 KB once).
+    /// Border glyphs (`─`, `│`, `┌`, `┐`, `└`, `┘` are 3 bytes) and single
+    /// emoji codepoints (≤ 4 bytes) also fit without reallocating.
     fn default() -> Self {
-        let mut word = String::with_capacity(4);
+        let mut word = String::with_capacity(32);
         word.push(' ');
         Self {
             word,

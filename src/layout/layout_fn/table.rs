@@ -27,13 +27,15 @@
 //! cursor is advanced by `margin.top + total_height + margin.bottom` so the
 //! next sibling starts at the correct row.
 
+use unicode_segmentation::UnicodeSegmentation;
+
 use crate::{
     layout::{
         BoxConstraint, BoxEdges, Cursor, FontContext, LayoutBox, Rect,
         tree::{LayoutBlockOptions, collect_runs, layout_block, layout_children},
     },
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
-    tui::graph_api::{block_style, char_width},
+    tui::graph_api::{block_style, grapheme_width},
 };
 
 /// Padding applied to every cell, on each side, unless the cell's CSS
@@ -333,16 +335,21 @@ fn collect_cells(arena: &NodeArena, row_id: NodeId) -> Vec<CellInfo> {
     cells
 }
 
-/// Measure a cell's inline text width as the sum of `char_width` of every
-/// direct text descendant. Nested block elements are ignored — their own
-/// cell layout would require its own metric pass and we don't currently
-/// surface that.
+/// Measure a cell's inline text width as the sum of `grapheme_width` of every
+/// grapheme cluster in every direct text descendant. Nested block elements
+/// are ignored — their own cell layout would require its own metric pass and
+/// we don't currently surface that.
+///
+/// Iterating graphemes (rather than `char`s) keeps multi-codepoint emoji
+/// (ZWJ ligatures, modifier sequences, variation-selector pairs) at their
+/// correct column count — `char_width` would either double-count VS-16 or
+/// under-count ZWJ sequences.
 fn cell_text_width(arena: &NodeArena, cell_id: NodeId) -> usize {
     let node = &arena[cell_id];
     let mut total = 0usize;
     for &child_id in &node.children {
         if let NodeType::Text(s) = &arena[child_id].node_type {
-            total += s.chars().map(char_width).sum::<usize>();
+            total += s.graphemes(true).map(grapheme_width).sum::<usize>();
         }
     }
     total
@@ -364,8 +371,7 @@ fn compute_column_widths(
     let mut widths = vec![0usize; num_cols];
     for row in row_cells {
         for (col_idx, cell) in row.iter().enumerate() {
-            let w = cell_text_width(arena, cell.node_id)
-                .saturating_add(2 * CELL_PADDING);
+            let w = cell_text_width(arena, cell.node_id).saturating_add(2 * CELL_PADDING);
             if w > widths[col_idx] {
                 widths[col_idx] = w;
             }
@@ -439,9 +445,7 @@ fn layout_cell(
         .width
         .saturating_sub(cell_edges.inner_horizontal())
         .max(1);
-    let mut child_cursor = Cursor {
-        y: inner_content_y,
-    };
+    let mut child_cursor = Cursor { y: inner_content_y };
     let child_containing = BoxConstraint {
         x: inner_content_x,
         width: inner_content_width,
