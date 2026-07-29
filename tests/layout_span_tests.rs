@@ -408,7 +408,7 @@ fn test_text_align_center_counts_all_runs() {
 
 #[test]
 fn test_layout_box_exposes_runs_for_block_with_spans() {
-    use htui::layout::{BoxConstraint, Cursor, InlineRun, tree::layout_tree};
+    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor, InlineRun};
 
     let (root_id, arena) = setup(
         "<p>plain <span class=\"b\">bold</span></p>",
@@ -419,6 +419,7 @@ fn test_layout_box_exposes_runs_for_block_with_spans() {
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
     let p_box = find_box_by_type(&boxes, &NodeType::P, &arena).expect("should have the <p> box");
     let runs = p_box
+        .paint_style
         .runs
         .as_ref()
         .expect("<p> should expose runs when it has spans");
@@ -447,7 +448,7 @@ fn test_layout_box_runs_are_materialised_for_plain_block() {
     // The single-run case is still materialised as one inline run rather
     // than skipped. The paint phase treats one run identically to the
     // general case, so this is a contract test on the layout.
-    use htui::layout::{BoxConstraint, Cursor, tree::layout_tree};
+    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor};
 
     let (root_id, arena) = setup("<p>just text</p>", "");
     let containing = BoxConstraint::root(&mock_term_map());
@@ -455,6 +456,7 @@ fn test_layout_box_runs_are_materialised_for_plain_block() {
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
     let p_box = find_box_by_type(&boxes, &NodeType::P, &arena).expect("should have the <p> box");
     let runs = p_box
+        .paint_style
         .runs
         .as_ref()
         .expect("plain <p> still materialises runs");
@@ -468,14 +470,14 @@ fn test_layout_box_runs_are_materialised_for_plain_block() {
 
 #[test]
 fn test_h1_prefix_is_a_separate_run() {
-    use htui::layout::{BoxConstraint, Cursor, InlineRun, tree::layout_tree};
+    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor, InlineRun};
 
     let (root_id, arena) = setup("<h1>Title</h1>", "h1 { color: cyan; }");
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
     let h_box = find_box_by_type(&boxes, &NodeType::H1, &arena).expect("should have the <h1> box");
-    let runs = h_box.runs.as_ref().expect("<h1> should expose runs");
+    let runs = h_box.paint_style.runs.as_ref().expect("<h1> should expose runs");
     assert_eq!(
         runs.len(),
         2,

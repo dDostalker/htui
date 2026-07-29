@@ -1,19 +1,42 @@
+//! Layout pipeline.
+//!
+//! ```text
+//! DOM → LayoutBox tree → Block grid
+//! ```
+//!
+//! The two-phase pipeline is split as follows:
+//!
+//! - [`layoutbox`] defines the [`LayoutBox`] data model and its three-axis
+//!   classification ([`BoxKind`], [`OuterDisplay`], [`FormattingContext`]).
+//! - [`layoutbox::inner_formatting_context::flow`], [`flex`], and [`grid`]
+//!   implement the three formatting contexts that build layout trees from a
+//!   DOM. Each lives under
+//!   [`layoutbox::inner_formatting_context`] and shares the same
+//!   [`LayoutBox`] tree shape.
+//! - [`paint`] walks a finished `Vec<LayoutBox>` and writes
+//!   [`Block`](crate::tui::graph_api::Block) cells into the terminal canvas.
+//! - [`layout`] (this file) glues everything together: [`DEFAULT_LAYOUT`] is
+//!   the registry of layout functions consulted by the flow orchestrator.
+
 use crate::{
     layout::layout::TermMap,
     tdom::node::{NodeArena, NodeId},
 };
 
-pub mod block;
-pub mod box_tree;
-pub mod flex;
-pub mod grid;
 pub mod layout;
+pub mod layoutbox;
 pub mod paint;
-pub mod tree;
 
 pub use crate::html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeSizes};
-pub use box_tree::{BoxKind, Cursor, InlineRun, LayoutBox, LayoutMode, Rect, new_flex_item};
-pub use tree::FontContext;
+pub use layoutbox::inner_formatting_context;
+pub use layoutbox::inner_formatting_context::{
+    flow::{FontContext, layout_tree},
+    flex::layout_flex_dispatch,
+};
+pub use layoutbox::{
+    BoxKind, Cursor, FormattingContext, InlineRun, LayoutBox, OuterDisplay, PaintStyle, Rect,
+    ReplacedContent,
+};
 
 /// The containing block available to a layout function.
 ///
@@ -37,18 +60,30 @@ impl BoxConstraint {
 
 /// Layout function signature for the two-phase pipeline.
 ///
-/// Each registered function inspects `node_id`; returns `Ok(None)` to skip
-/// (passes through to the next entry), or `Ok(Some(LayoutBox))` to claim the
-/// node. The builder in [`tree::layout_tree`] walks the registry in order and
-/// stops at the first claimer. `font_ctx` carries the parent's effective
-/// font-size (and the root font-size) so `em` / `rem` lengths resolve against
-/// the active font-size context.
+/// Each registered function inspects `node_id`; returns `None` to skip
+/// (passes through to the next entry), or `Some(LayoutBox)` to claim the node.
+/// The builder in
+/// [`layoutbox::inner_formatting_context::flow::layout_tree`] walks the
+/// registry in order and stops at the first claimer. `font_ctx` carries the
+/// parent's effective font-size (and the root font-size) so `em` / `rem`
+/// lengths resolve against the active font-size context.
+///
+/// `pre_allocated_rect` lets the caller (currently only the flex layout) hand
+/// the layout function a fixed outer rect, instead of computing one from the
+/// shared `cursor`. The layout function MUST honor it when present — flex
+/// items have their rectangle determined by the flex algorithm, not by the
+/// block flow. `None` means "allocate the rect from the cursor yourself".
+/// This mirrors the way browser layout engines let a formatting context
+/// (Block Formatting Context, Flex Formatting Context, …) determine the
+/// outer rect of a child and then call into the child's layout function with
+/// that rect — the child does not recompute it.
 pub type LayoutFn = fn(
     arena: &NodeArena,
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
     font_ctx: FontContext,
+    pre_allocated_rect: Option<Rect>,
 ) -> Option<LayoutBox>;
 
 /// Layout function registry.
@@ -62,24 +97,25 @@ pub type LayoutFn = fn(
 /// element-specific block layout, so flex and the existing block
 /// layout are mutually exclusive without duplicating code.
 pub static DEFAULT_LAYOUT: &[LayoutFn] = &[
-    flex::flex::layout_flex_dispatch,
-    block::aside::layout_aside,
-    block::body::layout_body,
-    block::div::layout_div,
-    block::head::layout_hn,
-    block::head::layout_title,
-    block::head::layout_meta,
-    block::header_footer::layout_footer,
-    block::header_footer::layout_header,
-    block::html::layout_html,
-    block::img::layout_img,
-    block::list::layout_li,
-    block::list::layout_ol,
-    block::list::layout_ul,
-    block::p::layout_p,
-    block::table::layout_row_group,
-    block::table::layout_table,
-    block::table::layout_td,
-    block::table::layout_th,
-    block::table::layout_tr,
+    layout_flex_dispatch,
+    inner_formatting_context::flow::layout_aside,
+    inner_formatting_context::flow::layout_body,
+    inner_formatting_context::flow::layout_div,
+    inner_formatting_context::flow::layout_hn,
+    inner_formatting_context::flow::layout_title,
+    inner_formatting_context::flow::layout_meta,
+    inner_formatting_context::flow::layout_footer,
+    inner_formatting_context::flow::layout_header,
+    inner_formatting_context::flow::layout_html,
+    inner_formatting_context::flow::layout_img_with_rect,
+    inner_formatting_context::flow::layout_li,
+    inner_formatting_context::flow::layout_ol,
+    inner_formatting_context::flow::layout_ul,
+    inner_formatting_context::flow::layout_p,
+    inner_formatting_context::flow::layout_row_group,
+    inner_formatting_context::flow::layout_table,
+    inner_formatting_context::flow::layout_td,
+    inner_formatting_context::flow::layout_th,
+    inner_formatting_context::flow::layout_tr,
+    inner_formatting_context::flow::layout_generic,
 ];

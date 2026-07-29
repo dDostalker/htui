@@ -17,7 +17,7 @@
 use crossterm::style::Color;
 use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
-use htui::layout::{BoxKind, LayoutMode};
+use htui::layout::{BoxKind, FormattingContext};
 use htui::tdom::node::NodeArena;
 use htui::tdom::node::NodeId;
 use htui::tui::graph_api::TermLayout;
@@ -458,16 +458,17 @@ fn test_flex_basis_explicit_resolves_against_main_axis() {
     );
 }
 
-/// Depth-first search for the first box whose `layout_mode` matches `mode`.
-fn find_box_with_mode<'a>(
+/// Depth-first search for the first box whose `inner_formatting_context`
+/// matches `ctx`.
+fn find_box_with_formatting_context<'a>(
     boxes: &'a [htui::layout::LayoutBox],
-    mode: LayoutMode,
+    ctx: FormattingContext,
 ) -> Option<&'a htui::layout::LayoutBox> {
     for b in boxes {
-        if b.layout_mode == mode {
+        if b.inner_formatting_context == ctx {
             return Some(b);
         }
-        if let Some(found) = find_box_with_mode(&b.children, mode) {
+        if let Some(found) = find_box_with_formatting_context(&b.children, ctx) {
             return Some(found);
         }
     }
@@ -475,11 +476,11 @@ fn find_box_with_mode<'a>(
 }
 
 #[test]
-fn test_flex_container_carries_flex_layout_mode() {
+fn test_flex_container_carries_flex_formatting_context() {
     init();
-    // A flex container should be tagged `LayoutMode::FlexLayout` so the
+    // A flex container should be tagged `FormattingContext::Flex` so the
     // architectural distinction between the box's *rendering shape*
-    // (still `BoxKind::Block`) and its *layout algorithm* (flex) is
+    // (still `BoxKind::Normal`) and its *layout algorithm* (flex) is
     // visible to the layout tree.
     let html = r#"
         <div class="container">
@@ -491,52 +492,54 @@ fn test_flex_container_carries_flex_layout_mode() {
     "#;
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let boxes = htui::layout::tree::layout_tree(
+    let boxes = htui::layout::inner_formatting_context::flow::layout_tree(
         &arena,
         root_id,
         htui::layout::BoxConstraint::root(&term_map),
         &mut htui::layout::Cursor::new(),
     );
-    let container = find_box_with_mode(&boxes, LayoutMode::FlexLayout)
-        .expect("there must be a box tagged LayoutMode::FlexLayout");
+    let container = find_box_with_formatting_context(&boxes, FormattingContext::Flex)
+        .expect("there must be a box with FormattingContext::Flex");
     assert!(
-        matches!(container.kind, BoxKind::Block { .. }),
-        "container still renders as a Block (bg / padding / border unaffected)"
+        matches!(container.kind, BoxKind::Normal),
+        "container still renders as a Normal block (bg / padding / border unaffected)"
     );
     assert_eq!(
-        container.layout_mode,
-        LayoutMode::FlexLayout,
-        "flex container must be tagged LayoutMode::FlexLayout"
+        container.inner_formatting_context,
+        FormattingContext::Flex,
+        "flex container must be tagged FormattingContext::Flex"
     );
     assert_eq!(
         container.children.len(),
         1,
         "flex container has the one flex item as its child"
     );
+    // A plain `<div>` flex item keeps its own inner formatting context —
+    // it does not inherit `Flex` from the container.
     assert_eq!(
-        container.children[0].layout_mode,
-        LayoutMode::FlexLayout,
-        "flex items are also tagged LayoutMode::FlexLayout"
+        container.children[0].inner_formatting_context,
+        FormattingContext::Flow,
+        "flex item keeps its own inner formatting context"
     );
-    // Sanity: a non-flex container keeps the default BlockLayout.
+    // Sanity: a non-flex container keeps the default Flow formatting context.
     let html_block = r#"
         <div class="container">
             <div class="a">A</div>
         </div>
     "#;
     let (root_id, arena) = setup(html_block, "");
-    let boxes = htui::layout::tree::layout_tree(
+    let boxes = htui::layout::inner_formatting_context::flow::layout_tree(
         &arena,
         root_id,
         htui::layout::BoxConstraint::root(&term_map),
         &mut htui::layout::Cursor::new(),
     );
     assert!(
-        find_box_with_mode(&boxes, LayoutMode::FlexLayout).is_none(),
-        "non-flex containers must not produce any FlexLayout boxes"
+        find_box_with_formatting_context(&boxes, FormattingContext::Flex).is_none(),
+        "non-flex containers must not produce any Flex formatting context boxes"
     );
     assert!(
-        find_box_with_mode(&boxes, LayoutMode::BlockLayout).is_some(),
-        "non-flex containers still produce BlockLayout boxes"
+        find_box_with_formatting_context(&boxes, FormattingContext::Flow).is_some(),
+        "non-flex containers still produce Flow formatting context boxes"
     );
 }

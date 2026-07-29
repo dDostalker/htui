@@ -1,0 +1,70 @@
+//! One inline segment of a block-level element.
+
+use crossterm::style::Color;
+use unicode_segmentation::UnicodeSegmentation;
+
+use crate::tui::graph_api::FontStyle;
+
+/// One inline segment of a block-level element.
+///
+/// A block can hold multiple `InlineRun`s when its inline tree contains
+/// `<span>`s with distinct styles. Each run carries the resolved style, fg
+/// and bg that should be applied to its text. The paint phase walks `runs`
+/// in order and emits one styled cell per `char_width` column.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineRun {
+    pub text: String,
+    pub style: FontStyle,
+    pub fg: Option<Color>,
+    pub bg: Option<Color>,
+}
+
+impl InlineRun {
+    pub fn new(
+        text: impl Into<String>,
+        style: FontStyle,
+        fg: Option<Color>,
+        bg: Option<Color>,
+    ) -> Self {
+        Self {
+            text: text.into(),
+            style,
+            fg,
+            bg,
+        }
+    }
+
+    /// Returns the cell width this run occupies at the default
+    /// (un-expanded) font-size: `grapheme_width` per grapheme cluster, so a
+    /// wide CJK glyph (or a 2-column emoji) at the end of one run does not
+    /// collide with the first cell of the next. Layouts that need the width
+    /// at a larger font-size should call [`Self::width_at`].
+    ///
+    /// Iterating graphemes rather than `char`s lets multi-codepoint emoji
+    /// (`👨‍👩‍👧`, `👍🏽`, `❤️`) count as a single cluster — `char_width`
+    /// would either over- or under-count them depending on how many
+    /// combining / ZWJ codepoints the cluster contains.
+    pub fn width(&self) -> usize {
+        use crate::tui::graph_api::grapheme_width;
+        self.text.graphemes(true).map(grapheme_width).sum()
+    }
+
+    /// Cell width this run occupies at the supplied `font_size_cells`. Each
+    /// grapheme is treated as `max(grapheme_width(g), font_size_cells)`
+    /// cells wide (matching the expansion the paint phase applies), so a
+    /// heading with font-size=2 has its `text-align` measured against the
+    /// expanded width — not the single-cell-per-char default.
+    pub fn width_at(&self, font_size_cells: usize) -> usize {
+        use crate::tui::graph_api::grapheme_width;
+        let font_size = font_size_cells.max(1);
+        self.text
+            .graphemes(true)
+            .map(|g| grapheme_width(g).max(font_size))
+            .sum()
+    }
+
+    /// Returns true when the run has no visible text.
+    pub fn is_empty(&self) -> bool {
+        self.text.is_empty()
+    }
+}

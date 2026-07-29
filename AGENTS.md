@@ -17,29 +17,77 @@ htui/
 │   ├── lib.rs              # 入口：render() 主循环 + 渲染线程
 │   ├── logging.rs          # 文件 logger 初始化
 │   ├── html/
-│   │   ├── mod.rs
-│   │   ├── html_parse.rs   # HTML → tdom 树（html5ever）
-│   │   ├── css_parse.rs    # CSS 解析 + 选择器匹配 + 属性赋值
-│   │   └── box_edges.rs    # BoxEdges / Border / padding / margin / width
-│   ├── tdom/
-│   │   ├── mod.rs
-│   │   ├── node.rs         # NodeType / Node / NodeArena / NodeId
-│   │   └── attributes.rs   # Attr（HTML 属性解析与查询）
-│   ├── layout/
-│   │   ├── mod.rs          # DEFAULT_LAYOUT 注册表 + LayoutFn 类型
-│   │   ├── layout.rs       # TermMap / TermLayout::draw()
-│   │   ├── box_tree.rs     # Rect / BoxKind / LayoutBox / Cursor / InlineRun
-│   │   ├── tree.rs         # layout_tree() 编排器 + FontContext
-│   │   ├── paint.rs        # paint_layout_tree() 编排器
-│   │   └── layout_fn/      # 各元素布局函数
-│   │       ├── div.rs, p.rs, head.rs (h1–h5 + `<head>` no-op)
-│   │       ├── html.rs, body.rs
-│   │       ├── header_footer.rs
-│   │       ├── aside.rs
-│   │       ├── list.rs (ul / ol / li)
-│   │       ├── img.rs
-│   │       ├── table.rs     # <table> 布局
-│   │       └── flex.rs      # CSS flexbox (display: flex 入口)
+│   │   ├── html/
+│   │   │   ├── mod.rs
+│   │   │   ├── html_parse.rs   # HTML → tdom 树（html5ever）
+│   │   │   ├── css_parse/      # CSS 解析
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── cascade.rs  # INHERITED_PROPS / SUPPORTED_PROPERTIES / css_into_node()
+│   │   │   │   ├── matcher.rs  # selector_chain_matches
+│   │   │   │   ├── selector.rs # CssSelector
+│   │   │   │   ├── stylesheet.rs # StyleSheet parsing 入口
+│   │   │   │   ├── values.rs   # CSS 值枚举 + 解析函数（Length / TextAlign / ...）
+│   │   │   │   └── properties/ # CssAttr + AlignSelf
+│   │   │   │       ├── mod.rs              # CssAttr（IndexMap + 30+ 个 getter）
+│   │   │   │       └── align_self.rs       # AlignSelf
+│   │   │   └── box_edges.rs    # BoxEdges / Border / padding / margin / width
+│   │   ├── tdom/
+│   │   │   ├── mod.rs
+│   │   │   ├── node.rs         # NodeType / Node / NodeArena / NodeId
+│   │   │   └── attributes.rs   # Attr（HTML 属性解析与查询）
+│   │   ├── layout/
+│   │   │   ├── mod.rs          # DEFAULT_LAYOUT 注册表 + LayoutFn + BoxConstraint
+│   │   │   ├── layout.rs       # TermMap / TermLayout::draw()
+│   │   │   ├── layoutbox/      # LayoutBox 数据结构（镜像浏览器 CSS Display 三轴分类）
+│   │   │   │   ├── mod.rs      # LayoutBox struct + 三个轴分类 re-exports
+│   │   │   │   ├── rect.rs, paint_style.rs, inline_run.rs, cursor.rs, inline.rs
+│   │   │   │   ├── box_kind/   # BoxKind { Normal, Replaced, Anonymous } + ReplacedContent
+│   │   │   │   │   ├── mod.rs          # enum + ReplacedContent
+│   │   │   │   │   ├── normal.rs       # NormalExt trait
+│   │   │   │   │   ├── replaced.rs     # ReplacedExt trait
+│   │   │   │   │   └── anonymous.rs    # AnonymousExt trait
+│   │   │   │   ├── outer_display/    # OuterDisplay { Block, Inline }
+│   │   │   │   │   ├── mod.rs          # enum
+│   │   │   │   │   ├── block.rs        # BlockExt trait
+│   │   │   │   │   └── inline.rs       # InlineExt trait
+│   │   │   │   └── inner_formatting_context/  # FormattingContext { Flow, Flex, Grid }
+│   │   │   │       ├── mod.rs          # enum + FlowExt/FlexExt/GridExt re-exports
+│   │   │   │       ├── flow/           # Block/Inline Formatting Context 实现
+│   │   │   │       │   ├── mod.rs              # FlowExt + impl FormattingContext::Flow
+│   │   │   │       │   ├── tree.rs             # FontContext + layout_tree() 编排 + dispatch + layout_children
+│   │   │   │       │   ├── layout_block/       # 共享 layout_block() + OuterGeometry + LayoutBlockOptions
+│   │   │   │       │   │   ├── mod.rs          #   re-exports
+│   │   │   │       │   │   ├── geometry.rs     #   OuterGeometry + outer-geometry helpers
+│   │   │   │       │   │   ├── options.rs      #   LayoutBlockOptions
+│   │   │   │       │   │   └── core.rs         #   layout_block() main pipeline
+│   │   │   │       │   ├── aside.rs / body.rs / div.rs / generic.rs / head.rs
+│   │   │   │       │   ├── header_footer.rs / html.rs / list.rs / p.rs
+│   │   │   │       │   ├── img.rs
+│   │   │   │       │   └── table/              # <table> 布局（拆 6 个文件）
+│   │   │   │       │       ├── mod.rs          #   re-exports
+│   │   │   │       │       ├── table.rs        #   layout_table orchestrator
+│   │   │   │       │       ├── row_group.rs    #   layout_row_group pass-through
+│   │   │   │       │       ├── tr.rs           #   layout_tr pass-through
+│   │   │   │       │       ├── td.rs           #   layout_td + layout_th pass-through
+│   │   │   │       │       ├── cell.rs         #   CellInfo + layout_cell
+│   │   │   │       │       └── measure.rs      #   collect_rows + collect_cells + cell_text_width + compute_column_widths
+│   │   │   │       ├── flex/           # Flex Formatting Context 实现
+│   │   │   │       │   ├── mod.rs              # FlexExt + impl FormattingContext::Flex
+│   │   │   │       │   └── tree/               # 拆 6 个文件
+│   │   │   │       │       ├── mod.rs          #   re-exports + tree 入口
+│   │   │   │       │       ├── dispatch.rs     #   layout_flex_dispatch + is_flex_capable_node + is_block_child_node
+│   │   │   │       │       ├── container.rs    #   layout_flex_container + FlexItemPrep + FLEX_ITEM_MIN_CROSS
+│   │   │   │       │       ├── items.rs        #   layout_flex_items
+│   │   │   │       │       ├── prepare.rs      #   prepare_flex_item + measure_text_content_width + natural_cross_axis_size + resolve_item_cross_size
+│   │   │   │       │       └── algorithm.rs    #   effective_align + wrap_into_lines + distribute_main_axis + justify_spacing + align_content_spacing + align_on_cross_axis
+│   │   │   │       └── grid/           # Grid Formatting Context（预留）
+│   │   │   │           └── mod.rs              # GridExt + impl FormattingContext::Grid
+│   │   │   └── paint/                # 绘制编排（与布局解耦，独立阶段）
+│   │   │       ├── mod.rs      # paint_layout_tree() 编排器 + PaintCanvas + paint_box()
+│   │   │       ├── block.rs    # paint_block
+│   │   │       ├── border.rs   # paint_borders
+│   │   │       ├── image.rs    # paint_image
+│   │   │       └── text.rs     # paint_runs
 │   └── tui/
 │       ├── mod.rs
 │       └── graph_api.rs    # Block / TermLayout / RenderCmd / 图像加载
@@ -100,25 +148,40 @@ CSS 字符串 ───► css_parse::Parser ──► CssRule
                                            ▼
                               layout::TermLayout::draw()
                                     │
-                          ┌─────────┼──────────┐
-                          ▼         ▼          ▼
-                     layout_p  layout_div  layout_img  ...
-                          │         │          │
-                          └─────────┼──────────┘
-                                    ▼
+                          layoutbox::inner_formatting_context::flow::layout_tree()
+                                    │
+                          ┌─────────┼──────────────────────────────────┐
+                          ▼         ▼          ▼            ▼            ▼
+                     layout_p  layout_div  layout_img  flex::layout_flex_dispatch  ...
+                          │         │          │            │
+                          └─────────┼──────────┘            │
+                                    ▼                       ▼
+                            Vec<LayoutBox>           同样的 LayoutBox 树
+                                    │                       │
+                                    └─────────┬─────────────┘
+                                              ▼
+                                    paint::paint_layout_tree()
+                                              │
+                                              ▼
                             Vec<Block>（画布）
                                     │
                                     ▼
                           TermLayout::render()
                                     │
-                                    ▼
+                                              ▼
                               终端输出（ANSI 转义序列）
 ```
+
+`flow/` / `flex/` / `grid/` 三个 formatting context 平级（都位于
+`layoutbox::inner_formatting_context` 下）；它们都生成同一棵 `LayoutBox` 树，
+由 `paint::paint_layout_tree()` 统一绘制。flex 容器本身被
+`layout_flex_dispatch` 认领后，其子项仍走 `flow::dispatch` 的元素布局函数
+（复用 flow 流），只在 flex 容器层重排外层 rect 与子项坐标。
 
 ## 必要事项
 `html → tdom → layout → tui` 四层不可破坏。不要引入新的抽象层，除非有充分理由。在修改之前进行询问。
 
-新增 HTML 元素支持时，必须在 `layout::mod.rs` 的 `DEFAULT_LAYOUT` 数组中注册对应的 `LayoutFn`，同时在 `layout_fn/` 下新增模块。
+新增 HTML 元素支持时，必须在 `layout::mod.rs` 的 `DEFAULT_LAYOUT` 数组中注册对应的 `LayoutFn`，同时在 `layout/block/` 下新增模块。
 不要用字符串匹配代替 `NodeType` 枚举。新增标签必须：
 - 在 `tdom::node::NodeType` 枚举中添加变体
 - 在 `html_parse::tag_name_to_node_type()` 中添加映射
@@ -162,9 +225,9 @@ CSS 字符串 ───► css_parse::Parser ──► CssRule
 当你需要支持一个新的 HTML 标签时，
 1. **`tdom/node.rs`** — 在 `NodeType` 枚举中加入变体
 2. **`html/html_parse.rs`** — 在 `tag_name_to_node_type()` 中添加映射
-3. **`html/css_parse.rs`** — 在 `tag_str_to_node_type()` 中添加 CSS 选择器映射
-4. **`layout/layout_fn/`** — 新建 `<element>.rs`，实现 `LayoutFn` 签名
-5. **`layout/layout_fn/mod.rs`** — 声明模块并导出
+3. **`html/css_parse/stylesheet.rs`** — 在 `tag_str_to_node_type()` 中添加 CSS 选择器映射
+4. **`layout/layoutbox/inner_formatting_context/flow/`** — 新建 element 模块文件，实现 `LayoutFn` 签名
+5. **`flow/mod.rs`** — 声明模块并导出
 6. **`layout/mod.rs`** — 在 `DEFAULT_LAYOUT` 中注册
 
 
@@ -178,23 +241,33 @@ CSS 字符串 ───► css_parse::Parser ──► CssRule
 | `Node`             | `tdom::node`            | DOM 节点（含子节点/属性） |
 | `NodeType`         | `tdom::node`            | 节点类型枚举（30 种标签） |
 | `Attr`             | `tdom::attributes`      | HTML 属性存储与查询       |
-| `CssAttr`          | `html::css_parse`       | 解析后的 CSS 属性         |
+| `CssAttr`          | `html::css_parse::properties` | 解析后的 CSS 属性（`IndexMap<String, String>` + 30+ 个 getter） |
 | `CssRule`          | `html::css_parse`       | 完整 CSS 规则表           |
 | `CssSelector`      | `html::css_parse`       | CSS 选择器（含组合器）    |
-| `FontWeight`       | `html::css_parse`       | `font-weight` 枚举（`Normal` / `Bold`） |
-| `FontStyleKind`    | `html::css_parse`       | `font-style` 枚举（`Normal` / `Italic` / `Oblique`） |
-| `TextDecoration`   | `html::css_parse`       | `text-decoration` 枚举（`None` / `Underline` / `LineThrough` / `UnderlineLineThrough`） |
+| `FontWeight`       | `html::css_parse::values` | `font-weight` 枚举（`Normal` / `Bold`） |
+| `FontStyleKind`    | `html::css_parse::values` | `font-style` 枚举（`Normal` / `Italic` / `Oblique`） |
+| `TextDecoration`   | `html::css_parse::values` | `text-decoration` 枚举（`None` / `Underline` / `LineThrough` / `UnderlineLineThrough`） |
+| `LayoutBox`        | `layout::layoutbox`     | 布局树中的单个矩形节点（`BoxKind` × `OuterDisplay` × `FormattingContext` 三轴分类） |
+| `BoxKind`          | `layout::layoutbox::box_kind` | 盒子内容形状（`Normal` / `Replaced` / `Anonymous`） |
+| `ReplacedContent`  | `layout::layoutbox::box_kind` | `BoxKind::Replaced` 的内容负载（当前只有 `<img>`） |
+| `Rect`             | `layout::layoutbox::rect` | 列/行空间内的矩形 |
+| `PaintStyle`       | `layout::layoutbox::paint_style` | 视觉 chrome（padding/border/margin + inline runs + 背景/间距标志） |
+| `InlineRun`        | `layout::layoutbox::inline_run` | 单个 inline 文本段 |
+| `Cursor`           | `layout::layoutbox::cursor` | block 流行游标 |
+| `OuterDisplay`     | `layout::layoutbox::outer_display` | 盒子在父级流中的角色（`Block` / `Inline`） |
+| `FormattingContext`| `layout::layoutbox::inner_formatting_context` | 盒子安排子项的格式化上下文（`Flow` / `Flex` / `Grid`） |
+| `AlignSelf`        | `html::css_parse::properties::align_self` | `align-self` 解析结果（`Auto` / `Value(AlignItems)`） |
 | `LayoutFn`         | `layout::mod`           | 布局函数签名              |
 | `TermMap`          | `layout::layout`        | 终端尺寸信息              |
 | `TermLayout`       | `tui::graph_api`        | 终端画布 + 渲染方法       |
 | `Block`            | `tui::graph_api`        | 单个屏幕字符单元格（含 `style: FontStyle`） |
 | `FontStyle`        | `tui::graph_api`        | `Block` 的聚合样式位掩码（`BOLD` / `ITALIC` / `UNDERLINED` / `CROSSED_OUT`） |
 | `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举          |
-| `EdgeSizes`        | `layout::box_edges`     | 四边长度（top/right/bottom/left），用于 padding / margin |
-| `BorderStyle`      | `layout::box_edges`     | `border-style` 枚举（`None` / `Solid`） |
-| `Border`           | `layout::box_edges`     | 单边 border 的 width/style/color |
-| `BorderSides`      | `layout::box_edges`     | 四边 `Border` 组合 |
-| `BoxEdges`         | `layout::box_edges`     | padding + border + margin 三件套，供布局函数使用 |
+| `EdgeSizes`        | `html::box_edges`       | 四边长度（top/right/bottom/left），用于 padding / margin |
+| `BorderStyle`      | `html::box_edges`       | `border-style` 枚举（`None` / `Solid`） |
+| `Border`           | `html::box_edges`       | 单边 border 的 width/style/color |
+| `BorderSides`      | `html::box_edges`       | 四边 `Border` 组合 |
+| `BoxEdges`         | `html::box_edges`       | padding + border + margin 三件套，供布局函数使用 |
 
 ### 盒模型在 `CssAttr` 上的访问器
 

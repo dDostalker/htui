@@ -12,8 +12,8 @@ use std::path::PathBuf;
 
 use htui::html::html_parse;
 use htui::layout::layout::TermMap;
-use htui::layout::block::img::layout_img;
-use htui::layout::{BoxConstraint, BoxKind, Cursor, FontContext};
+use htui::layout::inner_formatting_context::flow::layout_img;
+use htui::layout::{BoxConstraint, BoxKind, Cursor, FontContext, ReplacedContent};
 use htui::tdom::node::{self, NodeType};
 use htui::tui::graph_api::{TermLayout, render_image_at};
 use image::{ImageBuffer, Rgb};
@@ -57,20 +57,22 @@ fn layout_img_clamps_cols_to_containing_width() {
     let lb = layout_img(&arena, img_id, containing, &mut cursor, FontContext::ROOT)
         .expect("<img> should produce a LayoutBox");
 
-    match lb.kind {
-        BoxKind::Image { cols, rows } => {
+    match &lb.kind {
+        BoxKind::Replaced(ReplacedContent::Image { cols, rows, .. }) => {
             assert_eq!(
-                cols, lb.rect.width,
+                *cols, lb.rect.width,
                 "img cols must equal rect.width so paint does not overflow (Bug #2 fix)"
             );
-            assert_eq!(rows, lb.rect.height, "img rows must equal rect.height");
+            assert_eq!(*rows, lb.rect.height, "img rows must equal rect.height");
             assert!(
                 lb.rect.width <= containing.width,
                 "rect.width must be clamped to containing.width, got {}",
                 lb.rect.width
             );
         }
-        BoxKind::Block { .. } => panic!("expected BoxKind::Image, got Block"),
+        BoxKind::Normal | BoxKind::Anonymous => {
+            panic!("expected BoxKind::Replaced(Image), got {:?}", lb.kind)
+        }
     }
 }
 
@@ -86,14 +88,14 @@ fn layout_img_unclamped_when_img_fits() {
     let lb = layout_img(&arena, img_id, containing, &mut cursor, FontContext::ROOT).unwrap();
 
     // 120 px / 2 = 60 cells (no clamp), 60 px / 4 = 15 cells.
-    match lb.kind {
-        BoxKind::Image { cols, rows } => {
-            assert_eq!(cols, 60);
-            assert_eq!(rows, 15);
-            assert_eq!(cols, lb.rect.width);
-            assert_eq!(rows, lb.rect.height);
+    match &lb.kind {
+        BoxKind::Replaced(ReplacedContent::Image { cols, rows, .. }) => {
+            assert_eq!(*cols, 60);
+            assert_eq!(*rows, 15);
+            assert_eq!(*cols, lb.rect.width);
+            assert_eq!(*rows, lb.rect.height);
         }
-        BoxKind::Block { .. } => panic!("expected Image"),
+        _ => panic!("expected BoxKind::Replaced(Image), got {:?}", lb.kind),
     }
 }
 

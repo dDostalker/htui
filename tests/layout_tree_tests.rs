@@ -178,7 +178,7 @@ fn layout_box_rect_is_deterministic() {
     // Direct unit test on the layout tree: building it twice with the same
     // DOM must produce identical rectangles. This guards against the cursor
     // accidentally depending on HashMap iteration order or similar.
-    use htui::layout::{BoxConstraint, Cursor, tree::layout_tree};
+    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor};
 
     let (root_id, arena) = setup(
         "<div>A</div><div>B</div><div>C</div>",
@@ -192,7 +192,7 @@ fn layout_box_rect_is_deterministic() {
     assert_eq!(boxes1.len(), boxes2.len());
     for (a, b) in boxes1.iter().zip(boxes2.iter()) {
         assert_eq!(a.rect, b.rect, "boxes must agree across runs");
-        assert_eq!(a.runs, b.runs, "runs must agree across runs");
+        assert_eq!(a.paint_style.runs, b.paint_style.runs, "runs must agree across runs");
     }
 }
 
@@ -202,7 +202,7 @@ fn rendered_rows_walks_full_layout_tree() {
     // must reflect the deepest descendant's bottom row, not just the
     // top-level boxes. Regression test for the bug where nested `<p>`
     // children of `<div>` were ignored when computing `max_y`.
-    use htui::layout::tree::layout_tree;
+    use htui::layout::inner_formatting_context::flow::layout_tree;
 
     // Layout sketch (each block's rect encompasses its children — no empty
     // placeholder row between container and children):

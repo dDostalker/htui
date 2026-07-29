@@ -21,7 +21,7 @@ pub(super) fn paint_borders(
     fg: Option<Color>,
     bg: Option<Color>,
 ) {
-    let sides = &lb.box_edges.border;
+    let sides = &lb.paint_style.box_edges.border;
     if !sides.any_visible() {
         return;
     }
