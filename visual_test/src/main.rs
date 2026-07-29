@@ -61,6 +61,9 @@ fn main() -> Result<()> {
         "box_model" => test_case!(box_model, no_css),
         "font_size" => test_case!(font_size, no_css),
         "flex" => test_case!(flex, no_css),
+        "flex_align_self" => test_case!(flex_align_self, no_css),
+        "flex_align_content" => test_case!(flex_align_content, no_css),
+        "flex_nested" => test_case!(flex_nested, no_css),
         _ => {
             let available = [
                 "all_in_one",
@@ -79,6 +82,9 @@ fn main() -> Result<()> {
                 "box_model",
                 "font_size",
                 "flex",
+                "flex_align_self",
+                "flex_align_content",
+                "flex_nested",
             ];
             eprintln!(
                 "Unknown test: '{test_name}'\nAvailable tests: {}",

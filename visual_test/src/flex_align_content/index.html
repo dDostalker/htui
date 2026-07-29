@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<!--
+  htui 视觉测试 — flex align-content / space-evenly / flex-shrink
+  覆盖场景：多行 cross-axis 分布 + 剩余空间分配 + overflow 收缩
+  运行: cargo run -p visual_test -- flex_align_content
+  浏览器直接打开本文件即可看到与终端渲染对应的样式
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>htui Flex align-content</title>
+    <style>
+        body { color: white; }
+        h2 { color: cyan; }
+        h3 { color: yellow; }
+        .row  { display: flex; flex-direction: row; }
+        .wrap { display: flex; flex-wrap: wrap; }
+        .red    { background-color: red;     color: white; }
+        .green  { background-color: green;   color: white; }
+        .blue   { background-color: blue;    color: white; }
+        .yellow { background-color: yellow;  color: black; }
+        .magenta{ background-color: magenta; color: white; }
+        .cyan   { background-color: cyan;    color: black; }
+    </style>
+</head>
+<body>
+    <h2>Flex — align-content / space-evenly / flex-shrink</h2>
+
+    <h3>1. justify-content: space-evenly (single row)</h3>
+    <div class="row" style="justify-content: space-evenly;">
+        <div class="red">A</div>
+        <div class="green">B</div>
+        <div class="blue">C</div>
+    </div>
+
+    <h3>2. align-content: flex-start (lines packed to the top)</h3>
+    <div class="wrap" style="width: 12; height: 7; align-content: flex-start;">
+        <div class="red">AAAAAAAAAAAA</div>
+        <div class="green">BBBBBBBBBBBB</div>
+        <div class="blue">CCCCCCCCCCCC</div>
+    </div>
+
+    <h3>3. align-content: center (lines centered vertically)</h3>
+    <div class="wrap" style="width: 12; height: 7; align-content: center;">
+        <div class="red">AAAAAAAAAAAA</div>
+        <div class="green">BBBBBBBBBBBB</div>
+        <div class="blue">CCCCCCCCCCCC</div>
+    </div>
+
+    <h3>4. align-content: space-between (lines reach both edges)</h3>
+    <div class="wrap" style="width: 12; height: 7; align-content: space-between;">
+        <div class="red">AAAAAAAAAAAA</div>
+        <div class="green">BBBBBBBBBBBB</div>
+        <div class="blue">CCCCCCCCCCCC</div>
+    </div>
+
+    <h3>5. align-content: space-around (lines with half-share at edges)</h3>
+    <div class="wrap" style="width: 12; height: 7; align-content: space-around;">
+        <div class="red">AAAAAAAAAAAA</div>
+        <div class="green">BBBBBBBBBBBB</div>
+        <div class="blue">CCCCCCCCCCCC</div>
+    </div>
+
+    <h3>6. align-content: space-evenly (lines evenly distributed)</h3>
+    <div class="wrap" style="width: 12; height: 7; align-content: space-evenly;">
+        <div class="red">AAAAAAAAAAAA</div>
+        <div class="green">BBBBBBBBBBBB</div>
+        <div class="blue">CCCCCCCCCCCC</div>
+    </div>
+
+    <h3>7. flex-shrink: overflow redistributed by shrink ratio</h3>
+    <div class="row" style="width: 10;">
+        <div class="red"    style="flex-basis: 4; flex-shrink: 0;">AAAA</div>
+        <div class="green"  style="flex-basis: 4; flex-shrink: 1;">BBBB</div>
+        <div class="blue"   style="flex-basis: 4; flex-shrink: 0;">CCCC</div>
+    </div>
+</body>
+</html>
