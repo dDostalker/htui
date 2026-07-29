@@ -735,6 +735,219 @@ fn test_flex_nested_containers_both_have_flex_formatting_context() {
 }
 
 #[test]
+fn test_flex_nested_row_inside_row_stacks_three_rows() {
+    init();
+    // Regression: a flex column nested inside a flex row must report its
+    // real intrinsic height (3 rows here) to the parent, so the parent's
+    // line cross-axis size is 3 instead of collapsing to 1. Otherwise the
+    // nested column gets clipped to 1 row and only the first child
+    // ("a") is visible.
+    let html = r#"
+        <div class="outer">
+            <div class="inner">
+                <div class="a">a</div>
+                <div class="b">b</div>
+                <div class="c">c</div>
+            </div>
+            <div class="content">content</div>
+        </div>
+    "#;
+    let css = r#"
+        .outer { display: flex; }
+        .inner { display: flex; flex-direction: column; }
+        .content { flex-grow: 1; background-color: yellow; }
+    "#;
+    let (rows, tl) = render_rows(html, css);
+    let a_row = rows
+        .iter()
+        .position(|r| r.trim_start().starts_with('a'))
+        .expect("a exists");
+    let b_row = rows
+        .iter()
+        .position(|r| r.trim_start().starts_with('b'))
+        .expect("b exists");
+    let c_row = rows
+        .iter()
+        .position(|r| r.trim_start().starts_with('c'))
+        .expect("c exists");
+    assert_eq!(a_row, 0, "a should be on row 0 (got {a_row})");
+    assert_eq!(b_row, 1, "b should be on row 1 (got {b_row})");
+    assert_eq!(c_row, 2, "c should be on row 2 (got {c_row})");
+    for row in 0..3 {
+        let yellow_count = tl.layout[row * COLS as usize..(row + 1) * COLS as usize]
+            .iter()
+            .filter(|cell| cell.bcolor == Some(Color::Yellow))
+            .count();
+        assert_eq!(
+            yellow_count,
+            COLS as usize - 1,
+            "growing sibling should cover the remaining width on row {row}"
+        );
+    }
+    // The growing sibling must stretch to the full line height, so its
+    // rect.height matches the nested column's 3 rows.
+    let term_map = mock_term_map();
+    let (root_id, arena) = setup(html, css);
+    let boxes = htui::layout::inner_formatting_context::flow::layout_tree(
+        &arena,
+        root_id,
+        htui::layout::BoxConstraint::root(&term_map),
+        &mut htui::layout::Cursor::new(),
+    );
+    // The nested column has 1-cell width (max of its children's 1-cell
+    // text widths), making it unique among the rects in the tree.
+    fn find_inner(boxes: &[htui::layout::LayoutBox]) -> Option<&htui::layout::LayoutBox> {
+        for b in boxes {
+            if matches!(b.inner_formatting_context, FormattingContext::Flex)
+                && b.rect.width == 1
+                && b.rect.height == 3
+            {
+                return Some(b);
+            }
+            if let Some(hit) = find_inner(&b.children) {
+                return Some(hit);
+            }
+        }
+        None
+    }
+    let inner = find_inner(&boxes).expect("nested column present");
+    assert_eq!(inner.rect.height, 3, "inner column should be 3 rows tall");
+}
+
+#[test]
+fn test_flex_nested_row_inside_row_growing_sibling_fits_within_canvas() {
+    init();
+    // The growing sibling must fit entirely within the canvas after the
+    // nested column. Earlier the .content rect extended to x=80 (one
+    // cell beyond the 80-column canvas), so the last column of its
+    // background was clipped.
+    let html = r#"
+        <div class="outer">
+            <div class="inner">
+                <div class="a">a</div>
+            </div>
+            <div class="content">content</div>
+        </div>
+    "#;
+    let css = r#"
+        .outer { display: flex; }
+        .inner { display: flex; flex-direction: column; }
+        .content { flex-grow: 1; background-color: yellow; }
+    "#;
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let boxes = htui::layout::inner_formatting_context::flow::layout_tree(
+        &arena,
+        root_id,
+        htui::layout::BoxConstraint::root(&term_map),
+        &mut htui::layout::Cursor::new(),
+    );
+    // Walk the tree and assert nothing overflows the canvas.
+    fn assert_no_overflow(
+        boxes: &[htui::layout::LayoutBox],
+        max_cols: usize,
+        path: &mut Vec<String>,
+    ) {
+        for b in boxes {
+            path.push(format!("{:?}", b.node_id));
+            assert!(
+                b.rect.x.saturating_add(b.rect.width) <= max_cols,
+                "box at {:?} overflows canvas: x={}, w={}, max={} (path={:?})",
+                b.node_id, b.rect.x, b.rect.width, max_cols, path
+            );
+            assert_no_overflow(&b.children, max_cols, path);
+            path.pop();
+        }
+    }
+    let mut path = Vec::new();
+    assert_no_overflow(&boxes, term_map.columns as usize, &mut path);
+}
+
+#[test]
+fn test_flex_nested_row_inside_column_stacks_three_rows() {
+    init();
+    // A flex row nested inside a flex column. Header (1 row) sits above
+    // the nested row, footer (1 row) below. The nested row's children
+    // ("a", "b") must share the same row.
+    let html = r#"
+        <div class="outer">
+            <div class="hdr">header</div>
+            <div class="inner">
+                <div class="a">a</div>
+                <div class="b">b</div>
+            </div>
+            <div class="ftr">footer</div>
+        </div>
+    "#;
+    let css = r#"
+        .outer { display: flex; flex-direction: column; }
+        .inner { display: flex; flex-direction: row; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    let header_row = rows
+        .iter()
+        .position(|r| r.contains("header"))
+        .expect("header exists");
+    let a_row = rows
+        .iter()
+        .position(|r| r.contains("a") && !r.contains("header"))
+        .expect("a exists");
+    let b_row = rows
+        .iter()
+        .position(|r| r.contains("b") && !r.contains("header"))
+        .expect("b exists");
+    let footer_row = rows
+        .iter()
+        .position(|r| r.contains("footer"))
+        .expect("footer exists");
+    assert_eq!(a_row, b_row, "a and b should share a row");
+    assert!(header_row < a_row, "header above inner row");
+    assert!(a_row < footer_row, "inner row above footer");
+}
+
+#[test]
+fn test_flex_nested_three_levels_deep_stacks_all_rows() {
+    init();
+    // Three levels: outer row > inner column > grandchild column.
+    // Items "1", "2a", "2b" must each land on a distinct row, in order,
+    // even though the deepest container is two levels below the row.
+    let html = r#"
+        <div class="outer">
+            <div class="inner-col">
+                <div class="one">1</div>
+                <div class="inner-col-2">
+                    <div class="two-a">2a</div>
+                    <div class="two-b">2b</div>
+                </div>
+            </div>
+            <div class="right">right</div>
+        </div>
+    "#;
+    let css = r#"
+        .outer { display: flex; }
+        .inner-col { display: flex; flex-direction: column; }
+        .inner-col-2 { display: flex; flex-direction: column; }
+        .right { flex-grow: 1; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    let row_1 = rows
+        .iter()
+        .position(|r| r.trim_start().starts_with('1'))
+        .expect("1 exists");
+    let row_2a = rows
+        .iter()
+        .position(|r| r.contains("2a"))
+        .expect("2a exists");
+    let row_2b = rows
+        .iter()
+        .position(|r| r.contains("2b"))
+        .expect("2b exists");
+    assert_eq!(row_1, 0, "1 on row 0");
+    assert_eq!(row_2a, 1, "2a on row 1");
+    assert_eq!(row_2b, 2, "2b on row 2");
+}
+
+#[test]
 fn test_flex_justify_space_around_distributes_with_edge_halves() {
     init();
     // 3 items of 1 cell in a 7-cell container. free space = 4.

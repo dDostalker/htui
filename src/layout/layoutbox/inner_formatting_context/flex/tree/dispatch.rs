@@ -45,7 +45,7 @@ pub fn layout_flex_dispatch(
 /// `Global` root are all rejected. The `Selector::Tag` matcher
 /// already prevents most of these from acquiring `display: flex` in the
 /// first place — the guard is belt-and-braces.
-fn is_flex_capable_node(nt: &NodeType) -> bool {
+pub(super) fn is_flex_capable_node(nt: &NodeType) -> bool {
     !matches!(
         nt,
         NodeType::Text(_)

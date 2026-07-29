@@ -159,11 +159,9 @@ pub(super) fn distribute_main_axis(
 pub(super) fn justify_spacing(justify: JustifyContent, free_space: usize, n_items: usize) -> (usize, usize) {
     if n_items <= 1 {
         return match justify {
-            JustifyContent::FlexStart | JustifyContent::SpaceBetween | JustifyContent::FlexEnd => {
-                (free_space, 0)
-            }
-            JustifyContent::Center => (free_space / 2, 0),
-            JustifyContent::SpaceAround => (free_space / 2, 0),
+            JustifyContent::FlexStart | JustifyContent::SpaceBetween => (0, 0),
+            JustifyContent::FlexEnd => (free_space, 0),
+            JustifyContent::Center | JustifyContent::SpaceAround => (free_space / 2, 0),
             JustifyContent::SpaceEvenly => (free_space, 0),
         };
     }

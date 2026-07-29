@@ -75,14 +75,42 @@ pub(super) fn layout_flex_items(
             .unwrap_or(FLEX_ITEM_MIN_CROSS)
             .max(FLEX_ITEM_MIN_CROSS);
 
-        // 3c. Effective cross-axis size: explicit container height wins
-        //     when present (and only for single-line containers — a multi-line
-        //     wrapper would otherwise overflow since each line would be sized
-        //     to the container height), otherwise the natural line cross.
-        let line_cross = if has_explicit_height && line_count == 1 {
-            container_height
-        } else {
-            natural_line_cross
+        // 3c. Effective cross-axis size. The cross axis swaps between the
+        //     two directions, so this is direction-aware:
+        //
+        //     - `row` direction: cross axis is vertical. Explicit
+        //       container height wins (and only for a single line —
+        //       otherwise every line would overflow the container).
+        //       Without an explicit height we use the natural line cross
+        //       to avoid a circular dependency where stretching items
+        //       would silently enlarge the container.
+        //     - `column` direction: cross axis is horizontal. The
+        //       container's content width is always known (it's
+        //       `content.width`), so the line stretches to that
+        //       regardless of an explicit height. A multi-line column
+        //       container has no concept of cross-axis stretching per
+        //       line — lines stack along the main axis, so we keep the
+        //       natural line cross for them. The previous
+        //       `container_height` shortcut was incorrect for column
+        //       direction: it used a vertical measurement as a
+        //       horizontal size, which made children of a flex column
+        //       stretch to the column's height — and overflow the
+        //       column's own width.
+        let line_cross = match direction {
+            FlexDirection::Row => {
+                if has_explicit_height && line_count == 1 {
+                    container_height
+                } else {
+                    natural_line_cross
+                }
+            }
+            FlexDirection::Column => {
+                if line_count == 1 {
+                    content.width.max(natural_line_cross)
+                } else {
+                    natural_line_cross
+                }
+            }
         };
 
         // 3d. Compute justify-content leading + between spacing.
