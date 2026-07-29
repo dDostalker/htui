@@ -749,13 +749,13 @@ fn test_flex_nested_row_inside_row_stacks_three_rows() {
                 <div class="b">b</div>
                 <div class="c">c</div>
             </div>
-            <div class="content">content</div>
+            <div class="content" style="flex-grow: 1;">content</div>
         </div>
     "#;
     let css = r#"
         .outer { display: flex; }
         .inner { display: flex; flex-direction: column; }
-        .content { flex-grow: 1; background-color: yellow; }
+        .content { flex-grow: 0; background-color: yellow; }
     "#;
     let (rows, tl) = render_rows(html, css);
     let a_row = rows
