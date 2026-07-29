@@ -14,7 +14,7 @@
 //!
 //! ```text
 //! flow/
-//! ├── mod.rs           ← FlowExt + impl FormattingContext::Flow (this file)
+//! ├── mod.rs           ← re-exports (this file)
 //! ├── tree.rs          ← layout_tree() orchestrator
 //! ├── layout_block/    ← shared layout_block() + OuterGeometry + LayoutBlockOptions
 //! │   ├── mod.rs       ←   re-exports
@@ -37,8 +37,6 @@
 //!
 //! `collect_runs` lives at `crate::layout::layoutbox::collect_runs` because it
 //! is shared with the flex layout (see the flex submodule).
-
-use super::FormattingContext;
 
 mod aside;
 mod body;
@@ -70,22 +68,3 @@ pub use list::{layout_li, layout_ol, layout_ul};
 pub use p::layout_p;
 pub use table::{layout_row_group, layout_table, layout_td, layout_th, layout_tr};
 pub use tree::{FontContext, dispatch, layout_children, layout_tree};
-
-/// Extension trait for [`FormattingContext::Flow`] operations.
-pub trait FlowExt {
-    /// `true` when this formatting context is [`Flow`](FormattingContext::Flow).
-    fn is_flow(&self) -> bool;
-
-    /// Construct a [`Flow`](FormattingContext::Flow) formatting context.
-    fn flow() -> Self;
-}
-
-impl FlowExt for FormattingContext {
-    fn is_flow(&self) -> bool {
-        matches!(self, FormattingContext::Flow)
-    }
-
-    fn flow() -> Self {
-        FormattingContext::Flow
-    }
-}

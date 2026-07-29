@@ -16,23 +16,6 @@
 //!
 //! The renderer is currently block-only, so `Inline` is stored but treated as
 //! `Block` at the layout layer.
-//!
-//! ## Module layout
-//!
-//! ```text
-//! outer_display/
-//! ├── mod.rs       ← enum (this file)
-//! ├── block.rs     ← impl Block variant helpers
-//! └── inline.rs    ← impl Inline variant helpers
-//! ```
-
-mod block;
-mod inline;
-
-#[allow(unused_imports)]
-pub use block::BlockExt;
-#[allow(unused_imports)]
-pub use inline::InlineExt;
 
 /// Outer display role of a layout box.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

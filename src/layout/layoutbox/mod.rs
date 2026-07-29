@@ -9,7 +9,7 @@
 //! DOM → LayoutBox tree → Block grid
 //! ```
 //!
-//! - [`layout_tree`](crate::layout::block::layout_tree) builds the tree and
+//! - [`layout_tree`](crate::layout::layoutbox::inner_formatting_context::flow::layout_tree) builds the tree and
 //!   assigns rectangles from containing-block constraints.
 //! - [`paint_layout_tree`](crate::layout::paint::paint_layout_tree) walks the
 //!   tree and writes [`Block`](crate::tui::graph_api::Block) cells into the
@@ -53,10 +53,10 @@
 //! ├── inline_run.rs       ← InlineRun   (used by PaintStyle.runs)
 //! ├── cursor.rs           ← Cursor      (block-flow row allocator)
 //! ├── inline.rs           ← collect_runs (shared by block + flex layouts)
-//! ├── box_kind/           ← BoxKind + ReplacedContent (per-variant helpers)
-//! ├── outer_display/      ← OuterDisplay (per-variant helpers)
-//! └── inner_formatting_context/  ← FormattingContext (per-variant helpers
-//!                                  + flow / flex / grid implementations)
+//! ├── box_kind/           ← BoxKind + ReplacedContent
+//! ├── outer_display/      ← OuterDisplay
+//! └── inner_formatting_context/  ← FormattingContext + flow / flex / grid
+//!                                  implementations
 //! ```
 
 mod box_kind;

@@ -13,27 +13,6 @@
 //!   (an `<img>` rasterisation today; room for `<video>` / `<input>` later).
 //! - [`BoxKind::Anonymous`] — Synthetic wrapper emitted by the layout engine
 //!   itself.
-//!
-//! ## Module layout
-//!
-//! ```text
-//! box_kind/
-//! ├── mod.rs          ← enum declarations (this file)
-//! ├── normal.rs       ← impl BlockKind Normal variant helpers
-//! ├── replaced.rs     ← impl BlockKind Replaced variant helpers
-//! └── anonymous.rs    ← impl BlockKind Anonymous variant helpers
-//! ```
-
-mod anonymous;
-mod normal;
-mod replaced;
-
-#[allow(unused_imports)]
-pub use anonymous::AnonymousExt;
-#[allow(unused_imports)]
-pub use normal::NormalExt;
-#[allow(unused_imports)]
-pub use replaced::ReplacedExt;
 
 /// Content payload of a [`BoxKind::Replaced`] box.
 ///

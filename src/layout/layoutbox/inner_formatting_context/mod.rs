@@ -14,27 +14,10 @@
 //!   lives in [`flex`](self::flex).
 //! - [`FormattingContext::Grid`] — CSS grid container (reserved). Lives in
 //!   [`grid`](self::grid).
-//!
-//! ## Module layout
-//!
-//! ```text
-//! inner_formatting_context/
-//! ├── mod.rs     ← enum + FlowExt / FlexExt / GridExt re-exports (this file)
-//! ├── flow/      ← Flow implementation (block layout + element handlers)
-//! │   └── mod.rs (also defines FlowExt + impl FormattingContext::Flow)
-//! ├── flex/      ← Flex implementation (CSS flexbox algorithm)
-//! │   └── mod.rs (also defines FlexExt + impl FormattingContext::Flex)
-//! └── grid/      ← Grid implementation (reserved)
-//!     └── mod.rs (also defines GridExt + impl FormattingContext::Grid)
-//! ```
 
 pub mod flow;
 pub mod flex;
 pub mod grid;
-
-pub use flow::FlowExt;
-pub use flex::FlexExt;
-pub use grid::GridExt;
 
 /// Formatting context established by a box for its children.
 ///
