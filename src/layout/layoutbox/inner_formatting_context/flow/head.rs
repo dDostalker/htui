@@ -64,31 +64,6 @@ pub fn layout_hn(
     ))
 }
 
-/// Build a [`LayoutBox`] for a `<head>` element.
-///
-/// `<head>` is a structural-only container for document metadata (`<title>`,
-/// `<style>`, `<link>`, `<meta>`, `<script>`). It produces no visible output
-/// and reserves no rows on the terminal canvas, so it acts as a sink for
-/// flattened children that would otherwise leak into the surrounding
-/// inline runs (e.g. the text content of `<title>`). The actual side effects
-/// — CSS extraction for `<style>` and `<link rel="stylesheet">` — happen at
-/// parse time, so the layout pass can safely ignore the whole subtree.
-#[allow(dead_code)]
-pub fn layout_head(
-    arena: &NodeArena,
-    node_id: NodeId,
-    _containing: BoxConstraint,
-    _cursor: &mut Cursor,
-    _font_ctx: FontContext,
-    _pre_allocated_rect: Option<crate::layout::Rect>,
-) -> Option<LayoutBox> {
-    let node = &arena[node_id];
-    if node.node_type != NodeType::Head {
-        return None;
-    }
-    None
-}
-
 /// Build a [`LayoutBox`] for a `<title>` element.
 ///
 /// `<title>` is document metadata rendered as the terminal title (or browser
