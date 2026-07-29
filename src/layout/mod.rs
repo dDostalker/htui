@@ -3,14 +3,16 @@ use crate::{
     tdom::node::{NodeArena, NodeId},
 };
 
+pub mod block;
 pub mod box_tree;
+pub mod flex;
+pub mod grid;
 pub mod layout;
-pub mod layout_fn;
 pub mod paint;
 pub mod tree;
 
 pub use crate::html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeSizes};
-pub use box_tree::{BoxKind, Cursor, InlineRun, LayoutBox, Rect};
+pub use box_tree::{BoxKind, Cursor, InlineRun, LayoutBox, LayoutMode, Rect, new_flex_item};
 pub use tree::FontContext;
 
 /// The containing block available to a layout function.
@@ -60,24 +62,24 @@ pub type LayoutFn = fn(
 /// element-specific block layout, so flex and the existing block
 /// layout are mutually exclusive without duplicating code.
 pub static DEFAULT_LAYOUT: &[LayoutFn] = &[
-    layout_fn::flex::layout_flex_dispatch,
-    layout_fn::p::layout_p,
-    layout_fn::head::layout_hn,
-    layout_fn::img::layout_img,
-    layout_fn::div::layout_div,
-    layout_fn::html::layout_html,
-    layout_fn::body::layout_body,
-    layout_fn::head::layout_title,
-    layout_fn::head::layout_meta,
-    layout_fn::header_footer::layout_header,
-    layout_fn::header_footer::layout_footer,
-    layout_fn::aside::layout_aside,
-    layout_fn::list::layout_li,
-    layout_fn::list::layout_ol,
-    layout_fn::list::layout_ul,
-    layout_fn::table::layout_table,
-    layout_fn::table::layout_tr,
-    layout_fn::table::layout_th,
-    layout_fn::table::layout_td,
-    layout_fn::table::layout_row_group,
+    flex::flex::layout_flex_dispatch,
+    block::aside::layout_aside,
+    block::body::layout_body,
+    block::div::layout_div,
+    block::head::layout_hn,
+    block::head::layout_title,
+    block::head::layout_meta,
+    block::header_footer::layout_footer,
+    block::header_footer::layout_header,
+    block::html::layout_html,
+    block::img::layout_img,
+    block::list::layout_li,
+    block::list::layout_ol,
+    block::list::layout_ul,
+    block::p::layout_p,
+    block::table::layout_row_group,
+    block::table::layout_table,
+    block::table::layout_td,
+    block::table::layout_th,
+    block::table::layout_tr,
 ];

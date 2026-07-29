@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use htui::html::html_parse;
 use htui::layout::layout::TermMap;
-use htui::layout::layout_fn::img::layout_img;
+use htui::layout::block::img::layout_img;
 use htui::layout::{BoxConstraint, BoxKind, Cursor, FontContext};
 use htui::tdom::node::{self, NodeType};
 use htui::tui::graph_api::{TermLayout, render_image_at};

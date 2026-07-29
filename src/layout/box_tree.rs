@@ -41,6 +41,36 @@ impl Rect {
     }
 }
 
+/// Layout algorithm that produced this box.
+///
+/// Lives on [`LayoutBox`] alongside [`BoxKind`]. `BoxKind` is the *rendering*
+/// shape (block container / image / future inline), while `LayoutMode` is the
+/// *layout* algorithm that placed the children. The two are independent:
+///
+/// - A flex container is a [`BoxKind::Block`] (it still has a border-box,
+///   backgrounds, padding and inline runs) but its direct children were
+///   arranged by [`LayoutMode::FlexLayout`], not by the default block flow.
+/// - An `<img>` is a [`BoxKind::Image`] rendered as a raster grid, but its
+///   layout mode is still [`LayoutMode::BlockLayout`] — it doesn't host
+///   children, so the algorithm doesn't matter for paint.
+///
+/// `GridLayout` is reserved for future support; it's not produced by any
+/// layout function yet, but the enum is exhaustive so adding a real grid
+/// implementation later will be a non-breaking change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LayoutMode {
+    /// Default block flow (siblings stacked vertically, each occupying one
+    /// or more rows inside the container's content area).
+    #[default]
+    BlockLayout,
+    /// CSS flexbox layout (direct children positioned along a main axis by
+    /// `flex-direction`, with optional wrapping).
+    FlexLayout,
+    /// CSS grid layout. Reserved for future use; the layout pipeline does
+    /// not yet produce boxes with this mode.
+    GridLayout,
+}
+
 /// Distinguishes the rendering shape of a layout box.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoxKind {
@@ -157,6 +187,9 @@ pub struct LayoutBox {
     pub children: Vec<LayoutBox>,
     /// Effective font-size of this box in terminal cells (≥ 1).
     pub font_size_cells: usize,
+    /// Layout algorithm that produced this box. Independent of `kind`:
+    /// a flex container is `BoxKind::Block` but `LayoutMode::FlexLayout`.
+    pub layout_mode: LayoutMode,
 }
 
 impl LayoutBox {
@@ -164,6 +197,10 @@ impl LayoutBox {
     /// or more `InlineRun`s (one per `<span>` boundary, one per direct
     /// text node). Pass an empty `Vec` when the block is purely
     /// structural — `runs` will be stored as `None`.
+    ///
+    /// Defaults to [`LayoutMode::BlockLayout`]; use [`new_block_with_mode`]
+    /// when the box is actually a flex container (which still renders as a
+    /// block but had its children arranged by the flex algorithm).
     pub fn new_block(
         node_id: NodeId,
         rect: Rect,
@@ -173,6 +210,33 @@ impl LayoutBox {
         runs: Vec<InlineRun>,
         children: Vec<LayoutBox>,
         font_size_cells: usize,
+    ) -> Self {
+        Self::new_block_with_mode(
+            node_id,
+            rect,
+            box_edges,
+            fill_bg,
+            spacing_after,
+            runs,
+            children,
+            font_size_cells,
+            LayoutMode::BlockLayout,
+        )
+    }
+
+    /// Same as [`new_block`], but with an explicit [`LayoutMode`]. Use this
+    /// for flex containers: they paint like blocks but their children's
+    /// positions were determined by the flex algorithm, not by block flow.
+    pub fn new_block_with_mode(
+        node_id: NodeId,
+        rect: Rect,
+        box_edges: BoxEdges,
+        fill_bg: bool,
+        spacing_after: usize,
+        runs: Vec<InlineRun>,
+        children: Vec<LayoutBox>,
+        font_size_cells: usize,
+        layout_mode: LayoutMode,
     ) -> Self {
         let runs = if runs.is_empty() { None } else { Some(runs) };
         Self {
@@ -188,6 +252,7 @@ impl LayoutBox {
             image_path: None,
             children,
             font_size_cells,
+            layout_mode,
         }
     }
 
@@ -224,6 +289,7 @@ impl LayoutBox {
             image_path: None,
             children,
             font_size_cells,
+            layout_mode: LayoutMode::BlockLayout,
         }
     }
 
@@ -238,8 +304,59 @@ impl LayoutBox {
             image_path: Some(path),
             children: vec![],
             font_size_cells: 1,
+            layout_mode: LayoutMode::BlockLayout,
         }
     }
+
+    /// Convenience constructor for a flex container: paints like a block,
+    /// but its children were arranged by the flex algorithm.
+    pub fn new_flex_container(
+        node_id: NodeId,
+        rect: Rect,
+        box_edges: BoxEdges,
+        fill_bg: bool,
+        spacing_after: usize,
+        runs: Vec<InlineRun>,
+        children: Vec<LayoutBox>,
+        font_size_cells: usize,
+    ) -> Self {
+        Self::new_block_with_mode(
+            node_id,
+            rect,
+            box_edges,
+            fill_bg,
+            spacing_after,
+            runs,
+            children,
+            font_size_cells,
+            LayoutMode::FlexLayout,
+        )
+    }
+}
+
+/// Convenience constructor for a flex item: still a block in paint terms,
+/// but tagged as `LayoutMode::FlexLayout` so callers can distinguish a
+/// flex item from a purely block-flow box.
+pub fn new_flex_item(
+    node_id: NodeId,
+    rect: Rect,
+    box_edges: BoxEdges,
+    fill_bg: bool,
+    runs: Vec<InlineRun>,
+    children: Vec<LayoutBox>,
+    font_size_cells: usize,
+) -> LayoutBox {
+    LayoutBox::new_block_with_mode(
+        node_id,
+        rect,
+        box_edges,
+        fill_bg,
+        0,
+        runs,
+        children,
+        font_size_cells,
+        LayoutMode::FlexLayout,
+    )
 }
 
 /// Tracks the next free row when laying out block-level siblings.

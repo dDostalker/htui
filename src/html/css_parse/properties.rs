@@ -268,7 +268,7 @@ impl CssAttr {
     // Each getter is tolerant: an unparseable value falls back to the
     // CSS initial value so a single typo never silently disables flex
     // for the element. Callers (the flex layout in
-    // `layout::layout_fn::flex`) consume the typed result directly.
+    // `layout::flex::flex`) consume the typed result directly.
     // ------------------------------------------------------------
 
     /// Whether this element opts into flex layout.
@@ -424,7 +424,7 @@ impl CssAttr {
     /// Mirrors [`get_width`](Self::get_width) for the cross-axis size. Used
     /// by the flex layout to detect an explicit container height so
     /// `align-items: stretch` can take effect (stretch is otherwise a no-op
-    /// in v1 — see `layout_fn::flex` for the rationale).
+    /// in v1 — see `flex::flex` for the rationale).
     pub fn get_height(
         &self,
         containing_width: usize,

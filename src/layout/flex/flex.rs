@@ -71,6 +71,7 @@ use crate::{
     html::css_parse::{AlignItems, AlignSelf, FlexDirection, FlexWrap, GapSizes, JustifyContent},
     layout::{
         BoxConstraint, BoxEdges, Cursor, FontContext, LayoutBox, Rect,
+        new_flex_item,
         tree::{collect_runs, layout_children},
     },
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
@@ -317,7 +318,7 @@ fn layout_flex_container(
     let fill_bg = block_bg.is_some();
     let rect = Rect::new(outer_x, outer_y_top, block_width, total_box_height);
 
-    LayoutBox::new_block(
+    LayoutBox::new_flex_container(
         node_id,
         rect,
         edges,
@@ -954,12 +955,11 @@ fn layout_flex_item(
         child_font_ctx,
     );
 
-    LayoutBox::new_block(
+    new_flex_item(
         item_id,
         rect,
         edges,
         fill_bg,
-        0,
         body_runs,
         children,
         own_font_size_cells,

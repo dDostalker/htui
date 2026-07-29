@@ -1,5 +1,5 @@
 //! Flexbox layout tests — the v1 subset of CSS flexbox that
-//! `layout_fn::flex` implements.
+//! `flex::flex` implements.
 //!
 //! Each test stands up a small HTML snippet with a flex container and
 //! one or more block children, then asserts on the rendered `Block`
@@ -17,6 +17,7 @@
 use crossterm::style::Color;
 use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
+use htui::layout::{BoxKind, LayoutMode};
 use htui::tdom::node::NodeArena;
 use htui::tdom::node::NodeId;
 use htui::tui::graph_api::TermLayout;
@@ -454,5 +455,88 @@ fn test_flex_basis_explicit_resolves_against_main_axis() {
     assert_eq!(
         pos_b, 10,
         "B starts at col 10 (after A's 10-cell flex-basis)"
+    );
+}
+
+/// Depth-first search for the first box whose `layout_mode` matches `mode`.
+fn find_box_with_mode<'a>(
+    boxes: &'a [htui::layout::LayoutBox],
+    mode: LayoutMode,
+) -> Option<&'a htui::layout::LayoutBox> {
+    for b in boxes {
+        if b.layout_mode == mode {
+            return Some(b);
+        }
+        if let Some(found) = find_box_with_mode(&b.children, mode) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+#[test]
+fn test_flex_container_carries_flex_layout_mode() {
+    init();
+    // A flex container should be tagged `LayoutMode::FlexLayout` so the
+    // architectural distinction between the box's *rendering shape*
+    // (still `BoxKind::Block`) and its *layout algorithm* (flex) is
+    // visible to the layout tree.
+    let html = r#"
+        <div class="container">
+            <div class="a">A</div>
+        </div>
+    "#;
+    let css = r#"
+        .container { display: flex; }
+    "#;
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let boxes = htui::layout::tree::layout_tree(
+        &arena,
+        root_id,
+        htui::layout::BoxConstraint::root(&term_map),
+        &mut htui::layout::Cursor::new(),
+    );
+    let container = find_box_with_mode(&boxes, LayoutMode::FlexLayout)
+        .expect("there must be a box tagged LayoutMode::FlexLayout");
+    assert!(
+        matches!(container.kind, BoxKind::Block { .. }),
+        "container still renders as a Block (bg / padding / border unaffected)"
+    );
+    assert_eq!(
+        container.layout_mode,
+        LayoutMode::FlexLayout,
+        "flex container must be tagged LayoutMode::FlexLayout"
+    );
+    assert_eq!(
+        container.children.len(),
+        1,
+        "flex container has the one flex item as its child"
+    );
+    assert_eq!(
+        container.children[0].layout_mode,
+        LayoutMode::FlexLayout,
+        "flex items are also tagged LayoutMode::FlexLayout"
+    );
+    // Sanity: a non-flex container keeps the default BlockLayout.
+    let html_block = r#"
+        <div class="container">
+            <div class="a">A</div>
+        </div>
+    "#;
+    let (root_id, arena) = setup(html_block, "");
+    let boxes = htui::layout::tree::layout_tree(
+        &arena,
+        root_id,
+        htui::layout::BoxConstraint::root(&term_map),
+        &mut htui::layout::Cursor::new(),
+    );
+    assert!(
+        find_box_with_mode(&boxes, LayoutMode::FlexLayout).is_none(),
+        "non-flex containers must not produce any FlexLayout boxes"
+    );
+    assert!(
+        find_box_with_mode(&boxes, LayoutMode::BlockLayout).is_some(),
+        "non-flex containers still produce BlockLayout boxes"
     );
 }

@@ -536,7 +536,7 @@ pub enum TextDecoration {
 // Parsers and enums for the CSS flex properties supported by the
 // renderer. Kept in `values.rs` alongside the other typed enums
 // because they're plain value-types with no DOM / layout coupling.
-// The flex layout itself lives in `layout::layout_fn::flex`.
+// The flex layout itself lives in `layout::flex::flex`.
 // ============================================================
 
 /// Main axis direction (CSS `flex-direction`).
