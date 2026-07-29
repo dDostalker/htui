@@ -18,6 +18,10 @@
         .row      { display: flex; flex-direction: row; }
         .col      { display: flex; flex-direction: column; }
         .wrap     { display: flex; flex-wrap: wrap; }
+        .height-4 { height: 4; }
+        .height-3 { height: 3; }
+        .width-30 { width: 30; }
+        .no-shrink { flex-shrink: 0; }
         .gap-2    { gap: 2; }
         .gap-1    { gap: 1; }
         .j-start  { justify-content: flex-start; }
@@ -88,18 +92,18 @@
     </div>
 
     <h3>4. align-items: stretch with explicit height</h3>
-    <div class="row a-stretch" style="height: 4;">
+    <div class="row a-stretch height-4">
         <div class="red">stretch</div>
         <div class="green">all to</div>
         <div class="blue">4 rows</div>
     </div>
 
     <h3>5. align-items: center / flex-end (row)</h3>
-    <div class="row a-center" style="height: 3;">
+    <div class="row a-center height-3">
         <div class="red">A</div>
         <div class="green">B</div>
     </div>
-    <div class="row a-end" style="height: 3;">
+    <div class="row a-end height-3">
         <div class="red">A</div>
         <div class="green">B</div>
     </div>
@@ -131,10 +135,10 @@
     </div>
 
     <h3>9. flex-wrap: 30px container, 15-char items</h3>
-    <div class="wrap" style="width: 30;">
-        <div class="red">AAAAAAAAAAAAAAA</div>
-        <div class="green">BBBBBBBBBBBBBBB</div>
-        <div class="blue">CCCCCCCCCCCCCCC</div>
+    <div class="wrap width-30">
+        <div class="red no-shrink">AAAAAAAAAAAAAAA</div>
+        <div class="green no-shrink">BBBBBBBBBBBBBBB</div>
+        <div class="blue no-shrink">CCCCCCCCCCCCCCC</div>
     </div>
 
     <h3>10. flex-basis: explicit length</h3>

@@ -173,8 +173,16 @@ pub(super) fn justify_spacing(justify: JustifyContent, free_space: usize, n_item
         JustifyContent::Center => (free_space / 2, 0),
         JustifyContent::SpaceBetween => (0, free_space / (n_items - 1)),
         JustifyContent::SpaceAround => {
-            let share = free_space / (2 * n_items);
-            (share, share * 2)
+            // CSS space-around: each edge gap = half of the between gap.
+            // Total = 2 * edge + (n-1) * between = n * between, so
+            //   between = free_space / n
+            //   leading = (free_space - (n - 1) * between) / 2
+            // The previous formula `share = f / (2n), (share, share*2)`
+            // collapses to zero whenever `free_space < 2n` (3 items in 4
+            // cells of free space → all gaps = 0, items stacked flush).
+            let between = free_space / n_items;
+            let leading = (free_space - between * (n_items - 1)) / 2;
+            (leading, between)
         }
         JustifyContent::SpaceEvenly => {
             let share = free_space / (n_items + 1);

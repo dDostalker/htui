@@ -15,6 +15,22 @@
         h3 { color: yellow; }
         .row  { display: flex; flex-direction: row; }
         .wrap { display: flex; flex-wrap: wrap; }
+        .justify-evenly { justify-content: space-evenly; }
+        .width-12 { width: 12; }
+        .width-10 { width: 10; }
+        .height-7 { height: 7; }
+        .align-content-start { align-content: flex-start; }
+        .align-content-center { align-content: center; }
+        .align-content-between { align-content: space-between; }
+        .align-content-around { align-content: space-around; }
+        .align-content-evenly { align-content: space-evenly; }
+        .basis-4 { flex-basis: 4; }
+        .shrink-0 { flex-shrink: 0; }
+        .shrink-1 { flex-shrink: 1; }
+        /* Force items to keep their natural width so they wrap to
+           multiple lines — otherwise `flex-shrink: 1` (default) collapses
+           them onto a single row and align-content has no effect. */
+        .no-shrink { flex-shrink: 0; }
         .red    { background-color: red;     color: white; }
         .green  { background-color: green;   color: white; }
         .blue   { background-color: blue;    color: white; }
@@ -27,52 +43,52 @@
     <h2>Flex — align-content / space-evenly / flex-shrink</h2>
 
     <h3>1. justify-content: space-evenly (single row)</h3>
-    <div class="row" style="justify-content: space-evenly;">
+    <div class="row justify-evenly">
         <div class="red">A</div>
         <div class="green">B</div>
         <div class="blue">C</div>
     </div>
 
     <h3>2. align-content: flex-start (lines packed to the top)</h3>
-    <div class="wrap" style="width: 12; height: 7; align-content: flex-start;">
-        <div class="red">AAAAAAAAAAAA</div>
-        <div class="green">BBBBBBBBBBBB</div>
-        <div class="blue">CCCCCCCCCCCC</div>
+    <div class="wrap width-12 height-7 align-content-start">
+        <div class="red no-shrink">AAAAAAAAAAAA</div>
+        <div class="green no-shrink">BBBBBBBBBBBB</div>
+        <div class="blue no-shrink">CCCCCCCCCCCC</div>
     </div>
 
     <h3>3. align-content: center (lines centered vertically)</h3>
-    <div class="wrap" style="width: 12; height: 7; align-content: center;">
-        <div class="red">AAAAAAAAAAAA</div>
-        <div class="green">BBBBBBBBBBBB</div>
-        <div class="blue">CCCCCCCCCCCC</div>
+    <div class="wrap width-12 height-7 align-content-center">
+        <div class="red no-shrink">AAAAAAAAAAAA</div>
+        <div class="green no-shrink">BBBBBBBBBBBB</div>
+        <div class="blue no-shrink">CCCCCCCCCCCC</div>
     </div>
 
     <h3>4. align-content: space-between (lines reach both edges)</h3>
-    <div class="wrap" style="width: 12; height: 7; align-content: space-between;">
-        <div class="red">AAAAAAAAAAAA</div>
-        <div class="green">BBBBBBBBBBBB</div>
-        <div class="blue">CCCCCCCCCCCC</div>
+    <div class="wrap width-12 height-7 align-content-between">
+        <div class="red no-shrink">AAAAAAAAAAAA</div>
+        <div class="green no-shrink">BBBBBBBBBBBB</div>
+        <div class="blue no-shrink">CCCCCCCCCCCC</div>
     </div>
 
     <h3>5. align-content: space-around (lines with half-share at edges)</h3>
-    <div class="wrap" style="width: 12; height: 7; align-content: space-around;">
-        <div class="red">AAAAAAAAAAAA</div>
-        <div class="green">BBBBBBBBBBBB</div>
-        <div class="blue">CCCCCCCCCCCC</div>
+    <div class="wrap width-12 height-7 align-content-around">
+        <div class="red no-shrink">AAAAAAAAAAAA</div>
+        <div class="green no-shrink">BBBBBBBBBBBB</div>
+        <div class="blue no-shrink">CCCCCCCCCCCC</div>
     </div>
 
     <h3>6. align-content: space-evenly (lines evenly distributed)</h3>
-    <div class="wrap" style="width: 12; height: 7; align-content: space-evenly;">
-        <div class="red">AAAAAAAAAAAA</div>
-        <div class="green">BBBBBBBBBBBB</div>
-        <div class="blue">CCCCCCCCCCCC</div>
+    <div class="wrap width-12 height-7 align-content-evenly">
+        <div class="red no-shrink">AAAAAAAAAAAA</div>
+        <div class="green no-shrink">BBBBBBBBBBBB</div>
+        <div class="blue no-shrink">CCCCCCCCCCCC</div>
     </div>
 
     <h3>7. flex-shrink: overflow redistributed by shrink ratio</h3>
-    <div class="row" style="width: 10;">
-        <div class="red"    style="flex-basis: 4; flex-shrink: 0;">AAAA</div>
-        <div class="green"  style="flex-basis: 4; flex-shrink: 1;">BBBB</div>
-        <div class="blue"   style="flex-basis: 4; flex-shrink: 0;">CCCC</div>
+    <div class="row width-10">
+        <div class="red basis-4 shrink-0">AAAA</div>
+        <div class="green basis-4 shrink-1">BBBB</div>
+        <div class="blue basis-4 shrink-0">CCCC</div>
     </div>
 </body>
 </html>

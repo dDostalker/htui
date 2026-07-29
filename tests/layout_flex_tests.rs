@@ -543,3 +543,255 @@ fn test_flex_container_carries_flex_formatting_context() {
         "non-flex containers still produce Flow formatting context boxes"
     );
 }
+
+// ----------------------------------------------------------
+// Tests for v1 features that the visual tests exercise but the
+// existing unit tests do not cover: align-self, align-content,
+// justify-content: space-evenly, flex-shrink overflow, and
+// nested flex containers.
+// ----------------------------------------------------------
+
+/// Recursive count of boxes whose `inner_formatting_context` matches `ctx`.
+fn count_boxes_with_formatting_context(
+    boxes: &[htui::layout::LayoutBox],
+    ctx: FormattingContext,
+) -> usize {
+    boxes
+        .iter()
+        .map(|b| {
+            let self_match = if b.inner_formatting_context == ctx { 1 } else { 0 };
+            self_match + count_boxes_with_formatting_context(&b.children, ctx)
+        })
+        .sum()
+}
+
+#[test]
+fn test_flex_align_self_overrides_align_items() {
+    init();
+    // Container has explicit height = 5; default `align-items: stretch`.
+    // A per-item `align-self` should override for that item only.
+    // `flex-start` items sit at the top of the line (row 0); `flex-end`
+    // items sit at the bottom (row 4).
+    let html = r#"
+        <div class="container">
+            <div class="top">A</div>
+            <div class="bot">B</div>
+        </div>
+    "#;
+    let css = r#"
+        .container { display: flex; height: 5; }
+        .top { align-self: flex-start; }
+        .bot { align-self: flex-end; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    let pos_a = rows[0].find("A").expect("A on row 0 (flex-start)");
+    let pos_b = rows[4].find("B").expect("B on row 4 (flex-end)");
+    let _ = pos_a;
+    let _ = pos_b;
+    assert!(
+        !rows[0].contains("B"),
+        "B should not be on row 0 (its align-self is flex-end)"
+    );
+    assert!(
+        !rows[4].contains("A"),
+        "A should not be on row 4 (its align-self is flex-start)"
+    );
+}
+
+#[test]
+fn test_flex_justify_space_evenly_distributes_equally() {
+    init();
+    // 3 single-cell items inside a 10-cell container, justify-content:
+    // space-evenly. With 3 items the algorithm inserts a leading share
+    // AND a trailing share of equal size to the between-gap, so the
+    // pattern is: 1 cell leading, 1 cell item, 1 cell gap, 1 cell item,
+    // 1 cell gap, 1 cell item, 1 cell trailing.
+    let html = r#"
+        <div class="container">
+            <div class="a">A</div>
+            <div class="b">B</div>
+            <div class="c">C</div>
+        </div>
+    "#;
+    let css = r#"
+        .container { display: flex; width: 10px; justify-content: space-evenly; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    // Container width 10 is clamped at the term width (80) so the rows
+    // span the full canvas. With 3 items of 1 cell each, the free
+    // space is 7 cells. space-evenly: 7 / (3 + 1) = 1 cell at every
+    // edge and gap. So items land at columns 1, 3, 5.
+    let line0 = &rows[0];
+    let pos_a = line0.find("A").expect("A on row 0");
+    let pos_b = line0.find("B").expect("B on row 0");
+    let pos_c = line0.find("C").expect("C on row 0");
+    assert_eq!(pos_a, 1, "A at col 1 (1-cell leading share)");
+    assert_eq!(pos_b, 3, "B at col 3 (1-cell between + 1-cell item)");
+    assert_eq!(pos_c, 5, "C at col 5 (between + item + between)");
+}
+
+#[test]
+fn test_flex_shrink_redistributes_overflow_proportionally() {
+    init();
+    // 3 items each with `flex-basis: 4px` in a 10-cell container.
+    // Total basis = 12, overflow = 2. The first and last items have
+    // `flex-shrink: 0` (they stay fixed at 4), so the middle item
+    // absorbs the entire 2-cell overflow and shrinks to 2 cells.
+    let html = r#"
+        <div class="container">
+            <div class="a">AAA</div>
+            <div class="b">BB</div>
+            <div class="c">CC</div>
+        </div>
+    "#;
+    let css = r#"
+        .container { display: flex; width: 10px; }
+        .a, .b, .c { flex-basis: 4px; }
+        .a { flex-shrink: 0; }
+        .b { flex-shrink: 1; }
+        .c { flex-shrink: 0; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    let line0 = &rows[0];
+    let pos_a = line0.find("AAA").expect("A on row 0");
+    let pos_b = line0.find("BB").expect("B on row 0");
+    let pos_c = line0.find("CC").expect("C on row 0");
+    // A and C stay at 4 cells; B shrinks to 2 cells. The positions
+    // must total exactly 10 cells (container width).
+    assert_eq!(pos_a, 0, "A at col 0 (4-cell basis, no shrink)");
+    assert_eq!(pos_b, 4, "B at col 4 (4-cell basis, shrunk to 2)");
+    assert_eq!(pos_c, 6, "C at col 6 (4-cell basis, no shrink)");
+    assert_eq!(pos_c + 4, 10, "C ends exactly at the container edge");
+}
+
+#[test]
+fn test_flex_align_content_center_centers_lines() {
+    init();
+    // 3 items each 12 cells wide in a 12-cell container with
+    // `flex-wrap: wrap` — each item wraps onto its own line (3 lines
+    // of 1 row, total 3). The container has explicit height = 7 so
+    // 4 rows of cross-axis free space remain. `align-content: center`
+    // shifts the block of lines down by half the free space (2 rows).
+    // The first item should therefore land on row 2, not row 0.
+    let html = r#"
+        <div class="container">
+            <div class="a">AAAAAAAAAAAA</div>
+            <div class="b">BBBBBBBBBBBB</div>
+            <div class="c">CCCCCCCCCCCC</div>
+        </div>
+    "#;
+    let css = r#"
+        .container { display: flex; flex-wrap: wrap; width: 12px; height: 7; align-content: center; }
+        .a, .b, .c { flex-shrink: 0; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    let a_row = rows
+        .iter()
+        .position(|r| r.contains("AAAAAAAAAAAA"))
+        .expect("A rendered");
+    let b_row = rows
+        .iter()
+        .position(|r| r.contains("BBBBBBBBBBBB"))
+        .expect("B rendered");
+    let c_row = rows
+        .iter()
+        .position(|r| r.contains("CCCCCCCCCCCC"))
+        .expect("C rendered");
+    assert_eq!(a_row, 2, "first line centered, starts at row 2 (got {a_row})");
+    assert_eq!(b_row, 3, "second line at row 3 (got {b_row})");
+    assert_eq!(c_row, 4, "third line at row 4 (got {c_row})");
+}
+
+#[test]
+fn test_flex_nested_containers_both_have_flex_formatting_context() {
+    init();
+    // Outer is a flex row; inner is a flex column. Both must be tagged
+    // `FormattingContext::Flex` independently — the dispatch is
+    // idempotent across nesting levels.
+    let html = r#"
+        <div class="outer">
+            <div class="inner">
+                <div class="a">A</div>
+            </div>
+        </div>
+    "#;
+    let css = r#"
+        .outer { display: flex; }
+        .inner { display: flex; flex-direction: column; }
+    "#;
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let boxes = htui::layout::inner_formatting_context::flow::layout_tree(
+        &arena,
+        root_id,
+        htui::layout::BoxConstraint::root(&term_map),
+        &mut htui::layout::Cursor::new(),
+    );
+    let flex_count = count_boxes_with_formatting_context(&boxes, FormattingContext::Flex);
+    assert_eq!(
+        flex_count, 2,
+        "outer AND inner should both be Flex formatting contexts (got {flex_count})"
+    );
+}
+
+#[test]
+fn test_flex_justify_space_around_distributes_with_edge_halves() {
+    init();
+    // 3 items of 1 cell in a 7-cell container. free space = 4.
+    // CSS space-around: between = 4/3 = 1, leading = (4 - 2)/2 = 1.
+    // Edge gap = leading = 1 (= half of between), so the pattern is
+    // 1 leading + 1 item + 1 between + 1 item + 1 between + 1 item +
+    // 1 trailing = 7 cells. Items land at columns 1, 3, 5.
+    let html = r#"
+        <div class="container">
+            <div class="a">A</div>
+            <div class="b">B</div>
+            <div class="c">C</div>
+        </div>
+    "#;
+    let css = r#"
+        .container { display: flex; width: 7px; justify-content: space-around; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    let line0 = &rows[0];
+    let pos_a = line0.find("A").expect("A on row 0");
+    let pos_b = line0.find("B").expect("B on row 0");
+    let pos_c = line0.find("C").expect("C on row 0");
+    assert_eq!(pos_a, 1, "A at col 1 (1-cell leading edge share)");
+    assert_eq!(pos_b, 3, "B at col 3 (1 + 1 + 1)");
+    assert_eq!(pos_c, 5, "C at col 5 (1 + 1 + 1 + 1 + 1)");
+}
+
+#[test]
+fn test_flex_align_content_space_around_distributes_with_edge_halves() {
+    init();
+    // 3 wrap lines of 1 row each in a 7-row container. free space = 4.
+    // CSS space-around: between = 1, leading = 1; lines at rows 1, 3, 5.
+    let html = r#"
+        <div class="container">
+            <div class="a">AAAAAAAAAAAA</div>
+            <div class="b">BBBBBBBBBBBB</div>
+            <div class="c">CCCCCCCCCCCC</div>
+        </div>
+    "#;
+    let css = r#"
+        .container { display: flex; flex-wrap: wrap; width: 12px; height: 7; align-content: space-around; }
+        .a, .b, .c { flex-shrink: 0; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    let a_row = rows
+        .iter()
+        .position(|r| r.contains("AAAAAAAAAAAA"))
+        .expect("A rendered");
+    let b_row = rows
+        .iter()
+        .position(|r| r.contains("BBBBBBBBBBBB"))
+        .expect("B rendered");
+    let c_row = rows
+        .iter()
+        .position(|r| r.contains("CCCCCCCCCCCC"))
+        .expect("C rendered");
+    assert_eq!(a_row, 1, "A at row 1 (1-cell leading edge share)");
+    assert_eq!(b_row, 3, "B at row 3");
+    assert_eq!(c_row, 5, "C at row 5");
+}

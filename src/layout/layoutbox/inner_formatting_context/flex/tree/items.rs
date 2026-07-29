@@ -76,8 +76,10 @@ pub(super) fn layout_flex_items(
             .max(FLEX_ITEM_MIN_CROSS);
 
         // 3c. Effective cross-axis size: explicit container height wins
-        //     when present, otherwise the natural line cross.
-        let line_cross = if has_explicit_height {
+        //     when present (and only for single-line containers — a multi-line
+        //     wrapper would otherwise overflow since each line would be sized
+        //     to the container height), otherwise the natural line cross.
+        let line_cross = if has_explicit_height && line_count == 1 {
             container_height
         } else {
             natural_line_cross
@@ -188,7 +190,7 @@ pub(super) fn layout_flex_items(
                     .max()
                     .unwrap_or(FLEX_ITEM_MIN_CROSS)
                     .max(FLEX_ITEM_MIN_CROSS);
-                let line_cross = if has_explicit_height {
+                let line_cross = if has_explicit_height && line_count == 1 {
                     container_height
                 } else {
                     natural
