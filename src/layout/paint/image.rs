@@ -5,7 +5,7 @@ use crate::{
 
 use super::PaintCanvas;
 
-pub(super) fn paint_image(lb: &LayoutBox, canvas: &mut PaintCanvas<'_>, cols: usize, rows: usize) {
+pub(crate) fn paint_image(lb: &LayoutBox, canvas: &mut PaintCanvas<'_>, cols: usize, rows: usize) {
     let ReplacedContent::Image { path, .. } = match &lb.kind {
         crate::layout::BoxKind::Replaced(content) => content,
         _ => return,

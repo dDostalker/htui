@@ -1,10 +1,12 @@
 //! Paint phase.
 //!
-//! Walks a [`LayoutBox`] forest produced by [`block::layout_tree`] and writes
-//! styled cells into the [`TermLayout`](crate::tui::graph_api::TermLayout)
-//! canvas. Reads no DOM state: every paint decision is derived from the box's
-//! own `rect`, `kind`, `paint_style`, and the CSS attributes stored on the
-//! source node.
+//! Walks a [`LayoutBox`] forest produced by
+//! [`super::layoutbox::inner_formatting_context::flow::layout_tree`] (and
+//! parallel-laid flex / grid trees) and writes styled cells into the
+//! [`TermLayout`](crate::tui::graph_api::TermLayout) canvas. Reads no DOM
+//! state beyond each box's `node_id`: every paint decision is derived from
+//! the box's own `rect`, `kind`, `paint_style`, and the CSS attributes
+//! stored on the source node.
 //!
 //! ## Submodules
 //!
@@ -27,7 +29,8 @@ use crate::{
     tui::graph_api::{Block, TermLayout},
 };
 
-use self::{block::paint_block, image::paint_image};
+use self::block::paint_block;
+use self::image::paint_image;
 
 /// A borrow of the canvas that the painters actually need.
 ///

@@ -23,7 +23,7 @@ use super::PaintCanvas;
 /// occupies that many terminal columns (the trailing columns are filled with
 /// the run's background, mirroring the empty space a larger font would leave
 /// around its glyphs).
-pub(super) fn paint_runs(
+pub(crate) fn paint_runs(
     canvas: &mut PaintCanvas<'_>,
     runs: &[InlineRun],
     cell_start: usize,

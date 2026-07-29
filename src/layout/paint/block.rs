@@ -7,7 +7,7 @@ use crate::{
 
 use super::{PaintCanvas, border::paint_borders, text::paint_runs};
 
-pub(super) fn paint_block(
+pub(crate) fn paint_block(
     lb: &LayoutBox,
     arena: &NodeArena,
     canvas: &mut PaintCanvas<'_>,
