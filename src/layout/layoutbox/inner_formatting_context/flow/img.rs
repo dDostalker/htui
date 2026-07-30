@@ -1,7 +1,6 @@
 use crate::{
     layout::{
-        BoxConstraint, Cursor, LayoutBox, PaintStyle, ReplacedContent,
-        inner_formatting_context::flow::FontContext,
+        BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, ReplacedContent,
     },
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW},
@@ -17,9 +16,9 @@ pub fn layout_img(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    font_ctx: FontContext,
+    context: LayoutContext,
 ) -> Option<LayoutBox> {
-    layout_img_with_rect(arena, node_id, containing, cursor, font_ctx, None)
+    layout_img_with_rect(arena, node_id, containing, cursor, context, None)
 }
 
 /// Build an `<img>` element, optionally honoring a rectangle allocated by a
@@ -29,7 +28,7 @@ pub fn layout_img_with_rect(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    _font_ctx: FontContext,
+    _context: LayoutContext,
     pre_allocated_rect: Option<crate::layout::Rect>,
 ) -> Option<LayoutBox> {
     let node = &arena[node_id];

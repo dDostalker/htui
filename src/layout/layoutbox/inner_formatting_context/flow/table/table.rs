@@ -1,9 +1,7 @@
 //! Layout the `<table>` element itself.
 
 use crate::{
-    layout::{
-        BoxConstraint, Cursor, FontContext, LayoutBox, PaintStyle, Rect,
-    },
+    layout::{BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, Rect},
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
 };
 
@@ -16,7 +14,7 @@ pub fn layout_table(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    font_ctx: FontContext,
+    context: LayoutContext,
     pre_allocated_rect: Option<Rect>,
 ) -> Option<LayoutBox> {
     let node = &arena[node_id];
@@ -24,10 +22,15 @@ pub fn layout_table(
         return None;
     }
 
-    let own_font_size_cells = effective_font_size_cells(arena, node_id, font_ctx);
-    let child_font_ctx = font_ctx.child(own_font_size_cells);
+    let own_font_size_cells =
+        effective_font_size_cells(arena, node_id, context.font, context.viewport);
+    let child_context = context.child(own_font_size_cells);
 
-    let edges = node.css_attr.get_box_edges(containing.width, child_font_ctx);
+    let edges = node.css_attr.get_box_edges(
+        containing.width,
+        child_context.font,
+        child_context.viewport,
+    );
 
     let available = containing.width.saturating_sub(edges.margin.horizontal());
     let (x, block_width, outer_y_top, preallocated_height) = match pre_allocated_rect {
@@ -35,7 +38,7 @@ pub fn layout_table(
         None => {
             let block_width = node
                 .css_attr
-                .get_width(available, child_font_ctx)
+                .get_width(available, child_context.font, child_context.viewport)
                 .unwrap_or(available)
                 .min(available)
                 .max(1);
@@ -73,7 +76,7 @@ pub fn layout_table(
                 cell.node_id,
                 cell_rect,
                 cell.is_header,
-                child_font_ctx,
+                child_context,
             );
             table_children.push(cell_box);
             current_x = current_x.saturating_add(col_w);

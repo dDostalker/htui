@@ -112,31 +112,33 @@ pub(super) fn parse_edge_sizes(
     shorthand: &str,
     containing_width: usize,
     font_ctx: FontContext,
+    viewport: Viewport,
 ) -> EdgeSizes {
     let shorthand_raw = decls.get(shorthand);
     let mut edges = parse_shorthand_lengths(
         shorthand_raw.map(|s| s.as_str()),
         containing_width,
         font_ctx,
+        viewport,
     );
 
     // Layer per-side longhands on top (they take precedence).
     let top_raw = decls.get(&format!("{shorthand}-top")).map(|s| s.as_str());
-    if let Some(v) = parse_length_token(top_raw, containing_width, font_ctx) {
+    if let Some(v) = parse_length_token(top_raw, containing_width, font_ctx, viewport) {
         edges.top = v;
     }
     let right_raw = decls.get(&format!("{shorthand}-right")).map(|s| s.as_str());
-    if let Some(v) = parse_length_token(right_raw, containing_width, font_ctx) {
+    if let Some(v) = parse_length_token(right_raw, containing_width, font_ctx, viewport) {
         edges.right = v;
     }
     let bottom_raw = decls
         .get(&format!("{shorthand}-bottom"))
         .map(|s| s.as_str());
-    if let Some(v) = parse_length_token(bottom_raw, containing_width, font_ctx) {
+    if let Some(v) = parse_length_token(bottom_raw, containing_width, font_ctx, viewport) {
         edges.bottom = v;
     }
     let left_raw = decls.get(&format!("{shorthand}-left")).map(|s| s.as_str());
-    if let Some(v) = parse_length_token(left_raw, containing_width, font_ctx) {
+    if let Some(v) = parse_length_token(left_raw, containing_width, font_ctx, viewport) {
         edges.left = v;
     }
 
@@ -152,6 +154,7 @@ fn parse_shorthand_lengths(
     value: Option<&str>,
     containing_width: usize,
     font_ctx: FontContext,
+    viewport: Viewport,
 ) -> EdgeSizes {
     let Some(value) = value else {
         return EdgeSizes::default();
@@ -159,7 +162,7 @@ fn parse_shorthand_lengths(
     let tokens: Vec<&str> = value.split_whitespace().collect();
     let parsed: Vec<usize> = tokens
         .iter()
-        .filter_map(|t| parse_length_token(Some(t), containing_width, font_ctx))
+        .filter_map(|t| parse_length_token(Some(t), containing_width, font_ctx, viewport))
         .collect();
     match parsed.len() {
         0 => EdgeSizes::default(),
@@ -170,7 +173,13 @@ fn parse_shorthand_lengths(
     }
 }
 
-/// Parse one CSS length token to an absolute cell count.
+fn resolve_length(length: Length, containing: usize, font: FontContext, viewport: Viewport) -> usize {
+    length.resolve(LengthContext {
+        containing,
+        font,
+        viewport,
+    })
+}
 ///
 /// `auto` / missing / unsupported unit → `None` (caller decides what default
 /// to apply).
@@ -178,11 +187,12 @@ fn parse_length_token(
     value: Option<&str>,
     containing_width: usize,
     font_ctx: FontContext,
+    viewport: Viewport,
 ) -> Option<usize> {
     let raw = value?;
     match Length::parse(raw)? {
         Length::Auto => None,
-        len => Some(len.resolve(containing_width, font_ctx)),
+        len => Some(resolve_length(len, containing_width, font_ctx, viewport)),
     }
 }
 
@@ -193,8 +203,9 @@ pub(super) fn parse_border_width(
     value: Option<&str>,
     containing_width: usize,
     font_ctx: FontContext,
+    viewport: Viewport,
 ) -> usize {
-    parse_length_token(value, containing_width, font_ctx).unwrap_or(0)
+    parse_length_token(value, containing_width, font_ctx, viewport).unwrap_or(0)
 }
 
 /// Map a `border-style` keyword to a [`BorderStyle`]. Unknown / missing
@@ -219,16 +230,17 @@ pub(super) fn parse_border_side(
     fallback: Border,
     containing_width: usize,
     font_ctx: FontContext,
+    viewport: Viewport,
 ) -> Border {
     if let Some(value) = side_raw {
-        if let Some(parsed) = parse_border_shorthand(value, containing_width, font_ctx) {
+        if let Some(parsed) = parse_border_shorthand(value, containing_width, font_ctx, viewport) {
             return parsed;
         }
         // `border-top` was present but unparseable — fall through to next
         // priority rather than dropping the side entirely.
     }
     if let Some(value) = shorthand_raw {
-        if let Some(parsed) = parse_border_shorthand(value, containing_width, font_ctx) {
+        if let Some(parsed) = parse_border_shorthand(value, containing_width, font_ctx, viewport) {
             return parsed;
         }
     }
@@ -245,13 +257,14 @@ fn parse_border_shorthand(
     value: &str,
     containing_width: usize,
     font_ctx: FontContext,
+    viewport: Viewport,
 ) -> Option<Border> {
     let mut width: Option<usize> = None;
     let mut style: Option<BorderStyle> = None;
     let mut color: Option<Color> = None;
 
     for token in value.split_whitespace() {
-        if let Some(w) = parse_length_token(Some(token), containing_width, font_ctx) {
+        if let Some(w) = parse_length_token(Some(token), containing_width, font_ctx, viewport) {
             width = Some(w);
             continue;
         }
@@ -292,59 +305,57 @@ fn parse_border_shorthand(
     })
 }
 
-/// Length-resolution context propagated through layout.
+/// Font-size context propagated through the layout tree.
 ///
-/// `Length::resolve` consumes one of these values; each layout function in
-/// `layout::*` plumbs a `FontContext` through the tree so the same
-/// `Length::resolve` call yields consistent em / rem / vw / vh results
-/// across nested elements. The struct lives in `html::css_parse` because
-/// it's the input to [`Length::resolve`]; layout depends on `html::css_parse`
-/// (not the other way around), so this inversion keeps the dependency
-/// graph acyclic.
-///
-/// Fields:
-/// - `font_size_cells`: the **element's own** effective font size in cells.
-///   `em` resolves against this. Layout functions compute the element's
-///   own font size via [`crate::tdom::node::effective_font_size_cells`]
-///   and pass `self.child(own_font_size_cells)` to nested `get_*` calls.
-/// - `root_font_size_cells`: the document root's font size. `rem` resolves
-///   against this.
-/// - `viewport_cols` / `viewport_rows`: the terminal viewport in cells.
-///   `vw` / `vh` resolve against these — axis-independent, they anchor to
-///   the viewport regardless of which CSS property they appear in.
+/// `FontContext` carries the **current element's effective font-size** and
+/// the **root font-size** so `em` and `rem` lengths can resolve against the
+/// active font-size cascade. It is intentionally viewport-free: viewport
+/// information lives in [`Viewport`] and the two are bundled together by
+/// [`LengthContext`] / [`crate::layout::LayoutContext`] when handed to
+/// [`Length::resolve`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FontContext {
     pub font_size_cells: usize,
     pub root_font_size_cells: usize,
-    pub viewport_cols: usize,
-    pub viewport_rows: usize,
+}
+
+/// Terminal viewport used by viewport-relative CSS lengths.
+///
+/// `Viewport` is a peer of [`FontContext`], not a field inside it. `vw` /
+/// `vh` always anchor to the terminal columns / rows respectively; carrying
+/// the viewport separately makes that explicit at every call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Viewport {
+    pub cols: usize,
+    pub rows: usize,
+}
+
+/// Inputs required to resolve one CSS length into terminal cells.
+///
+/// `Length::resolve` consumes a `LengthContext`; the same `Length::resolve`
+/// call therefore yields consistent `em` / `rem` / `vw` / `vh` results no
+/// matter which CSS property it appears in. `containing` is the
+/// containing-block width in cells (used by `Pct`); `font` supplies the
+/// em / rem base sizes; `viewport` supplies the `vw` / `vh` anchor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LengthContext {
+    pub containing: usize,
+    pub font: FontContext,
+    pub viewport: Viewport,
 }
 
 impl FontContext {
-    /// Build the root context for a given viewport size.
-    ///
-    /// The root font-size is 1 cell by default; it grows when the document
-    /// root sets an explicit `font-size` rule. Viewport cols/rows are the
-    /// terminal size; pass `0` to disable `vw`/`vh` resolution (it will
-    /// resolve to 1 cell, the minimum).
-    pub fn root(viewport_cols: usize, viewport_rows: usize) -> FontContext {
-        FontContext {
+    pub fn root() -> Self {
+        Self {
             font_size_cells: 1,
             root_font_size_cells: 1,
-            viewport_cols,
-            viewport_rows,
         }
     }
 
-    /// Build a child context whose `em` resolves against `child_cells` and
-    /// whose `rem` still resolves against the original root. The viewport
-    /// metrics are inherited unchanged.
-    pub fn child(&self, child_cells: usize) -> FontContext {
-        FontContext {
+    pub fn child(self, child_cells: usize) -> Self {
+        Self {
             font_size_cells: child_cells,
             root_font_size_cells: self.root_font_size_cells,
-            viewport_cols: self.viewport_cols,
-            viewport_rows: self.viewport_rows,
         }
     }
 }
@@ -373,14 +384,10 @@ impl FontContext {
 pub enum Length {
     /// `auto` — defer to the containing block.
     Auto,
-    /// Absolute cell count (CSS `40px` or bare `40`).
-    ///
-    /// For CSS `px` the cell count is exactly the parsed value: 1 CSS px
-    /// maps to 1 cell via [`PX_PER_CELL`]. Bare integers are accepted
-    /// for convenience (`width: 40` is equivalent to `width: 40px`).
-    /// This variant does NOT represent source-image pixels, which use a
-    /// different sampling rule (see `tui::graph_api::image`).
-    Cells(usize),
+    /// Absolute CSS pixel length. Converted to terminal cells during resolve.
+    Px(f32),
+    /// Absolute cell count for bare numeric lengths.
+    Cells(f32),
     /// Percentage 0..=100 of the containing block (CSS `50%`).
     Pct(f32),
     /// Em multiplier (CSS `2em`). 1em == 1 cell on the terminal grid.
@@ -408,6 +415,7 @@ pub enum Length {
 /// trailing junk with `is_exhausted()`.
 #[derive(Debug, Clone, Copy)]
 enum PreLength {
+    Px(f32),
     Cells(f32),
     Pct(f32),
     Em(f32),
@@ -458,7 +466,7 @@ impl Length {
                     // current 1.0 ratio this collapses to the raw value, but the
                     // explicit multiply makes the conversion searchable and gives
                     // a single edit-point should the per-cell px ratio ever change.
-                    "px" => PreLength::Cells(n * PX_PER_CELL),
+                    "px" => PreLength::Px(n),
                     "em" => PreLength::Em(n),
                     "rem" => PreLength::Rem(n),
                     // 1vw = viewport_cols / 100, 1vh = viewport_rows / 100.
@@ -493,7 +501,8 @@ impl Length {
             return None;
         }
         Some(match pre {
-            PreLength::Cells(n) => Length::Cells(n.round() as usize),
+            PreLength::Px(n) => Length::Px(n),
+            PreLength::Cells(n) => Length::Cells(n),
             PreLength::Pct(p) => Length::Pct(p),
             PreLength::Em(n) => Length::Em(n),
             PreLength::Rem(n) => Length::Rem(n),
@@ -508,10 +517,10 @@ impl Length {
     /// - `Auto`              → `containing` (fill the container)
     /// - `Cells(n)`          → `n`
     /// - `Pct(p)`            → round(containing * p / 100), min 1
-    /// - `Em(n)`             → round(n * font_ctx.font_size_cells), clamped at 0
-    /// - `Rem(n)`            → round(n * font_ctx.root_font_size_cells), clamped at 0
-    /// - `Vw(n)`             → round(n * font_ctx.viewport_cols / 100), min 1
-    /// - `Vh(n)`             → round(n * font_ctx.viewport_rows / 100), min 1
+    /// - `Em(n)`             → round(n * context.font.font_size_cells), clamped at 0
+    /// - `Rem(n)`            → round(n * context.font.root_font_size_cells), clamped at 0
+    /// - `Vw(n)`             → round(n * context.viewport.cols / 100), min 1
+    /// - `Vh(n)`             → round(n * context.viewport.rows / 100), min 1
     ///
     /// `em` resolves against the **current element's** effective font-size
     /// (in cells); `rem` resolves against the **root's** font-size. On a
@@ -526,23 +535,23 @@ impl Length {
     /// Floats round **away from zero** (Rust's `f32::round`), so `0.5em` at
     /// font-size=2 yields 1 cell and `2.5em` at font-size=2 yields 5 cells —
     /// never zero, never half.
-    pub fn resolve(&self, containing: usize, font_ctx: FontContext) -> usize {
+    pub fn resolve(&self, context: LengthContext) -> usize {
         match self {
-            Length::Auto => containing,
-            &Length::Cells(n) => n,
+            Length::Auto => context.containing,
+            &Length::Px(px) => (px / PX_PER_CELL).round().max(0.0) as usize,
+            &Length::Cells(cells) => cells.round().max(0.0) as usize,
             &Length::Pct(p) => {
-                let raw = (containing as f32 * p / 100.0).round();
+                let raw = (context.containing as f32 * p / 100.0).round();
                 (raw as usize).max(1)
             }
-            &Length::Em(n) => (n * font_ctx.font_size_cells as f32).round().max(0.0) as usize,
-            &Length::Rem(n) => (n * font_ctx.root_font_size_cells as f32).round().max(0.0) as usize,
+            &Length::Em(n) => (n * context.font.font_size_cells as f32).round().max(0.0) as usize,
+            &Length::Rem(n) => (n * context.font.root_font_size_cells as f32).round().max(0.0) as usize,
             &Length::Vw(n) => {
-                // 1vw = viewport_cols / 100. Round to nearest cell, min 1.
-                let raw = (n * font_ctx.viewport_cols as f32 / 100.0).round();
+                let raw = (n * context.viewport.cols as f32 / 100.0).round();
                 (raw as usize).max(1)
             }
             &Length::Vh(n) => {
-                let raw = (n * font_ctx.viewport_rows as f32 / 100.0).round();
+                let raw = (n * context.viewport.rows as f32 / 100.0).round();
                 (raw as usize).max(1)
             }
         }
@@ -725,10 +734,11 @@ pub fn resolve_flex_basis(
     basis: FlexBasis,
     containing_main: usize,
     font_ctx: FontContext,
+    viewport: Viewport,
 ) -> Option<usize> {
     match basis {
         FlexBasis::Auto => None,
-        FlexBasis::Length(len) => Some(len.resolve(containing_main, font_ctx)),
+        FlexBasis::Length(len) => Some(len.resolve(LengthContext { containing: containing_main, font: font_ctx, viewport })),
     }
 }
 
@@ -777,7 +787,7 @@ pub struct GapSizes {
 }
 
 #[doc(hidden)]
-pub fn parse_gap_shorthand(s: &str, font_ctx: FontContext) -> Option<GapSizes> {
+pub fn parse_gap_shorthand(s: &str, font_ctx: FontContext, viewport: Viewport) -> Option<GapSizes> {
     // 1- or 2-value gap grammar. Each value is a length; unparseable
     // tokens become 0 so a single bad component doesn't kill the rule.
     // `containing` is fixed to `usize::MAX` because the flex container's
@@ -790,8 +800,8 @@ pub fn parse_gap_shorthand(s: &str, font_ctx: FontContext) -> Option<GapSizes> {
     let Some(second) = parts.next() else {
         let v = first_len?;
         return Some(GapSizes {
-            row: v.resolve(usize::MAX, font_ctx),
-            column: v.resolve(usize::MAX, font_ctx),
+            row: v.resolve(LengthContext { containing: usize::MAX, font: font_ctx, viewport }),
+            column: v.resolve(LengthContext { containing: usize::MAX, font: font_ctx, viewport }),
         });
     };
     // CSS allows more than two values for row-gap-style properties, but the
@@ -804,7 +814,7 @@ pub fn parse_gap_shorthand(s: &str, font_ctx: FontContext) -> Option<GapSizes> {
     let row = first_len?;
     let column = second_len?;
     Some(GapSizes {
-        row: row.resolve(usize::MAX, font_ctx),
-        column: column.resolve(usize::MAX, font_ctx),
+        row: row.resolve(LengthContext { containing: usize::MAX, font: font_ctx, viewport }),
+        column: column.resolve(LengthContext { containing: usize::MAX, font: font_ctx, viewport }),
     })
 }

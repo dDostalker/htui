@@ -10,8 +10,8 @@
 use crate::{
     html::box_edges::BoxEdges,
     layout::{
-        BoxConstraint, Cursor, LayoutBox, PaintStyle, Rect,
-        inner_formatting_context::flow::{FontContext, layout_children},
+        BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, Rect,
+        inner_formatting_context::flow::layout_children,
         layoutbox::collect_runs,
     },
     tdom::node::{Node, NodeArena, NodeId, effective_font_size_cells},
@@ -32,11 +32,11 @@ use super::options::LayoutBlockOptions;
 /// differences are passed in via `opts` so the boilerplate (collect_runs,
 /// child layout, and box construction) lives in one place.
 ///
-/// `font_ctx` carries the parent's effective font-size and the root
-/// font-size so `em` / `rem` lengths inside the element resolve against the
-/// active font-size context. The element's own font-size is computed via
-/// [`effective_font_size_cells`] and forwarded to nested children so the
-/// chain remains consistent.
+/// `context` carries the parent's effective font-size, the root font-size,
+/// and the terminal viewport so `em` / `rem` / `vw` / `vh` lengths inside the
+/// element resolve against the active layout context. The element's own
+/// font-size is computed via [`effective_font_size_cells`] and forwarded to
+/// nested children via `context.child(...)` so the chain remains consistent.
 ///
 /// Returns the assembled `LayoutBox`. The caller is still responsible for
 /// checking that `node.node_type` matches the element it claims to lay out
@@ -48,13 +48,16 @@ pub fn layout_block(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     opts: LayoutBlockOptions,
-    font_ctx: FontContext,
+    context: LayoutContext,
     pre_allocated_rect: Option<Rect>,
 ) -> LayoutBox {
-    let own_font_size_cells = effective_font_size_cells(arena, node_id, font_ctx);
-    let child_font_ctx = font_ctx.child(own_font_size_cells);
+    let own_font_size_cells =
+        effective_font_size_cells(arena, node_id, context.font, context.viewport);
+    let child_context = context.child(own_font_size_cells);
 
-    let edges: BoxEdges = node.css_attr.get_box_edges(containing.width, child_font_ctx);
+    let edges: BoxEdges = node
+        .css_attr
+        .get_box_edges(containing.width, child_context.font, child_context.viewport);
 
     let (geom, preallocated_height) = match pre_allocated_rect {
         Some(rect) => {
@@ -83,7 +86,8 @@ pub fn layout_block(
                 .saturating_sub(opts.indent)
                 .saturating_sub(edges.margin.horizontal());
             let block_width = resolve_block_width(
-                node.css_attr.get_width(available, child_font_ctx),
+                node.css_attr
+                    .get_width(available, child_context.font, child_context.viewport),
                 available,
             )
             .max(1);
@@ -132,7 +136,7 @@ pub fn layout_block(
         &block_children,
         child_containing,
         &mut child_cursor,
-        child_font_ctx,
+        child_context,
     );
 
     let content_height = child_cursor

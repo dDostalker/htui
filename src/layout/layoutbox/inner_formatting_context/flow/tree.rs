@@ -12,8 +12,8 @@
 //! block handlers declared in this module's siblings.
 
 use crate::{
-    html::css_parse::FontContext,
-    layout::{BoxConstraint, Cursor, DEFAULT_LAYOUT, LayoutBox, Rect},
+    html::css_parse::{FontContext, Viewport},
+    layout::{BoxConstraint, Cursor, DEFAULT_LAYOUT, LayoutBox, LayoutContext, Rect},
     tdom::node::{NodeArena, NodeId},
 };
 
@@ -39,7 +39,13 @@ pub fn layout_tree(
         &children,
         containing,
         cursor,
-        FontContext::root(viewport_cols, viewport_rows),
+        LayoutContext {
+            font: FontContext::root(),
+            viewport: Viewport {
+                cols: viewport_cols,
+                rows: viewport_rows,
+            },
+        },
     )
 }
 
@@ -49,11 +55,11 @@ pub fn layout_children(
     children: &[NodeId],
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    font_ctx: FontContext,
+    context: LayoutContext,
 ) -> Vec<LayoutBox> {
     let mut boxes = Vec::new();
     for &child_id in children {
-        if let Some(b) = dispatch(arena, child_id, containing, cursor, font_ctx, None) {
+        if let Some(b) = dispatch(arena, child_id, containing, cursor, context, None) {
             boxes.push(b);
         }
     }
@@ -70,11 +76,11 @@ pub fn dispatch(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    font_ctx: FontContext,
+    context: LayoutContext,
     pre_allocated_rect: Option<Rect>,
 ) -> Option<LayoutBox> {
     for layout_fn in DEFAULT_LAYOUT {
-        if let Some(b) = layout_fn(arena, node_id, containing, cursor, font_ctx, pre_allocated_rect) {
+        if let Some(b) = layout_fn(arena, node_id, containing, cursor, context, pre_allocated_rect) {
             return Some(b);
         }
     }

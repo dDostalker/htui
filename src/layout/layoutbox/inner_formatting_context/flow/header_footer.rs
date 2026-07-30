@@ -1,7 +1,7 @@
 use crate::{
     layout::{
-        BoxConstraint, Cursor, LayoutBox,
-        inner_formatting_context::flow::{FontContext, LayoutBlockOptions, layout_block},
+        BoxConstraint, Cursor, LayoutBox, LayoutContext,
+        inner_formatting_context::flow::{LayoutBlockOptions, layout_block},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
 };
@@ -14,7 +14,7 @@ pub fn layout_header(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    font_ctx: FontContext,
+    context: LayoutContext,
     pre_allocated_rect: Option<crate::layout::Rect>,
 ) -> Option<LayoutBox> {
     layout_block_with_tag(
@@ -23,7 +23,7 @@ pub fn layout_header(
         containing,
         cursor,
         NodeType::Header,
-        font_ctx,
+        context,
         pre_allocated_rect,
     )
 }
@@ -34,7 +34,7 @@ pub fn layout_footer(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    font_ctx: FontContext,
+    context: LayoutContext,
     pre_allocated_rect: Option<crate::layout::Rect>,
 ) -> Option<LayoutBox> {
     layout_block_with_tag(
@@ -43,7 +43,7 @@ pub fn layout_footer(
         containing,
         cursor,
         NodeType::Footer,
-        font_ctx,
+        context,
         pre_allocated_rect,
     )
 }
@@ -54,7 +54,7 @@ fn layout_block_with_tag(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     expected: NodeType,
-    font_ctx: FontContext,
+    context: LayoutContext,
     pre_allocated_rect: Option<crate::layout::Rect>,
 ) -> Option<LayoutBox> {
     let node = &arena[node_id];
@@ -74,7 +74,7 @@ fn layout_block_with_tag(
             spacing_after: HEADER_FOOTER_SPACING,
             ..Default::default()
         },
-        font_ctx,
+        context,
         pre_allocated_rect,
     ))
 }

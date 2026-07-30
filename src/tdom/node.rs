@@ -3,7 +3,7 @@ use std::fmt;
 
 use slotmap::{Key, SlotMap, new_key_type};
 
-use crate::html::css_parse::{CssAttr, FontContext};
+use crate::html::css_parse::{CssAttr, FontContext, LengthContext, Viewport};
 
 // ============================================================
 // NodeId — slotmap 生成的类型安全索引
@@ -129,11 +129,19 @@ pub fn effective_font_size_cells(
     arena: &NodeArena,
     node_id: NodeId,
     font_ctx: FontContext,
+    viewport: Viewport,
 ) -> usize {
     let node = &arena[node_id];
     let declared = node.css_attr.get_font_size();
     if let Some(len) = declared {
-        return len.resolve(font_ctx.font_size_cells, font_ctx);
+        // `font-size` never resolves as a percentage, so `containing` is
+        // unused here — pass `0` rather than borrowing the parent's font-size
+        // to keep the placeholder obvious.
+        return len.resolve(LengthContext {
+            containing: 0,
+            font: font_ctx,
+            viewport,
+        });
     }
     if let Some(em) = node.node_type.default_font_size_em() {
         let raw = em * font_ctx.font_size_cells as f32;

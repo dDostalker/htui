@@ -21,7 +21,7 @@ mod align_self;
 
 pub use align_self::AlignSelf;
 
-use crate::html::css_parse::FontContext;
+use crate::html::css_parse::{FontContext, LengthContext, Viewport};
 use crate::layout::layoutbox::{FormattingContext, OuterDisplay};
 
 use crossterm::style::Color;
@@ -136,11 +136,16 @@ impl CssAttr {
         &self,
         term_columns: usize,
         font_ctx: FontContext,
+        viewport: Viewport,
     ) -> Option<usize> {
         let raw = self.0.get("width")?;
         match Length::parse(raw)? {
             Length::Auto => None,
-            len => Some(len.resolve(term_columns, font_ctx)),
+            len => Some(len.resolve(LengthContext {
+                containing: term_columns,
+                font: font_ctx,
+                viewport,
+            }))
         }
     }
 
@@ -170,11 +175,12 @@ impl CssAttr {
         &self,
         containing_width: usize,
         font_ctx: FontContext,
+        viewport: Viewport,
     ) -> BoxEdges {
         BoxEdges {
-            padding: self.get_padding(containing_width, font_ctx),
-            border: self.get_border(containing_width, font_ctx),
-            margin: self.get_margin(containing_width, font_ctx),
+            padding: self.get_padding(containing_width, font_ctx, viewport),
+            border: self.get_border(containing_width, font_ctx, viewport),
+            margin: self.get_margin(containing_width, font_ctx, viewport),
         }
     }
 
@@ -193,8 +199,9 @@ impl CssAttr {
         &self,
         containing_width: usize,
         font_ctx: FontContext,
+        viewport: Viewport,
     ) -> EdgeSizes {
-        parse_edge_sizes(&self.0, "padding", containing_width, font_ctx)
+        parse_edge_sizes(&self.0, "padding", containing_width, font_ctx, viewport)
     }
 
     /// Resolve all four margin edges from `margin` / `margin-{side}`.
@@ -206,8 +213,9 @@ impl CssAttr {
         &self,
         containing_width: usize,
         font_ctx: FontContext,
+        viewport: Viewport,
     ) -> EdgeSizes {
-        parse_edge_sizes(&self.0, "margin", containing_width, font_ctx)
+        parse_edge_sizes(&self.0, "margin", containing_width, font_ctx, viewport)
     }
 
     /// Resolve all four border sides from `border` / `border-{side}` /
@@ -221,12 +229,14 @@ impl CssAttr {
         &self,
         containing_width: usize,
         font_ctx: FontContext,
+        viewport: Viewport,
     ) -> BorderSides {
         // Step 1: collect universal values (lowest priority).
         let universal_width = parse_border_width(
             self.0.get("border-width").map(|s| s.as_str()),
             containing_width,
             font_ctx,
+            viewport,
         );
         let universal_style = parse_border_style(self.0.get("border-style").map(|s| s.as_str()));
         let universal_color = self.0.get("border-color").and_then(|s| parse_color_str(s));
@@ -240,6 +250,7 @@ impl CssAttr {
             universal,
             containing_width,
             font_ctx,
+            viewport,
         );
         let right = parse_border_side(
             self.0.get("border-right"),
@@ -247,6 +258,7 @@ impl CssAttr {
             universal,
             containing_width,
             font_ctx,
+            viewport,
         );
         let bottom = parse_border_side(
             self.0.get("border-bottom"),
@@ -254,6 +266,7 @@ impl CssAttr {
             universal,
             containing_width,
             font_ctx,
+            viewport,
         );
         let left = parse_border_side(
             self.0.get("border-left"),
@@ -261,6 +274,7 @@ impl CssAttr {
             universal,
             containing_width,
             font_ctx,
+            viewport,
         );
 
         BorderSides {
@@ -425,8 +439,9 @@ impl CssAttr {
         &self,
         containing_main: usize,
         font_ctx: FontContext,
+        viewport: Viewport,
     ) -> Option<usize> {
-        resolve_flex_basis(self.get_flex_basis(), containing_main, font_ctx)
+        resolve_flex_basis(self.get_flex_basis(), containing_main, font_ctx, viewport)
     }
 
     /// `order` (defaults to `0`).
@@ -447,23 +462,23 @@ impl CssAttr {
     /// gap is still resolved against `usize::MAX` (intentional — see
     /// `doc/layout.md`, "百分比 gap" — the flex container's actual axis
     /// size is not in scope here).
-    pub fn get_gap(&self, font_ctx: FontContext) -> GapSizes {
+    pub fn get_gap(&self, font_ctx: FontContext, viewport: Viewport) -> GapSizes {
         let shorthand = self
             .0
             .get("gap")
-            .and_then(|v| parse_gap_shorthand(v, font_ctx));
+            .and_then(|v| parse_gap_shorthand(v, font_ctx, viewport));
         let row = self
             .0
             .get("row-gap")
             .and_then(|v| Length::parse(v))
-            .map(|l| l.resolve(usize::MAX, font_ctx))
+            .map(|l| l.resolve(LengthContext { containing: usize::MAX, font: font_ctx, viewport }))
             .or_else(|| shorthand.map(|g| g.row))
             .unwrap_or(0);
         let column = self
             .0
             .get("column-gap")
             .and_then(|v| Length::parse(v))
-            .map(|l| l.resolve(usize::MAX, font_ctx))
+            .map(|l| l.resolve(LengthContext { containing: usize::MAX, font: font_ctx, viewport }))
             .or_else(|| shorthand.map(|g| g.column))
             .unwrap_or(0);
         GapSizes { row, column }
@@ -479,11 +494,12 @@ impl CssAttr {
         &self,
         containing_width: usize,
         font_ctx: FontContext,
+        viewport: Viewport,
     ) -> Option<usize> {
         let raw = self.0.get("height")?;
         match Length::parse(raw)? {
             Length::Auto => None,
-            len => Some(len.resolve(containing_width, font_ctx)),
+            len => Some(len.resolve(LengthContext { containing: containing_width, font: font_ctx, viewport })),
         }
     }
 }

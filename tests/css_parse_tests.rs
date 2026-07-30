@@ -2,9 +2,10 @@ use std::collections::HashMap;
 
 use crossterm::style::Color;
 use htui::html::css_parse::{
-    BorderStyle, Combinator, CssAttr, CssRule, CssSelector, EdgeSizes, FontContext, FontWeight, INHERITED_PROPS,
-    Length, NthExpr, PX_PER_CELL, Parser, SUPPORTED_PROPERTIES, TextDecoration, css_into_node,
-    parse_color_str, parse_declaration_text, selector_chain_matches,
+    BorderStyle, Combinator, CssAttr, CssRule, CssSelector, EdgeSizes, FontContext, FontWeight,
+    INHERITED_PROPS, Length, LengthContext, NthExpr, PX_PER_CELL, Parser, SUPPORTED_PROPERTIES,
+    TextDecoration, Viewport, css_into_node, parse_color_str, parse_declaration_text,
+    selector_chain_matches,
 };
 use htui::tdom::node::{Node, NodeArena, NodeId, NodeType};
 use indexmap::IndexMap;
@@ -18,22 +19,30 @@ const DEFAULT_ROOT_FONT_SIZE: usize = 1;
 const DEFAULT_VIEWPORT_COLS: usize = 80;
 const DEFAULT_VIEWPORT_ROWS: usize = 24;
 
-fn font_ctx(font_size_cells: usize, root_font_size_cells: usize, viewport_cols: usize, viewport_rows: usize) -> FontContext {
+fn font_ctx(font_size_cells: usize, root_font_size_cells: usize) -> FontContext {
     FontContext {
         font_size_cells,
         root_font_size_cells,
-        viewport_cols,
-        viewport_rows,
+    }
+}
+
+fn viewport() -> Viewport {
+    Viewport {
+        cols: DEFAULT_VIEWPORT_COLS,
+        rows: DEFAULT_VIEWPORT_ROWS,
+    }
+}
+
+fn length_ctx(containing: usize, font: FontContext) -> LengthContext {
+    LengthContext {
+        containing,
+        font,
+        viewport: viewport(),
     }
 }
 
 fn default_font_ctx() -> FontContext {
-    font_ctx(
-        DEFAULT_FONT_SIZE,
-        DEFAULT_ROOT_FONT_SIZE,
-        DEFAULT_VIEWPORT_COLS,
-        DEFAULT_VIEWPORT_ROWS,
-    )
+    font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE)
 }
 
 fn init() {
@@ -591,13 +600,17 @@ fn length_parse_auto() {
 #[test]
 fn length_parse_cells_px() {
     init();
-    assert_eq!(Length::parse("40px"), Some(Length::Cells(40)));
-    assert_eq!(Length::parse("  40px  "), Some(Length::Cells(40)));
+    // `px` is now kept as a distinct `Px` variant and resolves through
+    // `Length::resolve` instead of being collapsed at parse time. The browser
+    // pipeline treats `px` as an absolute unit and only normalises to cells
+    // at resolution; we mirror that.
+    assert_eq!(Length::parse("40px"), Some(Length::Px(40.0)));
+    assert_eq!(Length::parse("  40px  "), Some(Length::Px(40.0)));
     // Case-insensitive unit.
-    assert_eq!(Length::parse("20Px"), Some(Length::Cells(20)));
-    assert_eq!(Length::parse("30PX"), Some(Length::Cells(30)));
+    assert_eq!(Length::parse("20Px"), Some(Length::Px(20.0)));
+    assert_eq!(Length::parse("30PX"), Some(Length::Px(30.0)));
     // Trailing whitespace tolerated.
-    assert_eq!(Length::parse("20px\n"), Some(Length::Cells(20)));
+    assert_eq!(Length::parse("20px\n"), Some(Length::Px(20.0)));
 }
 
 #[test]
@@ -610,39 +623,41 @@ fn px_per_cell_constant_anchors_px_to_one_cell() {
 #[test]
 fn length_parse_cells_px_fractional_rounds_half_away_from_zero() {
     init();
-    // Fractional px values are accepted but round to integer cells. We use
-    // round-half-away-from-zero (Rust's f32::round), not banker's rounding,
-    // because terminals need a stable, monotonic mapping. These edge cases
-    // are the standardized behavior future tests should not regress.
-    assert_eq!(Length::parse("0.4px"), Some(Length::Cells(0)));
-    assert_eq!(Length::parse("0.5px"), Some(Length::Cells(1)));
-    assert_eq!(Length::parse("0.6px"), Some(Length::Cells(1)));
-    assert_eq!(Length::parse("1.5px"), Some(Length::Cells(2)));
-    assert_eq!(Length::parse("2.5px"), Some(Length::Cells(3)));
-    assert_eq!(Length::parse("100.4px"), Some(Length::Cells(100)));
+    // `parse` stores the raw f32 multiplier; the rounding to integer cells
+    // happens inside `Length::resolve` (which mirrors the browser's
+    // "rendered pixel" step). We use round-half-away-from-zero (Rust's
+    // f32::round), not banker's rounding, because terminals need a stable,
+    // monotonic mapping. These edge cases pin the standardized behavior.
+    assert_eq!(Length::parse("0.4px"), Some(Length::Px(0.4)));
+    assert_eq!(Length::parse("0.5px"), Some(Length::Px(0.5)));
+    assert_eq!(Length::parse("0.6px"), Some(Length::Px(0.6)));
+    assert_eq!(Length::parse("1.5px"), Some(Length::Px(1.5)));
+    assert_eq!(Length::parse("2.5px"), Some(Length::Px(2.5)));
+    assert_eq!(Length::parse("100.4px"), Some(Length::Px(100.4)));
 }
 
 #[test]
 fn length_parse_cells_px_zero_and_integer_exact() {
     init();
-    // 0px must parse to Cells(0), not None -- otherwise zero-sized boxes
-    // would silently fall through to the containing block width.
-    assert_eq!(Length::parse("0px"), Some(Length::Cells(0)));
-    assert_eq!(Length::parse("1px"), Some(Length::Cells(1)));
-    assert_eq!(Length::parse("1000px"), Some(Length::Cells(1000)));
+    // 0px must parse to Px(0), not None -- otherwise zero-sized boxes would
+    // silently fall through to the containing block width.
+    assert_eq!(Length::parse("0px"), Some(Length::Px(0.0)));
+    assert_eq!(Length::parse("1px"), Some(Length::Px(1.0)));
+    assert_eq!(Length::parse("1000px"), Some(Length::Px(1000.0)));
 }
 
 #[test]
 fn length_parse_cells_px_multiply_matches_raw_value_when_ratio_is_one() {
-    // With PX_PER_CELL == 1.0, the px branch multiplies by 1.0 and then
-    // rounds. This test pins the multiplication so any future change to
-    // the constant forces a deliberate update here.
+    // With PX_PER_CELL == 1.0, `Length::Px(n).resolve(...)` multiplies by
+    // 1.0 and rounds. `parse` keeps the raw multiplier; resolve applies
+    // PX_PER_CELL. This test pins the multiplication so any future change
+    // to the constant forces a deliberate update here.
     init();
     assert_eq!(
         (40.0_f32 * PX_PER_CELL).round() as usize,
         Length::parse("40px").map(|l| match l {
-            Length::Cells(n) => n,
-            _ => panic!("expected Cells"),
+            Length::Px(n) => n as usize,
+            _ => panic!("expected Px"),
         }).unwrap()
     );
 }
@@ -651,10 +666,12 @@ fn length_parse_cells_px_multiply_matches_raw_value_when_ratio_is_one() {
 fn length_parse_cells_bare_number() {
     init();
     // Bare integers and floats are accepted as cells — convenient shorthand.
-    assert_eq!(Length::parse("40"), Some(Length::Cells(40)));
-    assert_eq!(Length::parse("0"), Some(Length::Cells(0)));
-    assert_eq!(Length::parse("1.5"), Some(Length::Cells(2))); // round 1.5 → 2
-    assert_eq!(Length::parse("0.5"), Some(Length::Cells(1))); // round 0.5 → 1
+    // `parse` preserves the raw f32 value; rounding happens inside
+    // `Length::resolve`.
+    assert_eq!(Length::parse("40"), Some(Length::Cells(40.0)));
+    assert_eq!(Length::parse("0"), Some(Length::Cells(0.0)));
+    assert_eq!(Length::parse("1.5"), Some(Length::Cells(1.5)));
+    assert_eq!(Length::parse("0.5"), Some(Length::Cells(0.5)));
 }
 
 #[test]
@@ -725,19 +742,19 @@ fn length_parse_rejects_signed_and_junk() {
 fn length_resolve_auto_and_cells() {
     init();
     assert_eq!(
-        Length::Auto.resolve(80, default_font_ctx()),
+        Length::Auto.resolve(length_ctx(80, default_font_ctx())),
         80
     );
     assert_eq!(
-        Length::Cells(40).resolve(80, default_font_ctx()),
+        Length::Cells(40.0).resolve(length_ctx(80, default_font_ctx())),
         40
     );
     assert_eq!(
-        Length::Cells(0).resolve(80, default_font_ctx()),
+        Length::Cells(0.0).resolve(length_ctx(80, default_font_ctx())),
         0
     ); // caller clamps via resolve_block_width
     assert_eq!(
-        Length::Cells(1000).resolve(80, default_font_ctx()),
+        Length::Cells(1000.0).resolve(length_ctx(80, default_font_ctx())),
         1000
     ); // ditto
 }
@@ -746,35 +763,35 @@ fn length_resolve_auto_and_cells() {
 fn length_resolve_pct_rounds_and_min_1() {
     init();
     assert_eq!(
-        Length::Pct(50.0).resolve(80, default_font_ctx()),
+        Length::Pct(50.0).resolve(length_ctx(80, default_font_ctx())),
         40
     );
     assert_eq!(
-        Length::Pct(100.0).resolve(80, default_font_ctx()),
+        Length::Pct(100.0).resolve(length_ctx(80, default_font_ctx())),
         80
     );
     // round(), not truncate: 80 * 33 / 100 = 26.4 → 26.
     assert_eq!(
-        Length::Pct(33.0).resolve(80, default_font_ctx()),
+        Length::Pct(33.0).resolve(length_ctx(80, default_font_ctx())),
         26
     );
     // Half-percent boundary: 80 * 50.5 / 100 = 40.4 → 40 (round).
     assert_eq!(
-        Length::Pct(50.5).resolve(80, default_font_ctx()),
+        Length::Pct(50.5).resolve(length_ctx(80, default_font_ctx())),
         40
     );
     // 80 * 50.6 / 100 = 40.48 → 40 (round).
     assert_eq!(
-        Length::Pct(50.6).resolve(80, default_font_ctx()),
+        Length::Pct(50.6).resolve(length_ctx(80, default_font_ctx())),
         40
     );
     // Minimum 1 column: a non-zero percentage of zero yields 1, not 0.
     assert_eq!(
-        Length::Pct(50.0).resolve(0, default_font_ctx()),
+        Length::Pct(50.0).resolve(length_ctx(0, default_font_ctx())),
         1
     );
     assert_eq!(
-        Length::Pct(0.0).resolve(80, default_font_ctx()),
+        Length::Pct(0.0).resolve(length_ctx(80, default_font_ctx())),
         1
     ); // min-1 even at 0%
 }
@@ -785,27 +802,27 @@ fn length_resolve_em_rem_rounds_away_from_zero() {
     // With the default font-size / root-font-size of 1, em and rem collapse
     // to `n.round()`, so the existing round-away-from-zero behaviour holds.
     assert_eq!(
-        Length::Em(2.0).resolve(80, default_font_ctx()),
+        Length::Em(2.0).resolve(length_ctx(80, default_font_ctx())),
         2
     );
     assert_eq!(
-        Length::Em(1.5).resolve(80, default_font_ctx()),
+        Length::Em(1.5).resolve(length_ctx(80, default_font_ctx())),
         2
     ); // 1.5 rounds away → 2
     assert_eq!(
-        Length::Em(0.5).resolve(80, default_font_ctx()),
+        Length::Em(0.5).resolve(length_ctx(80, default_font_ctx())),
         1
     ); // 0.5 rounds away → 1
     assert_eq!(
-        Length::Em(2.5).resolve(80, default_font_ctx()),
+        Length::Em(2.5).resolve(length_ctx(80, default_font_ctx())),
         3
     ); // 2.5 rounds away → 3
     assert_eq!(
-        Length::Rem(1.5).resolve(80, default_font_ctx()),
+        Length::Rem(1.5).resolve(length_ctx(80, default_font_ctx())),
         2
     );
     assert_eq!(
-        Length::Rem(0.0).resolve(80, default_font_ctx()),
+        Length::Rem(0.0).resolve(length_ctx(80, default_font_ctx())),
         0
     );
 }
@@ -815,9 +832,9 @@ fn length_resolve_em_scales_with_font_size() {
     init();
     // em resolves against the element's font-size: 2em at font-size=2
     // yields 4 cells, 1.5em at font-size=3 yields 5 cells (round away).
-    assert_eq!(Length::Em(2.0).resolve(80, font_ctx(2, 1, DEFAULT_VIEWPORT_COLS, DEFAULT_VIEWPORT_ROWS)), 4);
-    assert_eq!(Length::Em(1.5).resolve(80, font_ctx(3, 1, DEFAULT_VIEWPORT_COLS, DEFAULT_VIEWPORT_ROWS)), 5);
-    assert_eq!(Length::Em(0.5).resolve(80, font_ctx(2, 1, DEFAULT_VIEWPORT_COLS, DEFAULT_VIEWPORT_ROWS)), 1);
+    assert_eq!(Length::Em(2.0).resolve(length_ctx(80, font_ctx(2, 1))), 4);
+    assert_eq!(Length::Em(1.5).resolve(length_ctx(80, font_ctx(3, 1))), 5);
+    assert_eq!(Length::Em(0.5).resolve(length_ctx(80, font_ctx(2, 1))), 1);
 }
 
 #[test]
@@ -825,9 +842,9 @@ fn length_resolve_rem_scales_with_root_font_size() {
     init();
     // rem ignores the element's font-size and uses the root font-size: 2rem
     // at root font-size=3 yields 6 cells, regardless of the element's size.
-    assert_eq!(Length::Rem(2.0).resolve(80, font_ctx(1, 3, DEFAULT_VIEWPORT_COLS, DEFAULT_VIEWPORT_ROWS)), 6);
-    assert_eq!(Length::Rem(1.5).resolve(80, font_ctx(2, 4, DEFAULT_VIEWPORT_COLS, DEFAULT_VIEWPORT_ROWS)), 6);
-    assert_eq!(Length::Rem(0.0).resolve(80, font_ctx(5, 5, DEFAULT_VIEWPORT_COLS, DEFAULT_VIEWPORT_ROWS)), 0);
+    assert_eq!(Length::Rem(2.0).resolve(length_ctx(80, font_ctx(1, 3))), 6);
+    assert_eq!(Length::Rem(1.5).resolve(length_ctx(80, font_ctx(2, 4))), 6);
+    assert_eq!(Length::Rem(0.0).resolve(length_ctx(80, font_ctx(5, 5))), 0);
 }
 
 #[test]
@@ -836,15 +853,15 @@ fn length_resolve_vw_vh_anchor_to_viewport() {
     // 1vw = viewport_cols / 100, 1vh = viewport_rows / 100.
     // `containing` is intentionally a different number to prove `vw` does
     // NOT anchor to the containing block — it always uses the viewport.
-    assert_eq!(Length::Vw(50.0).resolve(80, font_ctx(1, 1, DEFAULT_VIEWPORT_COLS, DEFAULT_VIEWPORT_ROWS)), 40); // 50 * 80 / 100
-    assert_eq!(Length::Vw(100.0).resolve(80, font_ctx(1, 1, DEFAULT_VIEWPORT_COLS, DEFAULT_VIEWPORT_ROWS)), 80);
-    assert_eq!(Length::Vw(50.0).resolve(999, font_ctx(1, 1, DEFAULT_VIEWPORT_COLS, DEFAULT_VIEWPORT_ROWS)), 40); // containing irrelevant
-    assert_eq!(Length::Vh(50.0).resolve(80, font_ctx(1, 1, DEFAULT_VIEWPORT_COLS, DEFAULT_VIEWPORT_ROWS)), 12); // 50 * 24 / 100
-    assert_eq!(Length::Vh(100.0).resolve(80, font_ctx(1, 1, DEFAULT_VIEWPORT_COLS, DEFAULT_VIEWPORT_ROWS)), 24);
+    assert_eq!(Length::Vw(50.0).resolve(length_ctx(80, font_ctx(1, 1))), 40); // 50 * 80 / 100
+    assert_eq!(Length::Vw(100.0).resolve(length_ctx(80, font_ctx(1, 1))), 80);
+    assert_eq!(Length::Vw(50.0).resolve(length_ctx(999, font_ctx(1, 1))), 40); // containing irrelevant
+    assert_eq!(Length::Vh(50.0).resolve(length_ctx(80, font_ctx(1, 1))), 12); // 50 * 24 / 100
+    assert_eq!(Length::Vh(100.0).resolve(length_ctx(80, font_ctx(1, 1))), 24);
     // Rounding: 33.3 * 80 / 100 = 26.64 → 27.
-    assert_eq!(Length::Vw(33.3).resolve(80, font_ctx(1, 1, DEFAULT_VIEWPORT_COLS, DEFAULT_VIEWPORT_ROWS)), 27);
+    assert_eq!(Length::Vw(33.3).resolve(length_ctx(80, font_ctx(1, 1))), 27);
     // Min-1 clamp: 0.5vw at viewport_cols=80 → 0.4 → 1.
-    assert_eq!(Length::Vw(0.5).resolve(80, font_ctx(1, 1, DEFAULT_VIEWPORT_COLS, DEFAULT_VIEWPORT_ROWS)), 1);
+    assert_eq!(Length::Vw(0.5).resolve(length_ctx(80, font_ctx(1, 1))), 1);
 }
 
 #[test]
@@ -858,7 +875,7 @@ fn css_attr_get_width_end_to_end() {
     decls.insert("width".into(), "auto".into());
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24)),
+        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
         None
     );
 
@@ -867,7 +884,7 @@ fn css_attr_get_width_end_to_end() {
     decls.insert("width".into(), "40px".into());
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24)),
+        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
         Some(40)
     );
 
@@ -876,7 +893,7 @@ fn css_attr_get_width_end_to_end() {
     decls.insert("width".into(), "50%".into());
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24)),
+        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
         Some(40)
     );
 
@@ -885,7 +902,7 @@ fn css_attr_get_width_end_to_end() {
     decls.insert("width".into(), "2em".into());
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24)),
+        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
         Some(2)
     );
 
@@ -894,7 +911,7 @@ fn css_attr_get_width_end_to_end() {
     decls.insert("width".into(), "1.5em".into());
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24)),
+        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
         Some(2)
     ); // 1.5 rounds away
 
@@ -903,7 +920,7 @@ fn css_attr_get_width_end_to_end() {
     decls.insert("width".into(), "2rem".into());
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24)),
+        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
         Some(2)
     );
 
@@ -913,7 +930,7 @@ fn css_attr_get_width_end_to_end() {
     decls.insert("width".into(), "50vw".into());
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24)),
+        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
         Some(40)
     );
 
@@ -923,13 +940,13 @@ fn css_attr_get_width_end_to_end() {
     decls.insert("width".into(), "50vh".into());
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24)),
+        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
         Some(12)
     );
 
     // Missing property → None.
     assert_eq!(
-        CssAttr::new().get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24)),
+        CssAttr::new().get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
         None
     );
 }
@@ -949,7 +966,7 @@ fn attr_from_decl(name: &str, value: &str) -> CssAttr {
 #[test]
 fn padding_shorthand_one_value_fills_all_sides() {
     let attr = attr_from_decl("padding", "5px");
-    let edges = attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24));
+    let edges = attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
     assert_eq!(edges, EdgeSizes::new(5, 5, 5, 5));
 }
 
@@ -958,7 +975,7 @@ fn padding_shorthand_two_values_vertical_horizontal() {
     // `padding: 10px 20px;` → top/bottom = 10, left/right = 20
     let attr = attr_from_decl("padding", "10px 20px");
     assert_eq!(
-        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24)),
+        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
         EdgeSizes::new(10, 20, 10, 20)
     );
 }
@@ -968,7 +985,7 @@ fn padding_shorthand_three_values_top_horizontal_bottom() {
     // `padding: 1px 2px 3px;` → top=1, left/right=2, bottom=3
     let attr = attr_from_decl("padding", "1px 2px 3px");
     assert_eq!(
-        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24)),
+        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
         EdgeSizes::new(1, 2, 3, 2)
     );
 }
@@ -978,7 +995,7 @@ fn padding_shorthand_four_values_clockwise() {
     // `padding: 1px 2px 3px 4px;` → top=1, right=2, bottom=3, left=4
     let attr = attr_from_decl("padding", "1px 2px 3px 4px");
     assert_eq!(
-        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24)),
+        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
         EdgeSizes::new(1, 2, 3, 4)
     );
 }
@@ -992,7 +1009,7 @@ fn padding_longhands_override_shorthand() {
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24)),
+        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
         EdgeSizes::new(7, 0, 0, 0)
     );
 }
@@ -1001,13 +1018,13 @@ fn padding_longhands_override_shorthand() {
 fn padding_supports_percent_and_em() {
     let attr = attr_from_decl("padding", "50%");
     assert_eq!(
-        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24))
+        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport())
             .left,
         40
     );
     let attr = attr_from_decl("padding-top", "3em");
     assert_eq!(
-        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24))
+        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport())
             .top,
         3
     );
@@ -1017,12 +1034,12 @@ fn padding_supports_percent_and_em() {
 fn margin_shorthand_mirrors_padding() {
     let attr = attr_from_decl("margin", "2px 4px");
     assert_eq!(
-        attr.get_margin(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24)),
+        attr.get_margin(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
         EdgeSizes::new(2, 4, 2, 4)
     );
     let attr = attr_from_decl("margin-left", "6px");
     assert_eq!(
-        attr.get_margin(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24)),
+        attr.get_margin(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
         EdgeSizes::new(0, 0, 0, 6)
     );
 }
@@ -1033,7 +1050,7 @@ fn margin_auto_collapses_to_zero() {
     // don't need a special case.
     let attr = attr_from_decl("margin", "auto");
     assert_eq!(
-        attr.get_margin(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24)),
+        attr.get_margin(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
         EdgeSizes::default()
     );
 }
@@ -1041,7 +1058,7 @@ fn margin_auto_collapses_to_zero() {
 #[test]
 fn border_shorthand_solid_parses_width_and_style() {
     let attr = attr_from_decl("border", "1px solid red");
-    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24));
+    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
     assert_eq!(sides.top.width, 1);
     assert_eq!(sides.top.style, BorderStyle::Solid);
     assert_eq!(sides.top.color, Some(Color::Red));
@@ -1053,7 +1070,7 @@ fn border_shorthand_solid_parses_width_and_style() {
 #[test]
 fn border_shorthand_style_alone_applies_to_all_sides() {
     let attr = attr_from_decl("border", "solid");
-    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24));
+    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
     assert_eq!(sides.top.style, BorderStyle::Solid);
     assert_eq!(sides.bottom.style, BorderStyle::Solid);
     assert_eq!(sides.left.style, BorderStyle::Solid);
@@ -1069,7 +1086,7 @@ fn border_longhand_overrides_universal_shorthand() {
     decls.insert("border-top".into(), "3px solid blue".into());
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));
-    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24));
+    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
     assert_eq!(sides.top.width, 3);
     assert_eq!(sides.top.color, Some(Color::Blue));
     assert_eq!(sides.right.width, 1);
@@ -1086,7 +1103,7 @@ fn border_universal_width_style_color_layers_correctly() {
     decls.insert("border-color".into(), "green".into());
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));
-    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24));
+    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
     assert_eq!(sides.top.width, 2);
     assert_eq!(sides.top.style, BorderStyle::Solid);
     assert_eq!(sides.top.color, Some(Color::Green));
@@ -1095,7 +1112,7 @@ fn border_universal_width_style_color_layers_correctly() {
 #[test]
 fn border_style_none_hides_the_border() {
     let attr = attr_from_decl("border-style", "none");
-    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24));
+    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
     assert!(!sides.any_visible());
 }
 
@@ -1104,7 +1121,7 @@ fn border_unknown_style_falls_back_to_solid() {
     // `dashed`, `dotted`, `double` etc. all render as solid in the terminal.
     for keyword in ["dashed", "dotted", "double", "groove"] {
         let attr = attr_from_decl("border", &format!("1px {keyword} red"));
-        let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24));
+        let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
         assert_eq!(
             sides.top.style,
             BorderStyle::Solid,
@@ -1121,7 +1138,7 @@ fn get_box_edges_returns_combined_padding_border_margin() {
     decls.insert("border".into(), "1px solid red".into());
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));
-    let edges = attr.get_box_edges(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE, 80, 24));
+    let edges = attr.get_box_edges(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
     assert_eq!(edges.padding.top, 2);
     assert_eq!(edges.margin.left, 4);
     assert_eq!(edges.border.top.width, 1);
@@ -1142,7 +1159,7 @@ fn font_size_parses_to_length() {
     let attr = attr_from_decl("font-size", "1.5rem");
     assert_eq!(attr.get_font_size(), Some(Length::Rem(1.5)));
     let attr = attr_from_decl("font-size", "16px");
-    assert_eq!(attr.get_font_size(), Some(Length::Cells(16)));
+    assert_eq!(attr.get_font_size(), Some(Length::Px(16.0)));
     let attr = attr_from_decl("font-size", "120%");
     assert_eq!(attr.get_font_size(), Some(Length::Pct(120.0)));
     assert_eq!(CssAttr::new().get_font_size(), None);
@@ -1167,11 +1184,11 @@ fn padding_em_scales_with_element_font_size() {
     // `padding: 1em` on an element whose effective font-size is 2 should
     // resolve to 2 cells, not 1.
     let attr = attr_from_decl("padding", "1em");
-    assert_eq!(attr.get_padding(80, font_ctx(2, 1, 80, 24)).top, 2);
+    assert_eq!(attr.get_padding(80, font_ctx(2, 1), viewport()).top, 2);
     // Same property on an element with font-size 3 yields 3 cells.
-    assert_eq!(attr.get_padding(80, font_ctx(3, 1, 80, 24)).top, 3);
+    assert_eq!(attr.get_padding(80, font_ctx(3, 1), viewport()).top, 3);
     // On the default font-size of 1 it stays at 1.
-    assert_eq!(attr.get_padding(80, font_ctx(1, 1, 80, 24)).top, 1);
+    assert_eq!(attr.get_padding(80, font_ctx(1, 1), viewport()).top, 1);
 }
 
 #[test]
@@ -1181,7 +1198,7 @@ fn margin_rem_uses_root_font_size_not_element() {
     // root's font-size. So `margin: 2rem` is 6 cells regardless of the
     // element's own size.
     let attr = attr_from_decl("margin", "2rem");
-    assert_eq!(attr.get_margin(80, font_ctx(1, 3, 80, 24)).top, 6);
-    assert_eq!(attr.get_margin(80, font_ctx(5, 3, 80, 24)).top, 6);
-    assert_eq!(attr.get_margin(80, font_ctx(1, 1, 80, 24)).top, 2);
+    assert_eq!(attr.get_margin(80, font_ctx(1, 3), viewport()).top, 6);
+    assert_eq!(attr.get_margin(80, font_ctx(5, 3), viewport()).top, 6);
+    assert_eq!(attr.get_margin(80, font_ctx(1, 1), viewport()).top, 2);
 }

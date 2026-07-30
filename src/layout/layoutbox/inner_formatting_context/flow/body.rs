@@ -1,7 +1,7 @@
 use crate::{
     layout::{
-        BoxConstraint, Cursor, LayoutBox,
-        inner_formatting_context::flow::{FontContext, LayoutBlockOptions, layout_block},
+        BoxConstraint, Cursor, LayoutBox, LayoutContext,
+        inner_formatting_context::flow::{LayoutBlockOptions, layout_block},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
 };
@@ -17,7 +17,7 @@ pub fn layout_body(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    font_ctx: FontContext,
+    context: LayoutContext,
     pre_allocated_rect: Option<crate::layout::Rect>,
 ) -> Option<LayoutBox> {
     let node = &arena[node_id];
@@ -32,7 +32,7 @@ pub fn layout_body(
         containing,
         cursor,
         LayoutBlockOptions::default(),
-        font_ctx,
+        context,
         pre_allocated_rect,
     ))
 }

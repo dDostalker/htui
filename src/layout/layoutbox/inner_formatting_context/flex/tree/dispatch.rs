@@ -1,7 +1,7 @@
 //! Top-level flex dispatch — entry point plus node-capability predicates.
 
 use crate::{
-    layout::{BoxConstraint, Cursor, FontContext, LayoutBox, Rect},
+    layout::{BoxConstraint, Cursor, LayoutBox, LayoutContext, Rect},
     tdom::node::{NodeArena, NodeId, NodeType},
 };
 
@@ -18,7 +18,7 @@ pub fn layout_flex_dispatch(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    font_ctx: FontContext,
+    context: LayoutContext,
     pre_allocated_rect: Option<Rect>,
 ) -> Option<LayoutBox> {
     let node = &arena[node_id];
@@ -33,7 +33,7 @@ pub fn layout_flex_dispatch(
         node_id,
         containing,
         cursor,
-        font_ctx,
+        context,
         pre_allocated_rect,
     ))
 }
