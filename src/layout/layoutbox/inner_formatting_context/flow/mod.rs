@@ -38,6 +38,7 @@
 //! `collect_runs` lives at `crate::layout::layoutbox::collect_runs` because it
 //! is shared with the flex layout (see the flex submodule).
 
+mod a;
 mod aside;
 mod body;
 mod div;
@@ -52,6 +53,7 @@ mod p;
 mod table;
 mod tree;
 
+pub use a::layout_a;
 pub use aside::layout_aside;
 pub use body::layout_body;
 pub use div::layout_div;

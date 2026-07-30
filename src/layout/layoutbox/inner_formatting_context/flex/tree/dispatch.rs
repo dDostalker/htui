@@ -61,10 +61,12 @@ pub(super) fn is_flex_capable_node(nt: &NodeType) -> bool {
 /// True when the node type is a block-level element that can act as a
 /// flex *item* (i.e. can be a direct child of a flex container).
 ///
-/// Inline elements (`Span`, `A`, `Em`) and `Text` leaves are excluded —
-/// they participate in the container's inline runs instead. `<img>` is
-/// also a block-level layout element and is included so images can sit
-/// inside a flex container.
+/// Inline elements (`Span`, `Em`) and `Text` leaves are excluded — they
+/// participate in the container's inline runs instead. `<a>` is included
+/// because `layout_a` claims it as a block element when it sits as a direct
+/// block-level child; an author who wants it inline inside a paragraph still
+/// gets the inline path via `walk_runs`. `<img>` is also a block-level layout
+/// element and is included so images can sit inside a flex container.
 pub(super) fn is_block_child_node(nt: &NodeType) -> bool {
     matches!(
         nt,
@@ -103,5 +105,6 @@ pub(super) fn is_block_child_node(nt: &NodeType) -> bool {
             | NodeType::Select
             | NodeType::Textarea
             | NodeType::Label
+            | NodeType::A
     )
 }

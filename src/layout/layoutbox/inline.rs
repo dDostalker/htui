@@ -11,6 +11,7 @@ use crossterm::style::Color;
 
 use super::InlineRun;
 use crate::{
+    html::css_parse::CssAttr,
     tdom::node::{Node, NodeArena, NodeType},
     tui::graph_api::{FontStyle, block_style},
 };
@@ -67,6 +68,13 @@ fn walk_runs(
                 walk_runs(arena, child, span_fg, span_bg, span_style, runs);
             }
             NodeType::A => {
+                // A block-level anchor is painted by its own LayoutBox. A
+                // direct anchor child of a flex container is likewise a flex
+                // item, so neither case belongs in the parent's inline runs.
+                if has_block_display(&child.css_attr) || node.css_attr.is_flex() {
+                    continue;
+                }
+
                 // User-agent defaults: unstyled links are blue and
                 // underlined, matching browser behaviour. Both defaults
                 // yield to anything the author (or an ancestor CSS rule)
@@ -104,4 +112,15 @@ fn walk_runs(
             _ => {}
         }
     }
+}
+
+fn has_block_display(css_attr: &CssAttr) -> bool {
+    matches!(
+        css_attr
+            .0
+            .get("display")
+            .map(|value| value.trim().to_ascii_lowercase())
+            .as_deref(),
+        Some("block") | Some("flex") | Some("grid")
+    )
 }

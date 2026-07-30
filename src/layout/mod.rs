@@ -112,6 +112,7 @@ pub static DEFAULT_LAYOUT: &[LayoutFn] = &[
     inner_formatting_context::flow::layout_ol,
     inner_formatting_context::flow::layout_ul,
     inner_formatting_context::flow::layout_p,
+    inner_formatting_context::flow::layout_a,
     inner_formatting_context::flow::layout_row_group,
     inner_formatting_context::flow::layout_table,
     inner_formatting_context::flow::layout_td,
