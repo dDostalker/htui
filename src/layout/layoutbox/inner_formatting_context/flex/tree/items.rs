@@ -12,9 +12,7 @@ use super::algorithm::{
     justify_spacing, wrap_into_lines,
 };
 use super::container::{FlexItemPrep, FLEX_ITEM_MIN_CROSS};
-use super::prepare::{
-    natural_cross_axis_size, prepare_flex_item, resolve_item_cross_size,
-};
+use super::prepare::{natural_cross_axis_size, prepare_flex_item, resolve_item_cross_size};
 
 /// Lay out every flex item across one or more lines and return the
 /// positioned children plus the vertical extent they consume (used to size
@@ -50,7 +48,13 @@ pub(super) fn layout_flex_items(
 
     // 3. Lay out each line and stack them along the cross axis.
     let mut placed: Vec<LayoutBox> = Vec::with_capacity(preps.len());
-    let mut current_cross: usize = content_y;
+    // `current_cross` is the cursor on the axis perpendicular to the
+    // flex main axis: vertical for rows, horizontal for columns.
+    let cross_origin = match direction {
+        FlexDirection::Row => content_y,
+        FlexDirection::Column => content.x,
+    };
+    let mut current_cross: usize = cross_origin;
     let mut total_main: usize = 0;
     let line_count = lines.len();
     let (cross_gap, main_gap) = match direction {
@@ -129,15 +133,13 @@ pub(super) fn layout_flex_items(
                     .fold(0usize, usize::saturating_add),
             )
             .saturating_add(main_gap.saturating_mul(line_preps.len().saturating_sub(1)))
-            .saturating_add(
-                justify_between.saturating_mul(line_preps.len().saturating_sub(1)),
-            );
+            .saturating_add(justify_between.saturating_mul(line_preps.len().saturating_sub(1)));
         total_main = total_main.max(line_main_extent);
 
         // 3e. Place every item on the line.
         let mut cursor_main: usize = match direction {
             FlexDirection::Row => content.x,
-            FlexDirection::Column => current_cross,
+            FlexDirection::Column => content_y,
         };
         cursor_main = cursor_main.saturating_add(justify_leading);
         for (prep_idx, prep) in line_preps.iter().enumerate() {
@@ -166,7 +168,7 @@ pub(super) fn layout_flex_items(
                 }
                 FlexDirection::Column => {
                     let x = align_on_cross_axis(
-                        content.x,
+                        current_cross,
                         line_cross,
                         item_cross_size,
                         effective_align(prep.align_self, align_items),
@@ -211,21 +213,25 @@ pub(super) fn layout_flex_items(
         }
     }
 
-    let total_cross = current_cross.saturating_sub(content_y);
+    let total_cross = current_cross.saturating_sub(cross_origin);
 
     // 4. Apply `align-content` to shift the stacked lines. We do this
     //    by re-translating each already-placed child's cross-axis
-    //    coordinate by the same delta; the size of the container
-    //    itself is unaffected (the cross-axis size of a flex container
-    //    is the natural / explicit height, not the content height of
-    //    the lines).
+    //    coordinate by the same delta. The available cross-axis size is
+    //    direction-aware: row containers may use an explicit height,
+    //    while column containers use their known content width.
     if line_count > 1 {
-        let cross_axis_size = if has_explicit_height {
-            container_height
-        } else {
-            total_cross
+        let cross_axis_size = match direction {
+            FlexDirection::Row => {
+                if has_explicit_height {
+                    container_height
+                } else {
+                    total_cross
+                }
+            }
+            FlexDirection::Column => content.width,
         };
-        let total_lines_height: usize = (0..line_count)
+        let total_lines_cross: usize = (0..line_count)
             .map(|i| {
                 let indices = &lines[i];
                 let line_preps: Vec<&FlexItemPrep> = indices.iter().map(|j| &preps[*j]).collect();
@@ -235,7 +241,10 @@ pub(super) fn layout_flex_items(
                     .max()
                     .unwrap_or(FLEX_ITEM_MIN_CROSS)
                     .max(FLEX_ITEM_MIN_CROSS);
-                let line_cross = if has_explicit_height && line_count == 1 {
+                let line_cross = if matches!(direction, FlexDirection::Row)
+                    && has_explicit_height
+                    && line_count == 1
+                {
                     container_height
                 } else {
                     natural
@@ -243,7 +252,7 @@ pub(super) fn layout_flex_items(
                 line_cross + if i + 1 < line_count { cross_gap } else { 0 }
             })
             .sum();
-        let free_space = cross_axis_size.saturating_sub(total_lines_height);
+        let free_space = cross_axis_size.saturating_sub(total_lines_cross);
         let (leading, between) = align_content_spacing(align_content, free_space, line_count);
         let mut shift: usize = leading;
         let mut running_offset: usize = 0;
