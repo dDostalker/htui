@@ -28,11 +28,7 @@ pub(super) fn prepare_flex_item(
     let node = &arena[item_id];
     let css = &node.css_attr;
     let basis_resolved = css
-        .get_flex_basis_resolved(
-            containing_main,
-            font_ctx.font_size_cells,
-            font_ctx.root_font_size_cells,
-        )
+        .get_flex_basis_resolved(containing_main, font_ctx)
         .or_else(|| {
             // `auto` fallback chain depends on the direction:
             // - `row` direction: main axis is horizontal, so an explicit
@@ -51,16 +47,8 @@ pub(super) fn prepare_flex_item(
             // keeps the parent from collapsing the nested container to
             // 1 cell.
             let explicit = match direction {
-                FlexDirection::Row => css.get_width(
-                    containing_main,
-                    font_ctx.font_size_cells,
-                    font_ctx.root_font_size_cells,
-                ),
-                FlexDirection::Column => css.get_height(
-                    containing_main,
-                    font_ctx.font_size_cells,
-                    font_ctx.root_font_size_cells,
-                ),
+                FlexDirection::Row => css.get_width(containing_main, font_ctx),
+                FlexDirection::Column => css.get_height(containing_main, font_ctx),
             };
             match direction {
                 FlexDirection::Row => explicit.or_else(|| {
@@ -136,12 +124,7 @@ fn natural_intrinsic_size(
 ) -> NaturalIntrinsicSize {
     let node = &arena[node_id];
     let css = &node.css_attr;
-    let own_font_size_cells = effective_font_size_cells(
-        arena,
-        node_id,
-        font_ctx.font_size_cells,
-        font_ctx.root_font_size_cells,
-    );
+    let own_font_size_cells = effective_font_size_cells(arena, node_id, font_ctx);
     let child_font_ctx = font_ctx.child(own_font_size_cells);
     // We pass `usize::MAX` as the containing width so percentage-based
     // edges resolve to their full length. We only read padding /
@@ -149,15 +132,11 @@ fn natural_intrinsic_size(
     // for non-percentage values, and at worst become the maximum for
     // percentage-based values — a safe upper bound for an intrinsic
     // measurement.
-    let edges = css.get_box_edges(
-        usize::MAX,
-        own_font_size_cells,
-        font_ctx.root_font_size_cells,
-    );
+    let edges = css.get_box_edges(usize::MAX, child_font_ctx);
 
     if css.is_flex() && is_flex_capable_node(&node.node_type) {
         let inner_direction = css.get_flex_direction();
-        let gap = css.get_gap();
+        let gap = css.get_gap(child_font_ctx);
 
         let mut child_sizes: Vec<NaturalIntrinsicSize> = Vec::new();
         for &child_id in &node.children {
@@ -232,12 +211,12 @@ fn natural_intrinsic_size(
         // resolving percentages during layout, not for the recursive
         // pre-layout measurement pass.
         let width = css
-            .get_width(usize::MAX, own_font_size_cells, font_ctx.root_font_size_cells)
+            .get_width(usize::MAX, child_font_ctx)
             .or_else(|| measure_text_content_width(arena, node_id))
             .unwrap_or(FLEX_ITEM_MIN_CROSS)
             .max(FLEX_ITEM_MIN_CROSS);
         let height = css
-            .get_height(usize::MAX, own_font_size_cells, font_ctx.root_font_size_cells)
+            .get_height(usize::MAX, child_font_ctx)
             .unwrap_or(own_font_size_cells)
             .max(FLEX_ITEM_MIN_CROSS);
         NaturalIntrinsicSize {

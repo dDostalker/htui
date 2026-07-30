@@ -3,7 +3,7 @@ use std::fmt;
 
 use slotmap::{Key, SlotMap, new_key_type};
 
-use crate::html::css_parse::CssAttr;
+use crate::html::css_parse::{CssAttr, FontContext};
 
 // ============================================================
 // NodeId — slotmap 生成的类型安全索引
@@ -128,23 +128,18 @@ impl NodeType {
 pub fn effective_font_size_cells(
     arena: &NodeArena,
     node_id: NodeId,
-    parent_font_size_cells: usize,
-    root_font_size_cells: usize,
+    font_ctx: FontContext,
 ) -> usize {
     let node = &arena[node_id];
     let declared = node.css_attr.get_font_size();
     if let Some(len) = declared {
-        return len.resolve(
-            parent_font_size_cells,
-            parent_font_size_cells,
-            root_font_size_cells,
-        );
+        return len.resolve(font_ctx.font_size_cells, font_ctx);
     }
     if let Some(em) = node.node_type.default_font_size_em() {
-        let raw = em * parent_font_size_cells as f32;
+        let raw = em * font_ctx.font_size_cells as f32;
         return raw.round().max(1.0) as usize;
     }
-    parent_font_size_cells.max(1)
+    font_ctx.font_size_cells.max(1)
 }
 
 // ============================================================

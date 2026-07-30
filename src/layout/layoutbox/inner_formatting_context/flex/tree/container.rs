@@ -49,21 +49,12 @@ pub(super) fn layout_flex_container(
 
     // 1. Font-size resolution: the container's own effective font-size
     //    cascades down to flex items and (transitively) their children.
-    let own_font_size_cells = effective_font_size_cells(
-        arena,
-        node_id,
-        font_ctx.font_size_cells,
-        font_ctx.root_font_size_cells,
-    );
+    let own_font_size_cells = effective_font_size_cells(arena, node_id, font_ctx);
     let child_font_ctx = font_ctx.child(own_font_size_cells);
 
     // 2. Box edges (padding / border / margin) — same resolution as
     //    `layout_block`, no flex-specific tweaks.
-    let edges = node.css_attr.get_box_edges(
-        containing.width,
-        own_font_size_cells,
-        font_ctx.root_font_size_cells,
-    );
+    let edges = node.css_attr.get_box_edges(containing.width, child_font_ctx);
 
     // A flex formatting context normally participates in block flow. When it
     // is itself a flex item, its parent has already chosen the border-box and
@@ -76,11 +67,7 @@ pub(super) fn layout_flex_container(
             let available = containing.width.saturating_sub(edges.margin.horizontal());
             let block_width = node
                 .css_attr
-                .get_width(
-                    available,
-                    own_font_size_cells,
-                    font_ctx.root_font_size_cells,
-                )
+                .get_width(available, child_font_ctx)
                 .unwrap_or(available)
                 .min(available)
                 .max(1);
@@ -103,15 +90,11 @@ pub(super) fn layout_flex_container(
     let justify = node.css_attr.get_justify_content();
     let align_items = node.css_attr.get_align_items();
     let align_content = node.css_attr.get_align_content();
-    let gap = node.css_attr.get_gap();
+    let gap = node.css_attr.get_gap(child_font_ctx);
     let container_css_height = preallocated_height
         .map(|height| height.saturating_sub(edges.inner_vertical()).max(1))
         .or_else(|| {
-            node.css_attr.get_height(
-                content_width,
-                own_font_size_cells,
-                font_ctx.root_font_size_cells,
-            )
+            node.css_attr.get_height(content_width, child_font_ctx)
         });
     let has_explicit_height = container_css_height.is_some();
 

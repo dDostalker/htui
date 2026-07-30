@@ -21,6 +21,7 @@ mod align_self;
 
 pub use align_self::AlignSelf;
 
+use crate::html::css_parse::FontContext;
 use crate::layout::layoutbox::{FormattingContext, OuterDisplay};
 
 use crossterm::style::Color;
@@ -122,22 +123,24 @@ impl CssAttr {
     /// - `50%` → fraction of terminal width (rounded, minimum 1 column)
     /// - `2em` → cells (resolved against the current element's font-size)
     /// - `2rem` → cells (resolved against the root's font-size)
+    /// - `50vw` → fraction of viewport columns (rounded, minimum 1 column)
     ///
     /// `em` / `rem` units are multiplied by `font_size_cells` /
     /// `root_font_size_cells` so they reflect the relative size specified by
-    /// CSS. Floats (`1.5em`, `33.33%`) are rounded to the nearest integer
-    /// cell — terminals cannot render half columns. See [`Length::parse`]
-    /// for the underlying value type.
+    /// CSS. `vw` / `vh` units are multiplied by `viewport_cols` /
+    /// `viewport_rows` provided by the layout context. Floats (`1.5em`,
+    /// `33.33%`) are rounded to the nearest integer cell — terminals cannot
+    /// render half columns. See [`Length::parse`] for the underlying value
+    /// type.
     pub fn get_width(
         &self,
         term_columns: usize,
-        font_size_cells: usize,
-        root_font_size_cells: usize,
+        font_ctx: FontContext,
     ) -> Option<usize> {
         let raw = self.0.get("width")?;
         match Length::parse(raw)? {
             Length::Auto => None,
-            len => Some(len.resolve(term_columns, font_size_cells, root_font_size_cells)),
+            len => Some(len.resolve(term_columns, font_ctx)),
         }
     }
 
@@ -161,17 +164,17 @@ impl CssAttr {
     ///
     /// `font_size_cells` / `root_font_size_cells` are forwarded to every
     /// inner resolution so `em` / `rem` lengths track the element's relative
-    /// font-size.
+    /// font-size. `viewport_cols` / `viewport_rows` are forwarded so `vw` /
+    /// `vh` lengths resolve against the terminal viewport.
     pub fn get_box_edges(
         &self,
         containing_width: usize,
-        font_size_cells: usize,
-        root_font_size_cells: usize,
+        font_ctx: FontContext,
     ) -> BoxEdges {
         BoxEdges {
-            padding: self.get_padding(containing_width, font_size_cells, root_font_size_cells),
-            border: self.get_border(containing_width, font_size_cells, root_font_size_cells),
-            margin: self.get_margin(containing_width, font_size_cells, root_font_size_cells),
+            padding: self.get_padding(containing_width, font_ctx),
+            border: self.get_border(containing_width, font_ctx),
+            margin: self.get_margin(containing_width, font_ctx),
         }
     }
 
@@ -184,20 +187,14 @@ impl CssAttr {
     ///
     /// `em` / `rem` lengths are scaled by `font_size_cells` /
     /// `root_font_size_cells` so they reflect the relative size of the
-    /// element's font.
+    /// element's font. `vw` / `vh` lengths are scaled by `viewport_cols` /
+    /// `viewport_rows`.
     pub fn get_padding(
         &self,
         containing_width: usize,
-        font_size_cells: usize,
-        root_font_size_cells: usize,
+        font_ctx: FontContext,
     ) -> EdgeSizes {
-        parse_edge_sizes(
-            &self.0,
-            "padding",
-            containing_width,
-            font_size_cells,
-            root_font_size_cells,
-        )
+        parse_edge_sizes(&self.0, "padding", containing_width, font_ctx)
     }
 
     /// Resolve all four margin edges from `margin` / `margin-{side}`.
@@ -208,16 +205,9 @@ impl CssAttr {
     pub fn get_margin(
         &self,
         containing_width: usize,
-        font_size_cells: usize,
-        root_font_size_cells: usize,
+        font_ctx: FontContext,
     ) -> EdgeSizes {
-        parse_edge_sizes(
-            &self.0,
-            "margin",
-            containing_width,
-            font_size_cells,
-            root_font_size_cells,
-        )
+        parse_edge_sizes(&self.0, "margin", containing_width, font_ctx)
     }
 
     /// Resolve all four border sides from `border` / `border-{side}` /
@@ -230,15 +220,13 @@ impl CssAttr {
     pub fn get_border(
         &self,
         containing_width: usize,
-        font_size_cells: usize,
-        root_font_size_cells: usize,
+        font_ctx: FontContext,
     ) -> BorderSides {
         // Step 1: collect universal values (lowest priority).
         let universal_width = parse_border_width(
             self.0.get("border-width").map(|s| s.as_str()),
             containing_width,
-            font_size_cells,
-            root_font_size_cells,
+            font_ctx,
         );
         let universal_style = parse_border_style(self.0.get("border-style").map(|s| s.as_str()));
         let universal_color = self.0.get("border-color").and_then(|s| parse_color_str(s));
@@ -251,32 +239,28 @@ impl CssAttr {
             self.0.get("border"),
             universal,
             containing_width,
-            font_size_cells,
-            root_font_size_cells,
+            font_ctx,
         );
         let right = parse_border_side(
             self.0.get("border-right"),
             self.0.get("border"),
             universal,
             containing_width,
-            font_size_cells,
-            root_font_size_cells,
+            font_ctx,
         );
         let bottom = parse_border_side(
             self.0.get("border-bottom"),
             self.0.get("border"),
             universal,
             containing_width,
-            font_size_cells,
-            root_font_size_cells,
+            font_ctx,
         );
         let left = parse_border_side(
             self.0.get("border-left"),
             self.0.get("border"),
             universal,
             containing_width,
-            font_size_cells,
-            root_font_size_cells,
+            font_ctx,
         );
 
         BorderSides {
@@ -440,15 +424,9 @@ impl CssAttr {
     pub fn get_flex_basis_resolved(
         &self,
         containing_main: usize,
-        font_size_cells: usize,
-        root_font_size_cells: usize,
+        font_ctx: FontContext,
     ) -> Option<usize> {
-        resolve_flex_basis(
-            self.get_flex_basis(),
-            containing_main,
-            font_size_cells,
-            root_font_size_cells,
-        )
+        resolve_flex_basis(self.get_flex_basis(), containing_main, font_ctx)
     }
 
     /// `order` (defaults to `0`).
@@ -464,20 +442,28 @@ impl CssAttr {
     /// `gap` is the shorthand (1- or 2-value). `row-gap` / `column-gap`
     /// longhands override the corresponding shorthand component when
     /// both are present. Anything unparseable collapses to `0`.
-    pub fn get_gap(&self) -> GapSizes {
-        let shorthand = self.0.get("gap").and_then(|v| parse_gap_shorthand(v));
+    ///
+    /// `vw` / `vh` lengths resolve against the viewport passed in; percentage
+    /// gap is still resolved against `usize::MAX` (intentional — see
+    /// `doc/layout.md`, "百分比 gap" — the flex container's actual axis
+    /// size is not in scope here).
+    pub fn get_gap(&self, font_ctx: FontContext) -> GapSizes {
+        let shorthand = self
+            .0
+            .get("gap")
+            .and_then(|v| parse_gap_shorthand(v, font_ctx));
         let row = self
             .0
             .get("row-gap")
             .and_then(|v| Length::parse(v))
-            .map(|l| l.resolve(usize::MAX, 1, 1))
+            .map(|l| l.resolve(usize::MAX, font_ctx))
             .or_else(|| shorthand.map(|g| g.row))
             .unwrap_or(0);
         let column = self
             .0
             .get("column-gap")
             .and_then(|v| Length::parse(v))
-            .map(|l| l.resolve(usize::MAX, 1, 1))
+            .map(|l| l.resolve(usize::MAX, font_ctx))
             .or_else(|| shorthand.map(|g| g.column))
             .unwrap_or(0);
         GapSizes { row, column }
@@ -492,13 +478,12 @@ impl CssAttr {
     pub fn get_height(
         &self,
         containing_width: usize,
-        font_size_cells: usize,
-        root_font_size_cells: usize,
+        font_ctx: FontContext,
     ) -> Option<usize> {
         let raw = self.0.get("height")?;
         match Length::parse(raw)? {
             Length::Auto => None,
-            len => Some(len.resolve(containing_width, font_size_cells, root_font_size_cells)),
+            len => Some(len.resolve(containing_width, font_ctx)),
         }
     }
 }

@@ -51,19 +51,10 @@ pub fn layout_block(
     font_ctx: FontContext,
     pre_allocated_rect: Option<Rect>,
 ) -> LayoutBox {
-    let own_font_size_cells = effective_font_size_cells(
-        arena,
-        node_id,
-        font_ctx.font_size_cells,
-        font_ctx.root_font_size_cells,
-    );
+    let own_font_size_cells = effective_font_size_cells(arena, node_id, font_ctx);
     let child_font_ctx = font_ctx.child(own_font_size_cells);
 
-    let edges: BoxEdges = node.css_attr.get_box_edges(
-        containing.width,
-        own_font_size_cells,
-        font_ctx.root_font_size_cells,
-    );
+    let edges: BoxEdges = node.css_attr.get_box_edges(containing.width, child_font_ctx);
 
     let (geom, preallocated_height) = match pre_allocated_rect {
         Some(rect) => {
@@ -92,11 +83,7 @@ pub fn layout_block(
                 .saturating_sub(opts.indent)
                 .saturating_sub(edges.margin.horizontal());
             let block_width = resolve_block_width(
-                node.css_attr.get_width(
-                    available,
-                    own_font_size_cells,
-                    font_ctx.root_font_size_cells,
-                ),
+                node.css_attr.get_width(available, child_font_ctx),
                 available,
             )
             .max(1);

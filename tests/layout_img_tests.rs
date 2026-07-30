@@ -56,7 +56,7 @@ fn layout_img_clamps_cols_to_containing_width() {
 
     let containing = BoxConstraint { x: 0, width: 80 };
     let mut cursor = Cursor::new();
-    let lb = layout_img(&arena, img_id, containing, &mut cursor, FontContext::ROOT)
+    let lb = layout_img(&arena, img_id, containing, &mut cursor, FontContext::root(80, 24))
         .expect("<img> should produce a LayoutBox");
 
     match &lb.kind {
@@ -87,7 +87,7 @@ fn layout_img_unclamped_when_img_fits() {
 
     let containing = BoxConstraint { x: 0, width: 80 };
     let mut cursor = Cursor::new();
-    let lb = layout_img(&arena, img_id, containing, &mut cursor, FontContext::ROOT).unwrap();
+    let lb = layout_img(&arena, img_id, containing, &mut cursor, FontContext::root(80, 24)).unwrap();
 
     // 120 source pixels / IMAGE_PIXELS_PER_CELL_COL (2) = 60 cells (no clamp),
     // 60 source pixels / IMAGE_PIXELS_PER_CELL_ROW (4) = 15 cells. These are

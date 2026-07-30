@@ -593,8 +593,10 @@ fn paint_box(lb, arena, tl, max_y: &mut usize) -> Result<()> {
 | `50%` | containing size 的 50%，舍入到整数 cell | 适合宽度；高度和 gap 仍缺少正确解析上下文 |
 | `2em` | 当前元素字号 cell 数的 2 倍 | 适合逻辑字号和盒模型缩放 |
 | `2rem` | 根元素字号 cell 数的 2 倍 | 适合跨层级保持统一比例 |
+| `50vw` | viewport cols 的 50%，舍入到整数 cell（min 1） | 锚定终端 width，不依赖 containing block |
+| `50vh` | viewport rows 的 50%，舍入到整数 cell（min 1） | 锚定终端 height，不依赖 containing block |
 
-所有浮点结果最终都舍入成整数 cell。解析入口是 `Length::parse()`，解析后的值由 `Length::resolve()` 根据 containing size、当前字号和根字号进行解析。
+所有浮点结果最终都舍入成整数 cell。解析入口是 `Length::parse()`，解析后的值由 `Length::resolve()` 根据 containing size、当前字号、根字号以及 viewport cols/rows 进行解析。`vw`/`vh` 是 axis-independent 单元：无论在 `width` 还是 `height` 上，`vw` 始终锚定 viewport 列数，`vh` 始终锚定 viewport 行数。
 
 ### 10.3 适合优先实现
 
@@ -608,16 +610,16 @@ fn paint_box(lb, arena, tl, max_y: &mut usize) -> Result<()> {
 
 它适合 `width`、水平 padding/margin、`gap` 和 `flex-basis`，比将 `px` 解释成 cell 更直观。建议作为下一个新增单位。
 
-#### `vw` / `vh`
+#### `vw` / `vh`（已实现）
 
-终端有明确的可见 viewport，可定义：
+终端有明确的可见 viewport，定义：
 
 ```text
 1vw = viewport columns / 100
 1vh = viewport rows / 100
 ```
 
-这两个单位适合实现，但当前 `Length::resolve()` 没有 viewport 宽高，也不知道正在解析水平轴还是垂直轴。实现前必须先把这些信息传入长度解析过程，不能只在 parser 中新增枚举分支。
+`Length::resolve()` 现在从 `FontContext` 拿到 `viewport_cols` / `viewport_rows`。`FontContext` 由 `TermLayout::draw()` 从 `TermMap` 初始化后在布局树中传递。`vw` / `vh` 是 axis-independent 单元：无论在 `width` 还是 `height` 上，`vw` 始终锚定 viewport 列数，`vh` 始终锚定 viewport 行数。`Length::resolve()` 不需要知道当前是水平轴还是垂直轴。
 
 #### `vmin` / `vmax`
 
@@ -706,8 +708,8 @@ CSS 规范定义 `1px ≈ 1/96 inch`，终端无法查询物理 DPI，因此采�
 
 1. 添加 `ch`，保持 `1ch = 1 column`。
 2. 修正百分比 `height` 和百分比 `gap` 的 containing context。
-3. 让长度解析获得水平/垂直轴与 viewport columns/rows。
-4. 添加 `vw`、`vh`，随后添加 `vmin`、`vmax`。
+3. **已实现 ✅** 让长度解析获得 viewport columns/rows — `Length::resolve()` 末尾新增 `viewport_cols` / `viewport_rows` 参数，`FontContext` 负责在布局树中传递，入口由 `TermLayout::draw()` 从 `TermMap` 初始化。
+4. **已实现 ✅** 添加 `vw`、`vh`；未实现 `vmin` / `vmax`（可随后补充）。
 5. 完成 `line-height` 后添加 `lh`、`rlh`。
 6. 实现 CSS Grid 时为 `fr` 建立 grid 专用值类型，不扩展通用 `Length`。
 

@@ -30,19 +30,10 @@ pub fn layout_cell(
 ) -> LayoutBox {
     let node = &arena[cell_id];
 
-    let own_font_size_cells = effective_font_size_cells(
-        arena,
-        cell_id,
-        font_ctx.font_size_cells,
-        font_ctx.root_font_size_cells,
-    );
+    let own_font_size_cells = effective_font_size_cells(arena, cell_id, font_ctx);
     let child_font_ctx = font_ctx.child(own_font_size_cells);
 
-    let cell_edges: BoxEdges = node.css_attr.get_box_edges(
-        rect.width,
-        own_font_size_cells,
-        font_ctx.root_font_size_cells,
-    );
+    let cell_edges: BoxEdges = node.css_attr.get_box_edges(rect.width, child_font_ctx);
 
     let block_fg = node.css_attr.get_color();
     let block_bg = node.css_attr.get_bg_color();

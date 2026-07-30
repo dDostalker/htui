@@ -186,9 +186,9 @@ fn layout_box_rect_is_deterministic() {
     );
     let containing = BoxConstraint::root(&mock_term_map());
     let mut c1 = Cursor::new();
-    let boxes1 = layout_tree(&arena, root_id, containing, &mut c1);
+    let boxes1 = layout_tree(&arena, root_id, containing, &mut c1, 80, 24);
     let mut c2 = Cursor::new();
-    let boxes2 = layout_tree(&arena, root_id, containing, &mut c2);
+    let boxes2 = layout_tree(&arena, root_id, containing, &mut c2, 80, 24);
     assert_eq!(boxes1.len(), boxes2.len());
     for (a, b) in boxes1.iter().zip(boxes2.iter()) {
         assert_eq!(a.rect, b.rect, "boxes must agree across runs");
@@ -218,7 +218,7 @@ fn rendered_rows_walks_full_layout_tree() {
     // Sanity-check via the layout tree itself.
     use htui::layout::{BoxConstraint, Cursor};
     let mut cursor = Cursor::new();
-    let boxes = layout_tree(&arena, root_id, BoxConstraint::root(&term_map), &mut cursor);
+    let boxes = layout_tree(&arena, root_id, BoxConstraint::root(&term_map), &mut cursor, 80, 24);
     let max_leaf = boxes
         .iter()
         .flat_map(|b| std::iter::once(b).chain(b.children.iter()))

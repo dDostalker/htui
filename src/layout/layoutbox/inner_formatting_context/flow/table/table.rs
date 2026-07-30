@@ -24,19 +24,10 @@ pub fn layout_table(
         return None;
     }
 
-    let own_font_size_cells = effective_font_size_cells(
-        arena,
-        node_id,
-        font_ctx.font_size_cells,
-        font_ctx.root_font_size_cells,
-    );
+    let own_font_size_cells = effective_font_size_cells(arena, node_id, font_ctx);
     let child_font_ctx = font_ctx.child(own_font_size_cells);
 
-    let edges = node.css_attr.get_box_edges(
-        containing.width,
-        own_font_size_cells,
-        font_ctx.root_font_size_cells,
-    );
+    let edges = node.css_attr.get_box_edges(containing.width, child_font_ctx);
 
     let available = containing.width.saturating_sub(edges.margin.horizontal());
     let (x, block_width, outer_y_top, preallocated_height) = match pre_allocated_rect {
@@ -44,11 +35,7 @@ pub fn layout_table(
         None => {
             let block_width = node
                 .css_attr
-                .get_width(
-                    available,
-                    own_font_size_cells,
-                    font_ctx.root_font_size_cells,
-                )
+                .get_width(available, child_font_ctx)
                 .unwrap_or(available)
                 .min(available)
                 .max(1);

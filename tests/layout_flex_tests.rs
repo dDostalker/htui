@@ -497,6 +497,7 @@ fn test_flex_container_carries_flex_formatting_context() {
         root_id,
         htui::layout::BoxConstraint::root(&term_map),
         &mut htui::layout::Cursor::new(),
+        80, 24,
     );
     let container = find_box_with_formatting_context(&boxes, FormattingContext::Flex)
         .expect("there must be a box with FormattingContext::Flex");
@@ -533,6 +534,7 @@ fn test_flex_container_carries_flex_formatting_context() {
         root_id,
         htui::layout::BoxConstraint::root(&term_map),
         &mut htui::layout::Cursor::new(),
+        80, 24,
     );
     assert!(
         find_box_with_formatting_context(&boxes, FormattingContext::Flex).is_none(),
@@ -726,6 +728,7 @@ fn test_flex_nested_containers_both_have_flex_formatting_context() {
         root_id,
         htui::layout::BoxConstraint::root(&term_map),
         &mut htui::layout::Cursor::new(),
+        80, 24,
     );
     let flex_count = count_boxes_with_formatting_context(&boxes, FormattingContext::Flex);
     assert_eq!(
@@ -793,6 +796,7 @@ fn test_flex_nested_row_inside_row_stacks_three_rows() {
         root_id,
         htui::layout::BoxConstraint::root(&term_map),
         &mut htui::layout::Cursor::new(),
+        80, 24,
     );
     // The nested column has 1-cell width (max of its children's 1-cell
     // text widths), making it unique among the rects in the tree.
@@ -841,6 +845,7 @@ fn test_flex_nested_row_inside_row_growing_sibling_fits_within_canvas() {
         root_id,
         htui::layout::BoxConstraint::root(&term_map),
         &mut htui::layout::Cursor::new(),
+        80, 24,
     );
     // Walk the tree and assert nothing overflows the canvas.
     fn assert_no_overflow(

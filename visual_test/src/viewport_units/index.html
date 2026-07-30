@@ -1,0 +1,58 @@
+<!--
+  htui visual test — viewport_units
+  Run: cargo run -p visual_test -- viewport_units
+  Demonstrates viewport-relative CSS lengths: vw and vh.
+-->
+<!doctype html>
+<html>
+<head>
+  <style>
+    body {
+      margin: 0;
+      color: white;
+      background-color: #101820;
+    }
+
+    h1 {
+      margin: 1vh 2vw;
+      color: #f2aa4c;
+    }
+
+    .viewport-width {
+      width: 50vw;
+      height: 3vh;
+      margin-left: 2vw;
+      background: #2e8b57;
+    }
+
+    .viewport-height {
+      width: 20vw;
+      height: 25vh;
+      margin: 2vh 2vw;
+      padding: 2vh 2vw;
+      background-color: #4169e1;
+    }
+
+    .nested {
+      width: 50vw;
+      height: 8vh;
+      padding: 1vh 1vw;
+      background-color: #b22222;
+    }
+
+    .label {
+      margin: 1vh 2vw;
+    }
+  </style>
+</head>
+<body>
+  <h1>vw / vh viewport units</h1>
+  <p class="label">The green bar is 50vw wide and 3vh high.</p>
+  <div class="viewport-width"></div>
+
+    <div class="viewport-height">
+      25vh height; padding is 2vh and 2vw.
+      <div class="nested">Nested box: 50vw × 8vh</div>
+    </div>
+</body>
+</html>

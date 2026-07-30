@@ -28,10 +28,11 @@ pub mod layoutbox;
 pub mod paint;
 
 pub use crate::html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeSizes};
+pub use crate::html::css_parse::FontContext;
 pub use layoutbox::inner_formatting_context;
 pub use layoutbox::inner_formatting_context::{
-    flow::{FontContext, layout_tree},
     flex::layout_flex_dispatch,
+    flow::layout_tree,
 };
 pub use layoutbox::{
     BoxKind, Cursor, FormattingContext, InlineRun, LayoutBox, OuterDisplay, PaintStyle, Rect,

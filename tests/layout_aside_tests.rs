@@ -358,7 +358,7 @@ fn test_aside_rect_height_includes_nested_children() {
     use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor};
     let containing = BoxConstraint::root(&term_map);
     let mut cursor = Cursor::new();
-    let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
+    let boxes = layout_tree(&arena, root_id, containing, &mut cursor, 80, 24);
 
     let aside_box = find_box_by_type(&boxes, &NodeType::Aside, &arena)
         .expect("aside box should be present in the layout tree");
@@ -530,7 +530,7 @@ fn test_aside_without_children_still_has_height_one() {
     use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor};
     let containing = BoxConstraint::root(&term_map);
     let mut cursor = Cursor::new();
-    let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
+    let boxes = layout_tree(&arena, root_id, containing, &mut cursor, 80, 24);
 
     let aside_box = find_box_by_type(&boxes, &NodeType::Aside, &arena)
         .expect("aside box should be present in the layout tree");
