@@ -575,7 +575,155 @@ fn paint_box(lb, arena, tl, max_y: &mut usize) -> Result<()> {
 
 ---
 
-## 10. 未来方向
+## 10. CSS 长度单位支持边界
+
+### 10.1 基本原则
+
+`htui` 的最终布局单位是终端字符单元格：水平方向是列，垂直方向是行。终端不能稳定表达半个 cell，也通常无法提供浏览器拥有的 DPI、字体物理度量和设备像素信息。因此，CSS 长度只有在能确定地转换成整数 cell 时才适合进入通用 [`Length`](../src/html/css_parse/values.rs) 模型。
+
+这里讨论的是 **CSS 长度单位**。HTML 属性是另一套规则，例如 `<img width="200" height="100">` 当前只接受无单位整数，并按图像采样规则换算成终端列和行；`width="200px"`、`width="50%"` 不属于当前 HTML 属性解析范围，应改用 CSS。
+
+### 10.2 当前已支持
+
+| 写法 | 当前终端语义 | 适用范围与限制 |
+| --- | --- | --- |
+| `auto` | 交给调用方决定，块宽通常填满 containing block | 适合；它是关键字而不是长度单位 |
+| `40` | 40 cells | 项目扩展；除 `0` 外不是标准 CSS 通用长度语法 |
+| `40px` | 40 cells | 适合终端约定，但不代表真实设备像素 |
+| `50%` | containing size 的 50%，舍入到整数 cell | 适合宽度；高度和 gap 仍缺少正确解析上下文 |
+| `2em` | 当前元素字号 cell 数的 2 倍 | 适合逻辑字号和盒模型缩放 |
+| `2rem` | 根元素字号 cell 数的 2 倍 | 适合跨层级保持统一比例 |
+| `50vw` | viewport cols 的 50%，舍入到整数 cell（min 1） | 锚定终端 width，不依赖 containing block |
+| `50vh` | viewport rows 的 50%，舍入到整数 cell（min 1） | 锚定终端 height，不依赖 containing block |
+
+所有浮点结果最终都舍入成整数 cell。解析入口是 `Length::parse()`，解析后的值由 `Length::resolve()` 根据 containing size、当前字号、根字号以及 viewport cols/rows 进行解析。`vw`/`vh` 是 axis-independent 单元：无论在 `width` 还是 `height` 上，`vw` 始终锚定 viewport 列数，`vh` 始终锚定 viewport 行数。
+
+### 10.3 适合优先实现
+
+#### `ch`
+
+`ch` 是最适合终端的标准 CSS 单位。等宽终端中可以采用稳定语义：
+
+```text
+1ch = 1 terminal column
+```
+
+它适合 `width`、水平 padding/margin、`gap` 和 `flex-basis`，比将 `px` 解释成 cell 更直观。建议作为下一个新增单位。
+
+#### `vw` / `vh`（已实现）
+
+终端有明确的可见 viewport，定义：
+
+```text
+1vw = viewport columns / 100
+1vh = viewport rows / 100
+```
+
+`Length::resolve()` 现在从 `FontContext` 拿到 `viewport_cols` / `viewport_rows`。`FontContext` 由 `TermLayout::draw()` 从 `TermMap` 初始化后在布局树中传递。`vw` / `vh` 是 axis-independent 单元：无论在 `width` 还是 `height` 上，`vw` 始终锚定 viewport 列数，`vh` 始终锚定 viewport 行数。`Length::resolve()` 不需要知道当前是水平轴还是垂直轴。
+
+#### `vmin` / `vmax`
+
+可以基于 viewport columns/rows 的较小值或较大值解析，适合作为 `vw`/`vh` 之后的补充。由于终端 cell 通常不是正方形，这只能是逻辑 cell 尺寸的近似语义，不应宣称为物理尺寸等价。
+
+#### `lh` / `rlh`
+
+纵向终端布局可以自然地定义：
+
+```text
+1lh  = 当前元素的一行高度
+1rlh = 根元素的一行高度
+```
+
+但它们依赖完整的 `line-height` 模型。当前项目只有 `font_size_cells`，因此应在 `line-height` 属性和有效行高上下文完成后再实现。
+
+### 10.4 当前需要限制或修正的单位
+
+#### 百分比高度
+
+`width: 50%` 可以直接使用 containing block 的宽度。当前 `get_height()` 仍把 `containing_width` 传给 `Length::resolve()`，所以 `height: 50%` 会错误地按父宽度计算。只有在布局上下文能提供父级确定高度后，百分比高度才应视为正式支持。
+
+CSS 中垂直 padding/margin 的百分比按 containing block 的 inline size 计算，因此继续使用父宽度是允许的；这与 `height` 的百分比规则不同。
+
+#### 百分比 gap
+
+当前 `gap`、`row-gap`、`column-gap` 使用 `usize::MAX` 作为长度解析基准。绝对值、`em`、`rem` 不受影响，但百分比会产生无意义的巨大结果。在 flex container 的实际轴尺寸传入前，gap 应只使用绝对或字体相对单位。
+
+#### `px` —— 两套标准化的换算公式
+
+CSS `px` 与 `img` HTML 属性的"像素"是**两个不同概念**，目前各自由一个具名常量锚定，避免魔法数字在代码里到处出现。
+
+**CSS `px` —— 锚定为 `PX_PER_CELL`**
+
+[`PX_PER_CELL`](../src/html/css_parse/values.rs) 是 `Length::parse` 中 `px` 分支的乘子：
+
+```text
+cells = px × PX_PER_CELL        （PX_PER_CELL == 1.0）
+```
+
+也就是说 `width: 40px` 与 `width: 40` 都解析成 `Length::Cells(40)`，与裸整数完全等价。该常量存在的意义是为后续可能的"每 cell 多 px"模式（例如 2× DPI 模拟）保留单点编辑位；当前没有运行时效果，仅是文档锚。
+
+CSS 规范定义 `1px ≈ 1/96 inch`，终端无法查询物理 DPI，因此采用"headless 终端渲染器的惯例"——把 CSS 像素固定为 1 cell 列（或 1 cell 行），使任何解析得到的 px 都是整数 cell 数量，无需取整。
+
+**`img` HTML 属性像素 —— 锚定为 `IMAGE_PIXELS_PER_CELL_*`**
+
+[`IMAGE_PIXELS_PER_CELL_COL`](../src/tui/graph_api/image.rs) 和 [`IMAGE_PIXELS_PER_CELL_ROW`](../src/tui/graph_api/image.rs) 是**源图像素**到终端 cell 的采样比：
+
+```text
+1 cell = IMAGE_PIXELS_PER_CELL_COL × IMAGE_PIXELS_PER_CELL_ROW
+       = 2 × 4 = 8 source pixels
+```
+
+终端网格不是正方形（常见 cell 长宽比约 1:2），所以水平与垂直采用不同采样率。`_create_img` 在 2×4 的源图像素块上走一遍，把每个像素按位置分配到 braille 字符的 8 个点位之一。
+
+`<img width="200">` 表示"源图宽度 200 像素"，对应 `200 / IMAGE_PIXELS_PER_CELL_COL = 100` 个 cell；`<img height="100">` 对应 `100 / IMAGE_PIXELS_PER_CELL_ROW = 25` 个 cell。HTML 属性不接受 `px` 后缀——`<img width="200px">` 会被 Rust 的 `u32::parse` 拒绝并回退到默认 2:1 portrait，与裸 `width="200"` 不等价，文档与测试必须明确这一边界。
+
+**两套语义的关系**
+
+| 维度 | CSS `px` | `img` HTML 属性 |
+| --- | --- | --- |
+| 描述什么 | 盒模型布局尺寸 | 源图像素尺寸 |
+| 锚定常量 | `PX_PER_CELL = 1.0` | `IMAGE_PIXELS_PER_CELL_COL = 2`、`_ROW = 4` |
+| 解析函数 | `Length::parse("40px")` | `Node::get_width()` / `get_height()` |
+| 接受 `px` 后缀？ | 是 | 否 |
+| 适用于 | `width`、`height`、`padding`、`border`、`margin`、`gap` | 仅 `img` 的 `width` / `height` |
+| 默认映射 | 1 cell = 1 px | 1 cell = 2×4 = 8 source px |
+
+测试与文档不得把这两套混用——例如不要写"`img width=200 表示 200 个 CSS 像素`"，正确的说法是"200 个源图像素，约 100 个 cell 列"。
+
+### 10.5 当前不适合实现
+
+| 单位/类别 | 不适合的原因 |
+| --- | --- |
+| `cm`、`mm`、`Q`、`in`、`pt`、`pc` | 终端没有可靠 DPI、屏幕物理尺寸或点数到 cell 的换算 |
+| `ex`、`cap`、`ic` | 依赖真实字体的 x-height、大写字母高度或 CJK advance，终端 API 无法稳定提供 |
+| `svw`、`svh`、`lvw`、`lvh`、`dvw`、`dvh` | 用于移动浏览器动态工具栏产生的多种 viewport；终端没有对应区别 |
+| `fr` | 只属于 CSS Grid 轨道分配，不是通用长度；应等 Grid Formatting Context 实现后使用独立值类型 |
+| 负长度 | 当前边尺寸和坐标使用 `usize`；虽然 CSS 允许负 margin，但 width、height、padding、border-width 和 gap 不允许。未引入有符号 margin 模型前不能加入通用 `Length` |
+
+不支持的单位应由 `Length::parse()` 返回 `None`，不要静默映射为 `0`、`px` 或 cell，否则 CSS 会得到看似成功但错误的布局。
+
+`calc()`、`min()`、`max()`、`clamp()` 是长度表达式函数而不是单位。当前 parser 只接受单个长度 token；未来如需支持，应单独设计表达式解析与求值，不能作为普通单位分支加入 `Length::parse()`。
+
+### 10.6 推荐实施顺序
+
+1. 添加 `ch`，保持 `1ch = 1 column`。
+2. 修正百分比 `height` 和百分比 `gap` 的 containing context。
+3. **已实现 ✅** 让长度解析获得 viewport columns/rows — `Length::resolve()` 末尾新增 `viewport_cols` / `viewport_rows` 参数，`FontContext` 负责在布局树中传递，入口由 `TermLayout::draw()` 从 `TermMap` 初始化。
+4. **已实现 ✅** 添加 `vw`、`vh`；未实现 `vmin` / `vmax`（可随后补充）。
+5. 完成 `line-height` 后添加 `lh`、`rlh`。
+6. 实现 CSS Grid 时为 `fr` 建立 grid 专用值类型，不扩展通用 `Length`。
+
+建议的长期核心集合是：
+
+```text
+px、ch、%、em、rem、vw、vh、vmin、vmax、lh、rlh、auto
+```
+
+其中 `px` 是 cell 别名，`auto` 是布局关键字；物理单位和真实字体度量单位不纳入目标范围。
+
+---
+
+## 11. 未来方向
 
 - **inline 布局**：当前 `<span>` 仅在 `collect_direct_text` 里被展平。未来需要支持行内 `<span>` 的颜色/粗细差异 → 需要把 `LayoutBox` 拆成"块盒 + 内联盒列表"。
 - **layout cache**：增量布局（仅重算 CSS 改变的子树）以减少重绘成本。

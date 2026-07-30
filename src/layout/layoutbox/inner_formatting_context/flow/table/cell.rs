@@ -4,7 +4,7 @@
 use crate::{
     html::box_edges::BoxEdges,
     layout::{
-        BoxConstraint, Cursor, FontContext, LayoutBox, PaintStyle, Rect,
+        BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, Rect,
         inner_formatting_context::flow::layout_children, layoutbox::collect_runs,
     },
     tdom::node::{NodeArena, NodeId, effective_font_size_cells},
@@ -26,22 +26,18 @@ pub fn layout_cell(
     cell_id: NodeId,
     rect: Rect,
     _is_header: bool,
-    font_ctx: FontContext,
+    context: LayoutContext,
 ) -> LayoutBox {
     let node = &arena[cell_id];
 
-    let own_font_size_cells = effective_font_size_cells(
-        arena,
-        cell_id,
-        font_ctx.font_size_cells,
-        font_ctx.root_font_size_cells,
-    );
-    let child_font_ctx = font_ctx.child(own_font_size_cells);
+    let own_font_size_cells =
+        effective_font_size_cells(arena, cell_id, context.font, context.viewport);
+    let child_context = context.child(own_font_size_cells);
 
     let cell_edges: BoxEdges = node.css_attr.get_box_edges(
         rect.width,
-        own_font_size_cells,
-        font_ctx.root_font_size_cells,
+        child_context.font,
+        child_context.viewport,
     );
 
     let block_fg = node.css_attr.get_color();
@@ -67,7 +63,7 @@ pub fn layout_cell(
         &node.children,
         child_containing,
         &mut child_cursor,
-        child_font_ctx,
+        child_context,
     );
 
     let paint_style = PaintStyle {

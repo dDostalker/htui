@@ -72,7 +72,14 @@ impl TermLayout {
         assert_eq!(root.node_type, NodeType::Global);
         let containing = BoxConstraint::root(term_map);
         let mut cursor = Cursor::new();
-        let boxes = layout_tree(arena, root_id, containing, &mut cursor);
+        let boxes = layout_tree(
+            arena,
+            root_id,
+            containing,
+            &mut cursor,
+            term_map.columns as usize,
+            term_map.rows as usize,
+        );
         paint_layout_tree(&boxes, arena, self);
         Ok(())
     }

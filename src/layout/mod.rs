@@ -28,17 +28,33 @@ pub mod layoutbox;
 pub mod paint;
 
 pub use crate::html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeSizes};
+pub use crate::html::css_parse::{FontContext, Viewport};
 pub use layoutbox::inner_formatting_context;
 pub use layoutbox::inner_formatting_context::{
-    flow::{FontContext, layout_tree},
     flex::layout_flex_dispatch,
+    flow::layout_tree,
 };
 pub use layoutbox::{
     BoxKind, Cursor, FormattingContext, InlineRun, LayoutBox, OuterDisplay, PaintStyle, Rect,
     ReplacedContent,
 };
 
-/// The containing block available to a layout function.
+/// Context propagated by the layout phase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LayoutContext {
+    pub font: FontContext,
+    pub viewport: Viewport,
+}
+
+impl LayoutContext {
+    pub fn child(self, child_font_size_cells: usize) -> Self {
+        Self {
+            font: self.font.child(child_font_size_cells),
+            viewport: self.viewport,
+        }
+    }
+}
+
 ///
 /// A child element resolves its own width / horizontal position relative to
 /// its containing block, mirroring CSS containing-block semantics.
@@ -82,7 +98,7 @@ pub type LayoutFn = fn(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    font_ctx: FontContext,
+    context: LayoutContext,
     pre_allocated_rect: Option<Rect>,
 ) -> Option<LayoutBox>;
 

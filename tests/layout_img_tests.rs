@@ -13,9 +13,11 @@ use std::path::PathBuf;
 use htui::html::html_parse;
 use htui::layout::layout::TermMap;
 use htui::layout::inner_formatting_context::flow::layout_img;
-use htui::layout::{BoxConstraint, BoxKind, Cursor, FontContext, ReplacedContent};
+use htui::layout::{BoxConstraint, BoxKind, Cursor, LayoutContext, ReplacedContent, Viewport};
 use htui::tdom::node::{self, NodeType};
-use htui::tui::graph_api::{TermLayout, render_image_at};
+use htui::tui::graph_api::{
+    IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, TermLayout, render_image_at,
+};
 use image::{ImageBuffer, Rgb};
 
 fn init() {
@@ -54,8 +56,17 @@ fn layout_img_clamps_cols_to_containing_width() {
 
     let containing = BoxConstraint { x: 0, width: 80 };
     let mut cursor = Cursor::new();
-    let lb = layout_img(&arena, img_id, containing, &mut cursor, FontContext::ROOT)
-        .expect("<img> should produce a LayoutBox");
+    let lb = layout_img(
+        &arena,
+        img_id,
+        containing,
+        &mut cursor,
+        LayoutContext {
+            font: htui::html::css_parse::FontContext::root(),
+            viewport: Viewport { cols: 80, rows: 24 },
+        },
+    )
+    .expect("<img> should produce a LayoutBox");
 
     match &lb.kind {
         BoxKind::Replaced(ReplacedContent::Image { cols, rows, .. }) => {
@@ -85,18 +96,44 @@ fn layout_img_unclamped_when_img_fits() {
 
     let containing = BoxConstraint { x: 0, width: 80 };
     let mut cursor = Cursor::new();
-    let lb = layout_img(&arena, img_id, containing, &mut cursor, FontContext::ROOT).unwrap();
+    let lb = layout_img(
+        &arena,
+        img_id,
+        containing,
+        &mut cursor,
+        LayoutContext {
+            font: htui::html::css_parse::FontContext::root(),
+            viewport: Viewport { cols: 80, rows: 24 },
+        },
+    )
+    .unwrap();
 
-    // 120 px / 2 = 60 cells (no clamp), 60 px / 4 = 15 cells.
+    // 120 source pixels / IMAGE_PIXELS_PER_CELL_COL (2) = 60 cells (no clamp),
+    // 60 source pixels / IMAGE_PIXELS_PER_CELL_ROW (4) = 15 cells. These are
+    // SOURCE-IMAGE pixels, not CSS px — see `doc/layout.md` section 10.4.
+    let expected_cols = 120u32.div_ceil(IMAGE_PIXELS_PER_CELL_COL) as usize;
+    let expected_rows = 60u32.div_ceil(IMAGE_PIXELS_PER_CELL_ROW) as usize;
     match &lb.kind {
         BoxKind::Replaced(ReplacedContent::Image { cols, rows, .. }) => {
-            assert_eq!(*cols, 60);
-            assert_eq!(*rows, 15);
+            assert_eq!(*cols, expected_cols);
+            assert_eq!(*rows, expected_rows);
             assert_eq!(*cols, lb.rect.width);
             assert_eq!(*rows, lb.rect.height);
         }
         _ => panic!("expected BoxKind::Replaced(Image), got {:?}", lb.kind),
     }
+}
+
+#[test]
+fn image_sampling_constants_lock_in_2_by_4_ratio() {
+    // Standardized source-pixel → terminal-cell sampling ratio. Each
+    // terminal cell renders a 2-wide x 4-tall block of source pixels as one
+    // braille glyph (8 dot positions). Changing these values without a
+    // coordinated update to `_create_img`, `layout_img`, and the doc would
+    // silently corrupt image rendering.
+    assert_eq!(IMAGE_PIXELS_PER_CELL_COL, 2);
+    assert_eq!(IMAGE_PIXELS_PER_CELL_ROW, 4);
+    assert_eq!(IMAGE_PIXELS_PER_CELL_COL * IMAGE_PIXELS_PER_CELL_ROW, 8);
 }
 
 // ============================================================

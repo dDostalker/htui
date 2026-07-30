@@ -12,54 +12,41 @@
 //! block handlers declared in this module's siblings.
 
 use crate::{
-    layout::{BoxConstraint, Cursor, DEFAULT_LAYOUT, LayoutBox, Rect},
+    html::css_parse::{FontContext, Viewport},
+    layout::{BoxConstraint, Cursor, DEFAULT_LAYOUT, LayoutBox, LayoutContext, Rect},
     tdom::node::{NodeArena, NodeId},
 };
 
-/// Font-size context propagated through layout.
-///
-/// `font_size_cells` is the parent's effective font-size (in terminal
-/// cells). `root_font_size_cells` is the root document's font-size, used to
-/// resolve `rem` lengths. Each layout function reads `font_size_cells` to
-/// compute the element's own font-size via
-/// [`crate::tdom::node::effective_font_size_cells`], then forwards the result down to nested
-/// children.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FontContext {
-    pub font_size_cells: usize,
-    pub root_font_size_cells: usize,
-}
 
-impl FontContext {
-    /// Default root context: 1-cell font, 1-cell root font.
-    pub const ROOT: FontContext = FontContext {
-        font_size_cells: 1,
-        root_font_size_cells: 1,
-    };
-
-    /// Build a child context whose `em` resolves against `child_cells` and
-    /// whose `rem` still resolves against the original root.
-    pub fn child(&self, child_cells: usize) -> FontContext {
-        FontContext {
-            font_size_cells: child_cells,
-            root_font_size_cells: self.root_font_size_cells,
-        }
-    }
-}
 
 /// Build a layout forest for `root_id`'s block children.
 ///
 /// `containing` is the root containing block (typically the full terminal
 /// width). `cursor` tracks the next free row and is advanced in-place so
-/// callers can chain multiple passes.
+/// callers can chain multiple passes. `viewport_cols` / `viewport_rows`
+/// supply the viewport size for `vw` / `vh` resolution.
 pub fn layout_tree(
     arena: &NodeArena,
     root_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
+    viewport_cols: usize,
+    viewport_rows: usize,
 ) -> Vec<LayoutBox> {
     let children: Vec<NodeId> = arena[root_id].children.clone();
-    layout_children(arena, &children, containing, cursor, FontContext::ROOT)
+    layout_children(
+        arena,
+        &children,
+        containing,
+        cursor,
+        LayoutContext {
+            font: FontContext::root(),
+            viewport: Viewport {
+                cols: viewport_cols,
+                rows: viewport_rows,
+            },
+        },
+    )
 }
 
 /// Lay out a sequence of sibling node IDs under `containing`.
@@ -68,11 +55,11 @@ pub fn layout_children(
     children: &[NodeId],
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    font_ctx: FontContext,
+    context: LayoutContext,
 ) -> Vec<LayoutBox> {
     let mut boxes = Vec::new();
     for &child_id in children {
-        if let Some(b) = dispatch(arena, child_id, containing, cursor, font_ctx, None) {
+        if let Some(b) = dispatch(arena, child_id, containing, cursor, context, None) {
             boxes.push(b);
         }
     }
@@ -89,11 +76,11 @@ pub fn dispatch(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    font_ctx: FontContext,
+    context: LayoutContext,
     pre_allocated_rect: Option<Rect>,
 ) -> Option<LayoutBox> {
     for layout_fn in DEFAULT_LAYOUT {
-        if let Some(b) = layout_fn(arena, node_id, containing, cursor, font_ctx, pre_allocated_rect) {
+        if let Some(b) = layout_fn(arena, node_id, containing, cursor, context, pre_allocated_rect) {
             return Some(b);
         }
     }

@@ -3,7 +3,7 @@
 
 use crate::{
     html::css_parse::{AlignItems, FlexDirection, FlexWrap, GapSizes, JustifyContent},
-    layout::{BoxConstraint, Cursor, FontContext, LayoutBox, Rect},
+    layout::{BoxConstraint, Cursor, LayoutBox, LayoutContext, Rect},
     tdom::node::NodeArena,
 };
 
@@ -29,14 +29,14 @@ pub(super) fn layout_flex_items(
     gap: GapSizes,
     content: BoxConstraint,
     content_y: usize,
-    font_ctx: FontContext,
+    context: LayoutContext,
     has_explicit_height: bool,
     container_height: usize,
 ) -> (Vec<LayoutBox>, usize) {
     // 1. Prepare + sort every item.
     let mut preps: Vec<FlexItemPrep> = item_ids
         .iter()
-        .map(|&id| prepare_flex_item(arena, id, direction, content.width, font_ctx, align_items))
+        .map(|&id| prepare_flex_item(arena, id, direction, content.width, context, align_items))
         .collect();
     preps.sort_by_key(|p| p.order);
 
@@ -75,7 +75,7 @@ pub(super) fn layout_flex_items(
         // 3b. Compute the line's natural cross-axis size.
         let natural_line_cross = line_preps
             .iter()
-            .map(|p| natural_cross_axis_size(arena, p.node_id, direction, font_ctx))
+            .map(|p| natural_cross_axis_size(arena, p.node_id, direction, context))
             .max()
             .unwrap_or(FLEX_ITEM_MIN_CROSS)
             .max(FLEX_ITEM_MIN_CROSS);
@@ -148,7 +148,7 @@ pub(super) fn layout_flex_items(
             // for non-stretch alignments and for stretch when the
             // container's cross-axis size is unknown).
             let item_natural_cross =
-                natural_cross_axis_size(arena, prep.node_id, direction, font_ctx);
+                natural_cross_axis_size(arena, prep.node_id, direction, context);
             let item_cross_size = resolve_item_cross_size(
                 prep.align_self,
                 line_cross,
@@ -184,7 +184,7 @@ pub(super) fn layout_flex_items(
                     width: item_w.max(1),
                 },
                 &mut Cursor { y: item_y },
-                font_ctx,
+                context,
                 Some(Rect::new(item_x, item_y, item_w.max(1), item_h.max(1))),
             );
             if let Some(child_box) = child_box {
@@ -237,7 +237,7 @@ pub(super) fn layout_flex_items(
                 let line_preps: Vec<&FlexItemPrep> = indices.iter().map(|j| &preps[*j]).collect();
                 let natural = line_preps
                     .iter()
-                    .map(|p| natural_cross_axis_size(arena, p.node_id, direction, font_ctx))
+                    .map(|p| natural_cross_axis_size(arena, p.node_id, direction, context))
                     .max()
                     .unwrap_or(FLEX_ITEM_MIN_CROSS)
                     .max(FLEX_ITEM_MIN_CROSS);

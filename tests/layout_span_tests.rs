@@ -416,7 +416,7 @@ fn test_layout_box_exposes_runs_for_block_with_spans() {
     );
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
-    let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
+    let boxes = layout_tree(&arena, root_id, containing, &mut cursor, 80, 24);
     let p_box = find_box_by_type(&boxes, &NodeType::P, &arena).expect("should have the <p> box");
     let runs = p_box
         .paint_style
@@ -453,7 +453,7 @@ fn test_layout_box_runs_are_materialised_for_plain_block() {
     let (root_id, arena) = setup("<p>just text</p>", "");
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
-    let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
+    let boxes = layout_tree(&arena, root_id, containing, &mut cursor, 80, 24);
     let p_box = find_box_by_type(&boxes, &NodeType::P, &arena).expect("should have the <p> box");
     let runs = p_box
         .paint_style
@@ -475,7 +475,7 @@ fn test_h1_prefix_is_a_separate_run() {
     let (root_id, arena) = setup("<h1>Title</h1>", "h1 { color: cyan; }");
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
-    let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
+    let boxes = layout_tree(&arena, root_id, containing, &mut cursor, 80, 24);
     let h_box = find_box_by_type(&boxes, &NodeType::H1, &arena).expect("should have the <h1> box");
     let runs = h_box.paint_style.runs.as_ref().expect("<h1> should expose runs");
     assert_eq!(

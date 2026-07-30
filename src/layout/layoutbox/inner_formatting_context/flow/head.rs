@@ -1,7 +1,7 @@
 use crate::{
     layout::{
-        BoxConstraint, Cursor, InlineRun, LayoutBox,
-        inner_formatting_context::flow::{FontContext, LayoutBlockOptions, layout_block},
+        BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext,
+        inner_formatting_context::flow::{LayoutBlockOptions, layout_block},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::block_style,
@@ -35,7 +35,7 @@ pub fn layout_hn(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    font_ctx: FontContext,
+    context: LayoutContext,
     pre_allocated_rect: Option<crate::layout::Rect>,
 ) -> Option<LayoutBox> {
     let node = &arena[node_id];
@@ -59,7 +59,7 @@ pub fn layout_hn(
             prefix: Some(prefix_run),
             ..Default::default()
         },
-        font_ctx,
+        context,
         pre_allocated_rect,
     ))
 }
@@ -78,7 +78,7 @@ pub fn layout_title(
     node_id: NodeId,
     _containing: BoxConstraint,
     _cursor: &mut Cursor,
-    _font_ctx: FontContext,
+    _context: LayoutContext,
     _pre_allocated_rect: Option<crate::layout::Rect>,
 ) -> Option<LayoutBox> {
     let node = &arena[node_id];
@@ -100,7 +100,7 @@ pub fn layout_meta(
     node_id: NodeId,
     _containing: BoxConstraint,
     _cursor: &mut Cursor,
-    _font_ctx: FontContext,
+    _context: LayoutContext,
     _pre_allocated_rect: Option<crate::layout::Rect>,
 ) -> Option<LayoutBox> {
     let node = &arena[node_id];

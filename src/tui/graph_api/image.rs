@@ -9,6 +9,26 @@ use super::{
     cell::{Block, FontStyle},
 };
 
+// ============================================================
+// Image pixel -> terminal cell sampling ratios.
+//
+// These constants define how source-image pixels map onto terminal
+// cells. They are intentionally independent of
+// `crate::html::css_parse::values::PX_PER_CELL`, which governs CSS px
+// in the box model. The two answer different questions:
+//   - PX_PER_CELL: how many CSS px is one terminal cell? Answer: 1.
+//   - The two below: how many source-image pixels does one terminal
+//     cell render? 2 wide x 4 tall = 8 source pixels per cell. The
+//     braille rendering in `_create_img` walks a 2x4 block and assigns
+//     each source pixel to one of the 8 dot positions in the braille
+//     character.
+
+/// Source-image pixels rendered per terminal cell on the horizontal axis.
+pub const IMAGE_PIXELS_PER_CELL_COL: u32 = 2;
+
+/// Source-image pixels rendered per terminal cell on the vertical axis.
+pub const IMAGE_PIXELS_PER_CELL_ROW: u32 = 4;
+
 #[derive(Debug)]
 pub struct Img {
     pub path: PathBuf,
@@ -36,28 +56,37 @@ impl Img {
 
         let img = image::open(&self.path)?;
         // `term_size` is documented as `(cols, rows)` in terminal cells. Each
-        // cell represents a 2×4 pixel block, so we multiply accordingly before
-        // resizing. We must use `resize_exact` — the default `resize`
+        // cell represents an IMAGE_PIXELS_PER_CELL_COL x IMAGE_PIXELS_PER_CELL_ROW
+        // pixel block (see the constants above), so we multiply accordingly
+        // before resizing. We must use `resize_exact` -- the default `resize`
         // preserves aspect ratio and would shrink the long edge to fit the
         // shorter one, breaking the cell-to-pixel correspondence.
-        let pixel_w = self.term_size.0.saturating_mul(2).max(2);
-        let pixel_h = self.term_size.1.saturating_mul(4).max(4);
+        let pixel_w = self
+            .term_size
+            .0
+            .saturating_mul(IMAGE_PIXELS_PER_CELL_COL)
+            .max(IMAGE_PIXELS_PER_CELL_COL);
+        let pixel_h = self
+            .term_size
+            .1
+            .saturating_mul(IMAGE_PIXELS_PER_CELL_ROW)
+            .max(IMAGE_PIXELS_PER_CELL_ROW);
         let img = img.resize_exact(pixel_w, pixel_h, FilterType::Nearest);
         let (width, height) = img.dimensions();
 
-        self.cloumns = width.div_ceil(2);
-        self.rows = height.div_ceil(4);
+        self.cloumns = width.div_ceil(IMAGE_PIXELS_PER_CELL_COL);
+        self.rows = height.div_ceil(IMAGE_PIXELS_PER_CELL_ROW);
         self.picture = Some(vec![]);
-        for y in (0..height).step_by(4) {
-            for x in (0..width).step_by(2) {
+        for y in (0..height).step_by(IMAGE_PIXELS_PER_CELL_ROW as usize) {
+            for x in (0..width).step_by(IMAGE_PIXELS_PER_CELL_COL as usize) {
                 let mut bits = 0;
                 let mut r_sum = 0u32;
                 let mut g_sum = 0u32;
                 let mut b_sum = 0u32;
                 let mut count = 0;
 
-                for dy in 0..4 {
-                    for dx in 0..2 {
+                for dy in 0..IMAGE_PIXELS_PER_CELL_ROW {
+                    for dx in 0..IMAGE_PIXELS_PER_CELL_COL {
                         let px = x + dx;
                         let py = y + dy;
 

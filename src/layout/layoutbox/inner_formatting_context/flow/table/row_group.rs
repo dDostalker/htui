@@ -5,7 +5,7 @@
 //! re-plumbing the registry.
 
 use crate::{
-    layout::{BoxConstraint, Cursor, FontContext, Rect},
+    layout::{BoxConstraint, Cursor, LayoutBox, LayoutContext, Rect},
     tdom::node::{NodeArena, NodeId},
 };
 
@@ -15,8 +15,8 @@ pub fn layout_row_group(
     _node_id: NodeId,
     _containing: BoxConstraint,
     _cursor: &mut Cursor,
-    _font_ctx: FontContext,
+    _context: LayoutContext,
     _pre_allocated_rect: Option<Rect>,
-) -> Option<crate::layout::LayoutBox> {
+) -> Option<LayoutBox> {
     None
 }

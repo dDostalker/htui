@@ -1,9 +1,9 @@
 use crate::{
     layout::{
-        BoxConstraint, Cursor, LayoutBox, PaintStyle, ReplacedContent,
-        inner_formatting_context::flow::FontContext,
+        BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, ReplacedContent,
     },
     tdom::node::{NodeArena, NodeId, NodeType},
+    tui::graph_api::{IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW},
 };
 
 /// Build a normal-flow image box without a parent pre-allocation.
@@ -16,9 +16,9 @@ pub fn layout_img(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    font_ctx: FontContext,
+    context: LayoutContext,
 ) -> Option<LayoutBox> {
-    layout_img_with_rect(arena, node_id, containing, cursor, font_ctx, None)
+    layout_img_with_rect(arena, node_id, containing, cursor, context, None)
 }
 
 /// Build an `<img>` element, optionally honoring a rectangle allocated by a
@@ -28,7 +28,7 @@ pub fn layout_img_with_rect(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    _font_ctx: FontContext,
+    _context: LayoutContext,
     pre_allocated_rect: Option<crate::layout::Rect>,
 ) -> Option<LayoutBox> {
     let node = &arena[node_id];
@@ -48,16 +48,22 @@ pub fn layout_img_with_rect(
             (rect.x, rect.y, width, height)
         }
         None => {
-            let max_w = node.get_width().unwrap_or(containing.width as u32 * 2);
+            let max_w = node
+                .get_width()
+                .unwrap_or(containing.width as u32 * IMAGE_PIXELS_PER_CELL_COL);
             // `BoxConstraint` only exposes the containing block width, so the default
             // height is approximated as 4× that in pixels (i.e. a 2:1 portrait by
             // default once converted to cells). The picture always scrolls
             // vertically, so we never need to clamp to the terminal height.
-            let max_h = node.get_height().unwrap_or(containing.width as u32 * 4);
+            let max_h = node
+                .get_height()
+                .unwrap_or(containing.width as u32 * IMAGE_PIXELS_PER_CELL_ROW);
 
-            // Each terminal cell represents a 2×4 pixel block (see Img::_create_img).
-            let img_cols = max_w.div_ceil(2).max(1) as usize;
-            let img_rows = max_h.div_ceil(4).max(1) as usize;
+            // Each terminal cell represents a
+            // IMAGE_PIXELS_PER_CELL_COL × IMAGE_PIXELS_PER_CELL_ROW pixel block
+            // (see `tui::graph_api::image` constants).
+            let img_cols = max_w.div_ceil(IMAGE_PIXELS_PER_CELL_COL).max(1) as usize;
+            let img_rows = max_h.div_ceil(IMAGE_PIXELS_PER_CELL_ROW).max(1) as usize;
             // Clamp to the containing block width so the rect and the rendered image
             // share the same cell count — painting past `rect.width` would overwrite
             // neighboring boxes.

@@ -69,4 +69,5 @@ pub use layout_block::{
 pub use list::{layout_li, layout_ol, layout_ul};
 pub use p::layout_p;
 pub use table::{layout_row_group, layout_table, layout_td, layout_th, layout_tr};
-pub use tree::{FontContext, dispatch, layout_children, layout_tree};
+pub use crate::html::css_parse::FontContext;
+pub use tree::{dispatch, layout_children, layout_tree};

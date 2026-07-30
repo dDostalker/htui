@@ -1,7 +1,7 @@
 use crate::{
     layout::{
-        BoxConstraint, Cursor, InlineRun, LayoutBox,
-        inner_formatting_context::flow::{FontContext, LayoutBlockOptions, layout_block},
+        BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext,
+        inner_formatting_context::flow::{LayoutBlockOptions, layout_block},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::block_style,
@@ -22,7 +22,7 @@ pub fn layout_ul(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    font_ctx: FontContext,
+    context: LayoutContext,
     pre_allocated_rect: Option<crate::layout::Rect>,
 ) -> Option<LayoutBox> {
     layout_list(
@@ -31,7 +31,7 @@ pub fn layout_ul(
         containing,
         cursor,
         NodeType::Ul,
-        font_ctx,
+        context,
         pre_allocated_rect,
     )
 }
@@ -45,7 +45,7 @@ pub fn layout_ol(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    font_ctx: FontContext,
+    context: LayoutContext,
     pre_allocated_rect: Option<crate::layout::Rect>,
 ) -> Option<LayoutBox> {
     layout_list(
@@ -54,7 +54,7 @@ pub fn layout_ol(
         containing,
         cursor,
         NodeType::Ol,
-        font_ctx,
+        context,
         pre_allocated_rect,
     )
 }
@@ -75,7 +75,7 @@ pub fn layout_li(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    font_ctx: FontContext,
+    context: LayoutContext,
     pre_allocated_rect: Option<crate::layout::Rect>,
 ) -> Option<LayoutBox> {
     let node = &arena[node_id];
@@ -108,7 +108,7 @@ pub fn layout_li(
             child_containing_shift: Some((marker_width, -(marker_width as isize))),
             ..Default::default()
         },
-        font_ctx,
+        context,
         pre_allocated_rect,
     ))
 }
@@ -119,7 +119,7 @@ fn layout_list(
     containing: BoxConstraint,
     cursor: &mut Cursor,
     expected: NodeType,
-    font_ctx: FontContext,
+    context: LayoutContext,
     pre_allocated_rect: Option<crate::layout::Rect>,
 ) -> Option<LayoutBox> {
     let node = &arena[node_id];
@@ -137,7 +137,7 @@ fn layout_list(
             indent: LIST_INDENT_PER_LEVEL * list_depth(arena, node_id),
             ..Default::default()
         },
-        font_ctx,
+        context,
         pre_allocated_rect,
     ))
 }
