@@ -17,8 +17,8 @@ use super::prepare::{
 };
 
 /// Lay out every flex item across one or more lines and return the
-/// positioned children plus the total main-axis-perpendicular height
-/// they consume (used to size the container).
+/// positioned children plus the vertical extent they consume (used to size
+/// the container).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn layout_flex_items(
     arena: &NodeArena,
@@ -51,6 +51,7 @@ pub(super) fn layout_flex_items(
     // 3. Lay out each line and stack them along the cross axis.
     let mut placed: Vec<LayoutBox> = Vec::with_capacity(preps.len());
     let mut current_cross: usize = content_y;
+    let mut total_main: usize = 0;
     let line_count = lines.len();
     let (cross_gap, main_gap) = match direction {
         FlexDirection::Row => (gap.row, gap.column),
@@ -116,6 +117,22 @@ pub(super) fn layout_flex_items(
         // 3d. Compute justify-content leading + between spacing.
         let (justify_leading, justify_between) =
             justify_spacing(justify, free_for_justify, line_preps.len());
+
+        // The container height is the line's main-axis extent in column
+        // direction. `current_cross` tracks the perpendicular axis and is
+        // therefore not suitable for sizing a column's block-height.
+        let line_main_extent = justify_leading
+            .saturating_add(
+                main_sizes
+                    .iter()
+                    .copied()
+                    .fold(0usize, usize::saturating_add),
+            )
+            .saturating_add(main_gap.saturating_mul(line_preps.len().saturating_sub(1)))
+            .saturating_add(
+                justify_between.saturating_mul(line_preps.len().saturating_sub(1)),
+            );
+        total_main = total_main.max(line_main_extent);
 
         // 3e. Place every item on the line.
         let mut cursor_main: usize = match direction {
@@ -247,5 +264,10 @@ pub(super) fn layout_flex_items(
         }
     }
 
-    (placed, total_cross)
+    let total_height = match direction {
+        FlexDirection::Row => total_cross,
+        FlexDirection::Column => total_main,
+    };
+
+    (placed, total_height)
 }

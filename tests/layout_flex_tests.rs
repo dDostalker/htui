@@ -1008,3 +1008,93 @@ fn test_flex_align_content_space_around_distributes_with_edge_halves() {
     assert_eq!(b_row, 3, "B at row 3");
     assert_eq!(c_row, 5, "C at row 5");
 }
+
+#[test]
+fn test_visual_flex_nested_document_keeps_all_nested_items_visible() {
+    init();
+    let html = r#"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>htui Flex Nested</title>
+    <style>
+        body { color: white; }
+        h2 { color: cyan; }
+        h3 { color: yellow; }
+        .row { display: flex; flex-direction: row; }
+        .col { display: flex; flex-direction: column; }
+        .red    { background-color: red;     color: white; }
+        .green  { background-color: green;   color: white; }
+        .blue   { background-color: blue;    color: white; }
+        .yellow { background-color: yellow;  color: black; }
+        .magenta{ background-color: magenta; color: white; }
+        .cyan   { background-color: cyan;    color: black; }
+    </style>
+</head>
+<body>
+    <h2>Flex — Nested containers</h2>
+    <h3>1. row inside row (sidebar + main)</h3>
+    <div class="row">
+        <div class="col" style="background-color: cyan; color: black;">
+            <div class="red">a</div>
+            <div class="green">b</div>
+            <div class="blue">c</div>
+        </div>
+        <div class="yellow" style="flex-grow: 1;">content</div>
+    </div>
+    <h3>2. row inside column (header + body + footer)</h3>
+    <div class="col">
+        <div class="red">header</div>
+        <div class="row">
+            <div class="green">a</div>
+            <div class="blue">b</div>
+        </div>
+        <div class="yellow">footer</div>
+    </div>
+    <h3>3. three levels deep</h3>
+    <div class="row">
+        <div class="col">
+            <div class="red">1</div>
+            <div class="col" style="background-color: cyan; color: black;">
+                <div class="green">2a</div>
+                <div class="blue">2b</div>
+            </div>
+        </div>
+        <div class="yellow" style="flex-grow: 1;">right</div>
+    </div>
+</body>
+</html>
+"#;
+    let (rows, _) = render_rows(html, "");
+    let c_row = rows
+        .iter()
+        .position(|row| row.trim_start().starts_with('c'))
+        .expect("the third item in section 1 must be rendered");
+    assert_eq!(c_row, 5, "the third item in section 1 stays in its row");
+
+    let section_three_row = rows
+        .iter()
+        .position(|row| row.contains("### 3. three levels deep"))
+        .expect("section 3 heading must be rendered");
+    assert!(
+        section_three_row < ROWS as usize,
+        "section 3 must fit in the initial viewport: row={section_three_row}"
+    );
+
+    let row_one = rows
+        .iter()
+        .position(|row| row.trim_start().starts_with('1'))
+        .expect("item 1 must be rendered");
+    let row_two_a = rows
+        .iter()
+        .position(|row| row.contains("2a"))
+        .expect("item 2a must be rendered");
+    let row_two_b = rows
+        .iter()
+        .position(|row| row.contains("2b"))
+        .expect("item 2b must be rendered");
+    assert_eq!(row_one, section_three_row + 1, "item 1 follows section 3");
+    assert_eq!(row_two_a, row_one + 1, "item 2a follows item 1");
+    assert_eq!(row_two_b, row_two_a + 1, "item 2b follows item 2a");
+}
