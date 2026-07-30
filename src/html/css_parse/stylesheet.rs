@@ -165,9 +165,10 @@ impl<'i> AtRuleParser<'i> for CssParseState {
 /// token-level parsing (defensive — the parser usually consumes it).
 fn clean_value_text(raw: &str) -> String {
     let trimmed = raw.trim();
-    match trimmed.find("!important") {
-        Some(idx) => trimmed[..idx].trim_end().to_string(),
-        None => trimmed.to_string(),
+    if let Some(idx) = trimmed.find("!important") {
+        trimmed[..idx].trim_end().to_string()
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -194,9 +195,11 @@ fn split_top_level_commas(s: &str) -> Vec<&str> {
             _ => {}
         }
     }
-    let tail = s[last..].trim();
-    if !tail.is_empty() {
-        out.push(tail);
+    if let Some(tail) = s.get(last..) {
+        let tail = tail.trim();
+        if !tail.is_empty() {
+            out.push(tail);
+        }
     }
     out
 }
