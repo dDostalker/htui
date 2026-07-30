@@ -1,21 +1,16 @@
 use crossterm::style::Color;
 
 use crate::{
-    html::css_parse::TextAlign,
-    layout::LayoutBox,
-    tdom::node::NodeArena,
+    html::css_parse::TextAlign, layout::LayoutBox, tdom::node::NodeArena,
     tui::graph_api::block_style,
 };
 
 use super::{PaintCanvas, border::paint_borders, text::paint_runs};
 
-pub(super) fn paint_block(
+pub(crate) fn paint_block(
     lb: &LayoutBox,
     arena: &NodeArena,
     canvas: &mut PaintCanvas<'_>,
-    fill_bg: bool,
-    spacing_after: usize,
-    chrome: bool,
     my_bg: Option<Color>,
     parent_bg: Option<Color>,
 ) {
@@ -31,6 +26,11 @@ pub(super) fn paint_block(
     let r = lb.rect;
     let cols = canvas.columns as usize;
     let cell_start = canvas.cell_index(r.x, r.y);
+
+    let fill_bg = lb.paint_style.fill_bg;
+    let chrome = lb.paint_style.chrome;
+    let spacing_after = lb.paint_style.spacing_after;
+    let box_edges = &lb.paint_style.box_edges;
 
     if fill_bg {
         // Paint the background across every row of the rect that is *not* a
@@ -50,29 +50,29 @@ pub(super) fn paint_block(
         // but would stand out in the terminal as an extra coloured band
         // on every side of the block.
         let border_horizontal =
-            lb.box_edges.border.left.thickness() + lb.box_edges.border.right.thickness();
-        let border_top = lb.box_edges.border.top.thickness();
-        let border_left = lb.box_edges.border.left.thickness();
-        let has_padding = lb.box_edges.padding.top
-            + lb.box_edges.padding.right
-            + lb.box_edges.padding.bottom
-            + lb.box_edges.padding.left
+            box_edges.border.left.thickness() + box_edges.border.right.thickness();
+        let border_top = box_edges.border.top.thickness();
+        let border_left = box_edges.border.left.thickness();
+        let has_padding = box_edges.padding.top
+            + box_edges.padding.right
+            + box_edges.padding.bottom
+            + box_edges.padding.left
             > 0;
-        let text_clamped = my_bg.is_some() && !chrome && !has_padding && lb.font_size_cells > 1;
+        let text_clamped = my_bg.is_some() && !chrome && !has_padding && lb.paint_style.font_size_cells > 1;
         let text_row_offset: usize = if text_clamped {
-            (lb.font_size_cells.saturating_sub(1)) / 2
+            (lb.paint_style.font_size_cells.saturating_sub(1)) / 2
         } else {
             0
         };
         let (bg_start_x, bg_width) = if text_clamped {
-            if let Some(runs) = &lb.runs {
-                let inner_h = lb.box_edges.inner_horizontal();
+            if let Some(runs) = &lb.paint_style.runs {
+                let inner_h = box_edges.inner_horizontal();
                 let content_x_offset =
-                    lb.box_edges.border.left.thickness() + lb.box_edges.padding.left;
+                    box_edges.border.left.thickness() + box_edges.padding.left;
                 let content_width = r.width.saturating_sub(inner_h).max(1);
                 let text_width: usize = runs
                     .iter()
-                    .map(|run| run.width_at(lb.font_size_cells))
+                    .map(|run| run.width_at(lb.paint_style.font_size_cells))
                     .sum();
                 let text_width = text_width.min(content_width);
                 let offset = match align {
@@ -122,14 +122,14 @@ pub(super) fn paint_block(
     // individual border colors are layered on top when set.
     paint_borders(lb, canvas, fg, effective_bg);
 
-    if let Some(runs) = &lb.runs {
+    if let Some(runs) = &lb.paint_style.runs {
         // Inline content sits in the content-box (rect shrunk by border +
         // padding), not the border-box, so text-align and run positioning
         // work against the inner width.
-        let inner_h = lb.box_edges.inner_horizontal();
-        let border_top = lb.box_edges.border.top.thickness();
-        let padding_top = lb.box_edges.padding.top;
-        let content_x_offset = lb.box_edges.border.left.thickness() + lb.box_edges.padding.left;
+        let inner_h = box_edges.inner_horizontal();
+        let border_top = box_edges.border.top.thickness();
+        let padding_top = box_edges.padding.top;
+        let content_x_offset = box_edges.border.left.thickness() + box_edges.padding.left;
         let content_width = r.width.saturating_sub(inner_h).max(1);
         // When font-size > 1 the box's rect is taller (height = font_size
         // cells) so the text baseline visually sits on the middle row of the
@@ -137,8 +137,8 @@ pub(super) fn paint_block(
         // The extra leading rows are also filled with `effective_bg` by the
         // background loop above, so the box reads as a tall band rather than
         // a 1-row strip.
-        let vertical_offset = if lb.font_size_cells > 1 {
-            (lb.font_size_cells.saturating_sub(1) / 2) * cols
+        let vertical_offset = if lb.paint_style.font_size_cells > 1 {
+            (lb.paint_style.font_size_cells.saturating_sub(1) / 2) * cols
         } else {
             0
         };
@@ -153,7 +153,7 @@ pub(super) fn paint_block(
             content_width,
             align,
             effective_bg,
-            lb.font_size_cells,
+            lb.paint_style.font_size_cells,
         );
     }
 }

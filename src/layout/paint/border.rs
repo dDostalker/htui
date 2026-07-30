@@ -15,13 +15,13 @@ use super::PaintCanvas;
 /// color. Borders with width > 1 currently render as a single row/column —
 /// terminals cannot express thicker edges without mis-aligning the inner
 /// content area, so any width > 1 is treated as 1.
-pub(super) fn paint_borders(
+pub(crate) fn paint_borders(
     lb: &LayoutBox,
     canvas: &mut PaintCanvas<'_>,
     fg: Option<Color>,
     bg: Option<Color>,
 ) {
-    let sides = &lb.box_edges.border;
+    let sides = &lb.paint_style.box_edges.border;
     if !sides.any_visible() {
         return;
     }

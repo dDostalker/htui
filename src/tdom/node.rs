@@ -34,6 +34,10 @@ pub enum NodeType {
     P,
     Img,
     A,
+    /// `<em>` — emphasis. Inline element with browser-default `font-style:
+    /// italic` that the layout pass applies when neither the element nor an
+    /// ancestor has declared an explicit `font-style`.
+    Em,
     Html,
     Body,
     Head,

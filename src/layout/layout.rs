@@ -2,7 +2,11 @@ use anyhow::{Ok, Result};
 use crossterm::terminal;
 
 use crate::{
-    layout::{BoxConstraint, Cursor, paint::paint_layout_tree, tree::layout_tree},
+    layout::{
+        BoxConstraint, Cursor,
+        inner_formatting_context::flow::layout_tree,
+        paint::paint_layout_tree,
+    },
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{Block, FontStyle, TermLayout},
 };

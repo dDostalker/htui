@@ -1,9 +1,10 @@
 use crossterm::style::Color;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     html::css_parse::TextAlign,
     layout::InlineRun,
-    tui::graph_api::{FontStyle, char_width},
+    tui::graph_api::{FontStyle, grapheme_width},
 };
 
 use super::PaintCanvas;
@@ -22,7 +23,7 @@ use super::PaintCanvas;
 /// occupies that many terminal columns (the trailing columns are filled with
 /// the run's background, mirroring the empty space a larger font would leave
 /// around its glyphs).
-pub(super) fn paint_runs(
+pub(crate) fn paint_runs(
     canvas: &mut PaintCanvas<'_>,
     runs: &[InlineRun],
     cell_start: usize,
@@ -77,12 +78,12 @@ fn paint_text_row(
     let max = canvas.layout.len();
     let mut idx = start;
     let font_size = font_size_cells.max(1);
-    for c in text.chars() {
-        let w = char_width(c);
-        // Stop when the next char + its background padding would step past
-        // the content-box right edge or the canvas boundary. Without this,
-        // a long `<p>` would spill its overflow into the rows below and
-        // corrupt the cells of subsequent boxes.
+    for g in text.graphemes(true) {
+        let w = grapheme_width(g);
+        // Stop when the next cluster + its background padding would step
+        // past the content-box right edge or the canvas boundary. Without
+        // this, a long `<p>` would spill its overflow into the rows below
+        // and corrupt the cells of subsequent boxes.
         let slot_width = w.max(font_size);
         if idx.saturating_add(slot_width) > row_end {
             break;
@@ -93,18 +94,20 @@ fn paint_text_row(
         if w == 2 && idx + 1 >= max {
             break;
         }
-        // In-place mutation: the 4-byte buffer from `Block::default()` fits
-        // any single UTF-8 char (1–4 bytes) so `push(c)` reuses it.
+        // In-place mutation: the buffer from `Block::default()` (32 bytes
+        // by default) fits any single grapheme cluster so `push_str(g)`
+        // reuses it without reallocating.
         let cell = &mut canvas.layout[idx];
         cell.word.clear();
-        cell.word.push(c);
+        cell.word.push_str(g);
         cell.fcolor = fg;
         cell.bcolor = bg;
         cell.style = style;
         if w == 2 {
-            // Wide CJK glyphs occupy two columns; the second column is
-            // marked with an empty word so the renderer (`render_to_bytes`)
-            // skips it and doesn't double-print the glyph.
+            // Wide clusters (CJK ideographs, 2-column emoji, ZWJ ligatures)
+            // occupy two columns; the second column is marked with an empty
+            // word so the renderer (`render_to_bytes`) skips it and doesn't
+            // double-print the glyph.
             let pad = &mut canvas.layout[idx + 1];
             pad.word.clear();
             pad.fcolor = fg;
@@ -140,9 +143,9 @@ fn paint_text_row(
             pad_cell.bcolor = bg;
             pad_cell.style = style;
         }
-        // Advance to the next character: the slot is `font_size` columns
-        // wide (or `w` columns wide, whichever is larger — `w > font_size`
-        // for narrow fonts rendering wide glyphs).
+        // Advance to the next cluster: the slot is `font_size` columns wide
+        // (or `w` columns wide, whichever is larger — `w > font_size` for
+        // narrow fonts rendering wide glyphs).
         idx += slot_width;
     }
 }

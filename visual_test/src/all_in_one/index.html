@@ -2,7 +2,7 @@
 <!--
   ============================================
   htui 综合视觉测试 — all_in_one
-  覆盖场景：标题、段落、图片、嵌套、列表
+  覆盖场景：标题、段落、图片、嵌套、列表、链接
   运行: cargo run -p visual_test -- all_in_one
   浏览器直接打开本文件即可看到与终端渲染对应相同的样式
   ============================================
@@ -20,6 +20,13 @@
         header { color: cyan; background-color: darkblue; text-align: center; }
         footer { color: grey; text-align: center; }
         aside  { color: white; }
+        .link-menu { background-color: darkblue; }
+        .link-menu a {
+            display: block;
+            color: cyan;
+            text-decoration: none;
+            padding: 1px 0;
+        }
     </style>
 </head>
 <body>
@@ -73,7 +80,7 @@
         <div>
             <h3>Mixed Content Section</h3>
             <p>This section mixes headings and paragraphs.</p>
-            <p>Another paragraph with <em>inline</em> elements (em tags are flattened).</p>
+            <p>Another paragraph with <em>inline</em> elements (&lt;em&gt; renders as inline italic by default).</p>
             <h4>Sub-heading in Mixed Layout</h4>
             <p>Final paragraph for the mixed layout test.</p>
         </div>
@@ -126,6 +133,15 @@
             <tr><td>Alice</td><td>Engineer</td><td>Berlin</td></tr>
             <tr><td>Bob</td><td>Designer</td><td>Tokyo</td></tr>
         </table>
+
+        <h2>12. Anchor Links</h2>
+        <p>Inline anchor: <a href="#inline">this link stays in the paragraph flow</a>.</p>
+        <div class="link-menu">
+            <a href="#dashboard">Dashboard</a>
+            <a href="#projects">Projects</a>
+            <a href="#tasks">Tasks</a>
+            <a href="#settings">Settings</a>
+        </div>
 
         <p>=== End of Comprehensive Test ===</p>
     </div>

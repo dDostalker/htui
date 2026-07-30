@@ -1,0 +1,282 @@
+//! Per-line placement: prepare items, distribute main-axis space, run
+//! `justify-content` and `align-items`, recurse into the element registry.
+
+use crate::{
+    html::css_parse::{AlignItems, FlexDirection, FlexWrap, GapSizes, JustifyContent},
+    layout::{BoxConstraint, Cursor, FontContext, LayoutBox, Rect},
+    tdom::node::NodeArena,
+};
+
+use super::algorithm::{
+    align_content_spacing, align_on_cross_axis, distribute_main_axis, effective_align,
+    justify_spacing, wrap_into_lines,
+};
+use super::container::{FlexItemPrep, FLEX_ITEM_MIN_CROSS};
+use super::prepare::{natural_cross_axis_size, prepare_flex_item, resolve_item_cross_size};
+
+/// Lay out every flex item across one or more lines and return the
+/// positioned children plus the vertical extent they consume (used to size
+/// the container).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn layout_flex_items(
+    arena: &NodeArena,
+    item_ids: &[crate::tdom::node::NodeId],
+    direction: FlexDirection,
+    wrap: FlexWrap,
+    justify: JustifyContent,
+    align_items: AlignItems,
+    align_content: JustifyContent,
+    gap: GapSizes,
+    content: BoxConstraint,
+    content_y: usize,
+    font_ctx: FontContext,
+    has_explicit_height: bool,
+    container_height: usize,
+) -> (Vec<LayoutBox>, usize) {
+    // 1. Prepare + sort every item.
+    let mut preps: Vec<FlexItemPrep> = item_ids
+        .iter()
+        .map(|&id| prepare_flex_item(arena, id, direction, content.width, font_ctx, align_items))
+        .collect();
+    preps.sort_by_key(|p| p.order);
+
+    // 2. Split into lines based on `wrap`.
+    let lines: Vec<Vec<usize>> = match wrap {
+        FlexWrap::NoWrap => vec![(0..preps.len()).collect()],
+        FlexWrap::Wrap => wrap_into_lines(&preps, direction, content.width, gap),
+    };
+
+    // 3. Lay out each line and stack them along the cross axis.
+    let mut placed: Vec<LayoutBox> = Vec::with_capacity(preps.len());
+    // `current_cross` is the cursor on the axis perpendicular to the
+    // flex main axis: vertical for rows, horizontal for columns.
+    let cross_origin = match direction {
+        FlexDirection::Row => content_y,
+        FlexDirection::Column => content.x,
+    };
+    let mut current_cross: usize = cross_origin;
+    let mut total_main: usize = 0;
+    let line_count = lines.len();
+    let (cross_gap, main_gap) = match direction {
+        FlexDirection::Row => (gap.row, gap.column),
+        FlexDirection::Column => (gap.column, gap.row),
+    };
+
+    for (line_idx, line_indices) in lines.iter().enumerate() {
+        // 3a. Distribute the line's main-axis space.
+        let line_preps: Vec<&FlexItemPrep> = line_indices.iter().map(|&i| &preps[i]).collect();
+        let line_main_size = match direction {
+            FlexDirection::Row => content.width,
+            FlexDirection::Column => usize::MAX, // column direction: vertical unbounded
+        };
+        let (main_sizes, free_for_justify) =
+            distribute_main_axis(&line_preps, line_main_size, main_gap);
+
+        // 3b. Compute the line's natural cross-axis size.
+        let natural_line_cross = line_preps
+            .iter()
+            .map(|p| natural_cross_axis_size(arena, p.node_id, direction, font_ctx))
+            .max()
+            .unwrap_or(FLEX_ITEM_MIN_CROSS)
+            .max(FLEX_ITEM_MIN_CROSS);
+
+        // 3c. Effective cross-axis size. The cross axis swaps between the
+        //     two directions, so this is direction-aware:
+        //
+        //     - `row` direction: cross axis is vertical. Explicit
+        //       container height wins (and only for a single line —
+        //       otherwise every line would overflow the container).
+        //       Without an explicit height we use the natural line cross
+        //       to avoid a circular dependency where stretching items
+        //       would silently enlarge the container.
+        //     - `column` direction: cross axis is horizontal. The
+        //       container's content width is always known (it's
+        //       `content.width`), so the line stretches to that
+        //       regardless of an explicit height. A multi-line column
+        //       container has no concept of cross-axis stretching per
+        //       line — lines stack along the main axis, so we keep the
+        //       natural line cross for them. The previous
+        //       `container_height` shortcut was incorrect for column
+        //       direction: it used a vertical measurement as a
+        //       horizontal size, which made children of a flex column
+        //       stretch to the column's height — and overflow the
+        //       column's own width.
+        let line_cross = match direction {
+            FlexDirection::Row => {
+                if has_explicit_height && line_count == 1 {
+                    container_height
+                } else {
+                    natural_line_cross
+                }
+            }
+            FlexDirection::Column => {
+                if line_count == 1 {
+                    content.width.max(natural_line_cross)
+                } else {
+                    natural_line_cross
+                }
+            }
+        };
+
+        // 3d. Compute justify-content leading + between spacing.
+        let (justify_leading, justify_between) =
+            justify_spacing(justify, free_for_justify, line_preps.len());
+
+        // The container height is the line's main-axis extent in column
+        // direction. `current_cross` tracks the perpendicular axis and is
+        // therefore not suitable for sizing a column's block-height.
+        let line_main_extent = justify_leading
+            .saturating_add(
+                main_sizes
+                    .iter()
+                    .copied()
+                    .fold(0usize, usize::saturating_add),
+            )
+            .saturating_add(main_gap.saturating_mul(line_preps.len().saturating_sub(1)))
+            .saturating_add(justify_between.saturating_mul(line_preps.len().saturating_sub(1)));
+        total_main = total_main.max(line_main_extent);
+
+        // 3e. Place every item on the line.
+        let mut cursor_main: usize = match direction {
+            FlexDirection::Row => content.x,
+            FlexDirection::Column => content_y,
+        };
+        cursor_main = cursor_main.saturating_add(justify_leading);
+        for (prep_idx, prep) in line_preps.iter().enumerate() {
+            let main_size = main_sizes[prep_idx];
+            // Natural cross-axis size of this item (used as the fallback
+            // for non-stretch alignments and for stretch when the
+            // container's cross-axis size is unknown).
+            let item_natural_cross =
+                natural_cross_axis_size(arena, prep.node_id, direction, font_ctx);
+            let item_cross_size = resolve_item_cross_size(
+                prep.align_self,
+                line_cross,
+                item_natural_cross,
+                has_explicit_height,
+                direction,
+            );
+            let (item_x, item_y, item_w, item_h) = match direction {
+                FlexDirection::Row => {
+                    let y = align_on_cross_axis(
+                        current_cross,
+                        line_cross,
+                        item_cross_size,
+                        effective_align(prep.align_self, align_items),
+                    );
+                    (cursor_main, y, main_size, item_cross_size)
+                }
+                FlexDirection::Column => {
+                    let x = align_on_cross_axis(
+                        current_cross,
+                        line_cross,
+                        item_cross_size,
+                        effective_align(prep.align_self, align_items),
+                    );
+                    (x, cursor_main, item_cross_size, main_size)
+                }
+            };
+            let child_box = crate::layout::inner_formatting_context::flow::dispatch(
+                arena,
+                prep.node_id,
+                BoxConstraint {
+                    x: item_x,
+                    width: item_w.max(1),
+                },
+                &mut Cursor { y: item_y },
+                font_ctx,
+                Some(Rect::new(item_x, item_y, item_w.max(1), item_h.max(1))),
+            );
+            if let Some(child_box) = child_box {
+                // A flex item keeps its own inner formatting context (a plain
+                // `<div>` item remains `Flow`). The flex container itself
+                // is what establishes `FormattingContext::Flex` for its
+                // children, not each child.
+                placed.push(child_box);
+            } else {
+                log::warn!(
+                    "No layout handler for flex item {:?}",
+                    arena[prep.node_id].node_type
+                );
+            }
+            cursor_main = cursor_main.saturating_add(main_size);
+            if prep_idx + 1 < line_preps.len() {
+                cursor_main = cursor_main.saturating_add(main_gap);
+                cursor_main = cursor_main.saturating_add(justify_between);
+            }
+        }
+
+        // 3f. Advance the cross-axis cursor for the next line.
+        current_cross = current_cross.saturating_add(line_cross);
+        if line_idx + 1 < line_count {
+            current_cross = current_cross.saturating_add(cross_gap);
+        }
+    }
+
+    let total_cross = current_cross.saturating_sub(cross_origin);
+
+    // 4. Apply `align-content` to shift the stacked lines. We do this
+    //    by re-translating each already-placed child's cross-axis
+    //    coordinate by the same delta. The available cross-axis size is
+    //    direction-aware: row containers may use an explicit height,
+    //    while column containers use their known content width.
+    if line_count > 1 {
+        let cross_axis_size = match direction {
+            FlexDirection::Row => {
+                if has_explicit_height {
+                    container_height
+                } else {
+                    total_cross
+                }
+            }
+            FlexDirection::Column => content.width,
+        };
+        let total_lines_cross: usize = (0..line_count)
+            .map(|i| {
+                let indices = &lines[i];
+                let line_preps: Vec<&FlexItemPrep> = indices.iter().map(|j| &preps[*j]).collect();
+                let natural = line_preps
+                    .iter()
+                    .map(|p| natural_cross_axis_size(arena, p.node_id, direction, font_ctx))
+                    .max()
+                    .unwrap_or(FLEX_ITEM_MIN_CROSS)
+                    .max(FLEX_ITEM_MIN_CROSS);
+                let line_cross = if matches!(direction, FlexDirection::Row)
+                    && has_explicit_height
+                    && line_count == 1
+                {
+                    container_height
+                } else {
+                    natural
+                };
+                line_cross + if i + 1 < line_count { cross_gap } else { 0 }
+            })
+            .sum();
+        let free_space = cross_axis_size.saturating_sub(total_lines_cross);
+        let (leading, between) = align_content_spacing(align_content, free_space, line_count);
+        let mut shift: usize = leading;
+        let mut running_offset: usize = 0;
+        for (i, indices) in lines.iter().enumerate() {
+            if i > 0 {
+                shift = shift.saturating_add(between);
+            }
+            for (idx_pos, &_prep_idx) in indices.iter().enumerate() {
+                let child = &mut placed[running_offset + idx_pos];
+                let delta = match direction {
+                    FlexDirection::Row => (0, shift as isize),
+                    FlexDirection::Column => (shift as isize, 0),
+                };
+                child.rect.x = (child.rect.x as isize + delta.0).max(0) as usize;
+                child.rect.y = (child.rect.y as isize + delta.1).max(0) as usize;
+            }
+            running_offset = running_offset.saturating_add(indices.len());
+        }
+    }
+
+    let total_height = match direction {
+        FlexDirection::Row => total_cross,
+        FlexDirection::Column => total_main,
+    };
+
+    (placed, total_height)
+}

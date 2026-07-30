@@ -4,7 +4,7 @@ use crate::tdom::node::{NodeArena, NodeId};
 
 use super::{
     matcher::selector_chain_matches, properties::CssAttr, selector::CssSelector,
-    stylesheet::CssRule,
+    stylesheet::{CssRule, parse_declaration_text},
 };
 
 fn apply_css_rule(arena: &mut NodeArena, node_id: NodeId, selector: &CssSelector, css: &CssAttr) {
@@ -16,12 +16,29 @@ fn apply_css_rule(arena: &mut NodeArena, node_id: NodeId, selector: &CssSelector
         apply_css_rule(arena, child_id, selector, css);
     }
 }
+fn apply_inline_styles(arena: &mut NodeArena, node_id: NodeId) {
+    let inline_style = arena[node_id].attributes.get("style").cloned();
+    if let Some(style) = inline_style {
+        arena[node_id]
+            .css_attr
+            .add(CssAttr(parse_declaration_text(&style)));
+    }
+
+    let children = arena[node_id].children.clone();
+    for child_id in children {
+        apply_inline_styles(arena, child_id);
+    }
+}
+
 // css_into_node
 
 pub fn css_into_node(arena: &mut NodeArena, root_id: NodeId, css: &CssRule) {
     for (selector, attr) in css.0.iter() {
         apply_css_rule(arena, root_id, selector, attr);
     }
+    // Inline declarations have higher author-level precedence than matching
+    // stylesheet rules and must be present before inheritance is resolved.
+    apply_inline_styles(arena, root_id);
     // Propagate inheritable CSS properties (color, text-align, font-weight,
     // font-style, text-decoration)
     inherit_css(arena, root_id, &IndexMap::new());
@@ -46,6 +63,7 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "text-decoration",
     "font-size",
     "width",
+    "height",
     // Box-model edges
     "padding",
     "padding-top",
@@ -65,6 +83,21 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "border-width",
     "border-style",
     "border-color",
+    // Flexbox
+    "display",
+    "flex-direction",
+    "flex-wrap",
+    "justify-content",
+    "align-items",
+    "align-self",
+    "align-content",
+    "flex-grow",
+    "flex-shrink",
+    "flex-basis",
+    "order",
+    "gap",
+    "row-gap",
+    "column-gap",
 ];
 
 /// Inheritable subset of [`SUPPORTED_PROPERTIES`]: a child without an explicit

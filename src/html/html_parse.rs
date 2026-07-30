@@ -163,6 +163,7 @@ pub fn tag_name_to_node_type(tag: &str) -> Option<NodeType> {
         "tbody" => Some(NodeType::Tbody),
         "tfoot" => Some(NodeType::Tfoot),
         "div" => Some(NodeType::Div),
+        "em" => Some(NodeType::Em),
         "figcaption" => Some(NodeType::Figcaption),
         "figure" => Some(NodeType::Figure),
         "footer" => Some(NodeType::Footer),

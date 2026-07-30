@@ -1,7 +1,7 @@
 //! CSS box-model edge values: padding, border, margin.
 //!
 //! Each edge of a [`BoxEdges`] carries an [`EdgeSizes`] tuple (top, right,
-//! bottom, left). Together with [`Rect`](crate::layout::box_tree::Rect) they
+//! bottom, left). Together with [`Rect`](crate::layout::layoutbox::Rect) they
 //! fully describe the space taken by one block-level element:
 //!
 //! ```text
@@ -20,7 +20,7 @@
 //! ```
 //!
 //! The layout function stores the full *border-box* in
-//! [`Rect`](crate::layout::box_tree::Rect) and the content-box (rect shrunk by
+//! [`Rect`](crate::layout::layoutbox::Rect) and the content-box (rect shrunk by
 //! padding + border) is the inner [`BoxConstraint`](crate::layout::BoxConstraint)
 //! passed to nested children. Margins live *outside* the rect — they offset the
 //! rect within its containing block and reserve rows between siblings.

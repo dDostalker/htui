@@ -1,11 +1,17 @@
-//! Tests for `<a>` (anchor / hyperlink) inline rendering.
+//! Tests for `<a>` (anchor / hyperlink) rendering.
 //!
-//! `<a>` is recognised by the parser but previously had no handler in the
-//! layout pass — its text content was silently dropped because `walk_runs`
-//! only collected `Text` and `<span>` children. These tests pin down the
-//! inline rendering: link text reaches the canvas, the user-agent defaults
-//! (blue foreground, underline) apply when no CSS overrides them, and
-//! author CSS overrides take precedence over the defaults.
+//! `<a>` participates in two layout paths:
+//!
+//! - **Inline** when it sits inside another block's inline flow
+//!   (e.g. `<p>click <a>here</a> now</p>`). Handled by `walk_runs`; the
+//!   user-agent defaults (blue foreground, underline) and author-CSS
+//!   overrides are tested below in the *inline* section.
+//! - **Block** when it sits as a direct block-level child
+//!   (e.g. `<aside><a>Dashboard</a></aside>`). Handled by
+//!   [`crate::layout::layoutbox::inner_formatting_context::flow::layout_a`].
+//!   The user-agent defaults still apply; the *block* section below pins
+//!   down the new behaviour and guards against the silent regression that
+//!   left `<a>` unrendered before `layout_a` was registered.
 
 use crossterm::style::Color;
 use htui::html::{css_parse, html_parse};
@@ -254,5 +260,184 @@ fn test_a_preserves_text_decoration_line_through_instead_of_underline() {
     assert!(
         !cell.style.contains(FontStyle::UNDERLINED),
         "UA underline must yield to the declared line-through"
+    );
+}
+
+// =============================================================================
+// Block-level rendering
+// =============================================================================
+
+/// Build the canvas and return the per-row text string for inspection. Mirrors
+/// the helper used by `layout_flex_tests` so block-position assertions have the
+/// same shape as the existing flex coverage.
+fn render_rows(html: &str, css: &str) -> (Vec<String>, TermLayout) {
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    let cols = term_map.columns as usize;
+    let mut rows: Vec<String> = Vec::new();
+    for chunk in tl.layout.chunks(cols) {
+        let s: String = chunk.iter().map(|b| b.word.as_str()).collect();
+        rows.push(s);
+    }
+    (rows, tl)
+}
+
+#[test]
+fn test_block_a_renders_text_as_its_own_row() {
+    // Before `layout_a` was registered, an `<a>` sitting as a direct block-level
+    // child was silently dropped (the registry iterated past it and returned
+    // `None`). This is the regression guard: the four `<a>` items in a
+    // navigation-style sidebar must each occupy their own row, in document
+    // order, with no text loss.
+    init();
+    let html = r##"
+        <aside>
+            <h3>Menu</h3>
+            <a href="#">Dashboard</a>
+            <a href="#">Projects</a>
+            <a href="#">Tasks</a>
+            <a href="#">Settings</a>
+        </aside>
+    "##;
+    let (rows, _) = render_rows(html, "a { display: block; }");
+    assert!(rows.iter().any(|r| r.contains("Dashboard")), "Dashboard must render");
+    assert!(rows.iter().any(|r| r.contains("Projects")), "Projects must render");
+    assert!(rows.iter().any(|r| r.contains("Tasks")), "Tasks must render");
+    assert!(rows.iter().any(|r| r.contains("Settings")), "Settings must render");
+}
+
+#[test]
+fn test_block_a_default_underline_applies() {
+    // UA default for the block path: an unstyled block `<a>` is underlined.
+    init();
+    let html = r#"<aside><a href="x">link</a></aside>"#;
+    let (root_id, arena) = setup(html, "a { display: block; }");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    let idx = first_cell_with(&tl, "l").expect("link text must render");
+    assert!(
+        tl.layout[idx].style.contains(FontStyle::UNDERLINED),
+        "block <a> UA default must be underlined (got {:?})",
+        tl.layout[idx].style
+    );
+}
+
+#[test]
+fn test_block_a_default_blue_color_applies() {
+    // UA default for the block path: an unstyled block `<a>` is blue.
+    init();
+    let html = r#"<aside><a href="x">link</a></aside>"#;
+    let (root_id, arena) = setup(html, "a { display: block; }");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    let idx = first_cell_with(&tl, "l").expect("link text must render");
+    assert_eq!(
+        tl.layout[idx].fcolor,
+        Some(Color::Blue),
+        "block <a> UA default must use blue foreground (got {:?})",
+        tl.layout[idx].fcolor
+    );
+}
+
+#[test]
+fn test_block_a_text_decoration_none_disables_underline() {
+    // Author CSS overriding the UA default must take effect on the block path.
+    init();
+    let html = r#"<aside><a href="x">link</a></aside>"#;
+    let (root_id, arena) = setup(
+        html,
+        "a { display: block; text-decoration: none; }",
+    );
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    let idx = first_cell_with(&tl, "l").expect("link text must render");
+    assert!(
+        !tl.layout[idx].style.contains(FontStyle::UNDERLINED),
+        "`a {{ text-decoration: none }}` must suppress the UA underline on the block path"
+    );
+}
+
+#[test]
+fn test_block_a_color_override_disables_default_blue() {
+    init();
+    let html = r#"<aside><a href="x">link</a></aside>"#;
+    let (root_id, arena) = setup(html, "a { display: block; color: magenta; }");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    let idx = first_cell_with(&tl, "l").expect("link text must render");
+    assert_eq!(
+        tl.layout[idx].fcolor,
+        Some(Color::Magenta),
+        "`a {{ color: magenta }}` must override the default blue on the block path"
+    );
+    // Underline default should still apply because we didn't override it.
+    assert!(
+        tl.layout[idx].style.contains(FontStyle::UNDERLINED),
+        "color override must not affect the underline default on the block path"
+    );
+}
+
+#[test]
+fn test_block_a_inherits_parent_color_when_no_override() {
+    // The cascade populates `color` for `<a>` from its parent block; the
+    // cloned-Node approach in `layout_a` must not lose that inherited value.
+    init();
+    let html = r#"<aside><a href="x">link</a></aside>"#;
+    let (root_id, arena) = setup(html, "aside { color: red; } a { display: block; }");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    let idx = first_cell_with(&tl, "l").expect("link text must render");
+    assert_eq!(
+        tl.layout[idx].fcolor,
+        Some(Color::Red),
+        "block <a> must inherit the parent block's color (got {:?})",
+        tl.layout[idx].fcolor
+    );
+}
+
+#[test]
+fn test_block_a_visual_test_sidebar_renders_all_menu_items() {
+    // End-to-end regression for the `css` visual test: the sidebar's `<a>`
+    // menu items (Dashboard / Projects / Tasks / Settings) must each appear
+    // in the canvas. Before `layout_a` was registered, only the `<h3>Menu`
+    // heading rendered — the four `<a>` links were silently dropped.
+    init();
+    let html = r##"
+        <aside class="sidebar">
+            <h3>Menu</h3>
+            <a href="#">Dashboard</a>
+            <a href="#">Projects</a>
+            <a href="#">Tasks</a>
+            <a href="#">Settings</a>
+        </aside>
+    "##;
+    let css = r#"
+        .sidebar a {
+            display: block;
+            color: #cbd5e1;
+            text-decoration: none;
+            padding: 8px 0;
+        }
+    "#;
+    let (rows, tl) = render_rows(html, css);
+    for menu_item in ["Dashboard", "Projects", "Tasks", "Settings"] {
+        assert!(
+            rows.iter().any(|r| r.contains(menu_item)),
+            "sidebar <a> menu item {menu_item:?} must render"
+        );
+    }
+    // Author `text-decoration: none` overrides the UA underline default:
+    // no link cell should carry UNDERLINED.
+    let any_underlined = tl.layout.iter().any(|b| b.style.contains(FontStyle::UNDERLINED));
+    assert!(
+        !any_underlined,
+        "author `text-decoration: none` must suppress the UA underline default on every sidebar link"
     );
 }

@@ -355,7 +355,7 @@ fn test_aside_rect_height_includes_nested_children() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
 
-    use htui::layout::{BoxConstraint, Cursor, tree::layout_tree};
+    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor};
     let containing = BoxConstraint::root(&term_map);
     let mut cursor = Cursor::new();
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor);
@@ -527,7 +527,7 @@ fn test_aside_without_children_still_has_height_one() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
 
-    use htui::layout::{BoxConstraint, Cursor, tree::layout_tree};
+    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor};
     let containing = BoxConstraint::root(&term_map);
     let mut cursor = Cursor::new();
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor);

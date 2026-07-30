@@ -49,7 +49,10 @@ fn cell_containing(tl: &TermLayout, needle: &str) -> Option<(usize, usize, usize
 
 #[test]
 fn test_parse_tag_map_table() {
-    assert_eq!(html_parse::tag_name_to_node_type("table"), Some(NodeType::Table));
+    assert_eq!(
+        html_parse::tag_name_to_node_type("table"),
+        Some(NodeType::Table)
+    );
     assert_eq!(html_parse::tag_name_to_node_type("tr"), Some(NodeType::Tr));
     assert_eq!(html_parse::tag_name_to_node_type("td"), Some(NodeType::Td));
     assert_eq!(html_parse::tag_name_to_node_type("th"), Some(NodeType::Th));
@@ -69,7 +72,10 @@ fn test_parse_tag_map_table() {
 
 #[test]
 fn test_parse_tag_map_uppercase_table() {
-    assert_eq!(html_parse::tag_name_to_node_type("TABLE"), Some(NodeType::Table));
+    assert_eq!(
+        html_parse::tag_name_to_node_type("TABLE"),
+        Some(NodeType::Table)
+    );
     assert_eq!(html_parse::tag_name_to_node_type("TR"), Some(NodeType::Tr));
     assert_eq!(html_parse::tag_name_to_node_type("TD"), Some(NodeType::Td));
     assert_eq!(html_parse::tag_name_to_node_type("TH"), Some(NodeType::Th));
@@ -94,8 +100,7 @@ fn test_table_renders_all_cell_text() {
 #[test]
 fn test_table_renders_th_header_text() {
     init();
-    let html =
-        "<table><tr><th>Name</th><th>Role</th></tr><tr><td>Alice</td><td>Engineer</td></tr></table>";
+    let html = "<table><tr><th>Name</th><th>Role</th></tr><tr><td>Alice</td><td>Engineer</td></tr></table>";
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
@@ -245,7 +250,10 @@ fn test_table_css_border_draws_box_glyphs() {
         "table border should draw at least one ─ or │ glyph"
     );
     assert!(
-        canvas.contains('┌') || canvas.contains('┐') || canvas.contains('└') || canvas.contains('┘'),
+        canvas.contains('┌')
+            || canvas.contains('┐')
+            || canvas.contains('└')
+            || canvas.contains('┘'),
         "table border should draw at least one corner glyph"
     );
 }
@@ -261,10 +269,7 @@ fn test_table_cell_color_applies() {
     tl.draw(&arena, root_id, &term_map).unwrap();
 
     let has_red = tl.layout.iter().any(|b| b.fcolor == Some(Color::Red));
-    assert!(
-        has_red,
-        "td should pick up `color: red` via CSS selector"
-    );
+    assert!(has_red, "td should pick up `color: red` via CSS selector");
 }
 
 #[test]
@@ -285,6 +290,46 @@ fn test_table_cell_bg_color_applies() {
     assert!(
         yellow_count > 0,
         "td background-color: yellow should paint at least one cell"
+    );
+}
+
+#[test]
+fn test_table_nth_child_even_stripes_td_bg() {
+    // Mirrors the `table/index.html` visual test: `tr:nth-child(even) td` and
+    // `tr:nth-child(odd) td` must colour the even / odd rows' cells
+    // distinctly. Before the `:nth-child()` selector was implemented, both
+    // rules silently no-op'd so all cells kept the same background.
+    init();
+    let html = "<table>\
+        <tr><td>R1</td></tr>\
+        <tr><td>R2</td></tr>\
+        <tr><td>R3</td></tr>\
+        <tr><td>R4</td></tr>\
+        </table>";
+    let css = "tr:nth-child(even) td { background-color: darkgrey; } \
+               tr:nth-child(odd) td { background-color: black; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map).unwrap();
+
+    let even_cells = tl
+        .layout
+        .iter()
+        .filter(|b| b.bcolor == Some(Color::Grey))
+        .count();
+    let odd_cells = tl
+        .layout
+        .iter()
+        .filter(|b| b.bcolor == Some(Color::Black))
+        .count();
+    assert!(
+        even_cells > 0,
+        "nth-child(even) must colour at least one cell darkgrey (got {even_cells})"
+    );
+    assert!(
+        odd_cells > 0,
+        "nth-child(odd) must colour at least one cell black (got {odd_cells})"
     );
 }
 
@@ -398,7 +443,10 @@ fn test_table_three_column_alignment() {
     assert_eq!(a_col, d_col, "col 1 aligned");
     assert_eq!(b_col, e_col, "col 2 aligned");
     assert_eq!(c_col, f_col, "col 3 aligned");
-    assert!(a_col < b_col && b_col < c_col, "columns monotonically increase");
+    assert!(
+        a_col < b_col && b_col < c_col,
+        "columns monotonically increase"
+    );
 }
 
 #[test]
@@ -458,5 +506,3 @@ fn test_table_outside_table_falls_back_to_block() {
         "stray <td> text should still render via fallback block"
     );
 }
-
-
