@@ -6,6 +6,17 @@ use indexmap::IndexMap;
 
 use crate::html::box_edges::{Border, BorderStyle, EdgeSizes};
 
+/// Number of CSS px represented by one terminal cell on each axis.
+/// CSS defines 1px as 1/96 inch; terminals cannot query physical DPI,
+/// so we anchor px to the cell grid (1px == 1 cell column or row). This
+/// makes every parsed px an integer cell count without rounding. The
+/// constant is named so future changes (e.g. a 2x DPI mode) have one
+/// edit point. This constant only governs CSS px, not the numeric
+/// pixels on img HTML attributes, which describe source-image pixels
+/// and are sampled at the ratios defined in tui::graph_api::image
+/// (IMAGE_PIXELS_PER_CELL_COL / IMAGE_PIXELS_PER_CELL_ROW).
+pub const PX_PER_CELL: f32 = 1.0;
+
 /// Parse a CSS color string into a [`crossterm::style::Color`].
 ///
 /// Supported formats:
@@ -358,6 +369,12 @@ pub enum Length {
     /// `auto` — defer to the containing block.
     Auto,
     /// Absolute cell count (CSS `40px` or bare `40`).
+    ///
+    /// For CSS `px` the cell count is exactly the parsed value: 1 CSS px
+    /// maps to 1 cell via [`PX_PER_CELL`]. Bare integers are accepted
+    /// for convenience (`width: 40` is equivalent to `width: 40px`).
+    /// This variant does NOT represent source-image pixels, which use a
+    /// different sampling rule (see `tui::graph_api::image`).
     Cells(usize),
     /// Percentage 0..=100 of the containing block (CSS `50%`).
     Pct(f32),
@@ -417,7 +434,11 @@ impl Length {
             } => {
                 let n = int_value.map(|i| i as f32).unwrap_or(*value);
                 match unit.to_ascii_lowercase().as_str() {
-                    "px" => PreLength::Cells(n),
+                    // CSS px: anchor to the cell grid via PX_PER_CELL. With the
+                    // current 1.0 ratio this collapses to the raw value, but the
+                    // explicit multiply makes the conversion searchable and gives
+                    // a single edit-point should the per-cell px ratio ever change.
+                    "px" => PreLength::Cells(n * PX_PER_CELL),
                     "em" => PreLength::Em(n),
                     "rem" => PreLength::Rem(n),
                     // vw / vh / vmin / vmax / pt / cm / mm / in / pc / ...

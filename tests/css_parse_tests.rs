@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use crossterm::style::Color;
 use htui::html::css_parse::{
     BorderStyle, Combinator, CssAttr, CssRule, CssSelector, EdgeSizes, FontWeight, INHERITED_PROPS,
-    Length, NthExpr, Parser, SUPPORTED_PROPERTIES, TextDecoration, css_into_node, parse_color_str,
-    parse_declaration_text, selector_chain_matches,
+    Length, NthExpr, PX_PER_CELL, Parser, SUPPORTED_PROPERTIES, TextDecoration, css_into_node,
+    parse_color_str, parse_declaration_text, selector_chain_matches,
 };
 use htui::tdom::node::{Node, NodeArena, NodeId, NodeType};
 use indexmap::IndexMap;
@@ -577,6 +577,53 @@ fn length_parse_cells_px() {
     assert_eq!(Length::parse("30PX"), Some(Length::Cells(30)));
     // Trailing whitespace tolerated.
     assert_eq!(Length::parse("20px\n"), Some(Length::Cells(20)));
+}
+
+#[test]
+fn px_per_cell_constant_anchors_px_to_one_cell() {
+    // Standardized px semantics: 1 CSS px == 1 terminal cell. This is the
+    // single edit-point for any future DPI mode (e.g. 2x retina = 2.0).
+    assert_eq!(PX_PER_CELL, 1.0);
+}
+
+#[test]
+fn length_parse_cells_px_fractional_rounds_half_away_from_zero() {
+    init();
+    // Fractional px values are accepted but round to integer cells. We use
+    // round-half-away-from-zero (Rust's f32::round), not banker's rounding,
+    // because terminals need a stable, monotonic mapping. These edge cases
+    // are the standardized behavior future tests should not regress.
+    assert_eq!(Length::parse("0.4px"), Some(Length::Cells(0)));
+    assert_eq!(Length::parse("0.5px"), Some(Length::Cells(1)));
+    assert_eq!(Length::parse("0.6px"), Some(Length::Cells(1)));
+    assert_eq!(Length::parse("1.5px"), Some(Length::Cells(2)));
+    assert_eq!(Length::parse("2.5px"), Some(Length::Cells(3)));
+    assert_eq!(Length::parse("100.4px"), Some(Length::Cells(100)));
+}
+
+#[test]
+fn length_parse_cells_px_zero_and_integer_exact() {
+    init();
+    // 0px must parse to Cells(0), not None -- otherwise zero-sized boxes
+    // would silently fall through to the containing block width.
+    assert_eq!(Length::parse("0px"), Some(Length::Cells(0)));
+    assert_eq!(Length::parse("1px"), Some(Length::Cells(1)));
+    assert_eq!(Length::parse("1000px"), Some(Length::Cells(1000)));
+}
+
+#[test]
+fn length_parse_cells_px_multiply_matches_raw_value_when_ratio_is_one() {
+    // With PX_PER_CELL == 1.0, the px branch multiplies by 1.0 and then
+    // rounds. This test pins the multiplication so any future change to
+    // the constant forces a deliberate update here.
+    init();
+    assert_eq!(
+        (40.0_f32 * PX_PER_CELL).round() as usize,
+        Length::parse("40px").map(|l| match l {
+            Length::Cells(n) => n,
+            _ => panic!("expected Cells"),
+        }).unwrap()
+    );
 }
 
 #[test]

@@ -646,9 +646,47 @@ CSS 中垂直 padding/margin 的百分比按 containing block 的 inline size �
 
 当前 `gap`、`row-gap`、`column-gap` 使用 `usize::MAX` 作为长度解析基准。绝对值、`em`、`rem` 不受影响，但百分比会产生无意义的巨大结果。在 flex container 的实际轴尺寸传入前，gap 应只使用绝对或字体相对单位。
 
-#### `px`
+#### `px` —— 两套标准化的换算公式
 
-盒模型 CSS 中 `1px` 当前等于 1 cell；图片 HTML 属性则按 2×4 像素采样换算：约 2 个图片像素对应 1 列、4 个图片像素对应 1 行。这是两套有意不同但容易混淆的语义，文档和测试必须明确区分，不能把 CSS `px` 描述成真实图片像素。
+CSS `px` 与 `img` HTML 属性的"像素"是**两个不同概念**，目前各自由一个具名常量锚定，避免魔法数字在代码里到处出现。
+
+**CSS `px` —— 锚定为 `PX_PER_CELL`**
+
+[`PX_PER_CELL`](../src/html/css_parse/values.rs) 是 `Length::parse` 中 `px` 分支的乘子：
+
+```text
+cells = px × PX_PER_CELL        （PX_PER_CELL == 1.0）
+```
+
+也就是说 `width: 40px` 与 `width: 40` 都解析成 `Length::Cells(40)`，与裸整数完全等价。该常量存在的意义是为后续可能的"每 cell 多 px"模式（例如 2× DPI 模拟）保留单点编辑位；当前没有运行时效果，仅是文档锚。
+
+CSS 规范定义 `1px ≈ 1/96 inch`，终端无法查询物理 DPI，因此采用"headless 终端渲染器的惯例"——把 CSS 像素固定为 1 cell 列（或 1 cell 行），使任何解析得到的 px 都是整数 cell 数量，无需取整。
+
+**`img` HTML 属性像素 —— 锚定为 `IMAGE_PIXELS_PER_CELL_*`**
+
+[`IMAGE_PIXELS_PER_CELL_COL`](../src/tui/graph_api/image.rs) 和 [`IMAGE_PIXELS_PER_CELL_ROW`](../src/tui/graph_api/image.rs) 是**源图像素**到终端 cell 的采样比：
+
+```text
+1 cell = IMAGE_PIXELS_PER_CELL_COL × IMAGE_PIXELS_PER_CELL_ROW
+       = 2 × 4 = 8 source pixels
+```
+
+终端网格不是正方形（常见 cell 长宽比约 1:2），所以水平与垂直采用不同采样率。`_create_img` 在 2×4 的源图像素块上走一遍，把每个像素按位置分配到 braille 字符的 8 个点位之一。
+
+`<img width="200">` 表示"源图宽度 200 像素"，对应 `200 / IMAGE_PIXELS_PER_CELL_COL = 100` 个 cell；`<img height="100">` 对应 `100 / IMAGE_PIXELS_PER_CELL_ROW = 25` 个 cell。HTML 属性不接受 `px` 后缀——`<img width="200px">` 会被 Rust 的 `u32::parse` 拒绝并回退到默认 2:1 portrait，与裸 `width="200"` 不等价，文档与测试必须明确这一边界。
+
+**两套语义的关系**
+
+| 维度 | CSS `px` | `img` HTML 属性 |
+| --- | --- | --- |
+| 描述什么 | 盒模型布局尺寸 | 源图像素尺寸 |
+| 锚定常量 | `PX_PER_CELL = 1.0` | `IMAGE_PIXELS_PER_CELL_COL = 2`、`_ROW = 4` |
+| 解析函数 | `Length::parse("40px")` | `Node::get_width()` / `get_height()` |
+| 接受 `px` 后缀？ | 是 | 否 |
+| 适用于 | `width`、`height`、`padding`、`border`、`margin`、`gap` | 仅 `img` 的 `width` / `height` |
+| 默认映射 | 1 cell = 1 px | 1 cell = 2×4 = 8 source px |
+
+测试与文档不得把这两套混用——例如不要写"`img width=200 表示 200 个 CSS 像素`"，正确的说法是"200 个源图像素，约 100 个 cell 列"。
 
 ### 10.5 当前不适合实现
 
