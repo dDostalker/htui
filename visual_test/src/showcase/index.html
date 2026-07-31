@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<!--
+  ============================================
+  htui Showcase — "Nebula" system dashboard
+  Run:   cargo run -p visual_test -- showcase
+  Dump:  cargo run -p visual_test -- --dump showcase
+         cargo run -p visual_test -- --dump bg showcase
+  Open this file in a browser to preview the same
+  styling the terminal renderer produces.
+  ============================================
+  Demonstrates the best of what htui can render:
+    - full RGB color theming (hex)
+    - flexbox app shell (header / sidebar / main / footer)
+    - viewport-height (vh) full-screen layout
+    - bordered panels with padding
+    - faux data table via flex rows
+    - progress bars via flex-grow ratios
+    - color-coded status indicators
+  htui conventions honoured:
+    - flex containers only hold <div> items (never <span>);
+    - vertical stacking uses normal block flow (reliable content height);
+    - flex is used for horizontal side-by-side layout only.
+  ============================================
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>htui Showcase — Nebula Dashboard</title>
+    <style>
+        /* ---------- palette (Tokyo Night inspired) ---------- */
+        body {
+            margin: 0;
+            background-color: #1a1b26;
+            color: #c0caf5;
+        }
+
+        .c-muted { color: #565f89; }
+        .c-dim   { color: #737aa2; }
+        .c-blue  { color: #7aa2f7; }
+        .c-cyan  { color: #7dcfff; }
+        .c-green { color: #9ece6a; }
+        .c-yel   { color: #e0af68; }
+        .c-red   { color: #f7768e; }
+        .c-purp  { color: #bb9af7; }
+
+        /* ---------- typography helpers ---------- */
+        .bold   { font-weight: bold; }
+        .small  { color: #737aa2; }
+
+        /* ---------- layout helpers ---------- */
+        .app    { display: flex; flex-direction: column; height: 100vh; }
+        .row    { display: flex; flex-direction: row; }
+        .col    { display: flex; flex-direction: column; }
+        .grow   { flex-grow: 1; }
+        .ta-r   { text-align: right; }
+        .gap-1  { gap: 1; }
+        .gap-2  { gap: 2; }
+        .pad-x1 { padding: 0px 1px; }
+        .pad-x2 { padding: 0px 2px; }
+        .mar-t1 { margin: 1px 0 0 0; }
+
+        /* ---------- header ---------- */
+        header.app-header {
+            color: #c0caf5;
+            background-color: #1f2335;
+            padding: 0px 2px;
+        }
+        .brand-mark { color: #7dcfff; font-weight: bold; }
+
+        /* ---------- sidebar ---------- */
+        .sidebar {
+            width: 17;
+            flex-shrink: 0;
+            background-color: #1f2335;
+            padding: 1px 0;
+        }
+        .nav-item    { color: #737aa2; padding: 0px 1px; }
+        .nav-active  { color: #7aa2f7; background-color: #2f334d; padding: 0px 1px; font-weight: bold; }
+        .nav-section { color: #565f89; padding: 1px 1px 0px 1px; }
+
+        /* ---------- cards / panels ---------- */
+        .panel {
+            border: 1px solid #2f334d;
+            background-color: #24283b;
+        }
+        .panel-head {
+            color: #7dcfff;
+            background-color: #2f334d;
+            padding: 0px 2px;
+            font-weight: bold;
+        }
+        .stat-card {
+            border: 1px solid #2f334d;
+            background-color: #24283b;
+            padding: 1px 2px;
+        }
+        .card-value { color: #7dcfff; font-weight: bold; }
+
+        /* ---------- progress bars ---------- */
+        .bar { display: flex; height: 1; }
+        .bar-fill   { background-color: #9ece6a; }
+        .bar-empty  { background-color: #2f334d; }
+        .bar-fill-y { background-color: #e0af68; }
+        .bar-fill-r { background-color: #f7768e; }
+        .bar-fill-b { background-color: #7aa2f7; }
+        .bar-fill-p { background-color: #bb9af7; }
+
+        /* ---------- faux table columns ---------- */
+        .tbl-head { color: #7dcfff; background-color: #2f334d; }
+        .c-pid   { flex-basis: 6; flex-shrink: 0; }
+        .c-cpu   { flex-basis: 6; flex-shrink: 0; }
+        .c-mem   { flex-basis: 6; flex-shrink: 0; }
+        .stripe  { background-color: #2a2e44; }
+
+        /* ---------- footer ---------- */
+        footer.app-footer {
+            color: #737aa2;
+            background-color: #1f2335;
+            padding: 0px 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <!-- ===================== HEADER ===================== -->
+        <header class="app-header">
+            <div class="row">
+                <div class="grow"><span class="brand-mark">◆ NEBULA</span><span class="c-muted"> · system console</span></div>
+                <div class="grow ta-r"><span class="small">prod-us-east</span><span class="c-green bold"> ● LIVE</span><span class="c-purp bold"> · admin</span></div>
+            </div>
+        </header>
+
+        <!-- ================ BODY (sidebar + main) ================ -->
+        <div class="row grow">
+            <!-- ---------- SIDEBAR ---------- -->
+            <div class="sidebar">
+                <div class="nav-section small bold">MONITOR</div>
+                <div class="nav-active">▸ Overview</div>
+                <div class="nav-item">  Instances</div>
+                <div class="nav-item">  Network</div>
+                <div class="nav-item">  Storage</div>
+                <div class="nav-section small bold">OPERATE</div>
+                <div class="nav-item">  Deployments</div>
+                <div class="nav-item">  Alerts</div>
+                <div class="nav-section small bold">SYSTEM</div>
+                <div class="nav-item">  Settings</div>
+                <div class="nav-item">  Logs</div>
+            </div>
+
+            <!-- ---------- MAIN (flex column: sections stack, panels row grows) ---------- -->
+            <div class="col grow gap-1" style="padding: 1px 2px;">
+
+                <!-- page title -->
+                <div class="row">
+                    <div class="grow"><span class="c-blue bold">Overview</span><span class="c-muted"> · cluster health</span></div>
+                    <div class="grow ta-r c-dim">refresh 2s · 24h</div>
+                </div>
+
+                <!-- ---------- STAT CARDS ---------- -->
+                <div class="row gap-2">
+                    <div class="stat-card grow">
+                        <div class="small">CPU LOAD</div>
+                        <div class="card-value c-cyan">38%</div>
+                        <div class="bar">
+                            <div class="bar-fill bar-fill-b" style="flex-grow: 38;"></div>
+                            <div class="bar-empty" style="flex-grow: 62;"></div>
+                        </div>
+                    </div>
+                    <div class="stat-card grow">
+                        <div class="small">MEMORY</div>
+                        <div class="card-value c-yel">61%</div>
+                        <div class="bar">
+                            <div class="bar-fill bar-fill-y" style="flex-grow: 61;"></div>
+                            <div class="bar-empty" style="flex-grow: 39;"></div>
+                        </div>
+                    </div>
+                    <div class="stat-card grow">
+                        <div class="small">DISK I/O</div>
+                        <div class="card-value c-green">812 MB/s</div>
+                        <div class="bar">
+                            <div class="bar-fill" style="flex-grow: 27;"></div>
+                            <div class="bar-empty" style="flex-grow: 73;"></div>
+                        </div>
+                    </div>
+                    <div class="stat-card grow">
+                        <div class="small">NETWORK</div>
+                        <div class="card-value c-purp">2.4 Gb/s</div>
+                        <div class="bar">
+                            <div class="bar-fill bar-fill-p" style="flex-grow: 48;"></div>
+                            <div class="bar-empty" style="flex-grow: 52;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ---------- TWO-PANEL ROW (grows to fill remaining height) ---------- -->
+                <div class="row gap-2 grow">
+                    <!-- left: top processes table -->
+                    <div class="panel grow">
+                        <div class="panel-head">Top Processes</div>
+                        <div class="row tbl-head pad-x2">
+                            <div class="c-pid">PID</div>
+                            <div class="c-cpu">CPU%</div>
+                            <div class="c-mem">MEM%</div>
+                            <div class="grow">COMMAND</div>
+                        </div>
+                        <div class="row pad-x2">
+                            <div class="c-pid c-dim">4821</div>
+                            <div class="c-cpu c-red">98.4</div>
+                            <div class="c-mem c-yel">14.2</div>
+                            <div class="grow">node --space</div>
+                        </div>
+                        <div class="row pad-x2 stripe">
+                            <div class="c-pid c-dim">7732</div>
+                            <div class="c-cpu c-yel">72.1</div>
+                            <div class="c-mem c-green">8.0</div>
+                            <div class="grow">postgres -D</div>
+                        </div>
+                        <div class="row pad-x2">
+                            <div class="c-pid c-dim">1190</div>
+                            <div class="c-cpu c-yel">54.9</div>
+                            <div class="c-mem c-green">6.4</div>
+                            <div class="grow">redis :6379</div>
+                        </div>
+                        <div class="row pad-x2 stripe">
+                            <div class="c-pid c-dim">3344</div>
+                            <div class="c-cpu c-green">21.7</div>
+                            <div class="c-mem c-green">3.1</div>
+                            <div class="grow">nginx worker</div>
+                        </div>
+                        <div class="row pad-x2">
+                            <div class="c-pid c-dim">9001</div>
+                            <div class="c-cpu c-green">12.0</div>
+                            <div class="c-mem c-green">2.2</div>
+                            <div class="grow">prometheus</div>
+                        </div>
+                    </div>
+
+                    <!-- right: volume + services (panel = normal block, sections stack in flow) -->
+                    <div class="panel grow">
+                        <div class="panel-head">Volume Usage</div>
+                        <div class="col gap-1 pad-x2" style="padding: 1px 2px;">
+                            <div class="row">
+                                <div class="grow">/var/data</div>
+                                <div class="small">78%</div>
+                            </div>
+                            <div class="bar">
+                                <div class="bar-fill bar-fill-y" style="flex-grow: 78;"></div>
+                                <div class="bar-empty" style="flex-grow: 22;"></div>
+                            </div>
+                            <div class="row">
+                                <div class="grow">/srv/app</div>
+                                <div class="small">43%</div>
+                            </div>
+                            <div class="bar">
+                                <div class="bar-fill" style="flex-grow: 43;"></div>
+                                <div class="bar-empty" style="flex-grow: 57;"></div>
+                            </div>
+                            <div class="row">
+                                <div class="grow">/backups</div>
+                                <div class="c-red small">94%</div>
+                            </div>
+                            <div class="bar">
+                                <div class="bar-fill bar-fill-r" style="flex-grow: 94;"></div>
+                                <div class="bar-empty" style="flex-grow: 6;"></div>
+                            </div>
+                            <div class="row">
+                                <div class="grow">/cache</div>
+                                <div class="small">12%</div>
+                            </div>
+                            <div class="bar">
+                                <div class="bar-fill bar-fill-b" style="flex-grow: 12;"></div>
+                                <div class="bar-empty" style="flex-grow: 88;"></div>
+                            </div>
+                        </div>
+
+                        <div class="panel-head">Services</div>
+                        <div class="col gap-1" style="padding: 1px 2px;">
+                            <div class="row">
+                                <div class="grow c-green">● api-gateway</div>
+                                <div class="small">200 OK</div>
+                            </div>
+                            <div class="row">
+                                <div class="grow c-green">● auth-svc</div>
+                                <div class="small">200 OK</div>
+                            </div>
+                            <div class="row">
+                                <div class="grow c-yel">● celery</div>
+                                <div class="small">degraded</div>
+                            </div>
+                            <div class="row">
+                                <div class="grow c-green">● db-primary</div>
+                                <div class="small">healthy</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ---------- ACTIVITY LOG ---------- -->
+                <div class="panel">
+                    <div class="panel-head">Recent Events</div>
+                    <div class="col gap-1" style="padding: 1px 2px;">
+                        <div><span class="c-muted">12:04:21</span><span class="c-red bold"> ALERT </span><span>backups &gt; 90%</span></div>
+                        <div><span class="c-muted">11:58:02</span><span class="c-green bold"> DEPLOY </span><span>auth-svc v3.4.1</span></div>
+                        <div><span class="c-muted">11:41:55</span><span class="c-blue bold"> SCALE </span><span>+2 instances</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===================== FOOTER ===================== -->
+        <footer class="app-footer">
+            <div class="row">
+                <div class="grow"><span class="c-green">●</span><span> connected · 14 nodes</span></div>
+                <div class="grow ta-r"><span class="c-muted">htui v0.1.0</span><span> · uptime 17d</span><span class="c-cyan"> ↑2.1 ↓8.4G</span></div>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>

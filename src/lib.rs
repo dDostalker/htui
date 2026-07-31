@@ -224,8 +224,10 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
 // ============================================================
 
 pub fn render(html: &str, css: &str) {
+    // install debug hook
     #[cfg(debug_assertions)]
     install_debug_panic_hook();
+    
     if let Err(e) = enable_raw_mode() {
         log::error!("Failed to enable raw mode: {}", e);
         return;
