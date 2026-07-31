@@ -472,12 +472,19 @@ fn render_to_bytes_includes_bg_sgr_on_pad_cells_for_padded_em_block() {
     // `background-color: darkgreen` SGR. Before the fix, the bg-pad
     // cells were skipped by `render_to_bytes`, leaving gaps of un-bged
     // cells between letters (the user-visible jaggedness).
-    let (_term_map, tl) = draw(
+    let (term_map, tl) = draw(
         r#"<p class="pad-em">em padding</p>"#,
         "p.pad-em { font-size: 2em; padding: 0.5em 1em; background-color: darkgreen; color: white; }",
     );
     let bytes = tl.render_to_bytes();
     let rendered = String::from_utf8_lossy(&bytes);
+    let cols = term_map.columns as usize;
+    eprintln!("rendered (no escapes) = {:?}", rendered.replace('\x1B', "<ESC>"));
+    eprintln!("row 1 cells (cols 0-25):");
+    for i in 0..26 {
+        let c = &tl.layout[cols + i];
+        eprintln!("  cell {i}: word={:?} fg={:?} bg={:?} style={:?}", c.word, c.fcolor, c.bcolor, c.style);
+    }
     let dark_green_sgr = "\x1B[48;5;2m"; // crossterm maps DarkGreen to 256-color 2
     assert!(
         rendered.contains(dark_green_sgr),

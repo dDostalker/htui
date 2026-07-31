@@ -599,6 +599,124 @@ pub enum TextDecoration {
 }
 
 // ============================================================
+// Text-wrapping property values (CSS Text Level 3 subset)
+//
+// Parsers and enums for `white-space`, `word-break`, and
+// `overflow-wrap`. These properties do NOT inherit per the CSS
+// spec, so they live on `CssAttr` lookup, not in `INHERITED_PROPS`.
+// The renderer honours the defaults that browsers ship:
+//   - white-space: normal   (collapse ws + wrap)
+//   - word-break:  normal   (allow CJK character breaks)
+//   - overflow-wrap: normal (no mid-word breaks unless the word
+//     itself doesn't fit on a single line)
+// ============================================================
+
+/// Whitespace handling (CSS `white-space`).
+///
+/// Mirrors the CSS Text Module Level 3 grammar. The two orthogonal
+/// axes are:
+///
+/// - **collapsing** — whether runs of whitespace are folded into a
+///   single space (`normal` / `nowrap` / `pre-line`) or preserved
+///   verbatim (`pre` / `pre-wrap`).
+/// - **wrapping** — whether soft-wrap opportunities exist
+///   (`normal` / `pre-wrap` / `pre-line`) or the text is forced to
+///   a single line (`nowrap` / `pre`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WhiteSpace {
+    /// `normal` — collapse whitespace, wrap at soft-wrap opportunities.
+    #[default]
+    Normal,
+    /// `pre` — preserve whitespace and newlines verbatim, no wrapping.
+    Pre,
+    /// `nowrap` — collapse whitespace but never wrap.
+    NoWrap,
+    /// `pre-wrap` — preserve whitespace and newlines, allow wrapping.
+    PreWrap,
+    /// `pre-line` — collapse spaces / tabs but preserve newlines, allow
+    /// wrapping.
+    PreLine,
+}
+
+impl WhiteSpace {
+    /// `true` when the configured mode preserves whitespace runs and
+    /// newlines verbatim (instead of collapsing them).
+    pub const fn preserves_whitespace(self) -> bool {
+        matches!(self, WhiteSpace::Pre | WhiteSpace::PreWrap)
+    }
+
+    /// `true` when the configured mode allows wrapping at soft-wrap
+    /// opportunities (spaces, CJK character boundaries).
+    pub const fn allows_wrap(self) -> bool {
+        matches!(
+            self,
+            WhiteSpace::Normal | WhiteSpace::PreWrap | WhiteSpace::PreLine
+        )
+    }
+}
+
+#[doc(hidden)]
+pub fn parse_white_space(s: &str) -> Option<WhiteSpace> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "normal" => Some(WhiteSpace::Normal),
+        "pre" => Some(WhiteSpace::Pre),
+        "nowrap" => Some(WhiteSpace::NoWrap),
+        "pre-wrap" => Some(WhiteSpace::PreWrap),
+        "pre-line" => Some(WhiteSpace::PreLine),
+        _ => None,
+    }
+}
+
+/// Word-break behaviour for CJK / long-word overflow (CSS `word-break`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WordBreak {
+    /// `normal` — break at word boundaries; between CJK characters the
+    /// breaker may also break (mirrors browser default).
+    #[default]
+    Normal,
+    /// `break-all` — break between any two adjacent characters.
+    BreakAll,
+    /// `keep-all` — for CJK text, do not break between CJK characters;
+    /// breaks only happen at spaces / western word boundaries.
+    KeepAll,
+}
+
+#[doc(hidden)]
+pub fn parse_word_break(s: &str) -> Option<WordBreak> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "normal" => Some(WordBreak::Normal),
+        "break-all" => Some(WordBreak::BreakAll),
+        "keep-all" => Some(WordBreak::KeepAll),
+        _ => None,
+    }
+}
+
+/// Overflow-wrap behaviour (CSS `overflow-wrap`, formerly `word-wrap`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OverflowWrap {
+    /// `normal` — break only at normal break opportunities; a too-long
+    /// word overflows.
+    #[default]
+    Normal,
+    /// `break-word` — if no normal break opportunity exists on a line,
+    /// the unbreakable word may be broken to fit.
+    BreakWord,
+    /// `anywhere` — same as `break-word`, but soft-wrap opportunities
+    /// are considered even between every pair of characters.
+    Anywhere,
+}
+
+#[doc(hidden)]
+pub fn parse_overflow_wrap(s: &str) -> Option<OverflowWrap> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "normal" => Some(OverflowWrap::Normal),
+        "break-word" => Some(OverflowWrap::BreakWord),
+        "anywhere" => Some(OverflowWrap::Anywhere),
+        _ => None,
+    }
+}
+
+// ============================================================
 // Flexbox property values
 //
 // Parsers and enums for the CSS flex properties supported by the

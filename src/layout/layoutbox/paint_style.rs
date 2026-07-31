@@ -16,11 +16,13 @@ use super::inline_run::InlineRun;
 pub struct PaintStyle {
     /// Resolved padding / border / margin edges.
     pub box_edges: BoxEdges,
-    /// Inline runs for the box's own text content (one run per `<span>`
-    /// boundary, one per direct text node). `None` when the box has no inline
-    /// content of its own (e.g. a structural `<aside>` whose text lives in
-    /// nested block children, or a replaced element like `<img>`).
-    pub runs: Option<Vec<InlineRun>>,
+    /// Inline runs for the box's own text content, grouped by visual line
+    /// after wrapping. Each inner `Vec<InlineRun>` is one line that fits
+    /// inside the content-box; the outer `Vec` has one entry per visual
+    /// line. `None` when the box has no inline content of its own
+    /// (e.g. a structural `<aside>` whose text lives in nested block
+    /// children, or a replaced element like `<img>`).
+    pub runs: Option<Vec<Vec<InlineRun>>>,
     /// Effective font-size of this box in terminal cells (≥ 1). Drives the
     /// `font_size_cells` expansion the paint phase applies so an `<h1>` with
     /// the default 2em font-size renders each character across 2 cells.

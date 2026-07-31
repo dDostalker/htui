@@ -12,7 +12,7 @@ use crate::{
     layout::{
         BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, Rect,
         inner_formatting_context::flow::layout_children,
-        layoutbox::collect_runs,
+        layoutbox::{collect_runs, wrap_runs},
     },
     tdom::node::{Node, NodeArena, NodeId, effective_font_size_cells},
     tui::graph_api::block_style,
@@ -139,9 +139,43 @@ pub fn layout_block(
         child_context,
     );
 
-    let content_height = child_cursor
+    let children_rows = child_cursor
         .y
         .saturating_sub(geom.outer_y + edges.border.top.thickness() + edges.padding.top);
+
+    // The marker / hash prefix belongs to the first visual line. Prepend
+    // it to the flat run list so the line-breaker treats it as part of
+    // the first "word" group and renders it on the top row only.
+    let mut all_runs = body_runs;
+    if let Some(prefix) = opts.prefix.clone() {
+        all_runs.insert(0, prefix);
+    }
+
+    // Wrap the inline content to the content-box width. The wrapped
+    // line count drives the rect height; the per-line run list is
+    // what the paint phase draws.
+    let wrap_width = geom.content_constraint.width.max(1);
+    let wrapped_lines = if all_runs.is_empty() {
+        Vec::new()
+    } else {
+        wrap_runs(
+            &all_runs,
+            wrap_width,
+            own_font_size_cells,
+            node.css_attr.get_white_space(),
+            node.css_attr.get_word_break(),
+            node.css_attr.get_overflow_wrap(),
+        )
+    };
+    let inline_line_count = wrapped_lines.len();
+    let inline_rows = inline_line_count.saturating_mul(own_font_size_cells.max(1));
+
+    // The box's content area is the larger of (children's rows) and
+    // (wrapped inline rows). Wrapped lines are still painted inside
+    // the content area, so the border-box height must accommodate
+    // both.
+    let content_height = children_rows.max(inline_rows);
+
     let outer_height = match preallocated_height {
         Some(height) => height.max(1),
         None => reserve_border_box(
@@ -152,11 +186,6 @@ pub fn layout_block(
             own_font_size_cells.max(1),
         ),
     };
-
-    let mut runs = body_runs;
-    if let Some(prefix) = opts.prefix {
-        runs.insert(0, prefix);
-    }
 
     // Spacing belongs to block flow. A flex formatting context has already
     // allocated the item's border-box, so adding block-flow spacing here
@@ -179,7 +208,11 @@ pub fn layout_block(
 
     let paint_style = PaintStyle {
         box_edges: edges,
-        runs: if runs.is_empty() { None } else { Some(runs) },
+        runs: if wrapped_lines.is_empty() || wrapped_lines.iter().all(|l| l.is_empty()) {
+            None
+        } else {
+            Some(wrapped_lines)
+        },
         font_size_cells: own_font_size_cells,
         fill_bg,
         spacing_after: effective_spacing_after,

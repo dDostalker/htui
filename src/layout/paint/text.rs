@@ -9,21 +9,62 @@ use crate::{
 
 use super::PaintCanvas;
 
-/// Render each run in `runs` with its own style, colour and background.
+/// Render each visual line in `lines` with its own style, colour and
+/// background.
 ///
-/// Width accounting uses [`InlineRun::width`] (which sums `char_width` per
-/// char) so a wide CJK glyph at the end of one run does not collide with
-/// the first cell of the next run. The block's `effective_bg` is applied
-/// to runs whose own background is `None`, inheriting the surrounding
-/// rect's fill (e.g. an `<aside>`'s `darkblue` strip showing through
-/// unstyled text).
+/// `lines` is the result of [`crate::layout::layoutbox::wrap_runs`]:
+/// each inner `Vec<InlineRun>` is one visual line that fits within
+/// the content-box width after wrapping. This entry point lays out
+/// every line top-to-bottom, advancing `font_size_cells * canvas.columns`
+/// cells per line so each row of the rect paints a single visual line.
 ///
-/// `font_size_cells` is the effective font-size of the containing box. When
-/// `font_size_cells > 1`, each character cell is expanded so the character
-/// occupies that many terminal columns (the trailing columns are filled with
-/// the run's background, mirroring the empty space a larger font would leave
-/// around its glyphs).
+/// Per-line width accounting uses [`InlineRun::width_at`] (which sums
+/// `max(grapheme_width, font_size)` per grapheme) so a wide CJK glyph
+/// at the end of one run does not collide with the first cell of the
+/// next run. The block's `effective_bg` is applied to runs whose own
+/// background is `None`, inheriting the surrounding rect's fill (e.g.
+/// an `<aside>`'s `darkblue` strip showing through unstyled text).
+///
+/// `font_size_cells` is the effective font-size of the containing box.
+/// When `font_size_cells > 1`, each character cell is expanded so the
+/// character occupies that many terminal columns.
 pub(crate) fn paint_runs(
+    canvas: &mut PaintCanvas<'_>,
+    lines: &[Vec<InlineRun>],
+    cell_start: usize,
+    block_width: usize,
+    align: TextAlign,
+    effective_bg: Option<Color>,
+    font_size_cells: usize,
+) {
+    if lines.is_empty() {
+        return;
+    }
+    let cols = canvas.columns as usize;
+    let font = font_size_cells.max(1);
+    for (line_idx, line_runs) in lines.iter().enumerate() {
+        if line_runs.is_empty() {
+            // Forced-break blank row (e.g. a `<pre>` newline); the bg-fill
+            // loop in `paint_block` already covers it, so skip writing
+            // any text here.
+            continue;
+        }
+        let line_start = cell_start
+            .saturating_add(line_idx.saturating_mul(font).saturating_mul(cols));
+        paint_one_line(
+            canvas,
+            line_runs,
+            line_start,
+            block_width,
+            align,
+            effective_bg,
+            font_size_cells,
+        );
+    }
+}
+
+/// Render a single visual line's runs.
+fn paint_one_line(
     canvas: &mut PaintCanvas<'_>,
     runs: &[InlineRun],
     cell_start: usize,

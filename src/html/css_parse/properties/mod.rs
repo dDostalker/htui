@@ -32,10 +32,11 @@ use crate::html::box_edges::{Border, BorderSides, BoxEdges, EdgeSizes};
 
 use super::values::{
     AlignItems, CssDisplay, FlexBasis, FlexDirection, FlexWrap, FontStyleKind, FontWeight, GapSizes,
-    JustifyContent, Length, TextAlign, TextDecoration, parse_align_items, parse_border_side,
-    parse_border_style, parse_border_width, parse_color_str, parse_edge_sizes, parse_flex_basis,
-    parse_flex_direction, parse_flex_wrap, parse_gap_shorthand, parse_justify_content,
-    parse_non_negative_number, parse_order, resolve_flex_basis,
+    JustifyContent, Length, OverflowWrap, TextAlign, TextDecoration, WhiteSpace, WordBreak,
+    parse_align_items, parse_border_side, parse_border_style, parse_border_width, parse_color_str,
+    parse_edge_sizes, parse_flex_basis, parse_flex_direction, parse_flex_wrap, parse_gap_shorthand,
+    parse_justify_content, parse_non_negative_number, parse_order, parse_overflow_wrap,
+    parse_white_space, parse_word_break, resolve_flex_basis,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -116,6 +117,43 @@ impl CssAttr {
             (false, true) => TextDecoration::LineThrough,
             (false, false) => TextDecoration::None,
         }
+    }
+    /// Whitespace handling (CSS `white-space`).
+    ///
+    /// Defaults to [`WhiteSpace::Normal`] (collapse + wrap) when the
+    /// property is unset, mirroring the browser default.
+    pub fn get_white_space(&self) -> WhiteSpace {
+        self.0
+            .get("white-space")
+            .and_then(|s| parse_white_space(s.as_str()))
+            .unwrap_or_default()
+    }
+    /// Word-break behaviour for CJK and long-word overflow
+    /// (CSS `word-break`).
+    ///
+    /// Defaults to [`WordBreak::Normal`] (allow CJK character breaks,
+    /// disallow mid-word breaks for unbreakable overflows). The
+    /// per-element break decisions are made by the layout-phase line
+    /// breaker.
+    pub fn get_word_break(&self) -> WordBreak {
+        self.0
+            .get("word-break")
+            .and_then(|s| parse_word_break(s.as_str()))
+            .unwrap_or_default()
+    }
+    /// Overflow-wrap behaviour (CSS `overflow-wrap`, legacy
+    /// `word-wrap`).
+    ///
+    /// Accepts the legacy `word-wrap` keyword in addition to the
+    /// standard `overflow-wrap` so older stylesheets still apply.
+    /// Defaults to [`OverflowWrap::Normal`] (no mid-word break for
+    /// unbreakable overflows).
+    pub fn get_overflow_wrap(&self) -> OverflowWrap {
+        self.0
+            .get("overflow-wrap")
+            .or_else(|| self.0.get("word-wrap"))
+            .and_then(|s| parse_overflow_wrap(s.as_str()))
+            .unwrap_or_default()
     }
     /// Element width (CSS `width`).
     ///

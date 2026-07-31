@@ -60,12 +60,15 @@
 //! ├── inline_run.rs       ← InlineRun   (used by PaintStyle.runs)
 //! ├── cursor.rs           ← Cursor      (block-flow row allocator)
 //! ├── inline.rs           ← collect_runs (shared by block + flex layouts)
+//! ├── wrap.rs             ← wrap_runs / wrapped_size (Text Level 3 line-breaker)
+//! ├── inline.rs           ← collect_runs (shared by block + flex layouts)
 //! ├── box_kind/           ← BoxKind + ReplacedContent
 //! ├── outer_display/      ← OuterDisplay
 //! ├── generation/         ← generate_box_tree / GeneratedBox / GeneratedBoxKind
 //! ├── geometry/           ← layout_generated_tree / dispatch by classification
 //! └── inner_formatting_context/  ← FormattingContext + flow / flex / grid
 //!                                  implementations
+//! ├── wrap.rs             ← wrap_runs (CSS Text Level 3 line-breaker)
 //! ```
 
 mod box_kind;
@@ -77,6 +80,7 @@ mod inline_run;
 mod outer_display;
 mod paint_style;
 mod rect;
+mod wrap;
 
 pub mod inner_formatting_context;
 
@@ -90,6 +94,7 @@ pub use inner_formatting_context::FormattingContext;
 pub use outer_display::OuterDisplay;
 pub use paint_style::PaintStyle;
 pub use rect::Rect;
+pub use wrap::{is_cjk_break_opportunity, wrap_runs, wrapped_size};
 
 use crate::tdom::node::NodeId;
 

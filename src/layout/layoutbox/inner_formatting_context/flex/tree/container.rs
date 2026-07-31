@@ -5,7 +5,7 @@ use crate::{
     layout::{
         BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, Rect,
         layoutbox::{
-            collect_runs,
+            collect_runs, wrap_runs,
             generation::{GeneratedBoxKind, generate_node},
         },
     },
@@ -117,6 +117,26 @@ pub(super) fn layout_flex_container(
     let block_font_style = block_style(&node.css_attr);
     let body_runs = collect_runs(arena, node, block_fg, block_bg, block_font_style);
 
+    // Wrap the container's own inline text so its rect grows to fit
+    // the wrapped line count, and so the flex items are pushed down
+    // by the height of the wrapped text.
+    let flex_inline_lines = if body_runs.is_empty() {
+        Vec::new()
+    } else {
+        wrap_runs(
+            &body_runs,
+            content_constraint.width.max(1),
+            own_font_size_cells,
+            node.css_attr.get_white_space(),
+            node.css_attr.get_word_break(),
+            node.css_attr.get_overflow_wrap(),
+        )
+    };
+    let inline_line_count = flex_inline_lines.len();
+    let inline_rows = inline_line_count.saturating_mul(own_font_size_cells.max(1));
+    // Flex items begin below the container's own wrapped text.
+    let content_y_with_inline = content_y.saturating_add(inline_rows);
+
     // 6. Flex items: the container's `BoxKind::Normal` children in document
     //    order. Inline and text nodes are already wrapped by the generator
     //    into anonymous boxes that contribute their runs to the container
@@ -149,7 +169,7 @@ pub(super) fn layout_flex_container(
             align_content,
             gap,
             content_constraint,
-            content_y,
+            content_y_with_inline,
             child_context,
             has_explicit_height,
             container_css_height.unwrap_or(0),
@@ -204,7 +224,11 @@ pub(super) fn layout_flex_container(
 
     let paint_style = PaintStyle {
         box_edges: edges,
-        runs: if body_runs.is_empty() { None } else { Some(body_runs) },
+        runs: if flex_inline_lines.is_empty() || flex_inline_lines.iter().all(|l| l.is_empty()) {
+            None
+        } else {
+            Some(flex_inline_lines)
+        },
         font_size_cells: own_font_size_cells,
         fill_bg,
         spacing_after,

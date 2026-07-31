@@ -13,6 +13,6 @@ pub use selector::{Combinator, CompoundSelector, CssSelector, NthExpr, Selector}
 pub use stylesheet::{CssRule, Parser, parse_declaration_text};
 pub use values::{
     AlignItems, CssDisplay, FlexBasis, FlexDirection, FlexWrap, FontContext, FontStyleKind,
-    FontWeight, GapSizes, JustifyContent, Length, LengthContext, PX_PER_CELL, TextAlign,
-    TextDecoration, Viewport, parse_color_str,
+    FontWeight, GapSizes, JustifyContent, Length, LengthContext, OverflowWrap, PX_PER_CELL,
+    TextAlign, TextDecoration, Viewport, WhiteSpace, WordBreak, parse_color_str,
 };
