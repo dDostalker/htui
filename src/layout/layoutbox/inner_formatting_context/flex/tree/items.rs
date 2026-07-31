@@ -65,12 +65,22 @@ pub(super) fn layout_flex_items(
     for (line_idx, line_indices) in lines.iter().enumerate() {
         // 3a. Distribute the line's main-axis space.
         let line_preps: Vec<&FlexItemPrep> = line_indices.iter().map(|&i| &preps[i]).collect();
+        // The main-axis size is definite for `row` (always `content.width`)
+        // and for `column` when the container has an explicit height (from
+        // CSS `height` or a preallocated rect). A `column` without an
+        // explicit height is *indefinite* — its main size is determined by
+        // the items themselves, so there is no free space for `flex-grow`
+        // to consume (CSS Flexbox §9.7). `indefinite` is forwarded to
+        // `distribute_main_axis` so it can skip grow/shrink rather than
+        // distribute an `usize::MAX` free space that overflows `isize`.
+        let indefinite = matches!(direction, FlexDirection::Column) && !has_explicit_height;
         let line_main_size = match direction {
             FlexDirection::Row => content.width,
-            FlexDirection::Column => usize::MAX, // column direction: vertical unbounded
+            FlexDirection::Column if has_explicit_height => container_height,
+            FlexDirection::Column => usize::MAX,
         };
         let (main_sizes, free_for_justify) =
-            distribute_main_axis(&line_preps, line_main_size, main_gap);
+            distribute_main_axis(&line_preps, line_main_size, main_gap, indefinite);
 
         // 3b. Compute the line's natural cross-axis size.
         let natural_line_cross = line_preps

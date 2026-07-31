@@ -423,22 +423,33 @@ fn test_layout_box_exposes_runs_for_block_with_spans() {
         .runs
         .as_ref()
         .expect("<p> should expose runs when it has spans");
-
-    let collected: Vec<&str> = runs.iter().map(|r: &InlineRun| r.text.as_str()).collect();
-    // The HTML parser preserves original whitespace within text nodes — the
-    // plain run between the `<span>` and the closing `</p>` keeps its trailing
-    // space. Run order still follows document order.
+    // `paint_style.runs` is now `Vec<Vec<InlineRun>>` (one outer entry per
+    // visual line after wrapping). At width 80, "plain " + "bold" both
+    // fit on a single visual line, so the outer vec has one entry that
+    // contains two runs in document order.
+    assert_eq!(
+        runs.len(),
+        1,
+        "plain + bold fits one visual line at width 80, got {} lines",
+        runs.len()
+    );
+    let line_runs = &runs[0];
+    let collected: Vec<&str> = line_runs.iter().map(|r| r.text.as_str()).collect();
+    // The wrap layer splits the trailing space off the "plain " run
+    // into its own `Space` token so the line-breaker can drop it on a
+    // wrap point; the surviving runs read as `"plain"`, `" "`, `"bold"`
+    // in document order.
     assert_eq!(
         collected,
-        vec!["plain ", "bold"],
-        "runs should follow the document order: plain text then span text"
+        vec!["plain", " ", "bold"],
+        "runs should follow the document order: plain text, then the space, then the span body"
     );
     assert!(
-        !runs[0].style.contains(FontStyle::BOLD),
+        !line_runs[0].style.contains(FontStyle::BOLD),
         "plain run must not be bold"
     );
     assert!(
-        runs[1].style.contains(FontStyle::BOLD),
+        line_runs[2].style.contains(FontStyle::BOLD),
         "bold run must carry BOLD"
     );
 }
@@ -460,8 +471,19 @@ fn test_layout_box_runs_are_materialised_for_plain_block() {
         .runs
         .as_ref()
         .expect("plain <p> still materialises runs");
-    assert_eq!(runs.len(), 1, "single text node becomes one run");
-    assert_eq!(runs[0].text, "just text");
+    // `paint_style.runs` is `Vec<Vec<InlineRun>>` — at width 80, "just text"
+    // fits on a single visual line, so the outer vec has one entry that
+    // contains a single run.
+    // `paint_style.runs` is `Vec<Vec<InlineRun>>` — at width 80, "just text"
+    // fits on a single visual line. The wrap layer collapses the
+    // whitespace inside the text node into a single space token, so the
+    // outer vec has one entry with three runs: the leading word, the
+    // space, and the trailing word.
+    assert_eq!(runs.len(), 1, "single text node fits one visual line");
+    assert_eq!(runs[0].len(), 3, "wrap splits words around the inner space");
+    assert_eq!(runs[0][0].text, "just");
+    assert_eq!(runs[0][1].text, " ");
+    assert_eq!(runs[0][2].text, "text");
 }
 
 // ============================================================
@@ -478,15 +500,29 @@ fn test_h1_prefix_is_a_separate_run() {
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor, 80, 24);
     let h_box = find_box_by_type(&boxes, &NodeType::H1, &arena).expect("should have the <h1> box");
     let runs = h_box.paint_style.runs.as_ref().expect("<h1> should expose runs");
+    // `runs` is `Vec<Vec<InlineRun>>` — at width 80 the prefix and the
+    // body fit on a single visual line, so the outer vec has one entry
+    // that contains both runs in order: prefix first, then the heading
+    // body.
     assert_eq!(
         runs.len(),
-        2,
-        "<h1> with one body text should produce prefix + body runs"
+        1,
+        "<h1> prefix + body fit one visual line at width 80"
     );
-    assert_eq!(runs[0].text, "# ", "prefix run must be '# '");
-    assert_eq!(runs[1].text, "Title", "body run must be the heading text");
-    // Both runs share the heading's resolved color.
-    for r in runs {
+    let line_runs = &runs[0];
+    // The wrap layer splits the prefix into `#` (the word) and ` `
+    // (the space) before the body, so the visual line is built from
+    // four runs in document order: prefix `#`, prefix space, body.
+    assert_eq!(
+        line_runs.len(),
+        3,
+        "<h1> prefix is split into '#' + ' ' before the body, total 3 runs"
+    );
+    assert_eq!(line_runs[0].text, "#", "first prefix chunk is '#'");
+    assert_eq!(line_runs[1].text, " ", "second prefix chunk is the space");
+    assert_eq!(line_runs[2].text, "Title", "body run must be the heading text");
+    // All three runs share the heading's resolved color.
+    for r in line_runs {
         assert_eq!(
             r.fg,
             Some(Color::Cyan),
@@ -494,7 +530,7 @@ fn test_h1_prefix_is_a_separate_run() {
         );
     }
     // The visual width of all runs equals the rendered "# Title" string.
-    let total: usize = runs.iter().map(|r: &InlineRun| r.width()).sum();
+    let total: usize = line_runs.iter().map(|r| r.width()).sum();
     assert_eq!(total, "# Title".len());
 }
 

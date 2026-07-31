@@ -2,6 +2,10 @@
 //!
 //! Usage:
 //!   cargo run -p visual_test -- [test_name]
+//!   cargo run -p visual_test -- --dump [test_name] [--cols N] [--rows N]
+//!
+//! `--dump` renders headlessly (no raw mode / alternate screen) and prints
+//! the canvas as plain text rows — handy for previews in a pipe or log.
 //!
 //! Logs are written to `%TEMP%/htui-visual-test.log` via
 //! `htui::logging::init_file_logger`. If the file cannot be opened a warning
@@ -14,6 +18,57 @@
 use anyhow::Result;
 use htui::render;
 use log::info;
+
+/// Headless preview: parse the document, run the full layout pipeline into a
+/// [`TermLayout`] canvas, and print each non-empty row as plain text so the
+/// structure can be inspected without an interactive terminal.
+///
+/// When `bg_map` is set, every cell that carries a background colour is shown
+/// as `█` and every other cell as a space — this reveals filled regions
+/// (panels, bars, header/footer backgrounds) that the plain-text view hides.
+fn dump(html: &str, css: &str, cols: u16, rows: u16, bg_map: bool) {
+    use htui::html::{css_parse, html_parse};
+    use htui::layout::layout::TermMap;
+    use htui::tui::graph_api::TermLayout;
+
+    let mut html_parser = html_parse::Parser::new(html);
+    let (root_id, mut arena, embedded) = html_parser.parse();
+    let combined = if css.is_empty() {
+        embedded
+    } else if embedded.is_empty() {
+        css.to_string()
+    } else {
+        format!("{embedded}\n{css}")
+    };
+    if !combined.trim().is_empty() {
+        let mut css_parser = css_parse::Parser::new(&combined);
+        let rules = css_parser.parse();
+        css_parse::css_into_node(&mut arena, root_id, &rules);
+    }
+
+    let term_map = TermMap { columns: cols, rows };
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    if let Err(e) = tl.draw(&arena, root_id, &term_map) {
+        eprintln!("layout error: {e}");
+        std::process::exit(1);
+    }
+
+    let c = term_map.columns as usize;
+    for (i, chunk) in tl.layout.chunks(c).enumerate() {
+        let s: String = if bg_map {
+            chunk
+                .iter()
+                .map(|b| if b.bcolor.is_some() { '█' } else { ' ' })
+                .collect()
+        } else {
+            chunk.iter().map(|b| b.word.as_str()).collect()
+        };
+        let trimmed = s.trim_end();
+        if !trimmed.is_empty() {
+            println!("{i:02}│{trimmed}");
+        }
+    }
+}
 
 macro_rules! test_case {
     ($name:ident) => {
@@ -38,11 +93,46 @@ fn main() -> Result<()> {
     std::env::set_current_dir(env!("CARGO_MANIFEST_DIR"))?;
 
     let args: Vec<String> = std::env::args().collect();
-    let test_name = if args.len() > 1 {
-        args[1].as_str()
-    } else {
-        "all_in_one"
-    };
+
+    // `--dump` enables the headless preview (see `dump`); `--dump bg` prints
+    // a background-fill map instead of the text glyphs.
+    let dump_mode = args.iter().any(|a| a == "--dump");
+    let bg_map = dump_mode
+        && args
+            .iter()
+            .position(|a| a == "--dump")
+            .is_some_and(|pos| args.get(pos + 1).is_some_and(|v| v == "bg"));
+    let positional: Vec<&str> = args
+        .iter()
+        .skip(1)
+        .filter(|a| !a.starts_with("--") && *a != "bg")
+        .map(String::as_str)
+        .collect();
+
+    let mut cols: u16 = 104;
+    let mut rows: u16 = 32;
+    let mut it = args.iter().skip(1);
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--cols" => {
+                if let Some(v) = it.next() {
+                    if let Ok(n) = v.parse() {
+                        cols = n;
+                    }
+                }
+            }
+            "--rows" => {
+                if let Some(v) = it.next() {
+                    if let Ok(n) = v.parse() {
+                        rows = n;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let test_name = positional.first().copied().unwrap_or("showcase");
 
     let (html, css) = match test_name {
         "all_in_one" => test_case!(all_in_one, no_css),
@@ -65,6 +155,7 @@ fn main() -> Result<()> {
         "flex_align_content" => test_case!(flex_align_content, no_css),
         "flex_nested" => test_case!(flex_nested, no_css),
         "viewport_units" => test_case!(viewport_units, no_css),
+        "showcase" => test_case!(showcase, no_css),
         _ => {
             let available = [
                 "all_in_one",
@@ -87,6 +178,7 @@ fn main() -> Result<()> {
                 "flex_align_content",
                 "flex_nested",
                 "viewport_units",
+                "showcase",
             ];
             eprintln!(
                 "Unknown test: '{test_name}'\nAvailable tests: {}",
@@ -101,6 +193,10 @@ fn main() -> Result<()> {
         html.len(),
         css.len()
     );
+    if dump_mode {
+        dump(html, css, cols, rows, bg_map);
+        return Ok(());
+    }
     render(html, css);
     info!("Test '{test_name}' completed");
     Ok(())

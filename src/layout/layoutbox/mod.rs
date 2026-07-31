@@ -28,16 +28,23 @@
 //!    be grouped into a single block).
 //!
 //! 2. `outer_display` — how this box *participates in its parent's*
-//!    formatting context ([`OuterDisplay::Block`] vs [`OuterDisplay::Inline`]).
+//!    formatting context ([`OuterDisplay::BlockLevel`] vs
+//!    [`OuterDisplay::Inline`], with each variant carrying a
+//!    `container` / `block` flag that distinguishes a block container
+//!    from a plain block-level box, and `inline-block` from `inline`).
 //!
 //! 3. `inner_formatting_context` — how this box *lays out its own children*:
 //!    [`FormattingContext::Flow`] (default block / inline flow),
-//!    [`FormattingContext::Flex`] (CSS flexbox), or [`FormattingContext::Grid`]
+//!    [`FormattingContext::Flex`] (CSS flexbox), [`FormattingContext::Table`]
+//!    (table formatting context), or [`FormattingContext::Grid`]
 //!    (reserved for future grid support).
 //!
 //! The three axes are independent: a flex container is
-//! `BoxKind::Normal + OuterDisplay::Block + FormattingContext::Flex`; an
-//! `<img>` is `BoxKind::Replaced + OuterDisplay::Block + FormattingContext::Flow`.
+//! `BoxKind::Normal + OuterDisplay::BlockLevel { container: true } + FormattingContext::Flex`;
+//! an `<img>` is
+//! `BoxKind::Replaced + OuterDisplay::Inline { block: true } + FormattingContext::Flow`
+//! (its UA `display: inline-block` is what makes it a block-level
+//! replaced inline-block box).
 //! Paint-only data (padding / border / margin / inline runs / background-fill
 //! flags / chrome / font-size) is collected in [`PaintStyle`] so [`LayoutBox`]
 //! itself only carries layout-classification fields. This keeps the layout
@@ -53,30 +60,41 @@
 //! ├── inline_run.rs       ← InlineRun   (used by PaintStyle.runs)
 //! ├── cursor.rs           ← Cursor      (block-flow row allocator)
 //! ├── inline.rs           ← collect_runs (shared by block + flex layouts)
+//! ├── wrap.rs             ← wrap_runs / wrapped_size (Text Level 3 line-breaker)
+//! ├── inline.rs           ← collect_runs (shared by block + flex layouts)
 //! ├── box_kind/           ← BoxKind + ReplacedContent
 //! ├── outer_display/      ← OuterDisplay
+//! ├── generation/         ← generate_box_tree / GeneratedBox / GeneratedBoxKind
+//! ├── geometry/           ← layout_generated_tree / dispatch by classification
 //! └── inner_formatting_context/  ← FormattingContext + flow / flex / grid
 //!                                  implementations
+//! ├── wrap.rs             ← wrap_runs (CSS Text Level 3 line-breaker)
 //! ```
 
 mod box_kind;
 mod cursor;
+pub mod generation;
+pub mod geometry;
 mod inline;
 mod inline_run;
 mod outer_display;
 mod paint_style;
 mod rect;
+mod wrap;
 
 pub mod inner_formatting_context;
 
 pub use box_kind::{BoxKind, ReplacedContent};
 pub use cursor::Cursor;
+pub use generation::{GeneratedBox, GeneratedBoxKind, generate_box_tree, generate_node};
+pub use geometry::{layout_generated_box, layout_generated_tree};
 pub use inline::collect_runs;
 pub use inline_run::InlineRun;
 pub use inner_formatting_context::FormattingContext;
 pub use outer_display::OuterDisplay;
 pub use paint_style::PaintStyle;
 pub use rect::Rect;
+pub use wrap::{is_cjk_break_opportunity, wrap_runs, wrapped_size};
 
 use crate::tdom::node::NodeId;
 
@@ -197,7 +215,7 @@ impl LayoutBox {
             rect,
             paint_style,
             kind: BoxKind::Replaced(content),
-            outer_display: OuterDisplay::Block,
+            outer_display: OuterDisplay::BlockLevel { container: false },
             inner_formatting_context: FormattingContext::Flow,
             children: Vec::new(),
         }
@@ -222,7 +240,7 @@ impl LayoutBox {
             rect,
             paint_style,
             kind: BoxKind::Anonymous,
-            outer_display: OuterDisplay::Block,
+            outer_display: OuterDisplay::BlockLevel { container: true },
             inner_formatting_context: FormattingContext::Flow,
             children,
         }

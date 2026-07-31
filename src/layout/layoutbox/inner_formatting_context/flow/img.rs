@@ -1,16 +1,19 @@
+//! Compatibility wrapper around the geometry-driven replaced-element path.
+//!
+//! `<img>` is now classified as [`crate::layout::layoutbox::generation::GeneratedBoxKind::Replaced`]
+//! during the generation phase and dispatched through the geometry entry
+//! point. This entry point remains so external callers and the existing
+//! flex / table integration continue to compile; it simply defers to the
+//! geometry dispatcher and returns `None` for non-`<img>` nodes (the
+//! geometry phase itself decides whether the payload qualifies as a
+//! replaced element).
+
 use crate::{
-    layout::{
-        BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, ReplacedContent,
-    },
-    tdom::node::{NodeArena, NodeId, NodeType},
-    tui::graph_api::{IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW},
+    layout::{BoxConstraint, Cursor, LayoutBox, LayoutContext},
+    tdom::node::{NodeArena, NodeId},
 };
 
 /// Build a normal-flow image box without a parent pre-allocation.
-///
-/// This compatibility wrapper keeps the original public five-argument API;
-/// the layout registry uses [`layout_img_with_rect`] so flex can provide an
-/// explicit item rectangle.
 pub fn layout_img(
     arena: &NodeArena,
     node_id: NodeId,
@@ -28,64 +31,15 @@ pub fn layout_img_with_rect(
     node_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
-    _context: LayoutContext,
+    context: LayoutContext,
     pre_allocated_rect: Option<crate::layout::Rect>,
 ) -> Option<LayoutBox> {
-    let node = &arena[node_id];
-    if node.node_type != NodeType::Img {
-        return None;
-    }
-
-    let src = match node.get_src() {
-        Some(s) => s.clone(),
-        None => return None,
-    };
-
-    let (x, y, block_width, img_rows) = match pre_allocated_rect {
-        Some(rect) => {
-            let width = rect.width.max(1);
-            let height = rect.height.max(1);
-            (rect.x, rect.y, width, height)
-        }
-        None => {
-            let max_w = node
-                .get_width()
-                .unwrap_or(containing.width as u32 * IMAGE_PIXELS_PER_CELL_COL);
-            // `BoxConstraint` only exposes the containing block width, so the default
-            // height is approximated as 4× that in pixels (i.e. a 2:1 portrait by
-            // default once converted to cells). The picture always scrolls
-            // vertically, so we never need to clamp to the terminal height.
-            let max_h = node
-                .get_height()
-                .unwrap_or(containing.width as u32 * IMAGE_PIXELS_PER_CELL_ROW);
-
-            // Each terminal cell represents a
-            // IMAGE_PIXELS_PER_CELL_COL × IMAGE_PIXELS_PER_CELL_ROW pixel block
-            // (see `tui::graph_api::image` constants).
-            let img_cols = max_w.div_ceil(IMAGE_PIXELS_PER_CELL_COL).max(1) as usize;
-            let img_rows = max_h.div_ceil(IMAGE_PIXELS_PER_CELL_ROW).max(1) as usize;
-            // Clamp to the containing block width so the rect and the rendered image
-            // share the same cell count — painting past `rect.width` would overwrite
-            // neighboring boxes.
-            let block_width = img_cols.min(containing.width).max(1);
-            let x = centered_left(containing, block_width);
-            let y = cursor.allocate(img_rows);
-            (x, y, block_width, img_rows)
-        }
-    };
-
-    Some(LayoutBox::new_replaced(
+    crate::layout::layoutbox::geometry::layout_generated_box_via_node(
+        arena,
         node_id,
-        crate::layout::Rect::new(x, y, block_width, img_rows),
-        ReplacedContent::Image {
-            path: src,
-            cols: block_width,
-            rows: img_rows,
-        },
-        PaintStyle::default(),
-    ))
-}
-
-fn centered_left(containing: BoxConstraint, block_width: usize) -> usize {
-    containing.x + containing.width.saturating_sub(block_width) / 2
+        containing,
+        cursor,
+        context,
+        pre_allocated_rect,
+    )
 }

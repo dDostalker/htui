@@ -23,6 +23,7 @@ pub use align_self::AlignSelf;
 
 use crate::html::css_parse::{FontContext, LengthContext, Viewport};
 use crate::layout::layoutbox::{FormattingContext, OuterDisplay};
+use crate::tdom::node::NodeType;
 
 use crossterm::style::Color;
 use indexmap::IndexMap;
@@ -30,11 +31,12 @@ use indexmap::IndexMap;
 use crate::html::box_edges::{Border, BorderSides, BoxEdges, EdgeSizes};
 
 use super::values::{
-    AlignItems, FlexBasis, FlexDirection, FlexWrap, FontStyleKind, FontWeight, GapSizes,
-    JustifyContent, Length, TextAlign, TextDecoration, parse_align_items, parse_border_side,
-    parse_border_style, parse_border_width, parse_color_str, parse_edge_sizes, parse_flex_basis,
-    parse_flex_direction, parse_flex_wrap, parse_gap_shorthand, parse_justify_content,
-    parse_non_negative_number, parse_order, resolve_flex_basis,
+    AlignItems, CssDisplay, FlexBasis, FlexDirection, FlexWrap, FontStyleKind, FontWeight, GapSizes,
+    JustifyContent, Length, OverflowWrap, TextAlign, TextDecoration, WhiteSpace, WordBreak,
+    parse_align_items, parse_border_side, parse_border_style, parse_border_width, parse_color_str,
+    parse_edge_sizes, parse_flex_basis, parse_flex_direction, parse_flex_wrap, parse_gap_shorthand,
+    parse_justify_content, parse_non_negative_number, parse_order, parse_overflow_wrap,
+    parse_white_space, parse_word_break, resolve_flex_basis,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -115,6 +117,43 @@ impl CssAttr {
             (false, true) => TextDecoration::LineThrough,
             (false, false) => TextDecoration::None,
         }
+    }
+    /// Whitespace handling (CSS `white-space`).
+    ///
+    /// Defaults to [`WhiteSpace::Normal`] (collapse + wrap) when the
+    /// property is unset, mirroring the browser default.
+    pub fn get_white_space(&self) -> WhiteSpace {
+        self.0
+            .get("white-space")
+            .and_then(|s| parse_white_space(s.as_str()))
+            .unwrap_or_default()
+    }
+    /// Word-break behaviour for CJK and long-word overflow
+    /// (CSS `word-break`).
+    ///
+    /// Defaults to [`WordBreak::Normal`] (allow CJK character breaks,
+    /// disallow mid-word breaks for unbreakable overflows). The
+    /// per-element break decisions are made by the layout-phase line
+    /// breaker.
+    pub fn get_word_break(&self) -> WordBreak {
+        self.0
+            .get("word-break")
+            .and_then(|s| parse_word_break(s.as_str()))
+            .unwrap_or_default()
+    }
+    /// Overflow-wrap behaviour (CSS `overflow-wrap`, legacy
+    /// `word-wrap`).
+    ///
+    /// Accepts the legacy `word-wrap` keyword in addition to the
+    /// standard `overflow-wrap` so older stylesheets still apply.
+    /// Defaults to [`OverflowWrap::Normal`] (no mid-word break for
+    /// unbreakable overflows).
+    pub fn get_overflow_wrap(&self) -> OverflowWrap {
+        self.0
+            .get("overflow-wrap")
+            .or_else(|| self.0.get("word-wrap"))
+            .and_then(|s| parse_overflow_wrap(s.as_str()))
+            .unwrap_or_default()
     }
     /// Element width (CSS `width`).
     ///
@@ -286,61 +325,51 @@ impl CssAttr {
     }
 
     // ------------------------------------------------------------
-    // Flexbox accessors
+    // `display` accessor
     //
-    // Each getter is tolerant: an unparseable value falls back to the
-    // CSS initial value so a single typo never silently disables flex
-    // for the element. Callers (the flex layout in
-    // `layout::flex::tree`) consume the typed result directly.
+    // `display` is the single source of truth for the box's outer
+    // role and inner formatting context. The author-declared value is
+    // optional; the UA default for the element type is used when the
+    // property is absent. Callers (the generation phase, the inline
+    // runs walker, the flex item intrinsic-size helper, …) consume
+    // the typed `CssDisplay` directly. Per-axis views are exposed via
+    // [`outer_display`] and [`inner_formatting_context`].
     // ------------------------------------------------------------
 
-    /// Whether this element opts into flex layout.
-    ///
-    /// Only the literal `flex` is recognised. `inline-flex` is treated as
-    /// `block` (i.e. not flex) for v1 because the renderer is block-only.
-    pub fn is_flex(&self) -> bool {
-        matches!(
-            self.0.get("display").map(|s| s.trim().to_ascii_lowercase()),
-            Some(ref v) if v == "flex"
-        )
+    /// Raw author-declared `display` value as a typed enum, or `None`
+    /// when the property is absent.
+    pub fn display(&self) -> Option<CssDisplay> {
+        self.0.get("display").map(String::as_str).and_then(CssDisplay::parse)
     }
 
-    /// Outer display role from CSS `display`.
-    ///
-    /// Returns [`OuterDisplay::Inline`] for `inline` / `inline-block` /
-    /// `inline-flex` / `inline-grid`, and [`OuterDisplay::Block`] for the
-    /// block-level equivalents (`block` / `flex` / `grid`) plus the default
-    /// when `display` is missing.
-    pub fn outer_display(&self) -> OuterDisplay {
-        match self
-            .0
-            .get("display")
-            .map(|s| s.trim().to_ascii_lowercase())
-            .as_deref()
-        {
-            Some("inline") | Some("inline-block") | Some("inline-flex") | Some("inline-grid") => {
-                OuterDisplay::Inline
-            }
-            _ => OuterDisplay::Block,
-        }
+    /// Author-declared `display` if present, otherwise the UA default
+    /// for `node_type`. `display: none` and `display: contents` are
+    /// preserved here so the caller can branch on them.
+    fn display_or_ua(&self, node_type: &NodeType) -> CssDisplay {
+        self.display().unwrap_or_else(|| node_type.ua_default_display())
     }
 
-    /// Inner formatting context from CSS `display`.
-    ///
-    /// Returns [`FormattingContext::Flex`] for `flex` / `inline-flex`,
-    /// [`FormattingContext::Grid`] for `grid` / `inline-grid`, and
-    /// [`FormattingContext::Flow`] for everything else (including the default
-    /// when `display` is missing).
-    pub fn inner_formatting_context(&self) -> FormattingContext {
-        match self
-            .0
-            .get("display")
-            .map(|s| s.trim().to_ascii_lowercase())
-            .as_deref()
-        {
-            Some("flex") | Some("inline-flex") => FormattingContext::Flex,
-            Some("grid") | Some("inline-grid") => FormattingContext::Grid,
-            _ => FormattingContext::Flow,
+    /// Outer display role derived from CSS `display` (with UA default
+    /// fallback). Returns a `BlockLevel { container: bool } | Inline
+    /// { block: bool }` so geometry can tell apart a block-level box
+    /// from a block container (a box that establishes a new FC for its
+    /// children).
+    pub fn outer_display(&self, node_type: &NodeType) -> OuterDisplay {
+        OuterDisplay::from_css_display(self.display_or_ua(node_type))
+    }
+
+    /// Inner formatting context derived from CSS `display` (with UA
+    /// default fallback).
+    pub fn inner_formatting_context(&self, node_type: &NodeType) -> FormattingContext {
+        let d = self.display_or_ua(node_type);
+        if d.is_table_family() {
+            FormattingContext::Table
+        } else if d.is_flex() {
+            FormattingContext::Flex
+        } else if matches!(d, CssDisplay::Grid | CssDisplay::InlineGrid) {
+            FormattingContext::Grid
+        } else {
+            FormattingContext::Flow
         }
     }
 

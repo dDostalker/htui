@@ -44,7 +44,9 @@ pub fn layout_a(
     }
     // A normal anchor is inline by default. When flex has already allocated
     // its item rectangle, however, it must be laid out as a blockified item.
-    if pre_allocated_rect.is_none() && !has_block_display(&node.css_attr) {
+    if pre_allocated_rect.is_none()
+        && !node.css_attr.display().is_some_and(|d| d.is_block_level())
+    {
         return None;
     }
 
@@ -61,17 +63,6 @@ pub fn layout_a(
         context,
         pre_allocated_rect,
     ))
-}
-
-fn has_block_display(css_attr: &CssAttr) -> bool {
-    matches!(
-        css_attr
-            .0
-            .get("display")
-            .map(|value| value.trim().to_ascii_lowercase())
-            .as_deref(),
-        Some("block") | Some("flex") | Some("grid")
-    )
 }
 
 /// Inject the browser-style `<a>` defaults into `css_attr` when the cascade

@@ -599,6 +599,124 @@ pub enum TextDecoration {
 }
 
 // ============================================================
+// Text-wrapping property values (CSS Text Level 3 subset)
+//
+// Parsers and enums for `white-space`, `word-break`, and
+// `overflow-wrap`. These properties do NOT inherit per the CSS
+// spec, so they live on `CssAttr` lookup, not in `INHERITED_PROPS`.
+// The renderer honours the defaults that browsers ship:
+//   - white-space: normal   (collapse ws + wrap)
+//   - word-break:  normal   (allow CJK character breaks)
+//   - overflow-wrap: normal (no mid-word breaks unless the word
+//     itself doesn't fit on a single line)
+// ============================================================
+
+/// Whitespace handling (CSS `white-space`).
+///
+/// Mirrors the CSS Text Module Level 3 grammar. The two orthogonal
+/// axes are:
+///
+/// - **collapsing** — whether runs of whitespace are folded into a
+///   single space (`normal` / `nowrap` / `pre-line`) or preserved
+///   verbatim (`pre` / `pre-wrap`).
+/// - **wrapping** — whether soft-wrap opportunities exist
+///   (`normal` / `pre-wrap` / `pre-line`) or the text is forced to
+///   a single line (`nowrap` / `pre`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WhiteSpace {
+    /// `normal` — collapse whitespace, wrap at soft-wrap opportunities.
+    #[default]
+    Normal,
+    /// `pre` — preserve whitespace and newlines verbatim, no wrapping.
+    Pre,
+    /// `nowrap` — collapse whitespace but never wrap.
+    NoWrap,
+    /// `pre-wrap` — preserve whitespace and newlines, allow wrapping.
+    PreWrap,
+    /// `pre-line` — collapse spaces / tabs but preserve newlines, allow
+    /// wrapping.
+    PreLine,
+}
+
+impl WhiteSpace {
+    /// `true` when the configured mode preserves whitespace runs and
+    /// newlines verbatim (instead of collapsing them).
+    pub const fn preserves_whitespace(self) -> bool {
+        matches!(self, WhiteSpace::Pre | WhiteSpace::PreWrap)
+    }
+
+    /// `true` when the configured mode allows wrapping at soft-wrap
+    /// opportunities (spaces, CJK character boundaries).
+    pub const fn allows_wrap(self) -> bool {
+        matches!(
+            self,
+            WhiteSpace::Normal | WhiteSpace::PreWrap | WhiteSpace::PreLine
+        )
+    }
+}
+
+#[doc(hidden)]
+pub fn parse_white_space(s: &str) -> Option<WhiteSpace> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "normal" => Some(WhiteSpace::Normal),
+        "pre" => Some(WhiteSpace::Pre),
+        "nowrap" => Some(WhiteSpace::NoWrap),
+        "pre-wrap" => Some(WhiteSpace::PreWrap),
+        "pre-line" => Some(WhiteSpace::PreLine),
+        _ => None,
+    }
+}
+
+/// Word-break behaviour for CJK / long-word overflow (CSS `word-break`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WordBreak {
+    /// `normal` — break at word boundaries; between CJK characters the
+    /// breaker may also break (mirrors browser default).
+    #[default]
+    Normal,
+    /// `break-all` — break between any two adjacent characters.
+    BreakAll,
+    /// `keep-all` — for CJK text, do not break between CJK characters;
+    /// breaks only happen at spaces / western word boundaries.
+    KeepAll,
+}
+
+#[doc(hidden)]
+pub fn parse_word_break(s: &str) -> Option<WordBreak> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "normal" => Some(WordBreak::Normal),
+        "break-all" => Some(WordBreak::BreakAll),
+        "keep-all" => Some(WordBreak::KeepAll),
+        _ => None,
+    }
+}
+
+/// Overflow-wrap behaviour (CSS `overflow-wrap`, formerly `word-wrap`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OverflowWrap {
+    /// `normal` — break only at normal break opportunities; a too-long
+    /// word overflows.
+    #[default]
+    Normal,
+    /// `break-word` — if no normal break opportunity exists on a line,
+    /// the unbreakable word may be broken to fit.
+    BreakWord,
+    /// `anywhere` — same as `break-word`, but soft-wrap opportunities
+    /// are considered even between every pair of characters.
+    Anywhere,
+}
+
+#[doc(hidden)]
+pub fn parse_overflow_wrap(s: &str) -> Option<OverflowWrap> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "normal" => Some(OverflowWrap::Normal),
+        "break-word" => Some(OverflowWrap::BreakWord),
+        "anywhere" => Some(OverflowWrap::Anywhere),
+        _ => None,
+    }
+}
+
+// ============================================================
 // Flexbox property values
 //
 // Parsers and enums for the CSS flex properties supported by the
@@ -817,4 +935,219 @@ pub fn parse_gap_shorthand(s: &str, font_ctx: FontContext, viewport: Viewport) -
         row: row.resolve(LengthContext { containing: usize::MAX, font: font_ctx, viewport }),
         column: column.resolve(LengthContext { containing: usize::MAX, font: font_ctx, viewport }),
     })
+}
+
+// ============================================================
+// CSS `display` value
+//
+// `CssDisplay` is the single source of truth for the CSS `display`
+// property. Every other display-derived value (`OuterDisplay`,
+// `FormattingContext`, and the inline-vs-block predicates in
+// `walk_runs` / `layout_a`) is computed from this enum so that the
+// generation phase sees one consistent classification.
+//
+// The enum covers every keyword CSS Display 3 / 4 defines; keywords
+// the renderer doesn't implement yet (e.g. `run-in`) still parse but
+// are mapped to their `flow` / `block` / `flex` / `table` equivalents
+// at the outer / inner level so generation can hand them to the
+// closest supported algorithm without dropping them.
+// ============================================================
+
+/// CSS `display` value, parsed from the author-declared string.
+///
+/// The variant determines both the outer role (block-level vs inline-level)
+/// and the inner formatting context (flow / flex / table / grid) the box
+/// will use. See the per-variant docs for the exact mapping; helpers
+/// [`CssDisplay::outer_display`] and [`CssDisplay::inner_formatting_context`]
+/// give the per-axis view for callers that need only one piece.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CssDisplay {
+    /// `display: block`. Block-level box that establishes a block
+    /// formatting context.
+    Block,
+    /// `display: flow` — CSS Display 3 alias for the default block flow.
+    /// Renders identically to `block` in the v1 renderer.
+    Flow,
+    /// `display: flow-root` — block container that establishes a new
+    /// block formatting context. Treated as `block` for v1 layout; the
+    /// BFC distinction is exposed via the `container` flag in
+    /// [`crate::layout::OuterDisplay`].
+    FlowRoot,
+    /// `display: inline` — inline-level box that participates in the
+    /// parent's inline formatting context. Does not establish a new FC.
+    Inline,
+    /// `display: inline-block` — inline-level box that establishes a
+    /// block formatting context for its children.
+    InlineBlock,
+    /// `display: list-item` — block-level box that participates in the
+    /// parent's flow as a list item. The marker is not rendered in v1;
+    /// the box otherwise behaves like a `flow`.
+    ListItem,
+    /// `display: flex` — block-level box that establishes a flex
+    /// formatting context for its children.
+    Flex,
+    /// `display: inline-flex` — inline-level box that establishes a
+    /// flex formatting context for its children.
+    InlineFlex,
+    /// `display: grid` — block-level box that would establish a grid
+    /// formatting context. The grid algorithm is reserved; generation
+    /// routes these to the geometry dispatcher which currently logs a
+    /// debug message and returns `None`.
+    Grid,
+    /// `display: inline-grid` — inline-level box that would establish a
+    /// grid formatting context. Same caveat as [`CssDisplay::Grid`].
+    InlineGrid,
+    /// `display: table` — block-level box that establishes a table
+    /// formatting context.
+    Table,
+    /// `display: inline-table` — inline-level box that establishes a
+    /// table formatting context.
+    InlineTable,
+    /// `display: table-row-group` — table-internal row group (`<tbody>`).
+    /// Generated as a normal block flow container in v1 (no group chrome);
+    /// the table algorithm expects its children to be `<tr>`s.
+    TableRowGroup,
+    /// `display: table-header-group` (`<thead>`) — like
+    /// [`CssDisplay::TableRowGroup`] but conventionally printed before
+    /// `<tbody>` on a re-flow. Treated identically in v1.
+    TableHeaderGroup,
+    /// `display: table-footer-group` (`<tfoot>`) — like
+    /// [`CssDisplay::TableRowGroup`].
+    TableFooterGroup,
+    /// `display: table-row` — table row.
+    TableRow,
+    /// `display: table-cell` — table cell.
+    TableCell,
+    /// `display: table-column-group` (`<colgroup>`).
+    TableColumnGroup,
+    /// `display: table-column` (`<col>`).
+    TableColumn,
+    /// `display: table-caption` (`<caption>`) — block-level box that
+    /// appears above / below the table.
+    TableCaption,
+    /// `display: none` — the element and its descendants generate no
+    /// boxes. The generation phase drops these entirely.
+    None,
+    /// `display: contents` — the element itself generates no box, but
+    /// its children participate in the element's *parent*'s formatting
+    /// context (i.e. are flattened into the parent's children list).
+    Contents,
+}
+
+impl CssDisplay {
+    /// Parse a `display` value from a CSS string. Trims surrounding
+    /// whitespace and lowercases the input. Returns `None` for
+    /// unrecognised keywords so callers can fall back to the UA default.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "block" => Some(CssDisplay::Block),
+            "flow" => Some(CssDisplay::Flow),
+            "flow-root" => Some(CssDisplay::FlowRoot),
+            "inline" => Some(CssDisplay::Inline),
+            "inline-block" => Some(CssDisplay::InlineBlock),
+            "list-item" => Some(CssDisplay::ListItem),
+            "flex" => Some(CssDisplay::Flex),
+            "inline-flex" => Some(CssDisplay::InlineFlex),
+            "grid" => Some(CssDisplay::Grid),
+            "inline-grid" => Some(CssDisplay::InlineGrid),
+            "table" => Some(CssDisplay::Table),
+            "inline-table" => Some(CssDisplay::InlineTable),
+            "table-row-group" => Some(CssDisplay::TableRowGroup),
+            "table-header-group" => Some(CssDisplay::TableHeaderGroup),
+            "table-footer-group" => Some(CssDisplay::TableFooterGroup),
+            "table-row" => Some(CssDisplay::TableRow),
+            "table-cell" => Some(CssDisplay::TableCell),
+            "table-column-group" => Some(CssDisplay::TableColumnGroup),
+            "table-column" => Some(CssDisplay::TableColumn),
+            "table-caption" => Some(CssDisplay::TableCaption),
+            "none" => Some(CssDisplay::None),
+            "contents" => Some(CssDisplay::Contents),
+            _ => None,
+        }
+    }
+
+    /// `true` when this value removes the element from the box tree.
+    pub fn is_dropped(self) -> bool {
+        matches!(self, CssDisplay::None)
+    }
+
+    /// `true` when this value removes the element's own box but keeps
+    /// its children (which then flatten into the parent).
+    pub fn is_transparent(self) -> bool {
+        matches!(self, CssDisplay::Contents)
+    }
+
+    /// `true` for block-level keywords (the box participates in its
+    /// parent's flow as a block). Used by
+    /// [`collect_runs`](crate::layout::layoutbox::collect_runs) and
+    /// [`layout_a`](crate::layout::layoutbox::inner_formatting_context::flow::a::layout_a)
+    /// to decide whether an element should be handled as a block or
+    /// remain in the parent's inline runs.
+    pub fn is_block_level(self) -> bool {
+        matches!(
+            self,
+            CssDisplay::Block
+                | CssDisplay::Flow
+                | CssDisplay::FlowRoot
+                | CssDisplay::ListItem
+                | CssDisplay::Flex
+                | CssDisplay::Grid
+                | CssDisplay::Table
+                | CssDisplay::TableRowGroup
+                | CssDisplay::TableHeaderGroup
+                | CssDisplay::TableFooterGroup
+                | CssDisplay::TableRow
+                | CssDisplay::TableCell
+                | CssDisplay::TableColumnGroup
+                | CssDisplay::TableColumn
+                | CssDisplay::TableCaption
+        )
+    }
+
+    /// `true` for inline-level keywords.
+    pub fn is_inline_level(self) -> bool {
+        matches!(
+            self,
+            CssDisplay::Inline
+                | CssDisplay::InlineBlock
+                | CssDisplay::InlineFlex
+                | CssDisplay::InlineGrid
+                | CssDisplay::InlineTable
+        )
+    }
+
+    /// `true` for `display: flex` and `display: inline-flex`. Used by
+    /// the inline-runs walker to recognise anchor children of flex
+    /// containers as flex items rather than folding them into the
+    /// parent's text.
+    pub fn is_flex(self) -> bool {
+        matches!(self, CssDisplay::Flex | CssDisplay::InlineFlex)
+    }
+
+    /// `true` for `display: table`, `inline-table`, and table-internal
+    /// keywords that should route through the table formatting context.
+    pub fn is_table_family(self) -> bool {
+        matches!(
+            self,
+            CssDisplay::Table
+                | CssDisplay::InlineTable
+                | CssDisplay::TableRowGroup
+                | CssDisplay::TableHeaderGroup
+                | CssDisplay::TableFooterGroup
+                | CssDisplay::TableRow
+                | CssDisplay::TableCell
+                | CssDisplay::TableColumnGroup
+                | CssDisplay::TableColumn
+                | CssDisplay::TableCaption
+        )
+    }
+}
+
+impl Default for CssDisplay {
+    /// UA default for elements that don't carry an explicit `display`:
+    /// `flow` (block-level block container). This is the CSS Display 3
+    /// name for the legacy `block` behaviour.
+    fn default() -> Self {
+        CssDisplay::Flow
+    }
 }

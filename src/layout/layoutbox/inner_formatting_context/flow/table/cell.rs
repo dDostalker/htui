@@ -5,7 +5,8 @@ use crate::{
     html::box_edges::BoxEdges,
     layout::{
         BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, Rect,
-        inner_formatting_context::flow::layout_children, layoutbox::collect_runs,
+        inner_formatting_context::flow::layout_children,
+        layoutbox::{collect_runs, wrap_runs},
     },
     tdom::node::{NodeArena, NodeId, effective_font_size_cells},
     tui::graph_api::block_style,
@@ -66,9 +67,30 @@ pub fn layout_cell(
         child_context,
     );
 
+    // Wrap the cell's own inline text so long cell content wraps
+    // instead of overflowing. A `<td>` only owns its own text, so we
+    // wrap the body runs to the cell's content-box width.
+    let cell_content_width = inner_content_width.max(1);
+    let wrapped_lines = if body_runs.is_empty() {
+        Vec::new()
+    } else {
+        wrap_runs(
+            &body_runs,
+            cell_content_width,
+            own_font_size_cells,
+            node.css_attr.get_white_space(),
+            node.css_attr.get_word_break(),
+            node.css_attr.get_overflow_wrap(),
+        )
+    };
+
     let paint_style = PaintStyle {
         box_edges: cell_edges,
-        runs: if body_runs.is_empty() { None } else { Some(body_runs) },
+        runs: if wrapped_lines.is_empty() || wrapped_lines.iter().all(|l| l.is_empty()) {
+            None
+        } else {
+            Some(wrapped_lines)
+        },
         font_size_cells: own_font_size_cells,
         fill_bg,
         spacing_after: 0,
@@ -79,7 +101,7 @@ pub fn layout_cell(
         cell_id,
         rect,
         paint_style,
-        node.css_attr.outer_display(),
+        node.css_attr.outer_display(&node.node_type),
         children,
     )
 }

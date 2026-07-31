@@ -81,6 +81,7 @@ pub(super) fn distribute_main_axis(
     line: &[&FlexItemPrep],
     available: usize,
     column_gap: usize,
+    indefinite: bool,
 ) -> (Vec<usize>, usize) {
     let n = line.len();
     if n == 0 {
@@ -89,6 +90,17 @@ pub(super) fn distribute_main_axis(
     let gaps = column_gap.saturating_mul(n.saturating_sub(1));
     let total_basis: usize = line.iter().map(|p| p.basis).sum();
     let mut sizes: Vec<usize> = line.iter().map(|p| p.basis).collect();
+
+    // An indefinite main axis (a `column` flex container with no explicit
+    // height) has no free space to distribute: `flex-grow` and
+    // `flex-shrink` are no-ops and the container's main size is exactly
+    // the sum of its items' bases. Without this guard `available` is
+    // `usize::MAX`, which makes `free` overflow when cast to `isize` in
+    // the grow branch below (debug-build panic: attempt to add with
+    // overflow).
+    if indefinite {
+        return (sizes, 0);
+    }
 
     let used_after_basis = total_basis.saturating_add(gaps);
     if used_after_basis < available {

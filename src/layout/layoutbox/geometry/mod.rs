@@ -1,0 +1,174 @@
+//! Geometry assignment for generated layout boxes.
+//!
+//! Dispatch is based on box classification alone:
+//!
+//! - `BoxKind × OuterDisplay × FormattingContext` selects which algorithm
+//!   owns the geometry for a box.
+//! - Tag-specific data (e.g. `<img src>`) is read from the
+//!   [`GeneratedPayload`](crate::layout::layoutbox::generation::GeneratedPayload)
+//!   attached at generation time, never from the DOM.
+//! - Replaced, flex, and table boxes are reached here before the normal-flow
+//!   registry, so per-element `LayoutFn`s never re-claim them.
+
+use crate::{
+    layout::{
+        BoxConstraint, Cursor, FormattingContext, LayoutBox, LayoutContext, PaintStyle, Rect,
+        ReplacedContent,
+        layoutbox::generation::{GeneratedBox, GeneratedBoxKind, GeneratedPayload},
+    },
+    tdom::node::{NodeArena, NodeId},
+    tui::graph_api::{IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW},
+};
+
+/// Assign geometry to a generated box forest.
+pub fn layout_generated_tree(
+    arena: &NodeArena,
+    boxes: &[GeneratedBox],
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+    context: LayoutContext,
+) -> Vec<LayoutBox> {
+    boxes
+        .iter()
+        .filter_map(|generated| {
+            layout_generated_box(arena, generated, containing, cursor, context, None)
+        })
+        .collect()
+}
+
+/// Assign geometry to one generated box using its box classifications.
+pub fn layout_generated_box(
+    arena: &NodeArena,
+    generated: &GeneratedBox,
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+    context: LayoutContext,
+    pre_allocated_rect: Option<Rect>,
+) -> Option<LayoutBox> {
+    match (
+        generated.kind,
+        generated.outer_display,
+        generated.inner_formatting_context,
+    ) {
+        (GeneratedBoxKind::Replaced, _, _) => {
+            layout_replaced(arena, generated, containing, cursor, pre_allocated_rect)
+        }
+        (GeneratedBoxKind::Normal, _, FormattingContext::Flex) => {
+            crate::layout::layoutbox::inner_formatting_context::flex::layout_flex_dispatch(
+                arena,
+                generated.node_id,
+                containing,
+                cursor,
+                context,
+                pre_allocated_rect,
+            )
+        }
+        (GeneratedBoxKind::Normal, _, FormattingContext::Table) => {
+            crate::layout::inner_formatting_context::flow::layout_table(
+                arena,
+                generated.node_id,
+                containing,
+                cursor,
+                context,
+                pre_allocated_rect,
+            )
+        }
+        (GeneratedBoxKind::Normal, _, FormattingContext::Flow) => {
+            crate::layout::layoutbox::inner_formatting_context::flow::dispatch_flow_geometry(
+                arena,
+                generated.node_id,
+                containing,
+                cursor,
+                context,
+                pre_allocated_rect,
+            )
+        }
+        (GeneratedBoxKind::Normal, _, FormattingContext::Grid) => {
+            log::debug!(
+                "Grid geometry is not implemented for node {}",
+                generated.node_id
+            );
+            None
+        }
+        (GeneratedBoxKind::Text | GeneratedBoxKind::Anonymous, _, _) => None,
+    }
+}
+
+/// Layout a single DOM node by generating its box and dispatching its
+/// geometry. Used by callers that already have a `NodeId` and want the same
+/// classification-driven behaviour as the box-tree walk.
+pub fn layout_generated_box_via_node(
+    arena: &NodeArena,
+    node_id: NodeId,
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+    context: LayoutContext,
+    pre_allocated_rect: Option<Rect>,
+) -> Option<LayoutBox> {
+    let generated = crate::layout::layoutbox::generation::generate_node(arena, node_id)?;
+    layout_generated_box(
+        arena,
+        &generated,
+        containing,
+        cursor,
+        context,
+        pre_allocated_rect,
+    )
+}
+
+/// Geometry for replaced elements driven solely by the payload attached at
+/// generation time. Tag-specific data (the resource path and intrinsic
+/// `width` / `height` attributes) is read from the DOM only when the
+/// payload indicates an image; the dispatch never inspects `NodeType` to
+/// decide which geometry algorithm to run.
+fn layout_replaced(
+    arena: &NodeArena,
+    generated: &GeneratedBox,
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+    pre_allocated_rect: Option<Rect>,
+) -> Option<LayoutBox> {
+    let src = match &generated.payload {
+        GeneratedPayload::Image { src } if !src.is_empty() => src.clone(),
+        GeneratedPayload::Transparent => return None,
+        _ => return None,
+    };
+
+    let (x, y, block_width, img_rows) = match pre_allocated_rect {
+        Some(rect) => {
+            let width = rect.width.max(1);
+            let height = rect.height.max(1);
+            (rect.x, rect.y, width, height)
+        }
+        None => {
+            let node = &arena[generated.node_id];
+            let max_w = node
+                .get_width()
+                .unwrap_or(containing.width as u32 * IMAGE_PIXELS_PER_CELL_COL);
+            let max_h = node
+                .get_height()
+                .unwrap_or(containing.width as u32 * IMAGE_PIXELS_PER_CELL_ROW);
+            let img_cols = max_w.div_ceil(IMAGE_PIXELS_PER_CELL_COL).max(1) as usize;
+            let img_rows = max_h.div_ceil(IMAGE_PIXELS_PER_CELL_ROW).max(1) as usize;
+            let block_width = img_cols.min(containing.width).max(1);
+            let x = centered_left(containing, block_width);
+            let y = cursor.allocate(img_rows);
+            (x, y, block_width, img_rows)
+        }
+    };
+
+    Some(LayoutBox::new_replaced(
+        generated.node_id,
+        Rect::new(x, y, block_width, img_rows),
+        ReplacedContent::Image {
+            path: src,
+            cols: block_width,
+            rows: img_rows,
+        },
+        PaintStyle::default(),
+    ))
+}
+
+fn centered_left(containing: BoxConstraint, block_width: usize) -> usize {
+    containing.x + containing.width.saturating_sub(block_width) / 2
+}

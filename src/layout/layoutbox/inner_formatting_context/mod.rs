@@ -12,6 +12,8 @@
 //!   lives in [`flow`](self::flow).
 //! - [`FormattingContext::Flex`] — CSS flexbox container. Implementation
 //!   lives in [`flex`](self::flex).
+//! - [`FormattingContext::Table`] — Internal table formatting context. Geometry
+//!   is assigned by the table algorithm.
 //! - [`FormattingContext::Grid`] — CSS grid container (reserved). Lives in
 //!   [`grid`](self::grid).
 
@@ -32,6 +34,8 @@ pub enum FormattingContext {
     /// Flex formatting context — direct children are flex items positioned
     /// by `flex-direction` / `flex-wrap` / `justify-content` / `align-items`.
     Flex,
+    /// Table formatting context used by generated `<table>` boxes.
+    Table,
     /// Grid formatting context. Reserved for future support; the layout
     /// pipeline does not yet produce boxes with this context.
     Grid,

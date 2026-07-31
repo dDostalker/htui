@@ -70,10 +70,21 @@ pub(crate) fn paint_block(
                 let content_x_offset =
                     box_edges.border.left.thickness() + box_edges.padding.left;
                 let content_width = r.width.saturating_sub(inner_h).max(1);
-                let text_width: usize = runs
+                // `runs` is `Vec<Vec<InlineRun>>` (one entry per visual
+                // line after wrapping). The widest visual line drives
+                // the text-align offset; the bg only needs to cover
+                // that widest line, so flatten across all lines and
+                // pick the max per-line width.
+                let widest_line_width = runs
                     .iter()
-                    .map(|run| run.width_at(lb.paint_style.font_size_cells))
-                    .sum();
+                    .map(|line| {
+                        line.iter()
+                            .map(|run| run.width_at(lb.paint_style.font_size_cells))
+                            .sum::<usize>()
+                    })
+                    .max()
+                    .unwrap_or(0);
+                let text_width = widest_line_width.min(content_width);
                 let text_width = text_width.min(content_width);
                 let offset = match align {
                     TextAlign::Left => 0,

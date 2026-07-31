@@ -1072,6 +1072,10 @@ fn test_visual_flex_nested_document_keeps_all_nested_items_visible() {
 </html>
 "#;
     let (rows, _) = render_rows(html, "");
+    eprintln!("row dump flex:");
+    for (i, r) in rows.iter().enumerate() {
+        eprintln!("{i:3}: {:?}", r);
+    }
     let c_row = rows
         .iter()
         .position(|row| row.trim_start().starts_with('c'))
@@ -1082,6 +1086,7 @@ fn test_visual_flex_nested_document_keeps_all_nested_items_visible() {
         .iter()
         .position(|row| row.contains("### 3. three levels deep"))
         .expect("section 3 heading must be rendered");
+    eprintln!("section_three_row={}", section_three_row);
     assert!(
         section_three_row < ROWS as usize,
         "section 3 must fit in the initial viewport: row={section_three_row}"

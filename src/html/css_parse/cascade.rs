@@ -98,6 +98,11 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "gap",
     "row-gap",
     "column-gap",
+    // Text wrapping (CSS Text Level 3)
+    "white-space",
+    "word-break",
+    "overflow-wrap",
+    "word-wrap",
 ];
 
 /// Inheritable subset of [`SUPPORTED_PROPERTIES`]: a child without an explicit

@@ -5,13 +5,15 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     html::css_parse::{AlignItems, AlignSelf, FlexDirection},
-    layout::LayoutContext,
+    layout::{
+        LayoutContext,
+        layoutbox::generation::{GeneratedBoxKind, generate_node},
+    },
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
     tui::graph_api::grapheme_width,
 };
 
 use super::container::{FlexItemPrep, FLEX_ITEM_MIN_CROSS};
-use super::dispatch::is_flex_capable_node;
 
 
 /// Build a [`FlexItemPrep`] for one block child: resolve `flex-basis`,
@@ -79,20 +81,24 @@ pub(super) fn prepare_flex_item(
     }
 }
 
-/// Sum the grapheme widths of every direct `Text` descendant of `node_id`.
+/// Sum the grapheme widths of every direct text leaf of `node_id`.
 ///
-/// Used as a low-level measurement helper by the recursive
-/// [`natural_intrinsic_size`] pass: a non-flex leaf is sized by the
-/// grapheme widths of its own direct text. For a node with nested block
-/// children this only counts the direct text — nested blocks are
-/// measured by [`natural_intrinsic_size`] itself.
+/// The generator classifies direct text children as
+/// [`GeneratedBoxKind::Text`]; this helper therefore walks the generated
+/// tree rather than the raw DOM so flex size-probing never inspects the
+/// element tag.
 pub(super) fn measure_text_content_width(arena: &NodeArena, node_id: NodeId) -> Option<usize> {
     let node = &arena[node_id];
     let mut total: Option<usize> = Some(0);
     for &child_id in &node.children {
-        if let NodeType::Text(s) = &arena[child_id].node_type {
-            let w: usize = s.graphemes(true).map(grapheme_width).sum();
-            total = Some(total.unwrap_or(0).saturating_add(w));
+        let Some(child) = generate_node(arena, child_id) else {
+            continue;
+        };
+        if child.kind == GeneratedBoxKind::Text {
+            if let NodeType::Text(s) = &arena[child_id].node_type {
+                let w: usize = s.graphemes(true).map(grapheme_width).sum();
+                total = Some(total.unwrap_or(0).saturating_add(w));
+            }
         }
     }
     total
@@ -139,13 +145,26 @@ fn natural_intrinsic_size(
         child_context.viewport,
     );
 
-    if css.is_flex() && is_flex_capable_node(&node.node_type) {
+    let generated = generate_node(arena, node_id);
+    let is_flex_box = generated
+        .as_ref()
+        .map(|g| {
+            g.kind == GeneratedBoxKind::Normal
+                && g.inner_formatting_context
+                    == crate::layout::FormattingContext::Flex
+        })
+        .unwrap_or(false);
+
+    let res = if css.display().is_some_and(|d| d.is_flex()) && is_flex_box {
         let inner_direction = css.get_flex_direction();
         let gap = css.get_gap(child_context.font, child_context.viewport);
 
         let mut child_sizes: Vec<NaturalIntrinsicSize> = Vec::new();
         for &child_id in &node.children {
-            if is_flex_capable_node(&arena[child_id].node_type) {
+            let Some(child_generated) = generate_node(arena, child_id) else {
+                continue;
+            };
+            if child_generated.kind == GeneratedBoxKind::Normal {
                 child_sizes.push(natural_intrinsic_size(arena, child_id, child_context));
             }
         }
@@ -210,25 +229,83 @@ fn natural_intrinsic_size(
             height: outer_h.max(FLEX_ITEM_MIN_CROSS),
         }
     } else {
-        // Non-flex block: use CSS width / height or the existing text /
-        // font-size fallbacks. We deliberately ignore the containing
-        // block for an intrinsic measurement — that value is meant for
-        // resolving percentages during layout, not for the recursive
-        // pre-layout measurement pass.
-        let width = css
-            .get_width(usize::MAX, child_context.font, child_context.viewport)
-            .or_else(|| measure_text_content_width(arena, node_id))
-            .unwrap_or(FLEX_ITEM_MIN_CROSS)
-            .max(FLEX_ITEM_MIN_CROSS);
-        let height = css
-            .get_height(usize::MAX, child_context.font, child_context.viewport)
-            .unwrap_or(own_font_size_cells)
-            .max(FLEX_ITEM_MIN_CROSS);
-        NaturalIntrinsicSize {
-            width,
-            height,
+        // Non-flex block: measure content by recursing into block children
+        // (sum their heights, take the max width) and adding one
+        // max-content row for any inline / text content. Explicit CSS
+        // `width` / `height` always win — this only supplies the `auto`
+        // fallback so a block with nested content no longer collapses to
+        // a single font-size row when used as a flex item (CSS `flex-basis:
+        // auto` resolves to the content-based size). Mirrors the
+        // flex-container branch above, which already recurses.
+        //
+        // We deliberately ignore the containing block here — that value is
+        // meant for resolving percentages during layout, not for the
+        // recursive pre-layout measurement pass.
+        let mut content_w: usize = 0;
+        let mut content_h: usize = 0;
+        let mut has_inline = false;
+        for &child_id in &node.children {
+            let Some(child_gen) = generate_node(arena, child_id) else {
+                continue;
+            };
+            let is_block = child_gen.kind == GeneratedBoxKind::Normal
+                && !child_gen.outer_display.is_inline();
+            if is_block {
+                let cs = natural_intrinsic_size(arena, child_id, child_context);
+                content_w = content_w.max(cs.width);
+                content_h = content_h.saturating_add(cs.height);
+            } else {
+                // Text nodes, inline elements and anonymous wrappers all
+                // contribute to the block's own inline content.
+                has_inline = true;
+            }
         }
-    }
+        let text_w = measure_text_content_width(arena, node_id).unwrap_or(0);
+        if text_w > 0 {
+            has_inline = true;
+            content_w = content_w.max(text_w);
+        }
+        if has_inline {
+            // Intrinsic (max-content) measurement does not wrap, so a
+            // single line of inline content contributes one row scaled by
+            // the block's effective font size.
+            content_h = content_h.saturating_add(own_font_size_cells.max(1));
+        }
+
+        let content_box_w = css
+            .get_width(usize::MAX, child_context.font, child_context.viewport)
+            .unwrap_or(content_w.max(FLEX_ITEM_MIN_CROSS))
+            .max(FLEX_ITEM_MIN_CROSS);
+        let content_box_h = css
+            .get_height(usize::MAX, child_context.font, child_context.viewport)
+            .unwrap_or(content_h.max(FLEX_ITEM_MIN_CROSS))
+            .max(FLEX_ITEM_MIN_CROSS);
+        // Report the border-box (outer) size, like the flex-container branch
+        // above: padding + border sit on top of the content-box measurement
+        // so the flex algorithm sizes the item's full border-box.
+        let width = content_box_w
+            .saturating_add(edges.padding.horizontal())
+            .saturating_add(edges.border.horizontal_thickness());
+        let height = content_box_h
+            .saturating_add(edges.padding.vertical())
+            .saturating_add(edges.border.vertical_thickness());
+        NaturalIntrinsicSize {
+            width: width.max(FLEX_ITEM_MIN_CROSS),
+            height: height.max(FLEX_ITEM_MIN_CROSS),
+        }
+    };
+
+    log::debug!(
+        target: "htui::intrinsic",
+        "natural_intrinsic_size node={:?} type={:?} class={:?} flex={} -> {}x{}",
+        node_id,
+        node.node_type,
+        node.attributes.get("class").map(|s| s.as_str()),
+        is_flex_box,
+        res.width,
+        res.height
+    );
+    res
 }
 
 /// Intrinsic border-box dimensions of a node, in terminal cells.

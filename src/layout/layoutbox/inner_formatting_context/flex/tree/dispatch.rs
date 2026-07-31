@@ -10,9 +10,7 @@ use super::container::layout_flex_container;
 /// Top-level flex entry point. Registered first in `DEFAULT_LAYOUT`.
 ///
 /// Returns `None` for nodes that do not opt into `display: flex` so the
-/// registry falls through to the element-specific block layout. Also
-/// declines non-element nodes (text, head, style, …) which can never
-/// host flex children.
+/// registry falls through to the element-specific block layout.
 pub fn layout_flex_dispatch(
     arena: &NodeArena,
     node_id: NodeId,
@@ -21,11 +19,10 @@ pub fn layout_flex_dispatch(
     context: LayoutContext,
     pre_allocated_rect: Option<Rect>,
 ) -> Option<LayoutBox> {
-    let node = &arena[node_id];
-    if !node.css_attr.is_flex() {
-        return None;
-    }
-    if !is_flex_capable_node(&node.node_type) {
+    if !crate::layout::layoutbox::generation::generate_node(arena, node_id)
+        .map(|generated| generated.inner_formatting_context == crate::layout::FormattingContext::Flex)
+        .unwrap_or(false)
+    {
         return None;
     }
     Some(layout_flex_container(
@@ -45,6 +42,7 @@ pub fn layout_flex_dispatch(
 /// `Global` root are all rejected. The `Selector::Tag` matcher
 /// already prevents most of these from acquiring `display: flex` in the
 /// first place — the guard is belt-and-braces.
+#[allow(dead_code)]
 pub(super) fn is_flex_capable_node(nt: &NodeType) -> bool {
     !matches!(
         nt,
@@ -61,12 +59,11 @@ pub(super) fn is_flex_capable_node(nt: &NodeType) -> bool {
 /// True when the node type is a block-level element that can act as a
 /// flex *item* (i.e. can be a direct child of a flex container).
 ///
-/// Inline elements (`Span`, `Em`) and `Text` leaves are excluded — they
-/// participate in the container's inline runs instead. `<a>` is included
-/// because `layout_a` claims it as a block element when it sits as a direct
-/// block-level child; an author who wants it inline inside a paragraph still
-/// gets the inline path via `walk_runs`. `<img>` is also a block-level layout
-/// element and is included so images can sit inside a flex container.
+/// Generation wraps inline and text children into anonymous flex items, so
+/// the runtime never has to filter them by tag. This helper is kept for
+/// callers that still need to know whether a direct child *should* be
+/// promoted into a flex item box at all (e.g. measure-time width probing).
+#[allow(dead_code)]
 pub(super) fn is_block_child_node(nt: &NodeType) -> bool {
     matches!(
         nt,
