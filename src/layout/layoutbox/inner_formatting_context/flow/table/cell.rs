@@ -79,7 +79,7 @@ pub fn layout_cell(
         cell_id,
         rect,
         paint_style,
-        node.css_attr.outer_display(),
+        node.css_attr.outer_display(&node.node_type),
         children,
     )
 }

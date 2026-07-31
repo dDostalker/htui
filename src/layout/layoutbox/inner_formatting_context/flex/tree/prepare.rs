@@ -155,7 +155,7 @@ fn natural_intrinsic_size(
         })
         .unwrap_or(false);
 
-    if css.is_flex() && is_flex_box {
+    if css.display().is_some_and(|d| d.is_flex()) && is_flex_box {
         let inner_direction = css.get_flex_direction();
         let gap = css.get_gap(child_context.font, child_context.viewport);
 

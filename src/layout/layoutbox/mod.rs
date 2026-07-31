@@ -28,16 +28,23 @@
 //!    be grouped into a single block).
 //!
 //! 2. `outer_display` — how this box *participates in its parent's*
-//!    formatting context ([`OuterDisplay::Block`] vs [`OuterDisplay::Inline`]).
+//!    formatting context ([`OuterDisplay::BlockLevel`] vs
+//!    [`OuterDisplay::Inline`], with each variant carrying a
+//!    `container` / `block` flag that distinguishes a block container
+//!    from a plain block-level box, and `inline-block` from `inline`).
 //!
 //! 3. `inner_formatting_context` — how this box *lays out its own children*:
 //!    [`FormattingContext::Flow`] (default block / inline flow),
-//!    [`FormattingContext::Flex`] (CSS flexbox), or [`FormattingContext::Grid`]
+//!    [`FormattingContext::Flex`] (CSS flexbox), [`FormattingContext::Table`]
+//!    (table formatting context), or [`FormattingContext::Grid`]
 //!    (reserved for future grid support).
 //!
 //! The three axes are independent: a flex container is
-//! `BoxKind::Normal + OuterDisplay::Block + FormattingContext::Flex`; an
-//! `<img>` is `BoxKind::Replaced + OuterDisplay::Block + FormattingContext::Flow`.
+//! `BoxKind::Normal + OuterDisplay::BlockLevel { container: true } + FormattingContext::Flex`;
+//! an `<img>` is
+//! `BoxKind::Replaced + OuterDisplay::Inline { block: true } + FormattingContext::Flow`
+//! (its UA `display: inline-block` is what makes it a block-level
+//! replaced inline-block box).
 //! Paint-only data (padding / border / margin / inline runs / background-fill
 //! flags / chrome / font-size) is collected in [`PaintStyle`] so [`LayoutBox`]
 //! itself only carries layout-classification fields. This keeps the layout
@@ -203,7 +210,7 @@ impl LayoutBox {
             rect,
             paint_style,
             kind: BoxKind::Replaced(content),
-            outer_display: OuterDisplay::Block,
+            outer_display: OuterDisplay::BlockLevel { container: false },
             inner_formatting_context: FormattingContext::Flow,
             children: Vec::new(),
         }
@@ -228,7 +235,7 @@ impl LayoutBox {
             rect,
             paint_style,
             kind: BoxKind::Anonymous,
-            outer_display: OuterDisplay::Block,
+            outer_display: OuterDisplay::BlockLevel { container: true },
             inner_formatting_context: FormattingContext::Flow,
             children,
         }

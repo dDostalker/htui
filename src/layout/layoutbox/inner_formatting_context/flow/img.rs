@@ -4,11 +4,13 @@
 //! during the generation phase and dispatched through the geometry entry
 //! point. This entry point remains so external callers and the existing
 //! flex / table integration continue to compile; it simply defers to the
-//! geometry dispatcher and returns `None` when the node isn't an image.
+//! geometry dispatcher and returns `None` for non-`<img>` nodes (the
+//! geometry phase itself decides whether the payload qualifies as a
+//! replaced element).
 
 use crate::{
     layout::{BoxConstraint, Cursor, LayoutBox, LayoutContext},
-    tdom::node::{NodeArena, NodeId, NodeType},
+    tdom::node::{NodeArena, NodeId},
 };
 
 /// Build a normal-flow image box without a parent pre-allocation.
@@ -32,9 +34,6 @@ pub fn layout_img_with_rect(
     context: LayoutContext,
     pre_allocated_rect: Option<crate::layout::Rect>,
 ) -> Option<LayoutBox> {
-    if !matches!(arena[node_id].node_type, NodeType::Img) {
-        return None;
-    }
     crate::layout::layoutbox::geometry::layout_generated_box_via_node(
         arena,
         node_id,

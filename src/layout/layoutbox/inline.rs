@@ -11,7 +11,6 @@ use crossterm::style::Color;
 
 use super::InlineRun;
 use crate::{
-    html::css_parse::CssAttr,
     tdom::node::{Node, NodeArena, NodeType},
     tui::graph_api::{FontStyle, block_style},
 };
@@ -68,10 +67,17 @@ fn walk_runs(
                 walk_runs(arena, child, span_fg, span_bg, span_style, runs);
             }
             NodeType::A => {
-                // A block-level anchor is painted by its own LayoutBox. A
-                // direct anchor child of a flex container is likewise a flex
-                // item, so neither case belongs in the parent's inline runs.
-                if has_block_display(&child.css_attr) || node.css_attr.is_flex() {
+                // A block-level anchor is painted by its own `LayoutBox`
+                // and must not have its text folded into the parent's
+                // inline runs. A direct anchor child of a flex
+                // container is likewise a flex item. Either way, the
+                // anchor does not belong here.
+                if child
+                    .css_attr
+                    .display()
+                    .is_some_and(|d| d.is_block_level())
+                    || node.css_attr.display().is_some_and(|d| d.is_flex())
+                {
                     continue;
                 }
 
@@ -112,15 +118,4 @@ fn walk_runs(
             _ => {}
         }
     }
-}
-
-fn has_block_display(css_attr: &CssAttr) -> bool {
-    matches!(
-        css_attr
-            .0
-            .get("display")
-            .map(|value| value.trim().to_ascii_lowercase())
-            .as_deref(),
-        Some("block") | Some("flex") | Some("grid")
-    )
 }

@@ -215,7 +215,7 @@ pub(super) fn layout_flex_container(
         node_id,
         rect,
         paint_style,
-        arena[node_id].css_attr.outer_display(),
+        arena[node_id].css_attr.outer_display(&arena[node_id].node_type),
         child_boxes,
     )
 }

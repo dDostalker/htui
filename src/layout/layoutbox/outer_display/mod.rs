@@ -1,30 +1,83 @@
 //! Outer `display` role of a box.
 //!
-//! Mirrors the two-axis CSS display model: a box has one outer display role
-//! (how it participates in its parent's formatting context) and one inner
-//! formatting context (how it lays out its own children). These are
-//! independent: a flex container can be inline (`display: inline-flex`) and
-//! still arrange its children by flexbox; a block-level `<div>` with no
-//! children has the same outer display as an `<img>`.
+//! Mirrors the CSS Display 3 model: a box's outer role is one of
+//! *block-level* (the box participates in its parent's flow as a block)
+//! or *inline-level* (it participates as an inline). Within each axis the
+//! `container` / `block` flag distinguishes a *block container* (a box
+//! that establishes a new formatting context for its children —
+//! `display: block`, `flex`, `grid`, `table`, `flow-root`, etc.) from a
+//! plain block-level box, and `inline-block` / `inline-flex` /
+//! `inline-grid` / `inline-table` (inline-level boxes that establish
+//! their own FC) from a plain `inline`.
 //!
-//! ## Variants
-//!
-//! - [`OuterDisplay::Block`] — The box generates its own line in its
-//!   parent's flow. This is the implicit default when `display` is missing.
-//! - [`OuterDisplay::Inline`] — The box participates in its parent's
-//!   inline formatting context (`inline` / `inline-block` / `inline-flex`).
-//!
-//! The renderer is currently block-only, so `Inline` is stored but treated as
-//! `Block` at the layout layer.
+//! See [`OuterDisplay::from_css_display`] for the per-keyword mapping.
+
+use crate::html::css_parse::CssDisplay;
 
 /// Outer display role of a layout box.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OuterDisplay {
-    /// `display: block` (and the implicit default when `display` is missing).
-    /// The box generates its own line in its parent's flow.
-    #[default]
-    Block,
-    /// `display: inline` / `inline-block` / `inline-flex` / `inline-grid`. The
-    /// box participates in its parent's inline formatting context.
-    Inline,
+    /// Block-level box. `container: true` means the box also
+    /// establishes a new formatting context for its children (a
+    /// *block container*). `container: false` is reserved for plain
+    /// block-level boxes that don't establish their own FC; the v1
+    /// renderer treats both cases identically.
+    BlockLevel { container: bool },
+    /// Inline-level box. `block: true` means the box establishes its
+    /// own block formatting context (i.e. `inline-block` /
+    /// `inline-flex` / `inline-grid` / `inline-table`).
+    Inline { block: bool },
+}
+
+impl Default for OuterDisplay {
+    /// Default outer role is a block container — matches the browser
+    /// default for elements without an explicit `display`.
+    fn default() -> Self {
+        OuterDisplay::BlockLevel { container: true }
+    }
+}
+
+impl OuterDisplay {
+    /// Derive the outer role for a [`CssDisplay`](crate::html::css_parse::CssDisplay)
+    /// value. See the variant docs for the per-keyword rule.
+    pub fn from_css_display(display: CssDisplay) -> Self {
+        match display {
+            CssDisplay::Inline => OuterDisplay::Inline { block: false },
+            CssDisplay::InlineBlock
+            | CssDisplay::InlineFlex
+            | CssDisplay::InlineGrid
+            | CssDisplay::InlineTable => OuterDisplay::Inline { block: true },
+            // `none` / `contents` boxes are dropped at generation time;
+            // they should never reach here, but a `BlockLevel` default
+            // is the safest fallback if a caller ever inspects them.
+            CssDisplay::None | CssDisplay::Contents => {
+                OuterDisplay::BlockLevel { container: false }
+            }
+            // All block-level keywords establish a new FC (or, for the
+            // reserved grid variants, would). `flow-root` is the
+            // canonical BFC root; the rest of the block-level set is
+            // treated the same way for v1.
+            _ => OuterDisplay::BlockLevel { container: true },
+        }
+    }
+
+    /// `true` for inline-level boxes (`Inline` and `inline-block`-family).
+    pub fn is_inline(self) -> bool {
+        matches!(self, OuterDisplay::Inline { .. })
+    }
+
+    /// `true` for block-level boxes (the default).
+    pub fn is_block_level(self) -> bool {
+        matches!(self, OuterDisplay::BlockLevel { .. })
+    }
+
+    /// `true` for boxes that establish a new formatting context for
+    /// their children (block container or inline-block).
+    pub fn establishes_formatting_context(self) -> bool {
+        match self {
+            OuterDisplay::BlockLevel { container: true } => true,
+            OuterDisplay::Inline { block: true } => true,
+            _ => false,
+        }
+    }
 }

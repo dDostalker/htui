@@ -3,7 +3,7 @@ use std::fmt;
 
 use slotmap::{Key, SlotMap, new_key_type};
 
-use crate::html::css_parse::{CssAttr, FontContext, LengthContext, Viewport};
+use crate::html::css_parse::{CssAttr, CssDisplay, FontContext, LengthContext, Viewport};
 
 // ============================================================
 // NodeId — slotmap 生成的类型安全索引
@@ -87,6 +87,33 @@ pub enum NodeType {
 impl NodeType {
     pub fn is_self_closing(&self) -> bool {
         matches!(self, NodeType::Img | NodeType::Input | NodeType::Meta)
+    }
+
+    /// Browser-style UA `display` default for this element.
+    ///
+    /// Returns the `display` value the element would carry if neither
+    /// author CSS nor an inherited value has set `display` on it. The
+    /// matches mirror the HTML5 spec / browser defaults:
+    ///
+    /// - `<img>` → `inline-block` (it's a replaced element)
+    /// - `<table>` / `inline-table`-family → their table keyword
+    /// - `<li>` → `list-item`
+    /// - everything else → `flow` (block-level block container)
+    pub fn ua_default_display(&self) -> CssDisplay {
+        match self {
+            NodeType::Img => CssDisplay::InlineBlock,
+            NodeType::Table => CssDisplay::Table,
+            NodeType::Thead => CssDisplay::TableHeaderGroup,
+            NodeType::Tbody => CssDisplay::TableRowGroup,
+            NodeType::Tfoot => CssDisplay::TableFooterGroup,
+            NodeType::Tr => CssDisplay::TableRow,
+            NodeType::Th | NodeType::Td => CssDisplay::TableCell,
+            NodeType::Caption => CssDisplay::TableCaption,
+            NodeType::Colgroup => CssDisplay::TableColumnGroup,
+            NodeType::Col => CssDisplay::TableColumn,
+            NodeType::Li => CssDisplay::ListItem,
+            _ => CssDisplay::Flow,
+        }
     }
 
     /// CSS default `font-size` in `em` units for this element type.

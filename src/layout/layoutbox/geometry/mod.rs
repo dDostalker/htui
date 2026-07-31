@@ -130,6 +130,7 @@ fn layout_replaced(
 ) -> Option<LayoutBox> {
     let src = match &generated.payload {
         GeneratedPayload::Image { src } if !src.is_empty() => src.clone(),
+        GeneratedPayload::Transparent => return None,
         _ => return None,
     };
 

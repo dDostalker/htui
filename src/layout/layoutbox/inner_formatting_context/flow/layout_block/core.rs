@@ -190,7 +190,7 @@ pub fn layout_block(
         node_id,
         build_border_rect(geom, rect_height),
         paint_style,
-        node.css_attr.outer_display(),
+        node.css_attr.outer_display(&node.node_type),
         children,
     )
 }
