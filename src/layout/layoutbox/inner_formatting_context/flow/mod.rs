@@ -6,9 +6,8 @@
 //! block reserves `height` rows starting at the current cursor and advances
 //! the cursor past the box's border-box plus `margin.bottom`.
 //!
-//! The flex dispatcher (see [`super::super::flex`]) is registered *first* in
-//! [`DEFAULT_LAYOUT`](crate::layout::DEFAULT_LAYOUT) so flex containers claim
-//! themselves before falling through to the per-element handlers here.
+//! Flex, table, and replaced boxes are selected by the geometry dispatcher
+//! before normal-flow handlers in this module are consulted.
 //!
 //! ## Module layout
 //!
@@ -70,4 +69,5 @@ pub use list::{layout_li, layout_ol, layout_ul};
 pub use p::layout_p;
 pub use table::{layout_row_group, layout_table, layout_td, layout_th, layout_tr};
 pub use crate::html::css_parse::FontContext;
+pub(crate) use tree::dispatch_flow_geometry;
 pub use tree::{dispatch, layout_children, layout_tree};

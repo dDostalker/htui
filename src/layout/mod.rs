@@ -35,8 +35,9 @@ pub use layoutbox::inner_formatting_context::{
     flow::layout_tree,
 };
 pub use layoutbox::{
-    BoxKind, Cursor, FormattingContext, InlineRun, LayoutBox, OuterDisplay, PaintStyle, Rect,
-    ReplacedContent,
+    BoxKind, Cursor, FormattingContext, GeneratedBox, GeneratedBoxKind, InlineRun, LayoutBox,
+    OuterDisplay, PaintStyle, Rect, ReplacedContent, generate_box_tree, generate_node,
+    layout_generated_box, layout_generated_tree,
 };
 
 /// Context propagated by the layout phase.
@@ -107,13 +108,10 @@ pub type LayoutFn = fn(
 /// Each element type that needs custom layout declares a function here. The
 /// dispatcher iterates this list and uses the first non-`None` result.
 ///
-/// The first entry is the flex dispatcher: it claims every block element
-/// that opts into `display: flex`, regardless of its tag. For non-flex
-/// nodes it returns `None` and the registry falls through to the
-/// element-specific block layout, so flex and the existing block
-/// layout are mutually exclusive without duplicating code.
+/// The geometry dispatcher handles replaced, flex, and table boxes before this
+/// registry is reached. This registry therefore contains only normal-flow
+/// element adapters retained for behavior and public-API compatibility.
 pub static DEFAULT_LAYOUT: &[LayoutFn] = &[
-    layout_flex_dispatch,
     inner_formatting_context::flow::layout_aside,
     inner_formatting_context::flow::layout_body,
     inner_formatting_context::flow::layout_div,
@@ -123,14 +121,12 @@ pub static DEFAULT_LAYOUT: &[LayoutFn] = &[
     inner_formatting_context::flow::layout_footer,
     inner_formatting_context::flow::layout_header,
     inner_formatting_context::flow::layout_html,
-    inner_formatting_context::flow::layout_img_with_rect,
     inner_formatting_context::flow::layout_li,
     inner_formatting_context::flow::layout_ol,
     inner_formatting_context::flow::layout_ul,
     inner_formatting_context::flow::layout_p,
     inner_formatting_context::flow::layout_a,
     inner_formatting_context::flow::layout_row_group,
-    inner_formatting_context::flow::layout_table,
     inner_formatting_context::flow::layout_td,
     inner_formatting_context::flow::layout_th,
     inner_formatting_context::flow::layout_tr,

@@ -4,13 +4,15 @@
 use crate::{
     layout::{
         BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, Rect,
-        layoutbox::collect_runs,
+        layoutbox::{
+            collect_runs,
+            generation::{GeneratedBoxKind, generate_node},
+        },
     },
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
     tui::graph_api::block_style,
 };
 
-use super::dispatch::is_block_child_node;
 use super::items::layout_flex_items;
 
 /// Minimum cross-axis size of any flex item (1 row by default).
@@ -115,13 +117,19 @@ pub(super) fn layout_flex_container(
     let block_font_style = block_style(&node.css_attr);
     let body_runs = collect_runs(arena, node, block_fg, block_bg, block_font_style);
 
-    // 6. Flex items: the container's block children, in document order.
-    //    Sort by `order` (stable sort — same `order` keeps DOM order).
+    // 6. Flex items: the container's `BoxKind::Normal` children in document
+    //    order. Inline and text nodes are already wrapped by the generator
+    //    into anonymous boxes that contribute their runs to the container
+    //    itself rather than participating as flex items.
     let block_child_ids: Vec<NodeId> = node
         .children
         .iter()
         .copied()
-        .filter(|&id| is_block_child_node(&arena[id].node_type))
+        .filter(|&id| {
+            generate_node(arena, id)
+                .map(|generated| generated.kind == GeneratedBoxKind::Normal)
+                .unwrap_or(false)
+        })
         .collect();
 
     // A flex item is laid out by recursively dispatching its own element

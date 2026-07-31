@@ -41,6 +41,10 @@ htui/
 │   │   │   ├── layoutbox/      # LayoutBox 数据结构（镜像浏览器 CSS Display 三轴分类）
 │   │   │   │   ├── mod.rs      # LayoutBox struct + 三个轴分类 re-exports
 │   │   │   │   ├── rect.rs, paint_style.rs, inline_run.rs, cursor.rs, inline.rs
+│   │   │   │   ├── generation/  # styled DOM → geometry-free GeneratedBox tree
+│   │   │   │   │   └── mod.rs  # normal/text/anonymous/replaced + display classification
+│   │   │   │   ├── geometry/    # GeneratedBox → positioned LayoutBox tree
+│   │   │   │   │   └── mod.rs  # BoxKind × OuterDisplay × FormattingContext dispatch
 │   │   │   │   ├── box_kind/   # BoxKind { Normal, Replaced, Anonymous } + ReplacedContent
 │   │   │   │   │   ├── mod.rs          # enum + ReplacedContent
 │   │   │   │   │   ├── normal.rs       # NormalExt trait
@@ -50,7 +54,7 @@ htui/
 │   │   │   │   │   ├── mod.rs          # enum
 │   │   │   │   │   ├── block.rs        # BlockExt trait
 │   │   │   │   │   └── inline.rs       # InlineExt trait
-│   │   │   │   └── inner_formatting_context/  # FormattingContext { Flow, Flex, Grid }
+│   │   │   │   └── inner_formatting_context/  # FormattingContext { Flow, Flex, Table, Grid }
 │   │   │   │       ├── mod.rs          # enum + FlowExt/FlexExt/GridExt re-exports
 │   │   │   │       ├── flow/           # Block/Inline Formatting Context 实现
 │   │   │   │       │   ├── mod.rs              # FlowExt + impl FormattingContext::Flow
@@ -127,6 +131,7 @@ htui/
 │   ├── layout_tree_tests.rs
 │   ├── layout_html_body_tests.rs
 │   ├── layout_flex_tests.rs   # CSS flexbox (display: flex) 布局测试
+│   ├── layout_pipeline_tests.rs # box generation + geometry + mixed end-to-end regression
 │   └── logging_tests.rs
 ```
 
@@ -148,18 +153,24 @@ CSS 字符串 ───► css_parse::Parser ──► CssRule
                                            ▼
                               layout::TermLayout::draw()
                                     │
-                          layoutbox::inner_formatting_context::flow::layout_tree()
+                                    ▼
+                         generation::generate_box_tree()
                                     │
-                          ┌─────────┼──────────────────────────────────┐
-                          ▼         ▼          ▼            ▼            ▼
-                     layout_p  layout_div  layout_img  flex::layout_flex_dispatch  ...
-                          │         │          │            │
-                          └─────────┼──────────┘            │
-                                    ▼                       ▼
-                            Vec<LayoutBox>           同样的 LayoutBox 树
-                                    │                       │
-                                    └─────────┬─────────────┘
-                                              ▼
+                                    ▼
+                    Vec<GeneratedBox>（无坐标、统一盒分类树）
+                                    │
+                                    ▼
+                         geometry::layout_generated_tree()
+                                    │
+                    ┌───────────────┼────────────────┐
+                    ▼               ▼                ▼
+              flow geometry    flex geometry    table geometry
+                    │               │                │
+                    └───────────────┼────────────────┘
+                                    ▼
+                         Vec<LayoutBox>（已定位）
+                                    │
+                                    ▼
                                     paint::paint_layout_tree()
                                               │
                                               ▼
@@ -172,16 +183,20 @@ CSS 字符串 ───► css_parse::Parser ──► CssRule
                               终端输出（ANSI 转义序列）
 ```
 
-`flow/` / `flex/` / `grid/` 三个 formatting context 平级（都位于
-`layoutbox::inner_formatting_context` 下）；它们都生成同一棵 `LayoutBox` 树，
-由 `paint::paint_layout_tree()` 统一绘制。flex 容器本身被
-`layout_flex_dispatch` 认领后，其子项仍走 `flow::dispatch` 的元素布局函数
-（复用 flow 流），只在 flex 容器层重排外层 rect 与子项坐标。
+`generation` 统一从 styled DOM 生成不含几何坐标的 `GeneratedBox` 树，负责
+normal/text/anonymous/replaced 盒语义和 `OuterDisplay` / `FormattingContext`
+分类。`geometry` 再按 `BoxKind`、`OuterDisplay` 和 `FormattingContext` 分派
+flow/flex/table 算法并生成统一的 `LayoutBox` 树，最终由
+`paint::paint_layout_tree()` 绘制。现有标签级 `LayoutFn` 仅作为 normal flow
+内部适配器保留；flex、table 和 `<img>` 不再通过 `DEFAULT_LAYOUT` 抢占分派。
 
 ## 必要事项
 `html → tdom → layout → tui` 四层不可破坏。不要引入新的抽象层，除非有充分理由。在修改之前进行询问。
 
-新增 HTML 元素支持时，必须在 `layout::mod.rs` 的 `DEFAULT_LAYOUT` 数组中注册对应的 `LayoutFn`，同时在 `layout/block/` 下新增模块。
+新增 HTML 元素支持时，必须先接入 `layoutbox::generation` 的盒分类。仅当元素
+需要特殊 normal-flow 几何行为时，才在
+`layoutbox/inner_formatting_context/flow/` 增加 `LayoutFn` 并注册到
+`DEFAULT_LAYOUT`；flex、table、replaced element 由 geometry 分类分派。
 不要用字符串匹配代替 `NodeType` 枚举。新增标签必须：
 - 在 `tdom::node::NodeType` 枚举中添加变体
 - 在 `html_parse::tag_name_to_node_type()` 中添加映射
@@ -226,9 +241,10 @@ CSS 字符串 ───► css_parse::Parser ──► CssRule
 1. **`tdom/node.rs`** — 在 `NodeType` 枚举中加入变体
 2. **`html/html_parse.rs`** — 在 `tag_name_to_node_type()` 中添加映射
 3. **`html/css_parse/stylesheet.rs`** — 在 `tag_str_to_node_type()` 中添加 CSS 选择器映射
-4. **`layout/layoutbox/inner_formatting_context/flow/`** — 新建 element 模块文件，实现 `LayoutFn` 签名
-5. **`flow/mod.rs`** — 声明模块并导出
-6. **`layout/mod.rs`** — 在 `DEFAULT_LAYOUT` 中注册
+4. **`layout/layoutbox/generation/`** — 添加盒类型与 display/formatting-context 分类
+5. **`layout/layoutbox/geometry/`** — 如需专用几何算法，添加分类分派
+6. **`layout/layoutbox/inner_formatting_context/flow/`** — 仅特殊 normal-flow 元素新增 `LayoutFn`
+7. **`layout/mod.rs`** — 仅 normal-flow 标签适配器加入 `DEFAULT_LAYOUT`
 
 
 ## 关键类型速查

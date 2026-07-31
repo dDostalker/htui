@@ -55,12 +55,16 @@
 //! ├── inline.rs           ← collect_runs (shared by block + flex layouts)
 //! ├── box_kind/           ← BoxKind + ReplacedContent
 //! ├── outer_display/      ← OuterDisplay
+//! ├── generation/         ← generate_box_tree / GeneratedBox / GeneratedBoxKind
+//! ├── geometry/           ← layout_generated_tree / dispatch by classification
 //! └── inner_formatting_context/  ← FormattingContext + flow / flex / grid
 //!                                  implementations
 //! ```
 
 mod box_kind;
 mod cursor;
+pub mod generation;
+pub mod geometry;
 mod inline;
 mod inline_run;
 mod outer_display;
@@ -71,6 +75,8 @@ pub mod inner_formatting_context;
 
 pub use box_kind::{BoxKind, ReplacedContent};
 pub use cursor::Cursor;
+pub use generation::{GeneratedBox, GeneratedBoxKind, generate_box_tree, generate_node};
+pub use geometry::{layout_generated_box, layout_generated_tree};
 pub use inline::collect_runs;
 pub use inline_run::InlineRun;
 pub use inner_formatting_context::FormattingContext;

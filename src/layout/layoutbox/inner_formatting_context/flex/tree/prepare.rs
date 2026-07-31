@@ -5,13 +5,15 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     html::css_parse::{AlignItems, AlignSelf, FlexDirection},
-    layout::LayoutContext,
+    layout::{
+        LayoutContext,
+        layoutbox::generation::{GeneratedBoxKind, generate_node},
+    },
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
     tui::graph_api::grapheme_width,
 };
 
 use super::container::{FlexItemPrep, FLEX_ITEM_MIN_CROSS};
-use super::dispatch::is_flex_capable_node;
 
 
 /// Build a [`FlexItemPrep`] for one block child: resolve `flex-basis`,
@@ -79,20 +81,24 @@ pub(super) fn prepare_flex_item(
     }
 }
 
-/// Sum the grapheme widths of every direct `Text` descendant of `node_id`.
+/// Sum the grapheme widths of every direct text leaf of `node_id`.
 ///
-/// Used as a low-level measurement helper by the recursive
-/// [`natural_intrinsic_size`] pass: a non-flex leaf is sized by the
-/// grapheme widths of its own direct text. For a node with nested block
-/// children this only counts the direct text — nested blocks are
-/// measured by [`natural_intrinsic_size`] itself.
+/// The generator classifies direct text children as
+/// [`GeneratedBoxKind::Text`]; this helper therefore walks the generated
+/// tree rather than the raw DOM so flex size-probing never inspects the
+/// element tag.
 pub(super) fn measure_text_content_width(arena: &NodeArena, node_id: NodeId) -> Option<usize> {
     let node = &arena[node_id];
     let mut total: Option<usize> = Some(0);
     for &child_id in &node.children {
-        if let NodeType::Text(s) = &arena[child_id].node_type {
-            let w: usize = s.graphemes(true).map(grapheme_width).sum();
-            total = Some(total.unwrap_or(0).saturating_add(w));
+        let Some(child) = generate_node(arena, child_id) else {
+            continue;
+        };
+        if child.kind == GeneratedBoxKind::Text {
+            if let NodeType::Text(s) = &arena[child_id].node_type {
+                let w: usize = s.graphemes(true).map(grapheme_width).sum();
+                total = Some(total.unwrap_or(0).saturating_add(w));
+            }
         }
     }
     total
@@ -139,13 +145,26 @@ fn natural_intrinsic_size(
         child_context.viewport,
     );
 
-    if css.is_flex() && is_flex_capable_node(&node.node_type) {
+    let generated = generate_node(arena, node_id);
+    let is_flex_box = generated
+        .as_ref()
+        .map(|g| {
+            g.kind == GeneratedBoxKind::Normal
+                && g.inner_formatting_context
+                    == crate::layout::FormattingContext::Flex
+        })
+        .unwrap_or(false);
+
+    if css.is_flex() && is_flex_box {
         let inner_direction = css.get_flex_direction();
         let gap = css.get_gap(child_context.font, child_context.viewport);
 
         let mut child_sizes: Vec<NaturalIntrinsicSize> = Vec::new();
         for &child_id in &node.children {
-            if is_flex_capable_node(&arena[child_id].node_type) {
+            let Some(child_generated) = generate_node(arena, child_id) else {
+                continue;
+            };
+            if child_generated.kind == GeneratedBoxKind::Normal {
                 child_sizes.push(natural_intrinsic_size(arena, child_id, child_context));
             }
         }

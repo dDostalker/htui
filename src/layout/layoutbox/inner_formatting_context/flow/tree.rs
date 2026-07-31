@@ -13,7 +13,11 @@
 
 use crate::{
     html::css_parse::{FontContext, Viewport},
-    layout::{BoxConstraint, Cursor, DEFAULT_LAYOUT, LayoutBox, LayoutContext, Rect},
+    layout::{
+        BoxConstraint, Cursor, LayoutBox, LayoutContext, Rect,
+        layoutbox::{generate_box_tree, generate_node, layout_generated_box, layout_generated_tree},
+        DEFAULT_LAYOUT,
+    },
     tdom::node::{NodeArena, NodeId},
 };
 
@@ -33,10 +37,10 @@ pub fn layout_tree(
     viewport_cols: usize,
     viewport_rows: usize,
 ) -> Vec<LayoutBox> {
-    let children: Vec<NodeId> = arena[root_id].children.clone();
-    layout_children(
+    let generated = generate_box_tree(arena, root_id);
+    layout_generated_tree(
         arena,
-        &children,
+        &generated,
         containing,
         cursor,
         LayoutContext {
@@ -59,7 +63,17 @@ pub fn layout_children(
 ) -> Vec<LayoutBox> {
     let mut boxes = Vec::new();
     for &child_id in children {
-        if let Some(b) = dispatch(arena, child_id, containing, cursor, context, None) {
+        let Some(generated) = generate_node(arena, child_id) else {
+            continue;
+        };
+        if let Some(b) = layout_generated_box(
+            arena,
+            &generated,
+            containing,
+            cursor,
+            context,
+            None,
+        ) {
             boxes.push(b);
         }
     }
@@ -72,6 +86,27 @@ pub fn layout_children(
 /// layout can hand each flex item a fixed rectangle. Public so the flex
 /// layout can recurse into the dispatcher after deciding each item's rect.
 pub fn dispatch(
+    arena: &NodeArena,
+    node_id: NodeId,
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+    context: LayoutContext,
+    pre_allocated_rect: Option<Rect>,
+) -> Option<LayoutBox> {
+    let generated = generate_node(arena, node_id)?;
+    layout_generated_box(
+        arena,
+        &generated,
+        containing,
+        cursor,
+        context,
+        pre_allocated_rect,
+    )
+}
+
+/// Run the legacy element handlers after the geometry dispatcher has selected
+/// normal flow.
+pub(crate) fn dispatch_flow_geometry(
     arena: &NodeArena,
     node_id: NodeId,
     containing: BoxConstraint,

@@ -19,6 +19,10 @@ pub fn layout_table(
 ) -> Option<LayoutBox> {
     let node = &arena[node_id];
     if node.node_type != NodeType::Table {
+        log::debug!(
+            "layout_table reached for non-table node {:?}; ignoring",
+            node.node_type
+        );
         return None;
     }
 
