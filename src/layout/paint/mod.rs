@@ -24,7 +24,7 @@ mod text;
 use crossterm::style::Color;
 
 use crate::{
-    layout::{BoxKind, LayoutBox, ReplacedContent},
+    layout::{BoxKind, LayoutBox, Rect, ReplacedContent},
     tdom::node::NodeArena,
     tui::graph_api::{Block, TermLayout},
 };
@@ -46,8 +46,7 @@ pub(super) struct PaintCanvas<'a> {
 
 impl<'a> PaintCanvas<'a> {
     pub(super) fn cell_index(&self, x: usize, y: usize) -> usize {
-        y.saturating_mul(self.columns as usize)
-            .saturating_add(x)
+        y.saturating_mul(self.columns as usize).saturating_add(x)
     }
 }
 
@@ -111,18 +110,55 @@ pub fn paint_layout_tree(boxes: &[LayoutBox], arena: &NodeArena, term_layout: &m
                     layout: layout_slice,
                     columns: cols,
                 };
-                paint_box(b, arena, &mut canvas, None);
+                paint_box(b, arena, &mut canvas, None, None);
             });
         }
     });
 }
 
+/// Clamp `a` to the intersection with `b`, or return `None` when the two
+/// rectangles do not overlap. Both rects are in absolute canvas coordinates.
+pub(super) fn intersect_rects(a: Rect, b: Rect) -> Option<Rect> {
+    let x0 = a.x.max(b.x);
+    let y0 = a.y.max(b.y);
+    let x1 = a.x.saturating_add(a.width).min(b.x.saturating_add(b.width));
+    let y1 =
+        a.y.saturating_add(a.height)
+            .min(b.y.saturating_add(b.height));
+    if x1 <= x0 || y1 <= y0 {
+        None
+    } else {
+        Some(Rect::new(x0, y0, x1 - x0, y1 - y0))
+    }
+}
+
+/// Paint one box (and its subtree) into the canvas.
+///
+/// `clip` is the box's inherited clip region (absolute canvas coordinates):
+/// the intersection of every ancestor's border-box. Content that would be
+/// painted outside the clip is dropped instead of spilling onto rows below
+/// or beyond the box — on very small terminals the flexible algorithm can
+/// hand a box a rect smaller than its content, and without this clip the
+/// wrapped lines / block children would paint over the next sibling.
 fn paint_box(
     lb: &LayoutBox,
     arena: &NodeArena,
     canvas: &mut PaintCanvas<'_>,
     parent_bg: Option<Color>,
+    clip: Option<Rect>,
 ) {
+    // This box's own clip = inherited clip ∩ own border-box. A box never
+    // paints outside its ancestors' borders.
+    let own_clip = match clip {
+        Some(c) => match intersect_rects(c, lb.rect) {
+            Some(r) => r,
+            None => return,
+        },
+        None => lb.rect,
+    };
+    if own_clip.width == 0 || own_clip.height == 0 {
+        return;
+    }
     let my_bg = match &lb.kind {
         BoxKind::Normal => arena[lb.node_id].css_attr.get_bg_color(),
         BoxKind::Replaced(_) => None,
@@ -130,10 +166,10 @@ fn paint_box(
     };
     match &lb.kind {
         BoxKind::Normal => {
-            paint_block(lb, arena, canvas, my_bg, parent_bg);
+            paint_block(lb, arena, canvas, my_bg, parent_bg, own_clip);
         }
         BoxKind::Replaced(ReplacedContent::Image { cols, rows, .. }) => {
-            paint_image(lb, canvas, *cols, *rows);
+            paint_image(lb, canvas, *cols, *rows, own_clip);
         }
         BoxKind::Anonymous => {
             // Anonymous boxes have no chrome of their own; their visible
@@ -145,7 +181,31 @@ fn paint_box(
     // we inherit. This is what lets `<aside bg=cyan><p>30col</p></aside>`
     // render the text with cyan bg even though `<p>` itself has no bg.
     let effective_bg = my_bg.or(parent_bg);
+    // Children are positioned inside the box's content-box (the rect shrunk
+    // by border + padding); anything that spills out of it — e.g. a squeezed
+    // flex item's wrapped lines — is dropped rather than painted over the
+    // padding / border rows of this box or the sibling below.
+    let edges = &lb.paint_style.box_edges;
+    let content_area = Rect::new(
+        lb.rect
+            .x
+            .saturating_add(edges.border.left.thickness())
+            .saturating_add(edges.padding.left),
+        lb.rect
+            .y
+            .saturating_add(edges.border.top.thickness())
+            .saturating_add(edges.padding.top),
+        lb.rect
+            .width
+            .saturating_sub(edges.inner_horizontal())
+            .max(1),
+        lb.rect.height.saturating_sub(edges.inner_vertical()).max(1),
+    );
+    let children_clip = match intersect_rects(own_clip, content_area) {
+        Some(c) => c,
+        None => return,
+    };
     for child in &lb.children {
-        paint_box(child, arena, canvas, effective_bg);
+        paint_box(child, arena, canvas, effective_bg, Some(children_clip));
     }
 }

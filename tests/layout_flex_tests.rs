@@ -257,9 +257,11 @@ fn test_flex_column_stacks_items_vertically() {
 #[test]
 fn test_flex_wrap_moves_overflow_items_to_next_line() {
     init();
-    // Each child is intentionally wider than the container so wrap
-    // moves them to their own line. We use `width: 50px` for items in
-    // a 40-col container to force wrapping.
+    // Two 10-cell items in a 12-cell wrap container: each item fits on its
+    // own line but both cannot share one line, so the second item wraps to
+    // a new line. (A narrower container would also wrap, but its items would
+    // then be clipped at the container's edge by the paint-time clip, which
+    // is not what this test is about.)
     let html = r#"
         <div class="container">
             <div class="a">AAAAAAAAAA</div>
@@ -267,7 +269,7 @@ fn test_flex_wrap_moves_overflow_items_to_next_line() {
         </div>
     "#;
     let css = r#"
-        .container { display: flex; flex-wrap: wrap; width: 5px; }
+        .container { display: flex; flex-wrap: wrap; width: 12px; }
         .a, .b { background-color: red; flex-shrink: 0; }
     "#;
     let (rows, _) = render_rows(html, css);
@@ -497,7 +499,8 @@ fn test_flex_container_carries_flex_formatting_context() {
         root_id,
         htui::layout::BoxConstraint::root(&term_map),
         &mut htui::layout::Cursor::new(),
-        80, 24,
+        80,
+        24,
     );
     let container = find_box_with_formatting_context(&boxes, FormattingContext::Flex)
         .expect("there must be a box with FormattingContext::Flex");
@@ -534,7 +537,8 @@ fn test_flex_container_carries_flex_formatting_context() {
         root_id,
         htui::layout::BoxConstraint::root(&term_map),
         &mut htui::layout::Cursor::new(),
-        80, 24,
+        80,
+        24,
     );
     assert!(
         find_box_with_formatting_context(&boxes, FormattingContext::Flex).is_none(),
@@ -561,7 +565,11 @@ fn count_boxes_with_formatting_context(
     boxes
         .iter()
         .map(|b| {
-            let self_match = if b.inner_formatting_context == ctx { 1 } else { 0 };
+            let self_match = if b.inner_formatting_context == ctx {
+                1
+            } else {
+                0
+            };
             self_match + count_boxes_with_formatting_context(&b.children, ctx)
         })
         .sum()
@@ -699,7 +707,10 @@ fn test_flex_align_content_center_centers_lines() {
         .iter()
         .position(|r| r.contains("CCCCCCCCCCCC"))
         .expect("C rendered");
-    assert_eq!(a_row, 2, "first line centered, starts at row 2 (got {a_row})");
+    assert_eq!(
+        a_row, 2,
+        "first line centered, starts at row 2 (got {a_row})"
+    );
     assert_eq!(b_row, 3, "second line at row 3 (got {b_row})");
     assert_eq!(c_row, 4, "third line at row 4 (got {c_row})");
 }
@@ -728,7 +739,8 @@ fn test_flex_nested_containers_both_have_flex_formatting_context() {
         root_id,
         htui::layout::BoxConstraint::root(&term_map),
         &mut htui::layout::Cursor::new(),
-        80, 24,
+        80,
+        24,
     );
     let flex_count = count_boxes_with_formatting_context(&boxes, FormattingContext::Flex);
     assert_eq!(
@@ -796,7 +808,8 @@ fn test_flex_nested_row_inside_row_stacks_three_rows() {
         root_id,
         htui::layout::BoxConstraint::root(&term_map),
         &mut htui::layout::Cursor::new(),
-        80, 24,
+        80,
+        24,
     );
     // The nested column has 1-cell width (max of its children's 1-cell
     // text widths), making it unique among the rects in the tree.
@@ -845,7 +858,8 @@ fn test_flex_nested_row_inside_row_growing_sibling_fits_within_canvas() {
         root_id,
         htui::layout::BoxConstraint::root(&term_map),
         &mut htui::layout::Cursor::new(),
-        80, 24,
+        80,
+        24,
     );
     // Walk the tree and assert nothing overflows the canvas.
     fn assert_no_overflow(
@@ -858,7 +872,11 @@ fn test_flex_nested_row_inside_row_growing_sibling_fits_within_canvas() {
             assert!(
                 b.rect.x.saturating_add(b.rect.width) <= max_cols,
                 "box at {:?} overflows canvas: x={}, w={}, max={} (path={:?})",
-                b.node_id, b.rect.x, b.rect.width, max_cols, path
+                b.node_id,
+                b.rect.x,
+                b.rect.width,
+                max_cols,
+                path
             );
             assert_no_overflow(&b.children, max_cols, path);
             path.pop();
@@ -1107,4 +1125,151 @@ fn test_visual_flex_nested_document_keeps_all_nested_items_visible() {
     assert_eq!(row_one, section_three_row + 1, "item 1 follows section 3");
     assert_eq!(row_two_a, row_one + 1, "item 2a follows item 1");
     assert_eq!(row_two_b, row_two_a + 1, "item 2b follows item 2a");
+}
+
+#[test]
+fn test_flex_overflow_is_clipped_not_wrapped_on_small_terminals() {
+    init();
+    // Regression: flex items whose allocated width exceeds the terminal
+    // width (here `flex-shrink: 0` keeps the 60-cell basis) must be
+    // clipped at the right edge of the canvas. The canvas is a flat 1-D
+    // buffer, so writing a cell at column >= `columns` would wrap into
+    // the next row's cells and corrupt the rows of following boxes — the
+    // misalignment observed on very small terminals.
+    let html = r#"
+        <section class="container">
+            <p class="a">AAAA</p>
+            <p class="b">BBBB</p>
+        </section>
+        <div class="after">AFTER</div>
+    "#;
+    let css = r#"
+        .container { display: flex; }
+        .a, .b { flex-basis: 60px; flex-shrink: 0; }
+    "#;
+    let (root_id, arena) = setup(html, css);
+    let map = TermMap {
+        columns: 30,
+        rows: 10,
+    };
+    let mut tl = TermLayout::new(&map, 1.0);
+    tl.draw(&arena, root_id, &map).unwrap();
+    let cols = map.columns as usize;
+    let rows: Vec<String> = tl
+        .layout
+        .chunks(cols)
+        .map(|chunk| chunk.iter().map(|b| b.word.as_str()).collect())
+        .collect();
+    // Item A (x=0) is visible on row 0; item B (x=60 >= 30 cols) is fully
+    // off-canvas and must be clipped rather than painted at linear index
+    // 60, which would land on row 2 col 0.
+    assert!(
+        rows[0].contains("AAAA"),
+        "A visible on row 0: {:?}",
+        rows[0]
+    );
+    assert!(
+        !rows[0].contains("BBBB"),
+        "B must not appear on row 0: {:?}",
+        rows[0]
+    );
+    // The sibling after the flex container stays intact on row 1, and the
+    // wrapped row 2 must not carry B's cells.
+    assert!(
+        rows[1].contains("AFTER"),
+        "AFTER intact on row 1: {:?}",
+        rows[1]
+    );
+    assert!(
+        !rows[2].contains("BBBB"),
+        "B must not wrap into row 2: {:?}",
+        rows[2]
+    );
+}
+
+#[test]
+fn test_flex_column_keeps_items_at_min_content_when_viewport_is_small() {
+    init();
+    // Regression: a definite-height flex column must not crush its items
+    // below their min-content height (CSS `min-height: auto`). Previously
+    // the `.card` (natural height 5) was shrunk to the column's 2-row
+    // height, so its children spilled onto the card's bottom border row.
+    let html = r#"
+        <div class="app">
+            <div class="card">
+                <div>LABEL</div>
+                <div>VAL</div>
+                <div>BAR</div>
+            </div>
+        </div>
+    "#;
+    let css = r#"
+        .app { display: flex; flex-direction: column; height: 2; }
+        .card { border: 1px solid white; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    let label_row = rows
+        .iter()
+        .position(|r| r.contains("LABEL"))
+        .expect("LABEL row");
+    let val_row = rows
+        .iter()
+        .position(|r| r.contains("VAL"))
+        .expect("VAL row");
+    let bar_row = rows
+        .iter()
+        .position(|r| r.contains("BAR"))
+        .expect("BAR row");
+    assert!(
+        label_row < val_row && val_row < bar_row,
+        "card children must stack without overlap, got {label_row}/{val_row}/{bar_row}"
+    );
+    // The card keeps its min-content height (border top + 3 rows + border
+    // bottom = 5), so its bottom border lands below BAR rather than
+    // overlapping the first child.
+    assert!(
+        rows[bar_row + 1].contains("└"),
+        "bottom border must sit below the last child: {:?}",
+        rows[bar_row + 1]
+    );
+}
+
+#[test]
+fn test_flex_item_content_clipped_to_allocated_rect() {
+    init();
+    // A flex row with an explicit height smaller than an item's content: the
+    // item's overflowing rows must be clipped at its own rect (the user's
+    // "ignore overflow under extreme conditions" behaviour) instead of
+    // painting over the sibling below.
+    let html = r#"
+        <div class="row">
+            <div class="tall"><div>ONE</div><div>TWO</div><div>THREE</div></div>
+        </div>
+        <div class="after">AFTER</div>
+    "#;
+    let css = r#"
+        .row { display: flex; height: 1; }
+        .tall { flex-shrink: 0; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    let one_row = rows
+        .iter()
+        .position(|r| r.contains("ONE"))
+        .expect("first child on the item's own row");
+    let after_row = rows
+        .iter()
+        .position(|r| r.contains("AFTER"))
+        .expect("sibling after the flex row");
+    assert_eq!(one_row, 0, "ONE on row 0: {:?}", rows[0]);
+    assert!(
+        after_row > one_row,
+        "AFTER sits below the flex row, got {one_row}/{after_row}"
+    );
+    // The item's rect is only 1 row tall, so TWO / THREE are dropped
+    // rather than painted over AFTER's row.
+    assert!(
+        !rows[after_row].contains("TWO") && !rows[after_row].contains("THREE"),
+        "overflowing rows must be clipped, not painted over the sibling: {:?}",
+        rows[after_row]
+    );
 }

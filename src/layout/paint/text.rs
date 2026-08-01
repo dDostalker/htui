@@ -3,7 +3,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     html::css_parse::TextAlign,
-    layout::InlineRun,
+    layout::{InlineRun, Rect},
     tui::graph_api::{FontStyle, grapheme_width},
 };
 
@@ -36,21 +36,32 @@ pub(crate) fn paint_runs(
     align: TextAlign,
     effective_bg: Option<Color>,
     font_size_cells: usize,
+    clip: Rect,
 ) {
     if lines.is_empty() {
         return;
     }
     let cols = canvas.columns as usize;
     let font = font_size_cells.max(1);
+    // The canvas row the first visual line's glyphs sit on. Each visual
+    // line advances `font` canvas rows below it.
+    let first_line_row = cell_start / cols;
     for (line_idx, line_runs) in lines.iter().enumerate() {
+        // Drop lines whose glyph row falls outside the inherited clip
+        // (e.g. wrapped content of a box that was squeezed smaller than
+        // its text on a very small terminal).
+        let line_row = first_line_row.saturating_add(line_idx.saturating_mul(font));
+        if line_row < clip.y || line_row >= clip.y.saturating_add(clip.height) {
+            continue;
+        }
         if line_runs.is_empty() {
             // Forced-break blank row (e.g. a `<pre>` newline); the bg-fill
             // loop in `paint_block` already covers it, so skip writing
             // any text here.
             continue;
         }
-        let line_start = cell_start
-            .saturating_add(line_idx.saturating_mul(font).saturating_mul(cols));
+        let line_start =
+            cell_start.saturating_add(line_idx.saturating_mul(font).saturating_mul(cols));
         paint_one_line(
             canvas,
             line_runs,

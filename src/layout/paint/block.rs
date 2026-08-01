@@ -1,11 +1,13 @@
 use crossterm::style::Color;
 
 use crate::{
-    html::css_parse::TextAlign, layout::LayoutBox, tdom::node::NodeArena,
+    html::css_parse::TextAlign,
+    layout::{LayoutBox, Rect},
+    tdom::node::NodeArena,
     tui::graph_api::block_style,
 };
 
-use super::{PaintCanvas, border::paint_borders, text::paint_runs};
+use super::{PaintCanvas, border::paint_borders, intersect_rects, text::paint_runs};
 
 pub(crate) fn paint_block(
     lb: &LayoutBox,
@@ -13,6 +15,7 @@ pub(crate) fn paint_block(
     canvas: &mut PaintCanvas<'_>,
     my_bg: Option<Color>,
     parent_bg: Option<Color>,
+    clip: Rect,
 ) {
     let node = &arena[lb.node_id];
     let fg = node.css_attr.get_color();
@@ -23,8 +26,27 @@ pub(crate) fn paint_block(
     // text appears on the rect's background rather than the terminal default.
     let effective_bg = my_bg.or(parent_bg);
 
-    let r = lb.rect;
     let cols = canvas.columns as usize;
+    // A box can be wider than the terminal when a parent formatting context
+    // (flex, replaced element) hands it a rectangle that overflows the
+    // viewport. The canvas is a flat 1-D buffer, so writing past the right
+    // edge of a row would wrap into the next row's cells and corrupt the
+    // siblings below it — the misalignment seen on very small terminals.
+    // Clamp the rect to the canvas width so overflow is clipped at the
+    // terminal edge (mirroring browser viewport clipping) instead of
+    // wrapping into the next row.
+    let r = lb.rect;
+    if r.x >= cols || r.width == 0 {
+        return;
+    }
+    let r = Rect::new(r.x, r.y, r.width.min(cols - r.x), r.height);
+    // Inherited clip (ancestors' border-boxes) narrows the paint region
+    // further: when a box overflows its parent, the cells beyond the clip are
+    // dropped instead of painting over the sibling below.
+    let r = match intersect_rects(r, clip) {
+        Some(r) => r,
+        None => return,
+    };
     let cell_start = canvas.cell_index(r.x, r.y);
 
     let fill_bg = lb.paint_style.fill_bg;
@@ -58,7 +80,8 @@ pub(crate) fn paint_block(
             + box_edges.padding.bottom
             + box_edges.padding.left
             > 0;
-        let text_clamped = my_bg.is_some() && !chrome && !has_padding && lb.paint_style.font_size_cells > 1;
+        let text_clamped =
+            my_bg.is_some() && !chrome && !has_padding && lb.paint_style.font_size_cells > 1;
         let text_row_offset: usize = if text_clamped {
             (lb.paint_style.font_size_cells.saturating_sub(1)) / 2
         } else {
@@ -67,8 +90,7 @@ pub(crate) fn paint_block(
         let (bg_start_x, bg_width) = if text_clamped {
             if let Some(runs) = &lb.paint_style.runs {
                 let inner_h = box_edges.inner_horizontal();
-                let content_x_offset =
-                    box_edges.border.left.thickness() + box_edges.padding.left;
+                let content_x_offset = box_edges.border.left.thickness() + box_edges.padding.left;
                 let content_width = r.width.saturating_sub(inner_h).max(1);
                 // `runs` is `Vec<Vec<InlineRun>>` (one entry per visual
                 // line after wrapping). The widest visual line drives
@@ -130,8 +152,9 @@ pub(crate) fn paint_block(
 
     // Border glyphs overlay the border cells (after fill). When no border is
     // configured this is a no-op. Borders use the same fg / bg as the box;
-    // individual border colors are layered on top when set.
-    paint_borders(lb, canvas, fg, effective_bg);
+    // individual border colors are layered on top when set. The clamped
+    // rect is passed down so edges never extend past the terminal width.
+    paint_borders(lb, r, canvas, fg, effective_bg);
 
     if let Some(runs) = &lb.paint_style.runs {
         // Inline content sits in the content-box (rect shrunk by border +
@@ -157,6 +180,28 @@ pub(crate) fn paint_block(
             + (border_top.saturating_add(padding_top)) * cols
             + content_x_offset
             + vertical_offset;
+        // The runs are additionally clipped to the box's content-box (the
+        // rect minus border + padding): wrapped text that overflows the
+        // allocated content area must not paint onto the padding / border
+        // rows (which would break the frame glyphs). The inherited clip is
+        // still applied on top.
+        let border_bottom = box_edges.border.bottom.thickness();
+        let padding_bottom = box_edges.padding.bottom;
+        let content_clip = Rect::new(
+            r.x.saturating_add(content_x_offset),
+            r.y.saturating_add(border_top).saturating_add(padding_top),
+            content_width,
+            r.height
+                .saturating_sub(border_top)
+                .saturating_sub(padding_top)
+                .saturating_sub(border_bottom)
+                .saturating_sub(padding_bottom)
+                .max(1),
+        );
+        let content_clip = match intersect_rects(content_clip, clip) {
+            Some(c) => c,
+            None => return,
+        };
         paint_runs(
             canvas,
             runs,
@@ -165,6 +210,7 @@ pub(crate) fn paint_block(
             align,
             effective_bg,
             lb.paint_style.font_size_cells,
+            content_clip,
         );
     }
 }

@@ -5,7 +5,7 @@ use crate::{
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
 };
 
-use super::cell::{CellInfo, layout_cell};
+use super::cell::{CellInfo, cell_required_height, layout_cell};
 use super::measure::{collect_cells, collect_rows, compute_column_widths};
 
 /// Build a [`LayoutBox`] for a `<table>` element.
@@ -34,11 +34,9 @@ pub fn layout_table(
         effective_font_size_cells(arena, node_id, context.font, context.viewport);
     let child_context = context.child(own_font_size_cells);
 
-    let edges = node.css_attr.get_box_edges(
-        containing.width,
-        child_context.font,
-        child_context.viewport,
-    );
+    let edges =
+        node.css_attr
+            .get_box_edges(containing.width, child_context.font, child_context.viewport);
 
     let available = containing.width.saturating_sub(edges.margin.horizontal());
     let (x, block_width, outer_y_top, preallocated_height) = match pre_allocated_rect {
@@ -51,7 +49,12 @@ pub fn layout_table(
                 .min(available)
                 .max(1);
             cursor.skip(edges.margin.top);
-            (containing.x + edges.margin.left, block_width, cursor.y, None)
+            (
+                containing.x + edges.margin.left,
+                block_width,
+                cursor.y,
+                None,
+            )
         }
     };
 
@@ -69,12 +72,30 @@ pub fn layout_table(
         .saturating_add(edges.border.horizontal_thickness())
         .saturating_add(edges.padding.horizontal());
 
-    let row_height = 1usize;
+    // Each row is as tall as its tallest cell. Column widths are already
+    // clamped to the available width, so at narrow terminal widths a
+    // cell's text wraps to several lines and the row must grow to keep
+    // those lines above the table's bottom border.
+    let row_heights: Vec<usize> = row_cells
+        .iter()
+        .map(|row| {
+            row.iter()
+                .enumerate()
+                .map(|(col_idx, cell)| {
+                    cell_required_height(arena, cell.node_id, column_widths[col_idx], child_context)
+                })
+                .max()
+                .unwrap_or(1)
+                .max(1)
+        })
+        .collect();
+
     let mut table_children = Vec::new();
     let mut current_y = outer_y_top + edges.border.top.thickness() + edges.padding.top;
     let content_x = x + edges.border.left.thickness() + edges.padding.left;
 
-    for row in &row_cells {
+    for (row_idx, row) in row_cells.iter().enumerate() {
+        let row_height = row_heights[row_idx];
         let mut current_x = content_x;
         for (col_idx, cell) in row.iter().enumerate() {
             let col_w = column_widths[col_idx];

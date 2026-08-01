@@ -102,6 +102,11 @@ impl NodeType {
     pub fn ua_default_display(&self) -> CssDisplay {
         match self {
             NodeType::Img => CssDisplay::InlineBlock,
+            // Inline text-level elements: `<span>` / `<a>` / `<em>` participate
+            // in the parent's inline flow. Classifying them block-level would
+            // make intrinsic measurement sum each one as a full block row and
+            // inflate flex-item / column heights.
+            NodeType::Span | NodeType::A | NodeType::Em => CssDisplay::Inline,
             NodeType::Table => CssDisplay::Table,
             NodeType::Thead => CssDisplay::TableHeaderGroup,
             NodeType::Tbody => CssDisplay::TableRowGroup,

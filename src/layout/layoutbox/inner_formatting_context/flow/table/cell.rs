@@ -21,6 +21,57 @@ pub struct CellInfo {
     pub is_header: bool,
 }
 
+/// Number of rows a cell needs at the given column width: the wrapped
+/// inline-text height (each visual line takes `font_size_cells` rows) plus
+/// the cell's own vertical border / padding. Row heights drive the table
+/// geometry; without this, a cell whose text wraps (common when the terminal
+/// is narrow enough that the column shrinks) would paint its wrapped lines
+/// over the table's bottom border.
+pub fn cell_required_height(
+    arena: &NodeArena,
+    cell_id: NodeId,
+    col_width: usize,
+    context: LayoutContext,
+) -> usize {
+    let node = &arena[cell_id];
+    let own_font_size_cells =
+        effective_font_size_cells(arena, cell_id, context.font, context.viewport);
+    let child_context = context.child(own_font_size_cells);
+    let cell_edges: BoxEdges =
+        node.css_attr
+            .get_box_edges(col_width, child_context.font, child_context.viewport);
+    let content_width = col_width
+        .saturating_sub(cell_edges.inner_horizontal())
+        .max(1);
+
+    let block_fg = node.css_attr.get_color();
+    let block_bg = node.css_attr.get_bg_color();
+    let block_font_style = block_style(&node.css_attr);
+    let body_runs = collect_runs(arena, node, block_fg, block_bg, block_font_style);
+    let line_count = if body_runs.is_empty() {
+        1
+    } else {
+        wrap_runs(
+            &body_runs,
+            content_width,
+            own_font_size_cells,
+            node.css_attr.get_white_space(),
+            node.css_attr.get_word_break(),
+            node.css_attr.get_overflow_wrap(),
+        )
+        .len()
+        .max(1)
+    };
+
+    line_count
+        .saturating_mul(own_font_size_cells.max(1))
+        .saturating_add(cell_edges.border.top.thickness())
+        .saturating_add(cell_edges.padding.top)
+        .saturating_add(cell_edges.border.bottom.thickness())
+        .saturating_add(cell_edges.padding.bottom)
+        .max(1)
+}
+
 /// Build a single cell's [`LayoutBox`] at the given `rect`.
 pub fn layout_cell(
     arena: &NodeArena,
@@ -35,11 +86,9 @@ pub fn layout_cell(
         effective_font_size_cells(arena, cell_id, context.font, context.viewport);
     let child_context = context.child(own_font_size_cells);
 
-    let cell_edges: BoxEdges = node.css_attr.get_box_edges(
-        rect.width,
-        child_context.font,
-        child_context.viewport,
-    );
+    let cell_edges: BoxEdges =
+        node.css_attr
+            .get_box_edges(rect.width, child_context.font, child_context.viewport);
 
     let block_fg = node.css_attr.get_color();
     let block_bg = node.css_attr.get_bg_color();

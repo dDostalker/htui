@@ -5,8 +5,9 @@ use crate::{
     layout::{
         BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, Rect,
         layoutbox::{
-            collect_runs, wrap_runs,
+            collect_runs,
             generation::{GeneratedBoxKind, generate_node},
+            wrap_runs,
         },
     },
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
@@ -28,6 +29,10 @@ pub(super) struct FlexItemPrep {
     /// Resolved `flex-basis` (0 when `auto` falls through to no value —
     /// the size is supplied by the grow / shrink distribution).
     pub(super) basis: usize,
+    /// Automatic minimum main-axis size (CSS `min-width` / `min-height:
+    /// auto`) — the item's min-content size. `flex-shrink` never takes an
+    /// item below this floor.
+    pub(super) min_main: usize,
     pub(super) grow: f32,
     pub(super) shrink: f32,
     pub(super) align_self: crate::html::css_parse::AlignItems,
@@ -58,11 +63,9 @@ pub(super) fn layout_flex_container(
 
     // 2. Box edges (padding / border / margin) — same resolution as
     //    `layout_block`, no flex-specific tweaks.
-    let edges = node.css_attr.get_box_edges(
-        containing.width,
-        child_context.font,
-        child_context.viewport,
-    );
+    let edges =
+        node.css_attr
+            .get_box_edges(containing.width, child_context.font, child_context.viewport);
 
     // A flex formatting context normally participates in block flow. When it
     // is itself a flex item, its parent has already chosen the border-box and
@@ -79,7 +82,12 @@ pub(super) fn layout_flex_container(
                 .unwrap_or(available)
                 .min(available)
                 .max(1);
-            (containing.x + edges.margin.left, outer_y_top, block_width, None)
+            (
+                containing.x + edges.margin.left,
+                outer_y_top,
+                block_width,
+                None,
+            )
         }
     };
 
@@ -147,7 +155,13 @@ pub(super) fn layout_flex_container(
         .copied()
         .filter(|&id| {
             generate_node(arena, id)
-                .map(|generated| generated.kind == GeneratedBoxKind::Normal)
+                .map(|generated| {
+                    // Only block-level children become flex items. Inline
+                    // children (`<span>` / `<a>` / `<em>`) are folded into
+                    // the container's own runs by `collect_runs`.
+                    generated.kind == GeneratedBoxKind::Normal
+                        && !generated.outer_display.is_inline()
+                })
                 .unwrap_or(false)
         })
         .collect();
@@ -239,7 +253,9 @@ pub(super) fn layout_flex_container(
         node_id,
         rect,
         paint_style,
-        arena[node_id].css_attr.outer_display(&arena[node_id].node_type),
+        arena[node_id]
+            .css_attr
+            .outer_display(&arena[node_id].node_type),
         child_boxes,
     )
 }

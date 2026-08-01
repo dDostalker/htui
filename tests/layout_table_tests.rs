@@ -470,6 +470,49 @@ fn test_table_column_width_grows_to_widest_cell() {
 }
 
 #[test]
+fn test_table_row_grows_when_cell_text_wraps_on_narrow_terminals() {
+    init();
+    // Regression: on a narrow terminal the column width is clamped below the
+    // cell's text width, so the cell text wraps to several lines. The row
+    // height must grow to hold every wrapped line — otherwise the wrapped
+    // lines paint over the row below (here the <div> after the table).
+    let html = "<table><tr><td>longer cell text</td></tr></table><div>AFTER</div>";
+    let (root_id, arena) = setup(html, "");
+    let map = TermMap {
+        columns: 10,
+        rows: 10,
+    };
+    let mut tl = TermLayout::new(&map, 1.0);
+    tl.draw(&arena, root_id, &map).unwrap();
+    let cols = map.columns as usize;
+    let rows: Vec<String> = tl
+        .layout
+        .chunks(cols)
+        .map(|chunk| chunk.iter().map(|b| b.word.as_str()).collect())
+        .collect();
+    assert!(
+        rows[0].contains("longer"),
+        "first wrapped line on row 0: {:?}",
+        rows[0]
+    );
+    assert!(
+        rows[1].contains("cell text"),
+        "second wrapped line on row 1: {:?}",
+        rows[1]
+    );
+    assert!(
+        !rows[1].contains("AFTER"),
+        "AFTER must not share the wrapped line: {:?}",
+        rows[1]
+    );
+    assert!(
+        rows[2].contains("AFTER"),
+        "AFTER on row 2 (below the grown table row): {:?}",
+        rows[2]
+    );
+}
+
+#[test]
 fn test_table_text_align_center_in_cell() {
     init();
     let html = "<table><tr><td>X</td></tr></table>";

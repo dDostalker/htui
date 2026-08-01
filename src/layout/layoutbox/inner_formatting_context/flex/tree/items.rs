@@ -11,7 +11,7 @@ use super::algorithm::{
     align_content_spacing, align_on_cross_axis, distribute_main_axis, effective_align,
     justify_spacing, wrap_into_lines,
 };
-use super::container::{FlexItemPrep, FLEX_ITEM_MIN_CROSS};
+use super::container::{FLEX_ITEM_MIN_CROSS, FlexItemPrep};
 use super::prepare::{natural_cross_axis_size, prepare_flex_item, resolve_item_cross_size};
 
 /// Lay out every flex item across one or more lines and return the
@@ -102,13 +102,18 @@ pub(super) fn layout_flex_items(
         //     - `column` direction: cross axis is horizontal. The
         //       container's content width is always known (it's
         //       `content.width`), so the line stretches to that
-        //       regardless of an explicit height. A multi-line column
-        //       container has no concept of cross-axis stretching per
-        //       line — lines stack along the main axis, so we keep the
-        //       natural line cross for them. The previous
-        //       `container_height` shortcut was incorrect for column
-        //       direction: it used a vertical measurement as a
-        //       horizontal size, which made children of a flex column
+        //       regardless of an explicit height. This must NOT be
+        //       `max`ed with the natural (max-content) line cross: the
+        //       intrinsic width is width-independent, so a column whose
+        //       content is wider than the viewport (e.g. a sidebar +
+        //       main layout on a narrow terminal) would size every line
+        //       to the intrinsic width and overflow the container. A
+        //       multi-line column container has no concept of
+        //       cross-axis stretching per line — lines stack along the
+        //       main axis, so we keep the natural line cross for them.
+        //       The previous `container_height` shortcut was incorrect
+        //       for column direction: it used a vertical measurement as
+        //       a horizontal size, which made children of a flex column
         //       stretch to the column's height — and overflow the
         //       column's own width.
         let line_cross = match direction {
@@ -121,7 +126,7 @@ pub(super) fn layout_flex_items(
             }
             FlexDirection::Column => {
                 if line_count == 1 {
-                    content.width.max(natural_line_cross)
+                    content.width
                 } else {
                     natural_line_cross
                 }

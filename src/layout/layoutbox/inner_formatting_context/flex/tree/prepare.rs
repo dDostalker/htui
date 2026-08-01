@@ -13,8 +13,7 @@ use crate::{
     tui::graph_api::grapheme_width,
 };
 
-use super::container::{FlexItemPrep, FLEX_ITEM_MIN_CROSS};
-
+use super::container::{FLEX_ITEM_MIN_CROSS, FlexItemPrep};
 
 /// Build a [`FlexItemPrep`] for one block child: resolve `flex-basis`,
 /// read `flex-grow` / `flex-shrink` / `align-self` / `order`, and capture
@@ -29,6 +28,7 @@ pub(super) fn prepare_flex_item(
 ) -> FlexItemPrep {
     let node = &arena[item_id];
     let css = &node.css_attr;
+    let natural = natural_intrinsic_size(arena, item_id, context);
     let basis_resolved = css
         .get_flex_basis_resolved(containing_main, context.font, context.viewport)
         .or_else(|| {
@@ -49,21 +49,32 @@ pub(super) fn prepare_flex_item(
             // keeps the parent from collapsing the nested container to
             // 1 cell.
             let explicit = match direction {
-                FlexDirection::Row => css.get_width(containing_main, context.font, context.viewport),
-                FlexDirection::Column => css.get_height(containing_main, context.font, context.viewport),
+                FlexDirection::Row => {
+                    css.get_width(containing_main, context.font, context.viewport)
+                }
+                FlexDirection::Column => {
+                    css.get_height(containing_main, context.font, context.viewport)
+                }
             };
             match direction {
-                FlexDirection::Row => explicit.or_else(|| {
-                    let intrinsic = natural_intrinsic_size(arena, item_id, context);
-                    Some(intrinsic.width)
-                }),
-                FlexDirection::Column => explicit.or_else(|| {
-                    let intrinsic = natural_intrinsic_size(arena, item_id, context);
-                    Some(intrinsic.height)
-                }),
+                FlexDirection::Row => explicit.or_else(|| Some(natural.width)),
+                FlexDirection::Column => explicit.or_else(|| Some(natural.height)),
             }
         })
         .unwrap_or(FLEX_ITEM_MIN_CROSS);
+
+    // The automatic minimum main size (CSS `min-height` / `min-width: auto`):
+    // an item must never shrink below its min-content size. For `column`
+    // direction the natural height is already content-sized (block content
+    // stacks without compressing), so it doubles as the floor. For `row`
+    // direction the floor is the widest unbreakable word (text wraps at
+    // smaller widths). Without these floors, a definite-sized flex column
+    // whose items' basis sums exceed its height would crush every item below
+    // its content (e.g. stat cards collapsing to a 2-row strip).
+    let min_main = match direction {
+        FlexDirection::Row => longest_breakable_width(arena, item_id),
+        FlexDirection::Column => natural.height,
+    };
 
     // `align-self: auto` defers to the container's `align-items` (CSS
     // default for `align-items` is `stretch`, so without an explicit
@@ -71,6 +82,7 @@ pub(super) fn prepare_flex_item(
     FlexItemPrep {
         node_id: item_id,
         basis: basis_resolved,
+        min_main,
         grow: css.get_flex_grow(),
         shrink: css.get_flex_shrink(),
         align_self: match css.get_align_self() {
@@ -82,26 +94,60 @@ pub(super) fn prepare_flex_item(
 }
 
 /// Sum the grapheme widths of every direct text leaf of `node_id`.
-///
-/// The generator classifies direct text children as
-/// [`GeneratedBoxKind::Text`]; this helper therefore walks the generated
-/// tree rather than the raw DOM so flex size-probing never inspects the
-/// element tag.
 pub(super) fn measure_text_content_width(arena: &NodeArena, node_id: NodeId) -> Option<usize> {
     let node = &arena[node_id];
     let mut total: Option<usize> = Some(0);
     for &child_id in &node.children {
-        let Some(child) = generate_node(arena, child_id) else {
-            continue;
-        };
-        if child.kind == GeneratedBoxKind::Text {
-            if let NodeType::Text(s) = &arena[child_id].node_type {
+        match &arena[child_id].node_type {
+            NodeType::Text(s) => {
                 let w: usize = s.graphemes(true).map(grapheme_width).sum();
                 total = Some(total.unwrap_or(0).saturating_add(w));
             }
+            // Inline wrappers (`<span>` / `<a>` / `<em>`) hold the text that
+            // belongs to this block's inline content; recurse so a block whose
+            // text lives entirely inside inline elements still reports its
+            // intrinsic width (flex-basis: auto relies on it).
+            NodeType::Span | NodeType::A | NodeType::Em => {
+                if let Some(w) = measure_text_content_width(arena, child_id) {
+                    total = Some(total.unwrap_or(0).saturating_add(w));
+                }
+            }
+            _ => {}
         }
     }
     total
+}
+
+/// Widest unbreakable segment in `node_id`'s inline text — the item's
+/// min-content main-axis size for `row` direction (CSS `min-width: auto`).
+///
+/// Latin words break at whitespace; CJK characters each offer their own
+/// break opportunity, so a single CJK grapheme is the practical floor. If
+/// the node has no inline text (e.g. a pure block container) the floor is
+/// the [`FLEX_ITEM_MIN_CROSS`] single cell.
+pub(super) fn longest_breakable_width(arena: &NodeArena, node_id: NodeId) -> usize {
+    fn walk(arena: &NodeArena, node_id: NodeId, max_w: &mut usize) {
+        let node = &arena[node_id];
+        for &child_id in &node.children {
+            match &arena[child_id].node_type {
+                NodeType::Text(s) => {
+                    for token in s.split_whitespace() {
+                        let w: usize = token.graphemes(true).map(grapheme_width).sum();
+                        if w > *max_w {
+                            *max_w = w;
+                        }
+                    }
+                }
+                NodeType::Span | NodeType::A | NodeType::Em => {
+                    walk(arena, child_id, max_w);
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut max_w: usize = FLEX_ITEM_MIN_CROSS;
+    walk(arena, node_id, &mut max_w);
+    max_w
 }
 
 /// Intrinsic outer (border-box) size of one block node, computed
@@ -139,19 +185,14 @@ fn natural_intrinsic_size(
     // for non-percentage values, and at worst become the maximum for
     // percentage-based values — a safe upper bound for an intrinsic
     // measurement.
-    let edges = css.get_box_edges(
-        usize::MAX,
-        child_context.font,
-        child_context.viewport,
-    );
+    let edges = css.get_box_edges(usize::MAX, child_context.font, child_context.viewport);
 
     let generated = generate_node(arena, node_id);
     let is_flex_box = generated
         .as_ref()
         .map(|g| {
             g.kind == GeneratedBoxKind::Normal
-                && g.inner_formatting_context
-                    == crate::layout::FormattingContext::Flex
+                && g.inner_formatting_context == crate::layout::FormattingContext::Flex
         })
         .unwrap_or(false);
 
@@ -248,8 +289,8 @@ fn natural_intrinsic_size(
             let Some(child_gen) = generate_node(arena, child_id) else {
                 continue;
             };
-            let is_block = child_gen.kind == GeneratedBoxKind::Normal
-                && !child_gen.outer_display.is_inline();
+            let is_block =
+                child_gen.kind == GeneratedBoxKind::Normal && !child_gen.outer_display.is_inline();
             if is_block {
                 let cs = natural_intrinsic_size(arena, child_id, child_context);
                 content_w = content_w.max(cs.width);

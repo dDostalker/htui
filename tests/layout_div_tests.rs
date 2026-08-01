@@ -74,6 +74,39 @@ fn test_div_background_color() {
 }
 
 #[test]
+fn test_div_text_and_block_child_stack_on_separate_rows() {
+    init();
+    // Regression: a block's own inline text and its block-level children must
+    // stack (text line first, children below). Previously both were laid out
+    // from the same content-top row, so the child's first line painted over
+    // the parent's text (`<div>parent text<p>child block</p></div>` lost the
+    // parent text entirely).
+    let html = "<div>parent text<p>child block</p></div>";
+    let (root_id, arena) = setup(html, "");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    let cols = term_map.columns as usize;
+    let rows: Vec<String> = tl
+        .layout
+        .chunks(cols)
+        .map(|chunk| chunk.iter().map(|b| b.word.as_str()).collect())
+        .collect();
+    let parent_row = rows
+        .iter()
+        .position(|r| r.contains("parent text"))
+        .expect("parent text should render");
+    let child_row = rows
+        .iter()
+        .position(|r| r.contains("child block"))
+        .expect("child block should render");
+    assert!(
+        parent_row < child_row,
+        "parent text must sit above the block child, got {parent_row}/{child_row}"
+    );
+}
+
+#[test]
 fn test_div_bg_fills_full_row_default() {
     init();
     let html = "<div>short</div>";

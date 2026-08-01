@@ -332,3 +332,45 @@ fn test_ol_double_digit_ordinals() {
         assert!(canvas.contains(letter), "missing item body '{letter}'");
     }
 }
+
+#[test]
+fn test_nested_ul_inside_li_stacks_below_parent_text() {
+    init();
+    // Regression: the parent <li>'s own text and its nested <ul> children must
+    // stack on separate rows. Previously the nested list started on the same
+    // row as the parent's text, so "Nested list" was partially overwritten by
+    // the first nested item ("• Inner A").
+    let html = "<ul><li>Nested list<ul><li>Inner A</li><li>Inner B</li></ul></li><li>Sibling of nested</li></ul>";
+    let (root_id, arena) = setup(html, "");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map).unwrap();
+
+    let cols = term_map.columns as usize;
+    let rows: Vec<String> = tl
+        .layout
+        .chunks(cols)
+        .map(|chunk| chunk.iter().map(|b| b.word.as_str()).collect())
+        .collect();
+    let li_row = rows
+        .iter()
+        .position(|r| r.contains("Nested list"))
+        .expect("parent li text should render intact");
+    let inner_a_row = rows
+        .iter()
+        .position(|r| r.contains("Inner A"))
+        .expect("first nested item should render");
+    let inner_b_row = rows
+        .iter()
+        .position(|r| r.contains("Inner B"))
+        .expect("second nested item should render");
+    let sibling_row = rows
+        .iter()
+        .position(|r| r.contains("Sibling"))
+        .expect("sibling li should render");
+    assert!(
+        li_row < inner_a_row && inner_a_row < inner_b_row && inner_b_row < sibling_row,
+        "rows must stack li/{inner_a_row}/{inner_b_row}/{sibling_row}: {:?}",
+        rows[li_row]
+    );
+}

@@ -158,12 +158,19 @@ pub fn render_image_at(
     let img_rows = img_data.rows as usize;
     let canvas_cols = term_layout.columns as usize;
     let max = term_layout.layout.len();
-    'outer: for row in 0..img_rows {
+    for row in 0..img_rows {
+        let target_row = y + row;
+        if target_row.saturating_mul(canvas_cols) >= max {
+            break;
+        }
         for col in 0..img_cols {
-            let canvas_idx = (y + row) * canvas_cols + (x + col);
-            if canvas_idx >= max {
-                break 'outer;
+            let cx = x + col;
+            if cx >= canvas_cols {
+                // Clip at the right edge of the canvas row: the flat buffer
+                // would otherwise wrap the overflow into the next row's cells.
+                break;
             }
+            let canvas_idx = target_row * canvas_cols + cx;
             let pic_idx = row * img_cols + col;
             if let Some(cell) = picture.get(pic_idx) {
                 term_layout.layout[canvas_idx] =
@@ -196,20 +203,26 @@ pub fn render_image_at_slice(
     let img_rows = img_data.rows as usize;
     let canvas_cols = canvas_cols as usize;
     let max = layout.len();
-    'outer: for row in 0..img_rows {
+    for row in 0..img_rows {
+        let target_row = y + row;
+        if target_row.saturating_mul(canvas_cols) >= max {
+            break;
+        }
         for col in 0..img_cols {
-            let canvas_idx = (y + row) * canvas_cols + (x + col);
-            if canvas_idx >= max {
-                break 'outer;
+            let cx = x + col;
+            if cx >= canvas_cols {
+                // Clip at the right edge of the canvas row: the flat buffer
+                // would otherwise wrap the overflow into the next row's cells.
+                break;
             }
+            let canvas_idx = target_row * canvas_cols + cx;
             let pic_idx = row * img_cols + col;
             if let Some(cell) = picture.get(pic_idx) {
                 // `picture` holds pre-styled ANSI strings (one cell each),
                 // so the `word` field is the full content. Replace the
                 // cell rather than trying to find a multi-byte push that
                 // fits — the byte length is unbounded here.
-                layout[canvas_idx] =
-                    Block::new(cell.clone(), None, None, FontStyle::empty());
+                layout[canvas_idx] = Block::new(cell.clone(), None, None, FontStyle::empty());
             }
         }
     }

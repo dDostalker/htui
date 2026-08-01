@@ -1,7 +1,7 @@
 use crossterm::style::Color;
 
 use crate::{
-    layout::{BorderStyle, LayoutBox},
+    layout::{BorderStyle, LayoutBox, Rect},
     tui::graph_api::FontStyle,
 };
 
@@ -17,6 +17,7 @@ use super::PaintCanvas;
 /// content area, so any width > 1 is treated as 1.
 pub(crate) fn paint_borders(
     lb: &LayoutBox,
+    r: Rect,
     canvas: &mut PaintCanvas<'_>,
     fg: Option<Color>,
     bg: Option<Color>,
@@ -25,7 +26,6 @@ pub(crate) fn paint_borders(
     if !sides.any_visible() {
         return;
     }
-    let r = lb.rect;
     if r.width == 0 || r.height == 0 {
         return;
     }

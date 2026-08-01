@@ -55,15 +55,16 @@ pub fn layout_block(
         effective_font_size_cells(arena, node_id, context.font, context.viewport);
     let child_context = context.child(own_font_size_cells);
 
-    let edges: BoxEdges = node
-        .css_attr
-        .get_box_edges(containing.width, child_context.font, child_context.viewport);
+    let edges: BoxEdges =
+        node.css_attr
+            .get_box_edges(containing.width, child_context.font, child_context.viewport);
 
     let (geom, preallocated_height) = match pre_allocated_rect {
         Some(rect) => {
             let inner_h = edges.inner_horizontal();
             let content_constraint = BoxConstraint {
-                x: rect.x
+                x: rect
+                    .x
                     .saturating_add(edges.border.left.thickness())
                     .saturating_add(edges.padding.left),
                 width: rect.width.saturating_sub(inner_h).max(1),
@@ -127,22 +128,6 @@ pub fn layout_block(
         },
         None => geom.content_constraint,
     };
-    let mut child_cursor = Cursor {
-        y: geom.outer_y + edges.border.top.thickness() + edges.padding.top,
-    };
-    let block_children = node.children.clone();
-    let children = layout_children(
-        arena,
-        &block_children,
-        child_containing,
-        &mut child_cursor,
-        child_context,
-    );
-
-    let children_rows = child_cursor
-        .y
-        .saturating_sub(geom.outer_y + edges.border.top.thickness() + edges.padding.top);
-
     // The marker / hash prefix belongs to the first visual line. Prepend
     // it to the flat run list so the line-breaker treats it as part of
     // the first "word" group and renders it on the top row only.
@@ -170,11 +155,33 @@ pub fn layout_block(
     let inline_line_count = wrapped_lines.len();
     let inline_rows = inline_line_count.saturating_mul(own_font_size_cells.max(1));
 
-    // The box's content area is the larger of (children's rows) and
-    // (wrapped inline rows). Wrapped lines are still painted inside
-    // the content area, so the border-box height must accommodate
-    // both.
-    let content_height = children_rows.max(inline_rows);
+    // Block children begin BELOW the box's own inline text: in CSS the
+    // inline content forms its own line(s) first and block-level children
+    // start on a fresh line underneath. Starting the child cursor at the
+    // content top would paint the first child's row over the parent's own
+    // text (e.g. `<li>Nested list<ul>…</ul></li>` and
+    // `<div>text<p>child</p></div>`).
+    let content_top = geom.outer_y + edges.border.top.thickness() + edges.padding.top;
+    let mut child_cursor = Cursor {
+        y: content_top.saturating_add(inline_rows),
+    };
+    let block_children = node.children.clone();
+    let children = layout_children(
+        arena,
+        &block_children,
+        child_containing,
+        &mut child_cursor,
+        child_context,
+    );
+
+    let children_rows = child_cursor
+        .y
+        .saturating_sub(content_top.saturating_add(inline_rows));
+
+    // The content area stacks the wrapped inline lines and the block
+    // children (they no longer share rows), so the border-box height
+    // accommodates both.
+    let content_height = children_rows.saturating_add(inline_rows);
 
     let outer_height = match preallocated_height {
         Some(height) => height.max(1),

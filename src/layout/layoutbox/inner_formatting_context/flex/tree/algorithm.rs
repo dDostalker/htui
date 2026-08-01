@@ -1,9 +1,7 @@
 //! Flex algorithm primitives: wrap into lines, distribute main-axis space,
 //! apply `justify-content` / `align-content`, place items on the cross axis.
 
-use crate::{
-    html::css_parse::{AlignItems, FlexDirection, GapSizes, JustifyContent},
-};
+use crate::html::css_parse::{AlignItems, FlexDirection, GapSizes, JustifyContent};
 
 use super::container::FlexItemPrep;
 
@@ -154,10 +152,67 @@ pub(super) fn distribute_main_axis(
                 }
                 k += 1;
             }
+            // CSS `min-width` / `min-height: auto`: no item may shrink
+            // below its min-content floor. Clamp the violated items and
+            // re-distribute the remaining overflow among the items that
+            // can still shrink. If every item is at its floor and the
+            // line still overflows, the floors win and the line extends
+            // beyond the container (visible overflow, like a browser).
+            enforce_min_main_sizes(&mut sizes, line, available, column_gap);
         }
         (sizes, 0)
     } else {
         (sizes, 0)
+    }
+}
+
+/// Clamp each size to its min-content floor and redistribute the leftover
+/// overflow among items that can still shrink.
+///
+/// CSS flex layout resolves flexible lengths iteratively: items that hit
+/// their minimum become frozen at that size, and the remaining shrink is
+/// split among the still-shrinkable items. If clamping leaves the line
+/// larger than the container, the floors are kept and the line overflows
+/// (matching a browser's visible overflow for an over-constrained
+/// container).
+fn enforce_min_main_sizes(
+    sizes: &mut [usize],
+    line: &[&FlexItemPrep],
+    available: usize,
+    column_gap: usize,
+) {
+    let n = sizes.len();
+    let mins: Vec<usize> = line.iter().map(|p| p.min_main.max(1)).collect();
+    for i in 0..n {
+        if sizes[i] < mins[i] {
+            sizes[i] = mins[i];
+        }
+    }
+    loop {
+        let total: usize = sizes
+            .iter()
+            .sum::<usize>()
+            .saturating_add(column_gap.saturating_mul(n.saturating_sub(1)));
+        if total <= available {
+            break;
+        }
+        let overflow = total - available;
+        // Items still above their floor can absorb more shrink.
+        let candidates: Vec<usize> = (0..n).filter(|&i| sizes[i] > mins[i]).collect();
+        if candidates.is_empty() {
+            break; // everything at its floor; the line overflows.
+        }
+        let total_excess: usize = candidates.iter().map(|&i| sizes[i] - mins[i]).sum();
+        let mut reduced: usize = 0;
+        for &i in &candidates {
+            let share = overflow.saturating_mul(sizes[i] - mins[i]) / total_excess.max(1);
+            let new = sizes[i].saturating_sub(share).max(mins[i]);
+            reduced = reduced.saturating_add(sizes[i] - new);
+            sizes[i] = new;
+        }
+        if reduced == 0 {
+            break; // nothing changed; avoid an infinite loop.
+        }
     }
 }
 
@@ -168,7 +223,11 @@ pub(super) fn distribute_main_axis(
 /// space *between* items (no leading), `space-around` puts half a
 /// share at the leading and trailing edges, `space-evenly` puts a
 /// full share at every edge and gap.
-pub(super) fn justify_spacing(justify: JustifyContent, free_space: usize, n_items: usize) -> (usize, usize) {
+pub(super) fn justify_spacing(
+    justify: JustifyContent,
+    free_space: usize,
+    n_items: usize,
+) -> (usize, usize) {
     if n_items <= 1 {
         return match justify {
             JustifyContent::FlexStart | JustifyContent::SpaceBetween => (0, 0),
@@ -225,5 +284,3 @@ pub(super) fn align_on_cross_axis(
         AlignItems::Stretch => line_origin,
     }
 }
-
-
