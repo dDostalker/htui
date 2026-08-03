@@ -15,6 +15,11 @@ pub struct TermLayout {
     pub scroll_y: u32,
     pub rendered_rows: u32,
     pub zoom: f32,
+    /// Snapshot of the last viewport actually sent to the terminal, used by
+    /// the incremental renderer to emit only changed cells. Empty until the
+    /// first [`TermLayout::render_diff_to_bytes`](crate::tui::graph_api::TermLayout::render_diff_to_bytes)
+    /// call.
+    pub last_frame: Vec<Block>,
 }
 
 impl TermLayout {

@@ -99,7 +99,7 @@ htui/
 │               ├── cell.rs     # Block / FontStyle
 │               ├── image.rs    # Img / 图像加载
 │               ├── input.rs    # RenderCmd / trigger_refresh
-│               ├── render.rs   # TermLayout::render / render_to_bytes
+│               ├── render.rs   # TermLayout::render（增量） / render_diff_to_bytes / render_to_bytes
 │               ├── style.rs    # block_style
 │               └── text.rs     # char_width / grapheme_width
 ├── benches/               # criterion 基准（parse / cascade / paint / render_to_bytes / full_redraw）
@@ -151,6 +151,7 @@ htui/
 │   ├── layout_emoji_tests.rs
 │   ├── layout_table_tests.rs
 │   ├── layout_wrap_tests.rs
+│   ├── render_diff_tests.rs # 帧差增量渲染（不变零输出 / 滚动 diff / 全帧对比）
 │   └── logging_tests.rs
 ```
 

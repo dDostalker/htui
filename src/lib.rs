@@ -4,20 +4,17 @@ pub mod logging;
 pub mod tdom;
 pub mod tui;
 
-use std::io::{Write, stdout};
+use std::io::stdout;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
 use crossterm::{
-    cursor::{Hide, MoveTo, Show},
+    cursor::{Hide, Show},
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
-    terminal::{
-        Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
-        enable_raw_mode,
-    },
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 
 pub use html::html_parse::Parser;
@@ -96,17 +93,13 @@ fn render_thread(
                 // already filtered in the input thread, but if a `Rerender`
                 // slips past (e.g. races between a Redraw updating the
                 // max_scroll ceiling and a queued scroll event) we still
-                // avoid re-emitting Clear+render.
+                // avoid the diff pass.
                 if tl.scroll_y == prev {
                     continue;
                 }
-                if let Err(e) = execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0)) {
-                    log::error!("Failed to clear screen: {}", e);
-                }
+                // The incremental renderer diffs the shifted viewport against
+                // the previous frame, so scrolling needs no full-screen Clear.
                 tl.render();
-                if let Err(e) = stdout().flush() {
-                    log::error!("Failed to flush stdout: {}", e);
-                }
             }
 
             RenderCmd::Redraw { scroll_y, zoom } => {
@@ -149,13 +142,10 @@ fn render_thread(
                 tl.scroll_y = scroll_y;
                 tl.clamp_scroll();
 
-                if let Err(e) = execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0)) {
-                    log::error!("Failed to clear screen: {}", e);
-                }
+                // The incremental renderer emits only the changed cells (and
+                // a one-time full clear on the first frame / after resize),
+                // so redraws need no per-frame Clear and no extra flush.
                 tl.render();
-                if let Err(e) = stdout().flush() {
-                    log::error!("Failed to flush stdout: {}", e);
-                }
             }
         }
     }

@@ -1,6 +1,9 @@
 use std::{fmt::Display, io::stdout};
 
-use crossterm::cursor::MoveTo;
+use crossterm::{
+    cursor::MoveTo,
+    terminal::{Clear, ClearType},
+};
 
 use super::{
     canvas::TermLayout,
@@ -25,8 +28,17 @@ impl Display for TermLayout {
     }
 }
 impl TermLayout {
-    pub fn render(&self) {
-        let bytes = self.render_to_bytes();
+    /// Write the incremental frame to stdout.
+    ///
+    /// Only the cells that changed since the last call are emitted (see
+    /// [`Self::render_diff_to_bytes`]); when nothing changed this is a no-op
+    /// that performs no I/O. The buffer is flushed before returning so a
+    /// frame never lingers in Rust's stdout buffer.
+    pub fn render(&mut self) {
+        let bytes = self.render_diff_to_bytes();
+        if bytes.is_empty() {
+            return;
+        }
         use std::io::Write;
         let mut out = stdout();
         if let Err(e) = out.write_all(&bytes) {
@@ -37,12 +49,11 @@ impl TermLayout {
         }
     }
 
-    /// Render the visible viewport to an in-memory byte buffer.
+    /// Render the full visible viewport to an in-memory byte buffer.
     ///
-    /// Same output as `render()` but without any terminal I/O — useful for
-    /// unit tests that want to inspect the actual ANSI SGR sequence. The
-    /// cursor positioning commands are also written (as raw ANSI), so this
-    /// is a faithful reproduction of what `render()` writes to stdout.
+    /// Every visible cell is emitted (unlike [`Self::render`], which only
+    /// writes the cells that changed since the last frame) — useful for unit
+    /// tests that want to inspect the actual ANSI SGR sequence.
     pub fn render_to_bytes(&self) -> Vec<u8> {
         let mut out: Vec<u8> = Vec::new();
         let cols = self.columns as usize;
@@ -79,7 +90,7 @@ impl TermLayout {
                     i += 1;
                     continue;
                 }
-                if i > batch_start && i % cols == 0 {
+                if i > batch_start && i.is_multiple_of(cols) {
                     break;
                 }
                 let c_empty = c.word == " " && c.bcolor.is_none() && c.style.is_empty();
@@ -109,6 +120,115 @@ impl TermLayout {
         }
         out
     }
+
+    /// Render only the cells that changed since the last call.
+    ///
+    /// Compares the visible viewport (offset by `scroll_y`) against the
+    /// snapshot taken by the previous call and emits `MoveTo` + content for
+    /// the runs that differ, skipping runs whose cells are all unchanged.
+    /// The snapshot is then refreshed so the next call diffs against the new
+    /// screen state. Returns an empty buffer when the viewport is unchanged.
+    ///
+    /// The first call (or a viewport-size change, e.g. after a resize)
+    /// starts with an empty snapshot, so it emits a full-screen clear plus
+    /// every content cell.
+    pub fn render_diff_to_bytes(&mut self) -> Vec<u8> {
+        let mut out: Vec<u8> = Vec::new();
+        let cols = self.columns as usize;
+        let rows = self.rows as usize;
+        let scroll_start = self.scroll_y as usize * cols;
+        let scroll_end = (scroll_start + rows * cols).min(self.layout.len());
+        let viewport_cells = scroll_end - scroll_start;
+
+        if self.last_frame.len() != viewport_cells {
+            // First frame / resize: the screen is in an unknown state (fresh
+            // alternate screen), so clear it once and treat every cell as
+            // changed. `Block::default()` is a plain space, so blank cells
+            // compare equal against the cleared screen and stay silent.
+            if let Err(e) = crossterm::queue!(out, Clear(ClearType::All), MoveTo(0, 0)) {
+                log::error!("Failed to queue initial screen clear: {}", e);
+            }
+            self.last_frame = vec![Block::default(); viewport_cells];
+        }
+
+        let mut i = scroll_start;
+        while i < scroll_end {
+            // 跳过宽字符的填充格（空字符串标记）
+            if self.layout[i].word.is_empty() {
+                i += 1;
+                continue;
+            }
+
+            let cell = &self.layout[i];
+            let batch_start = i;
+            let fg = cell.fcolor;
+            let bg = cell.bcolor;
+            let cell_style = cell.style;
+            let is_empty = cell.word == " " && cell.bcolor.is_none() && cell.style.is_empty();
+            let mut batch = String::new();
+            let mut any_changed = false;
+
+            while i < scroll_end {
+                let c = &self.layout[i];
+                if c.word.is_empty() {
+                    i += 1;
+                    continue;
+                }
+                if i > batch_start && i.is_multiple_of(cols) {
+                    break;
+                }
+                let c_empty = c.word == " " && c.bcolor.is_none() && c.style.is_empty();
+                if c_empty != is_empty {
+                    break;
+                }
+                if !c_empty && (c.fcolor != fg || c.bcolor != bg || c.style != cell_style) {
+                    break;
+                }
+                if !block_state_eq(&self.last_frame[i - scroll_start], c) {
+                    any_changed = true;
+                }
+                batch.push_str(&c.word);
+                i += 1;
+            }
+
+            let x = (batch_start % cols) as u16;
+            let y = (batch_start / cols) as u16 - self.scroll_y as u16;
+
+            if any_changed && y < self.rows {
+                if let Err(e) = crossterm::queue!(out, MoveTo(x, y)) {
+                    log::error!("Failed to queue cursor move to ({}, {}): {}", x, y, e);
+                }
+                if is_empty {
+                    out.extend_from_slice(batch.as_bytes());
+                } else {
+                    out.extend_from_slice(styled_string(&batch, cell_style, fg, bg).as_bytes());
+                }
+            }
+        }
+
+        // Refresh the snapshot for the whole viewport. `clear` + `push_str`
+        // reuses each cell's allocation when the new word fits, so unchanged
+        // words don't reallocate.
+        for (snapshot, cell) in self
+            .last_frame
+            .iter_mut()
+            .zip(self.layout[scroll_start..scroll_end].iter())
+        {
+            if !block_state_eq(snapshot, cell) {
+                snapshot.word.clear();
+                snapshot.word.push_str(&cell.word);
+                snapshot.fcolor = cell.fcolor;
+                snapshot.bcolor = cell.bcolor;
+                snapshot.style = cell.style;
+            }
+        }
+        out
+    }
+}
+
+/// True when two cells render identically (same text, colors and style).
+fn block_state_eq(a: &Block, b: &Block) -> bool {
+    a.word == b.word && a.fcolor == b.fcolor && a.bcolor == b.bcolor && a.style == b.style
 }
 
 /// Returns true when a cell should be rendered as a "bare" space without

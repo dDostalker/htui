@@ -40,6 +40,7 @@ impl TermLayout {
         let layout = vec![Block::default(); max_cells];
         TermLayout {
             layout,
+            last_frame: Vec::new(),
             columns: map.columns,
             rows: map.rows,
             scroll_y: 0,
