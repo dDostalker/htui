@@ -26,7 +26,7 @@ use crossterm::style::Color;
 use crate::{
     layout::{BoxKind, LayoutBox, Rect, ReplacedContent},
     tdom::node::NodeArena,
-    tui::graph_api::{Block, TermLayout},
+    tui::graph_api::{Block, ImageCache, TermLayout},
 };
 
 use self::block::paint_block;
@@ -40,6 +40,10 @@ use self::image::paint_image;
 pub(super) struct PaintCanvas<'a> {
     pub layout: &'a mut [Block],
     pub columns: u16,
+    /// Image raster cache shared with the owning [`TermLayout`], so repeated
+    /// `<img>` paints across frames reuse the decoded grid instead of
+    /// re-reading the file.
+    pub image_cache: &'a mut ImageCache,
 }
 
 impl<'a> PaintCanvas<'a> {
@@ -82,6 +86,7 @@ pub fn paint_layout_tree(boxes: &[LayoutBox], arena: &NodeArena, term_layout: &m
     let mut canvas = PaintCanvas {
         layout: &mut term_layout.layout,
         columns,
+        image_cache: &mut term_layout.image_cache,
     };
     for b in boxes {
         paint_box(b, arena, &mut canvas, None, None);

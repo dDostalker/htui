@@ -1,7 +1,10 @@
-use std::path::PathBuf;
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+};
 
 use anyhow::{Result, anyhow};
-use crossterm::style::{Color, Stylize};
+use crossterm::style::Color;
 use image::{GenericImageView, imageops::FilterType};
 
 use super::{
@@ -29,11 +32,21 @@ pub const IMAGE_PIXELS_PER_CELL_COL: u32 = 2;
 /// Source-image pixels rendered per terminal cell on the vertical axis.
 pub const IMAGE_PIXELS_PER_CELL_ROW: u32 = 4;
 
+/// Maximum number of rasterized images kept in an [`ImageCache`]. Terminal
+/// resizes change the target cell size and therefore mint a new cache key
+/// per size; the cap bounds memory while the common case (a handful of
+/// images at one size) stays fully cached.
+const MAX_CACHED_IMAGES: usize = 16;
+
 #[derive(Debug)]
 pub struct Img {
     pub path: PathBuf,
     pub term_size: (u32, u32),
-    pub picture: Option<Vec<String>>,
+    /// One [`Block`] per terminal cell. The braille glyph lives in `word`
+    /// and the averaged cell color in `fcolor` — no ANSI is embedded in the
+    /// text, so the paint phase can copy cells into the canvas without
+    /// re-formatting, and the diff renderer compares stable cell state.
+    pub picture: Option<Vec<Block>>,
     pub cloumns: u32,
     pub rows: u32,
 }
@@ -76,7 +89,7 @@ impl Img {
 
         self.cloumns = width.div_ceil(IMAGE_PIXELS_PER_CELL_COL);
         self.rows = height.div_ceil(IMAGE_PIXELS_PER_CELL_ROW);
-        self.picture = Some(vec![]);
+        let mut picture = Vec::with_capacity((self.cloumns * self.rows) as usize);
         for y in (0..height).step_by(IMAGE_PIXELS_PER_CELL_ROW as usize) {
             for x in (0..width).step_by(IMAGE_PIXELS_PER_CELL_COL as usize) {
                 let mut bits = 0;
@@ -125,13 +138,58 @@ impl Img {
                     g: g_sum as u8,
                     b: b_sum as u8,
                 };
-                if let Some(picture) = self.picture.as_mut() {
-                    let ch = char::from_u32(0x2800 + bits).unwrap_or(' ');
-                    picture.push(format!("{}", ch.to_string().with(color)));
-                }
+                let mut word = String::new();
+                word.push(char::from_u32(0x2800 + bits).unwrap_or(' '));
+                picture.push(Block::new(word, Some(color), None, FontStyle::empty()));
             }
         }
+        self.picture = Some(picture);
         Ok(())
+    }
+}
+
+/// Cache of decoded + braille-rasterized images, keyed by
+/// `(path, cols, rows)` in terminal cells.
+///
+/// The paint phase runs once per frame, and every `<img>` used to be
+/// re-decoded from disk on each pass. `TermLayout` owns one of these and the
+/// paint pipeline shares it across frames, so each image is decoded once per
+/// size and reused for the rest of the session.
+#[derive(Debug)]
+pub struct ImageCache {
+    entries: HashMap<(String, u32, u32), Img>,
+}
+
+impl Default for ImageCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ImageCache {
+    /// Create an empty image cache.
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+        }
+    }
+
+    /// Return the rasterized image for `(path, size)`, decoding it on first
+    /// use. Failed decodes are not cached, so a temporarily missing file can
+    /// recover on a later frame instead of pinning the error forever.
+    pub fn get_or_decode(&mut self, path: &str, size: (u32, u32)) -> Result<&Img> {
+        let key = (path.to_string(), size.0, size.1);
+        if !self.entries.contains_key(&key) {
+            if self.entries.len() >= MAX_CACHED_IMAGES {
+                self.entries.clear();
+            }
+            let mut img = Img::new(PathBuf::from(path), size);
+            img._create_img()?;
+            self.entries.insert(key.clone(), img);
+        }
+        self.entries
+            .get(&key)
+            .ok_or_else(|| anyhow!("Image cache entry vanished for {}", path))
     }
 }
 
@@ -141,49 +199,28 @@ impl Img {
 /// `max_size` is the `(width, height)` in terminal cells the image should be
 /// resized to. Errors from the underlying loader are propagated; callers that
 /// want best-effort rendering should catch and log.
+///
+/// This one-shot entry point uses a throwaway [`ImageCache`]; long-lived
+/// callers (the paint pipeline) should share a cache across frames via
+/// [`render_image_at_slice`] instead.
 pub fn render_image_at(
     term_layout: &mut TermLayout,
     path: &str,
     origin: (usize, usize),
     max_size: (u32, u32),
 ) -> Result<()> {
-    let (x, y) = origin;
-    let mut img_data = Img::new(PathBuf::from(path), max_size);
-    img_data._create_img()?;
-    let picture = img_data
-        .picture
-        .as_ref()
-        .ok_or_else(|| anyhow!("Image data empty: {}", path))?;
-    let img_cols = img_data.cloumns as usize;
-    let img_rows = img_data.rows as usize;
-    let canvas_cols = term_layout.columns as usize;
-    let max = term_layout.layout.len();
-    for row in 0..img_rows {
-        let target_row = y + row;
-        if target_row.saturating_mul(canvas_cols) >= max {
-            break;
-        }
-        for col in 0..img_cols {
-            let cx = x + col;
-            if cx >= canvas_cols {
-                // Clip at the right edge of the canvas row: the flat buffer
-                // would otherwise wrap the overflow into the next row's cells.
-                break;
-            }
-            let canvas_idx = target_row * canvas_cols + cx;
-            let pic_idx = row * img_cols + col;
-            if let Some(cell) = picture.get(pic_idx) {
-                term_layout.layout[canvas_idx] =
-                    Block::new(cell.clone(), None, None, FontStyle::empty());
-            }
-        }
-    }
-    Ok(())
+    let columns = term_layout.columns;
+    let mut cache = ImageCache::new();
+    render_image_at_slice(&mut cache, &mut term_layout.layout, columns, path, origin, max_size)
 }
 
 /// Slice-based variant of [`render_image_at`] that writes through a
 /// caller-provided `&mut [Block]` instead of a full `TermLayout`.
+///
+/// `cache` is shared across frames so identical `(path, size)` requests hit
+/// the previously decoded raster instead of re-opening the file.
 pub fn render_image_at_slice(
+    cache: &mut ImageCache,
     layout: &mut [Block],
     canvas_cols: u16,
     path: &str,
@@ -191,8 +228,7 @@ pub fn render_image_at_slice(
     max_size: (u32, u32),
 ) -> Result<()> {
     let (x, y) = origin;
-    let mut img_data = Img::new(PathBuf::from(path), max_size);
-    img_data._create_img()?;
+    let img_data = cache.get_or_decode(path, max_size)?;
     let picture = img_data
         .picture
         .as_ref()
@@ -215,13 +251,17 @@ pub fn render_image_at_slice(
             }
             let canvas_idx = target_row * canvas_cols + cx;
             let pic_idx = row * img_cols + col;
-            if let Some(cell) = picture.get(pic_idx) {
-                // `picture` holds pre-styled ANSI strings (one cell each),
-                // so the `word` field is the full content. Replace the
-                // cell rather than trying to find a multi-byte push that
-                // fits — the byte length is unbounded here.
-                layout[canvas_idx] = Block::new(cell.clone(), None, None, FontStyle::empty());
-            }
+            let Some(src) = picture.get(pic_idx) else {
+                continue;
+            };
+            let dst = &mut layout[canvas_idx];
+            // Copy the rasterized cell into the canvas, reusing the canvas
+            // cell's existing String allocation (no per-frame heap traffic).
+            dst.word.clear();
+            dst.word.push_str(&src.word);
+            dst.fcolor = src.fcolor;
+            dst.bcolor = src.bcolor;
+            dst.style = src.style;
         }
     }
     Ok(())

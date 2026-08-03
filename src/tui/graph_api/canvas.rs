@@ -1,4 +1,4 @@
-use super::cell::Block;
+use super::{cell::Block, image::ImageCache};
 
 /// Maximum number of terminal screens the virtual canvas can hold. The layout
 /// Vec is sized to `columns * rows * MAX_SCROLL_MULTIPLIER` cells so content
@@ -20,6 +20,9 @@ pub struct TermLayout {
     /// first [`TermLayout::render_diff_to_bytes`](crate::tui::graph_api::TermLayout::render_diff_to_bytes)
     /// call.
     pub last_frame: Vec<Block>,
+    /// Rasterized-image cache shared across redraws so `<img>` sources are
+    /// decoded from disk once per (path, size) instead of once per frame.
+    pub(crate) image_cache: ImageCache,
 }
 
 impl TermLayout {

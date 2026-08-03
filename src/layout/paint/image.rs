@@ -31,6 +31,7 @@ pub(crate) fn paint_image(
         return;
     };
     if let Err(error) = render_image_at_slice(
+        canvas.image_cache,
         canvas.layout,
         canvas.columns,
         path.as_str(),

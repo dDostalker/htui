@@ -16,8 +16,9 @@ use htui::layout::inner_formatting_context::flow::layout_img;
 use htui::layout::{BoxConstraint, BoxKind, Cursor, LayoutContext, ReplacedContent, Viewport};
 use htui::tdom::node::{self, NodeType};
 use htui::tui::graph_api::{
-    IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, TermLayout, render_image_at,
+    IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, ImageCache, TermLayout, render_image_at,
 };
+use crossterm::style::Color;
 use image::{ImageBuffer, Rgb};
 
 fn init() {
@@ -202,4 +203,107 @@ fn paint_image_at_fills_requested_cell_area() {
         has_unicode,
         "canvas should contain braille/quarter-block glyphs"
     );
+}
+
+// ============================================================
+// Cell format: braille glyph in `word`, color in `fcolor` (no ANSI)
+// ============================================================
+
+#[test]
+fn image_cells_store_braille_glyph_and_color_separately() {
+    init();
+    let img_path = std::env::temp_dir().join("htui_img_cell_format.png");
+    write_test_png(&img_path);
+
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    let cell_w: u32 = 40;
+    let cell_h: u32 = 10;
+    render_image_at(
+        &mut tl,
+        img_path.to_str().unwrap(),
+        (0, 0),
+        (cell_w, cell_h),
+    )
+    .expect("render_image_at should succeed");
+
+    let cells_per_row = term_map.columns as usize;
+    for row in 0..(cell_h as usize) {
+        for col in 0..(cell_w as usize) {
+            let cell = &tl.layout[row * cells_per_row + col];
+            let ch = cell
+                .word
+                .chars()
+                .next()
+                .expect("image cell must hold a glyph");
+            assert!(
+                (0x2800..=0x28FF).contains(&(ch as u32)),
+                "cell word must be a braille glyph, got {:?}",
+                cell.word
+            );
+            assert!(
+                !cell.word.contains('\x1b'),
+                "word must not embed ANSI escapes, got {:?}",
+                cell.word
+            );
+            assert!(
+                matches!(cell.fcolor, Some(Color::Rgb { .. })),
+                "cell color must live in fcolor, got {:?}",
+                cell.fcolor
+            );
+        }
+    }
+}
+
+// ============================================================
+// ImageCache: one decode per (path, size)
+// ============================================================
+
+#[test]
+fn image_cache_reuses_decoded_raster() {
+    init();
+    let img_path = std::env::temp_dir().join("htui_img_cache_reuse.png");
+    write_test_png(&img_path);
+    let path = img_path.to_str().unwrap();
+    let mut cache = ImageCache::new();
+
+    let first = cache
+        .get_or_decode(path, (40, 10))
+        .expect("first decode should succeed");
+    let (cols, rows, size) = (first.cloumns, first.rows, first.term_size);
+
+    // The raster is cached: removing the source must not break a second
+    // request, which would otherwise re-open the file and fail.
+    std::fs::remove_file(&img_path).expect("remove temp png");
+
+    let second = cache
+        .get_or_decode(path, (40, 10))
+        .expect("cached entry must serve the second request without re-reading the file");
+    assert_eq!(cols, second.cloumns);
+    assert_eq!(rows, second.rows);
+    assert_eq!(size, second.term_size);
+}
+
+#[test]
+fn image_cache_keys_by_size() {
+    init();
+    let img_path = std::env::temp_dir().join("htui_img_cache_sizes.png");
+    write_test_png(&img_path);
+    let path = img_path.to_str().unwrap();
+    let mut cache = ImageCache::new();
+
+    let (small_cols, small_rows) = {
+        let small = cache
+            .get_or_decode(path, (20, 5))
+            .expect("decode small size");
+        (small.cloumns, small.rows)
+    };
+    let (large_cols, large_rows) = {
+        let large = cache
+            .get_or_decode(path, (40, 10))
+            .expect("decode large size");
+        (large.cloumns, large.rows)
+    };
+    assert_eq!((small_cols, small_rows), (20, 5));
+    assert_eq!((large_cols, large_rows), (40, 10));
 }

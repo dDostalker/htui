@@ -8,7 +8,7 @@ use crate::{
         paint::paint_layout_tree,
     },
     tdom::node::{NodeArena, NodeId, NodeType},
-    tui::graph_api::{Block, FontStyle, TermLayout},
+    tui::graph_api::{Block, FontStyle, ImageCache, TermLayout},
 };
 
 #[derive(Debug)]
@@ -46,6 +46,7 @@ impl TermLayout {
             scroll_y: 0,
             rendered_rows: 0,
             zoom,
+            image_cache: ImageCache::new(),
         }
     }
 }
