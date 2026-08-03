@@ -68,8 +68,14 @@ fn test_header_with_color() {
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
-    let has_fg = tl.layout.iter().any(|b| b.fcolor == Some(Color::Blue));
-    let has_bg = tl.layout.iter().any(|b| b.bcolor == Some(Color::Yellow));
+    let has_fg = tl
+        .layout
+        .iter()
+        .any(|b| b.fcolor == Some(Color::Rgb { r: 0, g: 0, b: 255 }));
+    let has_bg = tl
+        .layout
+        .iter()
+        .any(|b| b.bcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }));
     assert!(has_fg, "should have blue foreground");
     assert!(has_bg, "should have yellow background");
 }
@@ -89,14 +95,14 @@ fn test_header_solid_bg() {
     let content_idx = tl
         .layout
         .iter()
-        .position(|b| b.word != " " && b.bcolor == Some(Color::Green))
+        .position(|b| b.word != " " && b.bcolor == Some(Color::Rgb { r: 0, g: 128, b: 0 }))
         .expect("should find green text");
     let content_row = content_idx / cols;
     let row_start = content_row * cols;
     let row_end = row_start + cols;
     let bg_count = tl.layout[row_start..row_end]
         .iter()
-        .filter(|b| b.bcolor == Some(Color::Green))
+        .filter(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 128, b: 0 }))
         .count();
     assert_eq!(bg_count, cols, "default 100% width should fill row");
 }
@@ -293,7 +299,14 @@ fn test_css_attr_bg_color() {
     let (_, arena) = setup("<div></div>", "div { background-color: red; }");
     for (_, node) in Node::descendants(&arena, arena.keys().next().unwrap()) {
         if node.node_type == NodeType::Div {
-            assert_eq!(node.css_attr.get_bg_color(), Some(Color::Red));
+            assert_eq!(
+                node.css_attr.get_bg_color(),
+                Some(Color::Rgb {
+                    r: 255,
+                    g: 0,
+                    b: 0
+                })
+            );
             return;
         }
     }
@@ -305,7 +318,14 @@ fn test_css_attr_bg_color_fallback() {
     let (_, arena) = setup("<div></div>", "div { background: green; }");
     for (_, node) in Node::descendants(&arena, arena.keys().next().unwrap()) {
         if node.node_type == NodeType::Div {
-            assert_eq!(node.css_attr.get_bg_color(), Some(Color::Green));
+            assert_eq!(
+                node.css_attr.get_bg_color(),
+                Some(Color::Rgb {
+                    r: 0,
+                    g: 128,
+                    b: 0
+                })
+            );
             return;
         }
     }

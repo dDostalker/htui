@@ -269,7 +269,10 @@ fn test_li_with_css_color() {
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
-    let has_red = tl.layout.iter().any(|b| b.fcolor == Some(Color::Red));
+    let has_red = tl
+        .layout
+        .iter()
+        .any(|b| b.fcolor == Some(Color::Rgb { r: 255, g: 0, b: 0 }));
     assert!(
         has_red,
         "ul li should pick up `color: red` via selector match"
@@ -289,7 +292,7 @@ fn test_ul_with_bg_color_fills_list_rect() {
     let yellow_count = tl
         .layout
         .iter()
-        .filter(|b| b.bcolor == Some(Color::Yellow))
+        .filter(|b| b.bcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }))
         .count();
     assert!(
         yellow_count > 0,

@@ -363,7 +363,7 @@ fn explicit_bg_with_large_font_size_clamps_to_text_row_and_width() {
     // The text row must carry cyan bg only across the 6 text cells.
     let cells = &tl.layout[rstart..rstart + cols];
     let cyan_in_text_band = (col..col + 6)
-        .filter(|&i| cells[i].bcolor == Some(CtColor::Cyan))
+        .filter(|&i| cells[i].bcolor == Some(CtColor::Rgb { r: 0, g: 255, b: 255 }))
         .count();
     assert_eq!(
         cyan_in_text_band, 6,
@@ -383,7 +383,7 @@ fn explicit_bg_with_large_font_size_clamps_to_text_row_and_width() {
         let s = (row - 1 + r_off) * cols;
         let cyan_count = tl.layout[s..s + cols]
             .iter()
-            .filter(|b| b.bcolor == Some(CtColor::Cyan))
+            .filter(|b| b.bcolor == Some(CtColor::Rgb { r: 0, g: 255, b: 255 }))
             .count();
         assert_eq!(
             cyan_count, 0,
@@ -402,7 +402,7 @@ fn explicit_bg_at_default_font_size_still_fills_full_row() {
     let cols = term_map.columns as usize;
     let red_count = tl.layout[0..cols]
         .iter()
-        .filter(|b| b.bcolor == Some(CtColor::Red))
+        .filter(|b| b.bcolor == Some(CtColor::Rgb { r: 255, g: 0, b: 0 }))
         .count();
     assert_eq!(
         red_count, cols,
@@ -442,7 +442,11 @@ fn bg_pad_cells_carry_space_and_bg_into_rendered_output() {
     assert_eq!(row_cells[0].word, "A");
     assert_eq!(
         row_cells[0].bcolor,
-        Some(CtColor::DarkGreen),
+        Some(CtColor::Rgb {
+            r: 0,
+            g: 100,
+            b: 0
+        }),
         "glyph cell carries the run bg",
     );
     // The bg-pad cell must hold a space (not an empty string) so the
@@ -453,13 +457,17 @@ fn bg_pad_cells_carry_space_and_bg_into_rendered_output() {
     );
     assert_eq!(
         row_cells[1].bcolor,
-        Some(CtColor::DarkGreen),
+        Some(CtColor::Rgb {
+            r: 0,
+            g: 100,
+            b: 0
+        }),
         "bg-pad cell carries the run bg",
     );
     // Slot for 'B' at font-size 2: cell 2 = 'B' (bg), cell 3 = pad (bg).
     assert_eq!(row_cells[2].word, "B");
     assert_eq!(row_cells[3].word, " ", "bg-pad after 'B' also keeps the bg");
-    assert_eq!(row_cells[3].bcolor, Some(CtColor::DarkGreen));
+    assert_eq!(row_cells[3].bcolor, Some(CtColor::Rgb { r: 0, g: 100, b: 0 }));
 }
 
 #[test]
@@ -485,10 +493,10 @@ fn render_to_bytes_includes_bg_sgr_on_pad_cells_for_padded_em_block() {
         let c = &tl.layout[cols + i];
         eprintln!("  cell {i}: word={:?} fg={:?} bg={:?} style={:?}", c.word, c.fcolor, c.bcolor, c.style);
     }
-    let dark_green_sgr = "\x1B[48;5;2m"; // crossterm maps DarkGreen to 256-color 2
+    let dark_green_sgr = "\x1B[48;2;0;100;0m"; // darkgreen is now truecolor #006400
     assert!(
         rendered.contains(dark_green_sgr),
-        "rendered output must include the darkgreen bg SGR \\x1B[48;5;2m, got: {rendered:?}",
+        "rendered output must include the darkgreen bg SGR \\x1B[48;2;0;100;0m, got: {rendered:?}",
     );
     // The bg applies across the padding-top row, the text row, the
     // 2nd content row, and the padding-bottom row — so four SGR
@@ -526,7 +534,7 @@ fn render_to_bytes_includes_bg_sgr_on_pad_cells_for_padded_em_block() {
         .expect("must have a preceding ANSI escape");
     let after_move_to = &preceding[last_move_to..];
     assert!(
-        after_move_to.contains("[48;5;2m"),
+        after_move_to.contains("[48;2;0;100;0m"),
         "bg SGR must be the first style after the cursor move for the text row (got: {after_move_to:?})",
     );
 }

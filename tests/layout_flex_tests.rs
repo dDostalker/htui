@@ -203,7 +203,7 @@ fn test_flex_grow_fills_remaining_main_axis_space() {
     // background extends to the right edge.
     let red_count = tl.layout[0..COLS as usize]
         .iter()
-        .filter(|b| b.bcolor == Some(Color::Red))
+        .filter(|b| b.bcolor == Some(Color::Rgb { r: 255, g: 0, b: 0 }))
         .count();
     assert_eq!(
         red_count, COLS as usize,
@@ -791,7 +791,7 @@ fn test_flex_nested_row_inside_row_stacks_three_rows() {
     for row in 0..3 {
         let yellow_count = tl.layout[row * COLS as usize..(row + 1) * COLS as usize]
             .iter()
-            .filter(|cell| cell.bcolor == Some(Color::Yellow))
+            .filter(|cell| cell.bcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }))
             .count();
         assert_eq!(
             yellow_count,

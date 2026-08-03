@@ -90,7 +90,14 @@ fn walk_runs(
                 let a_fg = if child.css_attr.is_set("color") {
                     child.css_attr.get_color().or(fg)
                 } else {
-                    Some(Color::Blue)
+                    // Standard blue (#0000FF) — must match the block-<a>
+                    // UA default, which inserts the CSS name `blue` into
+                    // `css_attr` and resolves it through `parse_color_str`.
+                    Some(Color::Rgb {
+                        r: 0x00,
+                        g: 0x00,
+                        b: 0xFF,
+                    })
                 };
                 let a_bg = child.css_attr.get_bg_color().or(bg);
                 let mut a_style = style | block_style(&child.css_attr);

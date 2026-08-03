@@ -235,12 +235,22 @@ fn test_span_color_overrides_parent() {
     let r_idx = find_cell(&tl, "r").expect("'r' of 'red' should render");
     assert_eq!(
         tl.layout[r_idx].fcolor,
-        Some(Color::Red),
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 0
+        }),
         "span cell should carry the red fg"
     );
     let p_idx = find_cell(&tl, "p").expect("plain 'p' should render");
     assert!(
-        tl.layout[p_idx].fcolor.is_none() || tl.layout[p_idx].fcolor == Some(Color::Red),
+        tl.layout[p_idx].fcolor.is_none()
+            || tl.layout[p_idx].fcolor
+                == Some(Color::Rgb {
+                    r: 255,
+                    g: 0,
+                    b: 0
+                }),
         "plain cell should not pick up the span's red"
     );
 }
@@ -258,7 +268,11 @@ fn test_span_color_with_inherited_parent_color() {
     let g_idx = find_cell(&tl, "g").expect("'g' of 'go' should render");
     assert_eq!(
         tl.layout[g_idx].fcolor,
-        Some(Color::Green),
+        Some(Color::Rgb {
+            r: 0,
+            g: 128,
+            b: 0
+        }),
         "span's own color (green) must win over div's inherited color"
     );
 }
@@ -330,7 +344,11 @@ fn test_span_inherits_parent_color_when_no_own() {
     let x_idx = find_cell(&tl, "x").expect("span 'x' should render");
     assert_eq!(
         tl.layout[x_idx].fcolor,
-        Some(Color::Magenta),
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 255
+        }),
         "span should inherit the ancestor's color"
     );
 }
@@ -358,12 +376,20 @@ fn test_unstyled_runs_inherit_aside_bg() {
 
     assert_eq!(
         tl.layout[p_idx].bcolor,
-        Some(Color::DarkBlue),
+        Some(Color::Rgb {
+            r: 0,
+            g: 0,
+            b: 139
+        }),
         "plain text inside <aside> should inherit darkblue bg"
     );
     assert_eq!(
         tl.layout[b_idx].bcolor,
-        Some(Color::DarkBlue),
+        Some(Color::Rgb {
+            r: 0,
+            g: 0,
+            b: 139
+        }),
         "bold span inside <aside> should also paint on darkblue bg"
     );
 }
@@ -525,7 +551,11 @@ fn test_h1_prefix_is_a_separate_run() {
     for r in line_runs {
         assert_eq!(
             r.fg,
-            Some(Color::Cyan),
+            Some(Color::Rgb {
+                r: 0,
+                g: 255,
+                b: 255
+            }),
             "heading runs inherit the heading's color"
         );
     }
@@ -613,7 +643,11 @@ fn test_font_styles_visual_test_mixed_inline() {
     let g_idx = find_cell(&tl, "g").expect("green span should render");
     assert_eq!(
         tl.layout[g_idx].fcolor,
-        Some(Color::Green),
+        Some(Color::Rgb {
+            r: 0,
+            g: 128,
+            b: 0
+        }),
         "green span must carry green fg"
     );
     assert!(

@@ -102,7 +102,11 @@ fn test_a_default_blue_color_applies() {
     let cell = &tl.layout[idx];
     assert_eq!(
         cell.fcolor,
-        Some(Color::Blue),
+        Some(Color::Rgb {
+            r: 0,
+            g: 0,
+            b: 255
+        }),
         "default <a> rendering must use blue foreground (got {:?})",
         cell.fcolor
     );
@@ -142,7 +146,11 @@ fn test_a_color_override_disables_default_blue() {
     let cell = &tl.layout[idx];
     assert_eq!(
         cell.fcolor,
-        Some(Color::Magenta),
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 255
+        }),
         "`a {{ color: magenta }}` must override the default blue"
     );
     // Underline default should still apply because we didn't override it.
@@ -170,7 +178,11 @@ fn test_a_inherits_parent_color_when_no_override() {
     let cell = &tl.layout[idx];
     assert_eq!(
         cell.fcolor,
-        Some(Color::Red),
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 0
+        }),
         "link must inherit the parent block's color (got {:?})",
         cell.fcolor
     );
@@ -337,7 +349,11 @@ fn test_block_a_default_blue_color_applies() {
     let idx = first_cell_with(&tl, "l").expect("link text must render");
     assert_eq!(
         tl.layout[idx].fcolor,
-        Some(Color::Blue),
+        Some(Color::Rgb {
+            r: 0,
+            g: 0,
+            b: 255
+        }),
         "block <a> UA default must use blue foreground (got {:?})",
         tl.layout[idx].fcolor
     );
@@ -373,7 +389,11 @@ fn test_block_a_color_override_disables_default_blue() {
     let idx = first_cell_with(&tl, "l").expect("link text must render");
     assert_eq!(
         tl.layout[idx].fcolor,
-        Some(Color::Magenta),
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 255
+        }),
         "`a {{ color: magenta }}` must override the default blue on the block path"
     );
     // Underline default should still apply because we didn't override it.
@@ -396,7 +416,11 @@ fn test_block_a_inherits_parent_color_when_no_override() {
     let idx = first_cell_with(&tl, "l").expect("link text must render");
     assert_eq!(
         tl.layout[idx].fcolor,
-        Some(Color::Red),
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 0
+        }),
         "block <a> must inherit the parent block's color (got {:?})",
         tl.layout[idx].fcolor
     );

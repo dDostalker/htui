@@ -268,7 +268,10 @@ fn test_table_cell_color_applies() {
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
 
-    let has_red = tl.layout.iter().any(|b| b.fcolor == Some(Color::Red));
+    let has_red = tl
+        .layout
+        .iter()
+        .any(|b| b.fcolor == Some(Color::Rgb { r: 255, g: 0, b: 0 }));
     assert!(has_red, "td should pick up `color: red` via CSS selector");
 }
 
@@ -285,7 +288,7 @@ fn test_table_cell_bg_color_applies() {
     let yellow_count = tl
         .layout
         .iter()
-        .filter(|b| b.bcolor == Some(Color::Yellow))
+        .filter(|b| b.bcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }))
         .count();
     assert!(
         yellow_count > 0,
@@ -316,12 +319,12 @@ fn test_table_nth_child_even_stripes_td_bg() {
     let even_cells = tl
         .layout
         .iter()
-        .filter(|b| b.bcolor == Some(Color::Grey))
+        .filter(|b| b.bcolor == Some(Color::Rgb { r: 169, g: 169, b: 169 }))
         .count();
     let odd_cells = tl
         .layout
         .iter()
-        .filter(|b| b.bcolor == Some(Color::Black))
+        .filter(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 0, b: 0 }))
         .count();
     assert!(
         even_cells > 0,

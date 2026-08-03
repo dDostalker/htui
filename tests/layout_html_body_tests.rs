@@ -123,7 +123,10 @@ fn test_body_css_color_applies_to_descendants() {
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
-    let has_color = tl.layout.iter().any(|b| b.fcolor == Some(Color::Magenta));
+    let has_color = tl
+        .layout
+        .iter()
+        .any(|b| b.fcolor == Some(Color::Rgb { r: 255, g: 0, b: 255 }));
     assert!(
         has_color,
         "body-level color should cascade to <p> descendant"
@@ -144,14 +147,14 @@ fn test_body_css_background_color_fills_terminal() {
     let content_idx = tl
         .layout
         .iter()
-        .position(|b| b.word != " " && b.bcolor == Some(Color::Yellow))
+        .position(|b| b.word != " " && b.bcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }))
         .expect("should find colored content");
     let row = content_idx / cols;
     let rstart = row * cols;
     let rend = rstart + cols;
     let bg_count = tl.layout[rstart..rend]
         .iter()
-        .filter(|b| b.bcolor == Some(Color::Yellow))
+        .filter(|b| b.bcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }))
         .count();
     assert_eq!(
         bg_count, cols,
@@ -168,7 +171,10 @@ fn test_html_css_color_applies_to_descendants() {
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
-    let has_color = tl.layout.iter().any(|b| b.fcolor == Some(Color::Cyan));
+    let has_color = tl
+        .layout
+        .iter()
+        .any(|b| b.fcolor == Some(Color::Rgb { r: 0, g: 255, b: 255 }));
     assert!(
         has_color,
         "html-level color should cascade through body to <p>"

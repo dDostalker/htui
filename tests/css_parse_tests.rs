@@ -328,13 +328,62 @@ fn test_is_set_distinguishes_unset_from_explicit_none() {
 
 #[test]
 fn test_color_name_parsing() {
-    assert_eq!(parse_color_str("darkblue"), Some(Color::DarkBlue));
-    assert_eq!(parse_color_str("DarkBlue"), Some(Color::DarkBlue));
-    assert_eq!(parse_color_str("red"), Some(Color::Red));
-    assert_eq!(parse_color_str("darkred"), Some(Color::DarkRed));
-    assert_eq!(parse_color_str("blue"), Some(Color::Blue));
-    assert_eq!(parse_color_str("grey"), Some(Color::Grey));
-    assert_eq!(parse_color_str("gray"), Some(Color::Grey));
+    assert_eq!(
+        parse_color_str("darkblue"),
+        Some(Color::Rgb {
+            r: 0x00,
+            g: 0x00,
+            b: 0x8B
+        })
+    );
+    assert_eq!(
+        parse_color_str("DarkBlue"),
+        Some(Color::Rgb {
+            r: 0x00,
+            g: 0x00,
+            b: 0x8B
+        })
+    );
+    assert_eq!(
+        parse_color_str("red"),
+        Some(Color::Rgb {
+            r: 0xFF,
+            g: 0x00,
+            b: 0x00
+        })
+    );
+    assert_eq!(
+        parse_color_str("darkred"),
+        Some(Color::Rgb {
+            r: 0x8B,
+            g: 0x00,
+            b: 0x00
+        })
+    );
+    assert_eq!(
+        parse_color_str("blue"),
+        Some(Color::Rgb {
+            r: 0x00,
+            g: 0x00,
+            b: 0xFF
+        })
+    );
+    assert_eq!(
+        parse_color_str("grey"),
+        Some(Color::Rgb {
+            r: 0x80,
+            g: 0x80,
+            b: 0x80
+        })
+    );
+    assert_eq!(
+        parse_color_str("gray"),
+        Some(Color::Rgb {
+            r: 0x80,
+            g: 0x80,
+            b: 0x80
+        })
+    );
 }
 
 #[test]
@@ -375,7 +424,14 @@ fn test_css_attr_full_color() {
     let css = "color: darkblue; background-color: #1e293b;";
     let m = parse_declaration_text(css);
     attr.add(CssAttr(m));
-    assert_eq!(attr.get_color(), Some(Color::DarkBlue));
+    assert_eq!(
+        attr.get_color(),
+        Some(Color::Rgb {
+            r: 0x00,
+            g: 0x00,
+            b: 0x8B
+        })
+    );
     assert_eq!(
         attr.get_bg_color(),
         Some(Color::Rgb {
@@ -519,7 +575,11 @@ fn test_background_color_does_not_inherit() {
     let p_id = arena[div_id].children[0];
     assert_eq!(
         arena[div_id].css_attr.get_bg_color(),
-        Some(Color::Yellow),
+        Some(Color::Rgb {
+            r: 0xFF,
+            g: 0xFF,
+            b: 0x00
+        }),
         "div should have its own bg"
     );
     assert_eq!(
@@ -545,10 +605,21 @@ fn test_color_does_inherit() {
 
     let div_id = arena[root].children[0];
     let p_id = arena[div_id].children[0];
-    assert_eq!(arena[div_id].css_attr.get_color(), Some(Color::Red));
+    assert_eq!(
+        arena[div_id].css_attr.get_color(),
+        Some(Color::Rgb {
+            r: 0xFF,
+            g: 0x00,
+            b: 0x00
+        })
+    );
     assert_eq!(
         arena[p_id].css_attr.get_color(),
-        Some(Color::Red),
+        Some(Color::Rgb {
+            r: 0xFF,
+            g: 0x00,
+            b: 0x00
+        }),
         "inheritable property must propagate to descendant"
     );
 }
@@ -580,7 +651,14 @@ fn test_full_parse_pipeline_handles_important_and_comments() {
     css.add(sel_h1, decls);
     css_into_node(&mut arena, root, &css);
 
-    assert_eq!(arena[h1].css_attr.get_color(), Some(Color::Red));
+    assert_eq!(
+        arena[h1].css_attr.get_color(),
+        Some(Color::Rgb {
+            r: 0xFF,
+            g: 0x00,
+            b: 0x00
+        })
+    );
     assert_eq!(arena[h1].css_attr.get_font_weight(), FontWeight::Bold);
 }
 
@@ -1061,7 +1139,14 @@ fn border_shorthand_solid_parses_width_and_style() {
     let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
     assert_eq!(sides.top.width, 1);
     assert_eq!(sides.top.style, BorderStyle::Solid);
-    assert_eq!(sides.top.color, Some(Color::Red));
+    assert_eq!(
+        sides.top.color,
+        Some(Color::Rgb {
+            r: 0xFF,
+            g: 0x00,
+            b: 0x00
+        })
+    );
     assert_eq!(sides.right.width, 1);
     assert_eq!(sides.bottom.width, 1);
     assert_eq!(sides.left.width, 1);
@@ -1088,9 +1173,23 @@ fn border_longhand_overrides_universal_shorthand() {
     attr.add(CssAttr(decls));
     let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
     assert_eq!(sides.top.width, 3);
-    assert_eq!(sides.top.color, Some(Color::Blue));
+    assert_eq!(
+        sides.top.color,
+        Some(Color::Rgb {
+            r: 0x00,
+            g: 0x00,
+            b: 0xFF
+        })
+    );
     assert_eq!(sides.right.width, 1);
-    assert_eq!(sides.right.color, Some(Color::Red));
+    assert_eq!(
+        sides.right.color,
+        Some(Color::Rgb {
+            r: 0xFF,
+            g: 0x00,
+            b: 0x00
+        })
+    );
 }
 
 #[test]
@@ -1106,7 +1205,14 @@ fn border_universal_width_style_color_layers_correctly() {
     let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
     assert_eq!(sides.top.width, 2);
     assert_eq!(sides.top.style, BorderStyle::Solid);
-    assert_eq!(sides.top.color, Some(Color::Green));
+    assert_eq!(
+        sides.top.color,
+        Some(Color::Rgb {
+            r: 0x00,
+            g: 0x80,
+            b: 0x00
+        })
+    );
 }
 
 #[test]

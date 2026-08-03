@@ -114,7 +114,7 @@ fn padding_background_fills_padding_box() {
     let row0 = &tl.layout[0..cols];
     let cyan_count = row0
         .iter()
-        .filter(|b| b.bcolor == Some(Color::Cyan))
+        .filter(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 255, b: 255 }))
         .count();
     assert_eq!(
         cyan_count, cols,
@@ -298,7 +298,11 @@ fn border_color_overrides_text_color() {
     for b in &border_cells {
         assert_eq!(
             b.fcolor,
-            Some(Color::Green),
+            Some(Color::Rgb {
+                r: 0,
+                g: 128,
+                b: 0
+            }),
             "border glyphs should pick up the border's color"
         );
     }
@@ -316,8 +320,24 @@ fn border_per_side_longhand_overrides_universal() {
     let cols = 80;
     let top_color = tl.layout[0].fcolor;
     let left_color = tl.layout[cols].fcolor;
-    assert_eq!(top_color, Some(Color::Blue), "top border should be blue");
-    assert_eq!(left_color, Some(Color::Red), "left border should be red");
+    assert_eq!(
+        top_color,
+        Some(Color::Rgb {
+            r: 0,
+            g: 0,
+            b: 255
+        }),
+        "top border should be blue"
+    );
+    assert_eq!(
+        left_color,
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 0
+        }),
+        "left border should be red"
+    );
 }
 
 #[test]
@@ -377,7 +397,7 @@ fn combined_padding_border_margin_size_correctly() {
         .layout
         .iter()
         .enumerate()
-        .filter(|(_, b)| b.bcolor == Some(Color::Yellow))
+        .filter(|(_, b)| b.bcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }))
         .map(|(i, _)| i / cols)
         .collect::<std::collections::HashSet<_>>();
     // Expected rows: 3 (margin-top) + 1 (border-top) + 2 (padding-top)

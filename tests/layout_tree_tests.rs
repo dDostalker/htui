@@ -92,14 +92,14 @@ fn nested_paragraph_shares_aside_row_with_bg() {
     let aside_row = tl
         .layout
         .iter()
-        .position(|b| b.bcolor == Some(Color::DarkBlue))
+        .position(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 0, b: 139 }))
         .map(|i| i / cols)
         .expect("aside should paint a darkblue row");
     // Find the paragraph row (it has yellow text).
     let paragraph_row = tl
         .layout
         .iter()
-        .position(|b| b.fcolor == Some(Color::Yellow))
+        .position(|b| b.fcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }))
         .map(|i| i / cols)
         .expect("nested paragraph should still render yellow text");
     assert_eq!(

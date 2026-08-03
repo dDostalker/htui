@@ -87,8 +87,14 @@ fn test_aside_with_color() {
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map).unwrap();
-    let has_fg = tl.layout.iter().any(|b| b.fcolor == Some(Color::Blue));
-    let has_bg = tl.layout.iter().any(|b| b.bcolor == Some(Color::Yellow));
+    let has_fg = tl
+        .layout
+        .iter()
+        .any(|b| b.fcolor == Some(Color::Rgb { r: 0, g: 0, b: 255 }));
+    let has_bg = tl
+        .layout
+        .iter()
+        .any(|b| b.bcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }));
     assert!(has_fg, "should have blue foreground");
     assert!(has_bg, "should have yellow background");
 }
@@ -133,7 +139,7 @@ fn test_aside_width_50pct() {
     let row = tl
         .layout
         .iter()
-        .position(|b| b.bcolor == Some(Color::Blue))
+        .position(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 0, b: 255 }))
         .map(|index| index / cols)
         .unwrap();
     let row_start = row * cols;
@@ -141,7 +147,7 @@ fn test_aside_width_50pct() {
     assert!(
         block[block_left..block_left + block_width]
             .iter()
-            .all(|b| b.bcolor == Some(Color::Blue)),
+            .all(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 0, b: 255 })),
         "cols 0..cols/2 should all carry blue bg (block is flush left)"
     );
     assert!(
@@ -152,7 +158,14 @@ fn test_aside_width_50pct() {
     );
     for cell in &block[block_left..block_left + block_width] {
         if cell.word != " " {
-            assert_eq!(cell.fcolor, Some(Color::White));
+            assert_eq!(
+                cell.fcolor,
+                Some(Color::Rgb {
+                    r: 255,
+                    g: 255,
+                    b: 255
+                })
+            );
         }
     }
 }
@@ -173,14 +186,21 @@ fn test_aside_width_fixed_px() {
     let row = tl
         .layout
         .iter()
-        .position(|b| b.bcolor == Some(Color::Red))
+        .position(|b| b.bcolor == Some(Color::Rgb { r: 255, g: 0, b: 0 }))
         .map(|index| index / term_map.columns as usize)
         .unwrap();
     let row_start = row * term_map.columns as usize;
     // Block spans cols 0..20 (flush left, NOT cols 30..50).
     let block = &tl.layout[row_start..row_start + 20];
     assert!(
-        block.iter().all(|b| b.bcolor == Some(Color::Red)),
+        block.iter().all(|b| {
+            b.bcolor
+                == Some(Color::Rgb {
+                    r: 255,
+                    g: 0,
+                    b: 0
+                })
+        }),
         "cols 0..20 should all carry red bg (block is flush left, 20 wide)"
     );
     // Cols 20..30 must be bg-free.
@@ -205,14 +225,14 @@ fn test_aside_width_default_full() {
     let row = tl
         .layout
         .iter()
-        .position(|b| b.bcolor == Some(Color::Green))
+        .position(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 128, b: 0 }))
         .map(|index| index / term_map.columns as usize)
         .unwrap();
     let row_start = row * term_map.columns as usize;
     assert!(
         tl.layout[row_start..row_start + COLS as usize]
             .iter()
-            .all(|b| b.bcolor == Some(Color::Green))
+            .all(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 128, b: 0 }))
     );
     assert!(
         tl.layout[row_start..row_start + COLS as usize]
@@ -340,7 +360,7 @@ fn test_aside_bg_covers_nested_p_row() {
     // bg covers every non-text cell.
     let row0_bg = row0
         .iter()
-        .filter(|b| b.bcolor == Some(Color::DarkBlue))
+        .filter(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 0, b: 139 }))
         .count();
     assert!(
         row0_bg > 0,
@@ -410,7 +430,7 @@ fn test_aside_bg_covers_two_nested_p_rows() {
         let row_slice = &tl.layout[start..start + cols];
         let bg_count = row_slice
             .iter()
-            .filter(|b| b.bcolor == Some(Color::DarkBlue))
+            .filter(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 0, b: 139 }))
             .count();
         assert!(
             bg_count > 0,
@@ -446,7 +466,9 @@ fn test_header_spacing_rows_remain_bg_free() {
     // Row 0: header content row — must be filled.
     let row0 = &tl.layout[0..cols];
     assert!(
-        row0.iter().all(|b| b.bcolor == Some(Color::Green)),
+        row0
+            .iter()
+            .all(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 128, b: 0 })),
         "header content row should have bg"
     );
     // Rows 1 and 2: header spacing — must be bg-free.
@@ -479,7 +501,9 @@ fn test_footer_spacing_rows_remain_bg_free() {
     let footer_row_start = 1 * cols;
     let footer_row = &tl.layout[footer_row_start..footer_row_start + cols];
     assert!(
-        footer_row.iter().all(|b| b.bcolor == Some(Color::Red)),
+        footer_row
+            .iter()
+            .all(|b| b.bcolor == Some(Color::Rgb { r: 255, g: 0, b: 0 })),
         "footer content row should have bg"
     );
     let spacing_row_1 = &tl.layout[2 * cols..3 * cols];
@@ -513,7 +537,7 @@ fn test_aside_with_nested_div_extends_bg_to_div_row() {
     let row0 = &tl.layout[0..cols];
     let row0_bg = row0
         .iter()
-        .filter(|b| b.bcolor == Some(Color::DarkBlue))
+        .filter(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 0, b: 139 }))
         .count();
     assert!(
         row0_bg > 0,
@@ -592,12 +616,20 @@ fn test_nested_p_text_inherits_aside_bg() {
         let cell = cell_containing(&tl, ch);
         assert_eq!(
             cell.bcolor,
-            Some(Color::Cyan),
+            Some(Color::Rgb {
+                r: 0,
+                g: 255,
+                b: 255
+            }),
             "text cell for {ch:?} must inherit the aside's cyan bg"
         );
         assert_eq!(
             cell.fcolor,
-            Some(Color::Black),
+            Some(Color::Rgb {
+                r: 0,
+                g: 0,
+                b: 0
+            }),
             "text cell for {ch:?} must keep the black fg"
         );
     }
@@ -619,7 +651,11 @@ fn test_nested_p_text_bg_wins_over_parent() {
         let cell = cell_containing(&tl, ch);
         assert_eq!(
             cell.bcolor,
-            Some(Color::Yellow),
+            Some(Color::Rgb {
+                r: 255,
+                g: 255,
+                b: 0
+            }),
             "text cell for {ch:?} should use <p>'s own yellow bg, not aside's cyan"
         );
     }
@@ -642,10 +678,21 @@ fn test_nested_p_inherits_through_intermediate_div() {
     let cell = cell_containing(&tl, 'X');
     assert_eq!(
         cell.bcolor,
-        Some(Color::Red),
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 0
+        }),
         "<p> text should inherit <div>'s red bg, not aside's blue"
     );
-    assert_eq!(cell.fcolor, Some(Color::White));
+    assert_eq!(
+        cell.fcolor,
+        Some(Color::Rgb {
+            r: 255,
+            g: 255,
+            b: 255
+        })
+    );
 }
 
 #[test]
@@ -703,7 +750,12 @@ fn test_nested_p_in_aside_with_fixed_width_centered() {
     for ch in ['3', '0', 'c', 'o', 'l'] {
         let cell = cell_containing(&tl, ch);
         assert!(
-            cell.bcolor == Some(Color::Cyan),
+            cell.bcolor
+                == Some(Color::Rgb {
+                    r: 0,
+                    g: 255,
+                    b: 255
+                }),
             "text cell {ch:?} must inherit cyan bg from the aside"
         );
     }

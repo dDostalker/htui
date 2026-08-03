@@ -142,7 +142,11 @@ fn test_em_color_override_applies() {
     let cell = &tl.layout[idx];
     assert_eq!(
         cell.fcolor,
-        Some(Color::Magenta),
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 255
+        }),
         "`em {{ color: magenta }}` must paint the cell magenta (got {:?})",
         cell.fcolor
     );
