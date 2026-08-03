@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     path::PathBuf,
+    sync::{Mutex, OnceLock},
 };
 
 use anyhow::{Result, anyhow};
@@ -134,6 +135,37 @@ impl Img {
     }
 }
 
+/// Canvas-space clipping region for [`render_image_at_slice`]. Cells whose
+/// canvas position falls outside the region are not stamped. `None` means
+/// "no clip" — only the canvas bounds limit the stamping.
+#[derive(Debug, Clone, Copy)]
+pub struct ClipRect {
+    pub x: usize,
+    pub y: usize,
+    pub width: usize,
+    pub height: usize,
+}
+
+/// Cache of intrinsic image dimensions keyed by path, so layout-time size
+/// probing reads the file header at most once per image.
+static INTRINSIC_SIZES: OnceLock<Mutex<HashMap<String, (u32, u32)>>> = OnceLock::new();
+
+/// Return the intrinsic `(width, height)` in source pixels for `path`.
+///
+/// Reads only the image header (`image::ImageReader::into_dimensions`) — no
+/// pixel decode — and caches the result per path. `None` when the file
+/// cannot be opened or carries no decodable dimensions.
+pub(crate) fn image_intrinsic_size(path: &str) -> Option<(u32, u32)> {
+    let cache = INTRINSIC_SIZES.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut map = cache.lock().ok()?;
+    if let Some(&size) = map.get(path) {
+        return Some(size);
+    }
+    let size = image::ImageReader::open(path).ok()?.into_dimensions().ok()?;
+    map.insert(path.to_string(), size);
+    Some(size)
+}
+
 /// Cache of decoded + half-block-rasterized images, keyed by
 /// `(path, cols, rows)` in terminal cells.
 ///
@@ -197,7 +229,15 @@ pub fn render_image_at(
 ) -> Result<()> {
     let columns = term_layout.columns;
     let mut cache = ImageCache::new();
-    render_image_at_slice(&mut cache, &mut term_layout.layout, columns, path, origin, max_size)
+    render_image_at_slice(
+        &mut cache,
+        &mut term_layout.layout,
+        columns,
+        path,
+        origin,
+        max_size,
+        None,
+    )
 }
 
 /// Slice-based variant of [`render_image_at`] that writes through a
@@ -205,6 +245,13 @@ pub fn render_image_at(
 ///
 /// `cache` is shared across frames so identical `(path, size)` requests hit
 /// the previously decoded raster instead of re-opening the file.
+///
+/// `max_size` is the image's full size in terminal cells and is always what
+/// gets decoded; `clip` restricts which cells are actually stamped. Pass
+/// `None` to stamp the whole image (still bounded by the canvas). This
+/// decouples decode size from visibility so a partially clipped image is
+/// cropped at native scale instead of being squeezed into the visible
+/// region.
 pub fn render_image_at_slice(
     cache: &mut ImageCache,
     layout: &mut [Block],
@@ -212,6 +259,7 @@ pub fn render_image_at_slice(
     path: &str,
     origin: (usize, usize),
     max_size: (u32, u32),
+    clip: Option<ClipRect>,
 ) -> Result<()> {
     let (x, y) = origin;
     let img_data = cache.get_or_decode(path, max_size)?;
@@ -223,10 +271,17 @@ pub fn render_image_at_slice(
     let img_rows = img_data.rows as usize;
     let canvas_cols = canvas_cols as usize;
     let max = layout.len();
+    let (clip_x, clip_y, clip_w, clip_h) = match clip {
+        Some(c) => (c.x, c.y, c.width, c.height),
+        None => (0, 0, usize::MAX, usize::MAX),
+    };
     for row in 0..img_rows {
         let target_row = y + row;
         if target_row.saturating_mul(canvas_cols) >= max {
             break;
+        }
+        if target_row < clip_y || target_row >= clip_y.saturating_add(clip_h) {
+            continue;
         }
         for col in 0..img_cols {
             let cx = x + col;
@@ -234,6 +289,9 @@ pub fn render_image_at_slice(
                 // Clip at the right edge of the canvas row: the flat buffer
                 // would otherwise wrap the overflow into the next row's cells.
                 break;
+            }
+            if cx < clip_x || cx >= clip_x.saturating_add(clip_w) {
+                continue;
             }
             let canvas_idx = target_row * canvas_cols + cx;
             let pic_idx = row * img_cols + col;

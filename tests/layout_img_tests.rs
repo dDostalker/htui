@@ -16,7 +16,8 @@ use htui::layout::inner_formatting_context::flow::layout_img;
 use htui::layout::{BoxConstraint, BoxKind, Cursor, LayoutContext, ReplacedContent, Viewport};
 use htui::tdom::node::{self, NodeType};
 use htui::tui::graph_api::{
-    IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, ImageCache, TermLayout, render_image_at,
+    IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, ClipRect, ImageCache, TermLayout,
+    render_image_at, render_image_at_slice,
 };
 use crossterm::style::Color;
 use image::{ImageBuffer, Rgb};
@@ -306,4 +307,116 @@ fn image_cache_keys_by_size() {
     };
     assert_eq!((small_cols, small_rows), (20, 5));
     assert_eq!((large_cols, large_rows), (40, 10));
+}
+
+// ============================================================
+// Intrinsic aspect ratio (default sizing without width/height attrs)
+// ============================================================
+
+/// Build a 800×200 source PNG: four times wider than tall, so a default
+/// (no attributes) `<img>` must NOT lay out as a square.
+fn write_wide_test_png(path: &PathBuf) {
+    let img = ImageBuffer::<Rgb<u8>, _>::from_fn(800, 200, |_, _| Rgb([200, 100, 50]));
+    img.save(path).unwrap();
+}
+
+#[test]
+fn layout_img_default_size_preserves_intrinsic_aspect_ratio() {
+    init();
+    let img_path = std::env::temp_dir().join("htui_img_aspect.png");
+    write_wide_test_png(&img_path);
+    // Windows paths in an HTML attribute: forward slashes are accepted by
+    // `image::ImageReader` and avoid backslash-escaping concerns.
+    let src = img_path.to_str().unwrap().replace('\\', "/");
+
+    let mut p = html_parse::Parser::new(&format!(r#"<img src="{src}">"#));
+    let (root_id, arena, _) = p.parse();
+    let img_id = find_img_node(&arena, root_id);
+
+    let containing = BoxConstraint { x: 0, width: 80 };
+    let mut cursor = Cursor::new();
+    let lb = layout_img(
+        &arena,
+        img_id,
+        containing,
+        &mut cursor,
+        LayoutContext {
+            font: htui::html::css_parse::FontContext::root(),
+            viewport: Viewport { cols: 80, rows: 24 },
+        },
+    )
+    .expect("<img> should produce a LayoutBox");
+
+    // 800×200 source capped to an 80-col container: 80 cols wide, height
+    // follows the 4:1 aspect -> 80 * 200 / 800 = 20 source px = 10 rows.
+    assert_eq!(lb.rect.width, 80, "default width = containing width");
+    assert_eq!(
+        lb.rect.height, 10,
+        "default height must preserve the source aspect ratio, not be a square"
+    );
+}
+
+// ============================================================
+// Paint clipping: crop at native scale instead of squeezing
+// ============================================================
+
+#[test]
+fn render_image_at_slice_crops_to_clip_region() {
+    init();
+    // 64×64 source: the top 16 pixel rows are black, the rest white. At full
+    // scale (64×32 cells, 2 source px per cell row) the top 8 cell rows are
+    // all-black half-blocks.
+    let img_path = std::env::temp_dir().join("htui_img_clip.png");
+    let img = ImageBuffer::<Rgb<u8>, _>::from_fn(64, 64, |_, y| {
+        if y < 16 {
+            Rgb([0, 0, 0])
+        } else {
+            Rgb([255, 255, 255])
+        }
+    });
+    img.save(&img_path).unwrap();
+
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    let mut cache = ImageCache::new();
+    let cells_per_row = term_map.columns as usize;
+
+    // Decode at the FULL 64×32-cell grid but stamp only rows 0..8.
+    render_image_at_slice(
+        &mut cache,
+        &mut tl.layout,
+        term_map.columns,
+        img_path.to_str().unwrap(),
+        (0, 0),
+        (64, 32),
+        Some(ClipRect {
+            x: 0,
+            y: 0,
+            width: 64,
+            height: 8,
+        }),
+    )
+    .expect("render_image_at_slice should succeed");
+
+    // Inside the clip: the top of the image at native scale — every cell is
+    // a black half-block. (Squeezing the whole image into 8 rows would mix
+    // in the white below the black band, so all-black rows prove the crop.)
+    for row in 0..8usize {
+        for col in 0..64usize {
+            let cell = &tl.layout[row * cells_per_row + col];
+            assert_eq!(cell.word, "\u{2580}", "clipped row must be painted");
+            assert_eq!(
+                cell.fcolor,
+                Some(Color::Rgb { r: 0, g: 0, b: 0 }),
+                "clipped row must show the image's top band at native scale"
+            );
+        }
+    }
+    // Outside the clip: rows 8..32 must remain untouched blank cells.
+    for row in 8..32usize {
+        for col in 0..64usize {
+            let cell = &tl.layout[row * cells_per_row + col];
+            assert_eq!(cell.word, " ", "rows outside the clip must stay blank");
+        }
+    }
 }

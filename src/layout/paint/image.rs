@@ -1,6 +1,6 @@
 use crate::{
     layout::{LayoutBox, Rect, ReplacedContent},
-    tui::graph_api::render_image_at_slice,
+    tui::graph_api::{ClipRect, render_image_at_slice},
 };
 
 use super::{PaintCanvas, intersect_rects};
@@ -23,10 +23,12 @@ pub(crate) fn paint_image(
         // would wrap into the next row of the flat canvas buffer.
         return;
     }
-    // Only the intersection with the inherited clip is drawn: an image
-    // whose rect overflows an ancestor (flex-shrunk on a tiny terminal) is
-    // rendered into the visible region instead of spilling over the box
-    // below.
+    // Only the intersection with the inherited clip is drawn: an image whose
+    // rect overflows an ancestor (flex-shrunk on a tiny terminal) must not
+    // spill over the box below. The image is decoded at its FULL box size and
+    // the visible region is stamped as a crop, so the overflow is clipped at
+    // native scale instead of squeezing the whole image into the visible
+    // region.
     let Some(visible) = intersect_rects(Rect::new(r.x, r.y, cols, rows), clip) else {
         return;
     };
@@ -35,8 +37,14 @@ pub(crate) fn paint_image(
         canvas.layout,
         canvas.columns,
         path.as_str(),
-        (visible.x, visible.y),
-        (visible.width as u32, visible.height as u32),
+        (r.x, r.y),
+        (cols as u32, rows as u32),
+        Some(ClipRect {
+            x: visible.x,
+            y: visible.y,
+            width: visible.width,
+            height: visible.height,
+        }),
     ) {
         log::debug!("Image paint skipped for {}: {}", path, error);
     }

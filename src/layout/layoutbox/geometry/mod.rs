@@ -17,7 +17,9 @@ use crate::{
         layoutbox::generation::{GeneratedBox, GeneratedBoxKind, GeneratedPayload},
     },
     tdom::node::{NodeArena, NodeId},
-    tui::graph_api::{IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW},
+    tui::graph_api::{
+        IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, image_intrinsic_size,
+    },
 };
 
 /// Assign geometry to a generated box forest.
@@ -142,14 +144,12 @@ fn layout_replaced(
         }
         None => {
             let node = &arena[generated.node_id];
-            let max_w = node
-                .get_width()
-                .unwrap_or(containing.width as u32 * IMAGE_PIXELS_PER_CELL_COL);
-            let max_h = node
-                .get_height()
-                .unwrap_or(containing.width as u32 * IMAGE_PIXELS_PER_CELL_ROW);
-            let img_cols = max_w.div_ceil(IMAGE_PIXELS_PER_CELL_COL).max(1) as usize;
-            let img_rows = max_h.div_ceil(IMAGE_PIXELS_PER_CELL_ROW).max(1) as usize;
+            let (img_cols, img_rows) = resolve_image_cell_size(
+                node.get_width(),
+                node.get_height(),
+                image_intrinsic_size(&src),
+                containing.width,
+            );
             let block_width = img_cols.min(containing.width).max(1);
             let x = centered_left(containing, block_width);
             let y = cursor.allocate(img_rows);
@@ -171,4 +171,40 @@ fn layout_replaced(
 
 fn centered_left(containing: BoxConstraint, block_width: usize) -> usize {
     containing.x + containing.width.saturating_sub(block_width) / 2
+}
+
+/// Resolve the natural `<img>` display size in cells from the HTML `width` /
+/// `height` attributes (source pixels) and the file's intrinsic size.
+///
+/// Mirrors browser sizing:
+/// - Both attributes: the image is stretched to exactly `w × h` source
+///   pixels (width still capped to the containing block).
+/// - One attribute: the other axis follows the intrinsic aspect ratio.
+/// - Neither: the intrinsic size, capped to the containing width; the height
+///   follows the aspect ratio.
+/// - No readable intrinsic size: `containing_width` square (historical
+///   fallback).
+fn resolve_image_cell_size(
+    attr_w: Option<u32>,
+    attr_h: Option<u32>,
+    intrinsic: Option<(u32, u32)>,
+    containing_width: usize,
+) -> (usize, usize) {
+    let containing_w = containing_width.max(1) as u32;
+    let (intrinsic_w, intrinsic_h) = intrinsic.unwrap_or((containing_w, containing_w));
+    // Width: an explicit attribute wins, otherwise the intrinsic width; both
+    // are capped to the containing block so the box never overflows it.
+    let pixel_w = attr_w.unwrap_or(intrinsic_w).min(containing_w).max(1);
+    // Height: an explicit attribute wins, otherwise derived from the resolved
+    // width preserving the source aspect ratio.
+    let pixel_h = match attr_h {
+        Some(h) => h.max(1),
+        None => {
+            let h = pixel_w as u64 * intrinsic_h as u64 / intrinsic_w.max(1) as u64;
+            (h as u32).max(1)
+        }
+    };
+    let img_cols = pixel_w.div_ceil(IMAGE_PIXELS_PER_CELL_COL).max(1) as usize;
+    let img_rows = pixel_h.div_ceil(IMAGE_PIXELS_PER_CELL_ROW).max(1) as usize;
+    (img_cols, img_rows)
 }

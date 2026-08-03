@@ -7,11 +7,12 @@ mod style;
 mod text;
 
 pub(crate) use canvas::MAX_SCROLL_MULTIPLIER;
+pub(crate) use image::image_intrinsic_size;
 pub use canvas::TermLayout;
 pub use cell::{Block, FontStyle};
 pub use image::{
-    IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, ImageCache, Img, render_image_at,
-    render_image_at_slice,
+    IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, ClipRect, ImageCache, Img,
+    render_image_at, render_image_at_slice,
 };
 pub use input::{RenderCmd, trigger_refresh};
 pub use render::is_rendered_as_bare_space;
