@@ -1,4 +1,4 @@
-use std::{fmt::Display, io::stdout};
+use std::{fmt::Display, io::Write};
 
 use crossterm::{
     cursor::MoveTo,
@@ -28,24 +28,20 @@ impl Display for TermLayout {
     }
 }
 impl TermLayout {
-    /// Write the incremental frame to stdout.
+    /// Write the incremental frame to `out`.
     ///
-    /// Only the cells that changed since the last call are emitted (see
-    /// [`Self::render_diff_to_bytes`]); when nothing changed this is a no-op
-    /// that performs no I/O. The buffer is flushed before returning so a
-    /// frame never lingers in Rust's stdout buffer.
-    pub fn render(&mut self) {
+    /// Only the cells that changed since the last call are written (see
+    /// [`Self::render_diff_to_bytes`]); when nothing changed this is a no-op.
+    /// The caller is responsible for flushing `out` once per frame — the
+    /// render thread holds a persistent `BufWriter<Stdout>` so each frame
+    /// results in exactly one write syscall.
+    pub fn render(&mut self, out: &mut impl Write) {
         let bytes = self.render_diff_to_bytes();
         if bytes.is_empty() {
             return;
         }
-        use std::io::Write;
-        let mut out = stdout();
         if let Err(e) = out.write_all(&bytes) {
-            log::error!("Failed to write rendered frame to stdout: {}", e);
-        }
-        if let Err(e) = out.flush() {
-            log::error!("Failed to flush stdout: {}", e);
+            log::error!("Failed to write rendered frame: {}", e);
         }
     }
 

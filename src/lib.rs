@@ -4,7 +4,7 @@ pub mod logging;
 pub mod tdom;
 pub mod tui;
 
-use std::io::stdout;
+use std::io::{BufWriter, Write, stdout};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
@@ -31,6 +31,17 @@ fn parse_and_apply(html: &str, css_rules: &CssRule) -> (NodeId, NodeArena) {
     let (root_id, mut arena, _embedded) = html_parser.parse();
     css_parse::css_into_node(&mut arena, root_id, css_rules);
     (root_id, arena)
+}
+
+/// Flush one rendered frame from the session's `BufWriter`, skipping the
+/// syscall entirely when the frame wrote nothing (an unchanged viewport).
+fn flush_frame(out: &mut BufWriter<std::io::Stdout>) {
+    if out.buffer().is_empty() {
+        return;
+    }
+    if let Err(e) = out.flush() {
+        log::error!("Failed to flush stdout: {}", e);
+    }
 }
 
 fn build_css_rules(html: &str, css: &str) -> CssRule {
@@ -61,6 +72,10 @@ fn render_thread(
     css_rules: Arc<CssRule>,
     max_scroll: Arc<AtomicU32>,
 ) {
+    // One persistent write buffer for the whole session: every frame writes
+    // into it and is flushed exactly once, so a frame costs a single write
+    // syscall instead of one per render call.
+    let mut out = BufWriter::new(stdout());
     let mut term_layout: Option<TermLayout> = None;
 
     loop {
@@ -99,7 +114,8 @@ fn render_thread(
                 }
                 // The incremental renderer diffs the shifted viewport against
                 // the previous frame, so scrolling needs no full-screen Clear.
-                tl.render();
+                tl.render(&mut out);
+                flush_frame(&mut out);
             }
 
             RenderCmd::Redraw { scroll_y, zoom } => {
@@ -144,8 +160,10 @@ fn render_thread(
 
                 // The incremental renderer emits only the changed cells (and
                 // a one-time full clear on the first frame / after resize),
-                // so redraws need no per-frame Clear and no extra flush.
-                tl.render();
+                // so redraws need no per-frame Clear. `flush_frame` is the
+                // single I/O per frame, skipped entirely when nothing changed.
+                tl.render(&mut out);
+                flush_frame(&mut out);
             }
         }
     }
