@@ -13,24 +13,25 @@ use super::{
 };
 
 // ============================================================
-// Image pixel -> terminal cell sampling ratios.
+// Image pixel -> terminal cell sampling ratio.
 //
-// These constants define how source-image pixels map onto terminal
-// cells. They are intentionally independent of
+// Half-block rendering: each terminal cell displays a 1×2 block of
+// source pixels. The top pixel becomes the cell's foreground color,
+// the bottom pixel its background color, and the upper-half-block
+// glyph U+2580 draws them, so every cell carries two real color
+// samples instead of the single averaged color of the old 2×4
+// braille mode. The ratio is intentionally independent of
 // `crate::html::css_parse::values::PX_PER_CELL`, which governs CSS px
-// in the box model. The two answer different questions:
+// in the box model — the two answer different questions:
 //   - PX_PER_CELL: how many CSS px is one terminal cell? Answer: 1.
-//   - The two below: how many source-image pixels does one terminal
-//     cell render? 2 wide x 4 tall = 8 source pixels per cell. The
-//     braille rendering in `_create_img` walks a 2x4 block and assigns
-//     each source pixel to one of the 8 dot positions in the braille
-//     character.
+//   - The constants below: how many source-image pixels does one
+//     terminal cell render? 1 wide x 2 tall.
 
 /// Source-image pixels rendered per terminal cell on the horizontal axis.
-pub const IMAGE_PIXELS_PER_CELL_COL: u32 = 2;
+pub const IMAGE_PIXELS_PER_CELL_COL: u32 = 1;
 
 /// Source-image pixels rendered per terminal cell on the vertical axis.
-pub const IMAGE_PIXELS_PER_CELL_ROW: u32 = 4;
+pub const IMAGE_PIXELS_PER_CELL_ROW: u32 = 2;
 
 /// Maximum number of rasterized images kept in an [`ImageCache`]. Terminal
 /// resizes change the target cell size and therefore mint a new cache key
@@ -38,14 +39,28 @@ pub const IMAGE_PIXELS_PER_CELL_ROW: u32 = 4;
 /// images at one size) stays fully cached.
 const MAX_CACHED_IMAGES: usize = 16;
 
+/// Pick the resampling filter for a resize from `src` to `dst`:
+/// `Triangle` when downscaling (each destination pixel is a weighted
+/// average of nearby source pixels, avoiding the aliasing of sparse
+/// nearest-neighbour sampling), `Nearest` when upscaling (keeps edges
+/// crisp instead of blurring them).
+fn resize_filter(src: (u32, u32), dst: (u32, u32)) -> FilterType {
+    if src.0 > dst.0 || src.1 > dst.1 {
+        FilterType::Triangle
+    } else {
+        FilterType::Nearest
+    }
+}
+
 #[derive(Debug)]
 pub struct Img {
     pub path: PathBuf,
     pub term_size: (u32, u32),
-    /// One [`Block`] per terminal cell. The braille glyph lives in `word`
-    /// and the averaged cell color in `fcolor` — no ANSI is embedded in the
-    /// text, so the paint phase can copy cells into the canvas without
-    /// re-formatting, and the diff renderer compares stable cell state.
+    /// One [`Block`] per terminal cell: the upper-half-block glyph `▀` in
+    /// `word`, the top source pixel's color in `fcolor` and the bottom
+    /// pixel's color in `bcolor`. No ANSI is embedded in the text, so the
+    /// paint phase can copy cells into the canvas without re-formatting,
+    /// and the diff renderer compares stable cell state.
     pub picture: Option<Vec<Block>>,
     pub cloumns: u32,
     pub rows: u32,
@@ -69,11 +84,12 @@ impl Img {
 
         let img = image::open(&self.path)?;
         // `term_size` is documented as `(cols, rows)` in terminal cells. Each
-        // cell represents an IMAGE_PIXELS_PER_CELL_COL x IMAGE_PIXELS_PER_CELL_ROW
-        // pixel block (see the constants above), so we multiply accordingly
-        // before resizing. We must use `resize_exact` -- the default `resize`
-        // preserves aspect ratio and would shrink the long edge to fit the
-        // shorter one, breaking the cell-to-pixel correspondence.
+        // cell displays IMAGE_PIXELS_PER_CELL_COL x IMAGE_PIXELS_PER_CELL_ROW
+        // source pixels (1 wide x 2 tall in half-block mode), so the pixel
+        // grid is `cols x (rows * 2)`. We must use `resize_exact` -- the
+        // default `resize` preserves aspect ratio and would shrink the long
+        // edge to fit the shorter one, breaking the cell-to-pixel
+        // correspondence.
         let pixel_w = self
             .term_size
             .0
@@ -84,7 +100,8 @@ impl Img {
             .1
             .saturating_mul(IMAGE_PIXELS_PER_CELL_ROW)
             .max(IMAGE_PIXELS_PER_CELL_ROW);
-        let img = img.resize_exact(pixel_w, pixel_h, FilterType::Nearest);
+        let source = img.dimensions();
+        let img = img.resize_exact(pixel_w, pixel_h, resize_filter(source, (pixel_w, pixel_h)));
         let (width, height) = img.dimensions();
 
         self.cloumns = width.div_ceil(IMAGE_PIXELS_PER_CELL_COL);
@@ -92,55 +109,24 @@ impl Img {
         let mut picture = Vec::with_capacity((self.cloumns * self.rows) as usize);
         for y in (0..height).step_by(IMAGE_PIXELS_PER_CELL_ROW as usize) {
             for x in (0..width).step_by(IMAGE_PIXELS_PER_CELL_COL as usize) {
-                let mut bits = 0;
-                let mut r_sum = 0u32;
-                let mut g_sum = 0u32;
-                let mut b_sum = 0u32;
-                let mut count = 0;
-
-                for dy in 0..IMAGE_PIXELS_PER_CELL_ROW {
-                    for dx in 0..IMAGE_PIXELS_PER_CELL_COL {
-                        let px = x + dx;
-                        let py = y + dy;
-
-                        if px < width && py < height {
-                            let pixel = img.get_pixel(px, py);
-                            r_sum += pixel[0] as u32;
-                            g_sum += pixel[1] as u32;
-                            b_sum += pixel[2] as u32;
-                            count += 1;
-
-                            let brightness =
-                                (pixel[0] as u16 + pixel[1] as u16 + pixel[2] as u16) / 3;
-                            if brightness < 128 {
-                                let bit_index = match (dx, dy) {
-                                    (0, 0) => 0,
-                                    (0, 1) => 1,
-                                    (0, 2) => 2,
-                                    (1, 0) => 3,
-                                    (1, 1) => 4,
-                                    (1, 2) => 5,
-                                    (0, 3) => 6,
-                                    (1, 3) => 7,
-                                    _ => 0,
-                                };
-                                bits |= 1 << bit_index;
-                            }
-                        }
-                    }
-                }
-
-                r_sum = r_sum.checked_div(count).ok_or(anyhow!("r_sum is 0"))?;
-                g_sum = g_sum.checked_div(count).ok_or(anyhow!("g_sum is 0"))?;
-                b_sum = b_sum.checked_div(count).ok_or(anyhow!("b_sum is 0"))?;
-                let color = Color::Rgb {
-                    r: r_sum as u8,
-                    g: g_sum as u8,
-                    b: b_sum as u8,
+                // height is exactly `rows * 2`, so the bottom pixel always
+                // exists. The two source pixels become the cell's foreground
+                // (top) and background (bottom) colors.
+                let top = img.get_pixel(x, y);
+                let bottom = img.get_pixel(x, y + 1);
+                let fg = Color::Rgb {
+                    r: top[0],
+                    g: top[1],
+                    b: top[2],
+                };
+                let bg = Color::Rgb {
+                    r: bottom[0],
+                    g: bottom[1],
+                    b: bottom[2],
                 };
                 let mut word = String::new();
-                word.push(char::from_u32(0x2800 + bits).unwrap_or(' '));
-                picture.push(Block::new(word, Some(color), None, FontStyle::empty()));
+                word.push('\u{2580}');
+                picture.push(Block::new(word, Some(fg), Some(bg), FontStyle::empty()));
             }
         }
         self.picture = Some(picture);
@@ -148,7 +134,7 @@ impl Img {
     }
 }
 
-/// Cache of decoded + braille-rasterized images, keyed by
+/// Cache of decoded + half-block-rasterized images, keyed by
 /// `(path, cols, rows)` in terminal cells.
 ///
 /// The paint phase runs once per frame, and every `<img>` used to be
@@ -193,8 +179,8 @@ impl ImageCache {
     }
 }
 
-/// Decode an image into the half-block / quarter-block glyph grid and stamp
-/// the cells into `term_layout` starting at `(x, y)`.
+/// Decode an image into the half-block glyph grid and stamp the cells into
+/// `term_layout` starting at `(x, y)`.
 ///
 /// `max_size` is the `(width, height)` in terminal cells the image should be
 /// resized to. Errors from the underlying loader are propagated; callers that

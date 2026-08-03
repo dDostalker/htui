@@ -95,7 +95,10 @@ fn layout_img_unclamped_when_img_fits() {
     let (root_id, arena, _) = p.parse();
     let img_id = find_img_node(&arena, root_id);
 
-    let containing = BoxConstraint { x: 0, width: 80 };
+    // A 120px-wide image now maps to 120 cells (1 source px per column in
+    // half-block mode), so an 80-column container would clamp it. Use a
+    // wide-enough containing block to exercise the unclamped path.
+    let containing = BoxConstraint { x: 0, width: 200 };
     let mut cursor = Cursor::new();
     let lb = layout_img(
         &arena,
@@ -109,8 +112,8 @@ fn layout_img_unclamped_when_img_fits() {
     )
     .unwrap();
 
-    // 120 source pixels / IMAGE_PIXELS_PER_CELL_COL (2) = 60 cells (no clamp),
-    // 60 source pixels / IMAGE_PIXELS_PER_CELL_ROW (4) = 15 cells. These are
+    // 120 source pixels / IMAGE_PIXELS_PER_CELL_COL (1) = 120 cells (no clamp),
+    // 60 source pixels / IMAGE_PIXELS_PER_CELL_ROW (2) = 30 cells. These are
     // SOURCE-IMAGE pixels, not CSS px — see `doc/layout.md` section 10.4.
     let expected_cols = 120u32.div_ceil(IMAGE_PIXELS_PER_CELL_COL) as usize;
     let expected_rows = 60u32.div_ceil(IMAGE_PIXELS_PER_CELL_ROW) as usize;
@@ -126,15 +129,16 @@ fn layout_img_unclamped_when_img_fits() {
 }
 
 #[test]
-fn image_sampling_constants_lock_in_2_by_4_ratio() {
+fn image_sampling_constants_lock_in_1_by_2_ratio() {
     // Standardized source-pixel → terminal-cell sampling ratio. Each
-    // terminal cell renders a 2-wide x 4-tall block of source pixels as one
-    // braille glyph (8 dot positions). Changing these values without a
-    // coordinated update to `_create_img`, `layout_img`, and the doc would
-    // silently corrupt image rendering.
-    assert_eq!(IMAGE_PIXELS_PER_CELL_COL, 2);
-    assert_eq!(IMAGE_PIXELS_PER_CELL_ROW, 4);
-    assert_eq!(IMAGE_PIXELS_PER_CELL_COL * IMAGE_PIXELS_PER_CELL_ROW, 8);
+    // terminal cell renders a 1-wide x 2-tall block of source pixels as one
+    // half-block glyph (upper half = foreground color, lower half =
+    // background color). Changing these values without a coordinated update
+    // to `_create_img`, `layout_img`, and the doc would silently corrupt
+    // image rendering.
+    assert_eq!(IMAGE_PIXELS_PER_CELL_COL, 1);
+    assert_eq!(IMAGE_PIXELS_PER_CELL_ROW, 2);
+    assert_eq!(IMAGE_PIXELS_PER_CELL_COL * IMAGE_PIXELS_PER_CELL_ROW, 2);
 }
 
 // ============================================================
@@ -165,9 +169,10 @@ fn paint_image_at_fills_requested_cell_area() {
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
 
-    // Request 40 cells wide × 10 cells tall. After the fix, `_create_img`
-    // multiplies by (2, 4) internally and uses `resize_exact` so the source
-    // 64×64 PNG is squashed to 80×40 pixels and rasterized into 40×10 cells.
+    // Request 40 cells wide × 10 cells tall. `_create_img` multiplies the
+    // vertical axis by IMAGE_PIXELS_PER_CELL_ROW (2) internally and uses
+    // `resize_exact` so the source 64×64 PNG is squashed to 40×20 pixels
+    // and rasterized into 40×10 cells.
     let cell_w: u32 = 40;
     let cell_h: u32 = 10;
     render_image_at(
@@ -193,7 +198,7 @@ fn paint_image_at_fills_requested_cell_area() {
         }
     }
 
-    // The image uses half-block / quarter-block glyphs (BMP > U+007F). A
+    // The image uses half-block glyphs (BMP > U+007F). A
     // blank canvas would only carry ASCII spaces.
     let has_unicode = tl
         .layout
@@ -206,11 +211,11 @@ fn paint_image_at_fills_requested_cell_area() {
 }
 
 // ============================================================
-// Cell format: braille glyph in `word`, color in `fcolor` (no ANSI)
+// Cell format: half-block glyph in `word`, colors in fcolor/bcolor
 // ============================================================
 
 #[test]
-fn image_cells_store_braille_glyph_and_color_separately() {
+fn image_cells_store_half_block_glyph_and_colors_separately() {
     init();
     let img_path = std::env::temp_dir().join("htui_img_cell_format.png");
     write_test_png(&img_path);
@@ -231,25 +236,20 @@ fn image_cells_store_braille_glyph_and_color_separately() {
     for row in 0..(cell_h as usize) {
         for col in 0..(cell_w as usize) {
             let cell = &tl.layout[row * cells_per_row + col];
-            let ch = cell
-                .word
-                .chars()
-                .next()
-                .expect("image cell must hold a glyph");
-            assert!(
-                (0x2800..=0x28FF).contains(&(ch as u32)),
-                "cell word must be a braille glyph, got {:?}",
-                cell.word
-            );
-            assert!(
-                !cell.word.contains('\x1b'),
-                "word must not embed ANSI escapes, got {:?}",
+            assert_eq!(
+                cell.word, "\u{2580}",
+                "cell word must be the upper-half-block glyph, got {:?}",
                 cell.word
             );
             assert!(
                 matches!(cell.fcolor, Some(Color::Rgb { .. })),
-                "cell color must live in fcolor, got {:?}",
+                "top source-pixel color must live in fcolor, got {:?}",
                 cell.fcolor
+            );
+            assert!(
+                matches!(cell.bcolor, Some(Color::Rgb { .. })),
+                "bottom source-pixel color must live in bcolor, got {:?}",
+                cell.bcolor
             );
         }
     }
