@@ -261,7 +261,9 @@ fn parse_declarations_into<'i, 't>(
         if !name.is_empty() && !cleaned.is_empty() {
             out.insert(name.to_string(), cleaned);
         }
-        // Consume the trailing `;` if present.
-        let _ = input.try_parse(|i| i.expect_semicolon().map(|_| ()));
+        // Consume the trailing `;` if present. A missing `;` is not an
+        // error here — the parser simply stops at the next boundary.
+        let _: Result<(), cssparser::BasicParseError<'_>> =
+            input.try_parse(|i| i.expect_semicolon().map(|_| ()));
     }
 }

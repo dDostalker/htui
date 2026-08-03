@@ -199,6 +199,42 @@ fn pre_preserves_newlines_no_wrap() {
     assert!(one < two && two < three, "newlines should stack rows");
 }
 
+#[test]
+fn pre_preserves_consecutive_spaces() {
+    // `<pre>` must not collapse runs of horizontal whitespace the way
+    // `normal` does. The `tokenize_run` phase reduces consecutive
+    // spaces to a single Space token for the wrap path, so a
+    // dedicated `emit_preserving_newlines` step is required to keep
+    // the original whitespace byte-for-byte.
+    init();
+    let html = "<pre>a    b</pre>";
+    let (rows, _) = render_rows(html, "");
+    assert!(
+        rows.iter().any(|r| r.contains("a    b")),
+        "four spaces must survive verbatim, rows = {:?}",
+        rows
+    );
+}
+
+#[test]
+fn pre_element_uses_ua_default_white_space() {
+    // Author CSS does not declare `white-space` on the `<pre>` — the
+    // UA default of `pre` (preserves whitespace, treats `\n` as a
+    // forced break, no soft wrapping) must take effect.
+    init();
+    let html = "<pre>x\ny</pre>";
+    let (rows, _) = render_rows(html, "");
+    let x = rows
+        .iter()
+        .position(|r| r.contains('x'))
+        .expect("first newline row should render");
+    let y = rows
+        .iter()
+        .position(|r| r.contains('y'))
+        .expect("second newline row should render");
+    assert!(y > x, "UA default should split the two lines, rows {x}/{y}");
+}
+
 // ============================================================
 // 5. `overflow-wrap: break-word` splits an unbreakable long word.
 // ============================================================
@@ -282,9 +318,17 @@ fn h2_prefix_stays_on_first_line() {
     // The prefix is part of the first visual line's run list, so the
     // prefix glyphs always land on row 0 of the heading. With a wide
     // container, the first body word also lives on row 0.
+    //
+    // `font-size: 1em` disables h2's 1.5em default so each character
+    // paints into a single terminal cell. The headless test harness
+    // collects per-cell words one at a time and concatenates them
+    // into a single row string — font-size expansion would insert a
+    // padding cell between each character, which would scatter
+    // contiguous substrings like "alpha" across multiple cells even
+    // though the visual layout is identical.
     init();
     let html = "<h2>alpha beta gamma</h2>";
-    let css = "h2 { width: 30px; }";
+    let css = "h2 { width: 30px; font-size: 1em; }";
     let (rows, _) = render_rows(html, css);
     let prefix_idx = rows
         .iter()

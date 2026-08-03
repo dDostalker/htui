@@ -55,5 +55,6 @@ fn is_generic_block(node_type: &NodeType) -> bool {
             | NodeType::Button
             | NodeType::Textarea
             | NodeType::Label
+            | NodeType::Pre
     )
 }

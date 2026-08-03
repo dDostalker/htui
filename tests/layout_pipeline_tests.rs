@@ -5,7 +5,7 @@ use htui::{
         generate_box_tree, inner_formatting_context::flow::layout_tree,
         layout::TermMap,
     },
-    tdom::node::{NodeArena, NodeId, NodeType},
+    tdom::node::{Node, NodeArena, NodeId, NodeType},
     tui::graph_api::TermLayout,
 };
 
@@ -151,4 +151,60 @@ fn unified_pipeline_renders_mixed_document_end_to_end() {
     assert!(canvas.contains("FlexA"));
     assert!(canvas.contains("FlexB"));
     assert!(canvas.contains("TableCell"));
+}
+
+#[test]
+fn sibling_top_level_boxes_paint_on_distinct_rows() {
+    // A root with two rendered children (no `<html>` wrapper) yields two
+    // top-level boxes that must paint their own rows sequentially — a
+    // regression guard for the paint pass over multi-box forests.
+    let mut arena = NodeArena::default();
+    let root = arena.insert(Node::from(NodeType::Global));
+    let div1 = arena.insert(Node::from(NodeType::Div));
+    let text1 = arena.insert(Node::text("first band"));
+    let div2 = arena.insert(Node::from(NodeType::Div));
+    let text2 = arena.insert(Node::text("second band"));
+    Node::append_child(&mut arena, div1, text1);
+    Node::append_child(&mut arena, div2, text2);
+    Node::append_child(&mut arena, root, div1);
+    Node::append_child(&mut arena, root, div2);
+
+    let map = term_map();
+    let mut terminal_layout = TermLayout::new(&map, 1.0);
+    terminal_layout
+        .draw(&arena, root, &map)
+        .expect("multi-box document should render");
+
+    let canvas: String = terminal_layout
+        .layout
+        .iter()
+        .map(|cell| cell.word.as_str())
+        .collect();
+    assert!(canvas.contains("first band"), "first band should render");
+    assert!(canvas.contains("second band"), "second band should render");
+
+    // The two boxes land on distinct rows: the second box must not paint
+    // over the first one's cells.
+    let cols = map.columns as usize;
+    let rows = terminal_layout.layout.len() / cols;
+    let word_rows: Vec<String> = (0..rows)
+        .map(|row| {
+            terminal_layout.layout[row * cols..(row + 1) * cols]
+                .iter()
+                .map(|cell| cell.word.as_str())
+                .collect()
+        })
+        .collect();
+    let first_row = word_rows
+        .iter()
+        .position(|line| line.contains("first band"))
+        .expect("first band row");
+    let second_row = word_rows
+        .iter()
+        .position(|line| line.contains("second band"))
+        .expect("second band row");
+    assert_ne!(
+        first_row, second_row,
+        "top-level boxes must paint on different rows"
+    );
 }

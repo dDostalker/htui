@@ -181,10 +181,8 @@ pub fn render_image_at(
     Ok(())
 }
 
-/// Slice-based variant of [`render_image_at`] for the parallel paint
-/// pipeline. Each parallel task re-borrows its part of the canvas as a
-/// `&mut [Block]`, so the image loader must be able to write through that
-/// slice instead of the full `TermLayout`.
+/// Slice-based variant of [`render_image_at`] that writes through a
+/// caller-provided `&mut [Block]` instead of a full `TermLayout`.
 pub fn render_image_at_slice(
     layout: &mut [Block],
     canvas_cols: u16,

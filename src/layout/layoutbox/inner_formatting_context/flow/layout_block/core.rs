@@ -147,7 +147,7 @@ pub fn layout_block(
             &all_runs,
             wrap_width,
             own_font_size_cells,
-            node.css_attr.get_white_space(),
+            node.css_attr.get_white_space(&node.node_type),
             node.css_attr.get_word_break(),
             node.css_attr.get_overflow_wrap(),
         )

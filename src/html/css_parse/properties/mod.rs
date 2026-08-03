@@ -120,12 +120,18 @@ impl CssAttr {
     }
     /// Whitespace handling (CSS `white-space`).
     ///
-    /// Defaults to [`WhiteSpace::Normal`] (collapse + wrap) when the
-    /// property is unset, mirroring the browser default.
-    pub fn get_white_space(&self) -> WhiteSpace {
+    /// Resolution order mirrors the cascade:
+    /// 1. An explicit `white-space` declaration on the node.
+    /// 2. The element-type UA default (`<pre>` ships with
+    ///    [`WhiteSpace::Pre`] so verbatim whitespace survives the
+    ///    parser pass).
+    /// 3. The browser default of [`WhiteSpace::Normal`] (collapse +
+    ///    wrap).
+    pub fn get_white_space(&self, node_type: &NodeType) -> WhiteSpace {
         self.0
             .get("white-space")
             .and_then(|s| parse_white_space(s.as_str()))
+            .or_else(|| node_type.default_white_space())
             .unwrap_or_default()
     }
     /// Word-break behaviour for CJK and long-word overflow

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<!--
+  htui 视觉测试 — <pre> 元素 pre
+  运行: cargo run -p visual_test -- pre
+  浏览器直接打开本文件即可看到与终端渲染对应相同的样式
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>htui Pre Visual Test</title>
+    <style>
+        body  { color: white; }
+        h1    { color: cyan; }
+        h2    { color: yellow; }
+        pre   { color: green; }
+        p     { color: white; }
+    </style>
+</head>
+<body>
+    <h1>&lt;pre&gt; Element Test</h1>
+
+    <p>The <code>&lt;pre&gt;</code> element preserves whitespace
+    verbatim: leading indentation, consecutive spaces, tabs, and
+    every newline survive the paint phase without being collapsed
+    the way <code>white-space: normal</code> would treat them.</p>
+
+    <h2>Verbatim Whitespace</h2>
+    <pre>column one    col two   col three
+column  two    col two   col two
+line three</pre>
+
+    <h2>Hard Wraps</h2>
+    <pre>line one
+line two
+line three</pre>
+
+    <h2>Indentation</h2>
+    <pre>function greet(name) {
+    console.log("hello, " + name);
+}
+</pre>
+
+    <h2>Author Override</h2>
+    <pre style="white-space: pre-wrap;">This pre-wrap text wraps when it reaches the
+    container edge but still preserves every
+    space and newline.</pre>
+
+    <h2>Empty</h2>
+    <pre></pre>
+
+    <p>=== End of Pre Test ===</p>
+</body>
+</html>

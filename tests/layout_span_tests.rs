@@ -408,7 +408,7 @@ fn test_text_align_center_counts_all_runs() {
 
 #[test]
 fn test_layout_box_exposes_runs_for_block_with_spans() {
-    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor, InlineRun};
+    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor, };
 
     let (root_id, arena) = setup(
         "<p>plain <span class=\"b\">bold</span></p>",
@@ -492,7 +492,7 @@ fn test_layout_box_runs_are_materialised_for_plain_block() {
 
 #[test]
 fn test_h1_prefix_is_a_separate_run() {
-    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor, InlineRun};
+    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor, };
 
     let (root_id, arena) = setup("<h1>Title</h1>", "h1 { color: cyan; }");
     let containing = BoxConstraint::root(&mock_term_map());

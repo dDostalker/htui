@@ -24,8 +24,6 @@ impl Parser {
 
     /// Parse HTML and return (root_id, arena, embedded_css).
     pub fn parse(&mut self) -> (NodeId, NodeArena, String) {
-        debug!("html5ever 解析 HTML，{} 字节", self.input.len());
-
         let opts = ParseOpts::default();
         let dom = html5ever::parse_document(RcDom::default(), opts).one(self.input.clone());
 
@@ -187,6 +185,7 @@ pub fn tag_name_to_node_type(tag: &str) -> Option<NodeType> {
         "ol" => Some(NodeType::Ol),
         "option" => Some(NodeType::HtmlOption),
         "p" => Some(NodeType::P),
+        "pre" => Some(NodeType::Pre),
         "section" => Some(NodeType::Section),
         "select" => Some(NodeType::Select),
         "span" => Some(NodeType::Span),

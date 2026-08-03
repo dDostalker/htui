@@ -29,8 +29,12 @@ impl TermLayout {
         let bytes = self.render_to_bytes();
         use std::io::Write;
         let mut out = stdout();
-        let _ = out.write_all(&bytes);
-        let _ = out.flush();
+        if let Err(e) = out.write_all(&bytes) {
+            log::error!("Failed to write rendered frame to stdout: {}", e);
+        }
+        if let Err(e) = out.flush() {
+            log::error!("Failed to flush stdout: {}", e);
+        }
     }
 
     /// Render the visible viewport to an in-memory byte buffer.
@@ -93,7 +97,9 @@ impl TermLayout {
             let y = (batch_start / cols) as u16 - self.scroll_y as u16;
 
             if y < self.rows {
-                let _ = crossterm::queue!(out, MoveTo(x, y));
+                if let Err(e) = crossterm::queue!(out, MoveTo(x, y)) {
+                    log::error!("Failed to queue cursor move to ({}, {}): {}", x, y, e);
+                }
                 if is_empty {
                     out.extend_from_slice(batch.as_bytes());
                 } else {

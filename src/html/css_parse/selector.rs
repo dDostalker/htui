@@ -385,6 +385,7 @@ fn tag_str_to_node_type(tag: &str) -> std::result::Result<NodeType, anyhow::Erro
         "nav" => Ok(NodeType::Nav),
         "ol" => Ok(NodeType::Ol),
         "p" => Ok(NodeType::P),
+        "pre" => Ok(NodeType::Pre),
         "section" => Ok(NodeType::Section),
         "select" => Ok(NodeType::Select),
         "span" => Ok(NodeType::Span),

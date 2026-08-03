@@ -2,7 +2,7 @@
 //!
 //! Walks a [`LayoutBox`] forest produced by
 //! [`super::layoutbox::inner_formatting_context::flow::layout_tree`] (and
-//! parallel-laid flex / grid trees) and writes styled cells into the
+//! flex / grid trees) and writes styled cells into the
 //! [`TermLayout`](crate::tui::graph_api::TermLayout) canvas. Reads no DOM
 //! state beyond each box's `node_id`: every paint decision is derived from
 //! the box's own `rect`, `kind`, `paint_style`, and the CSS attributes
@@ -34,11 +34,9 @@ use self::image::paint_image;
 
 /// A borrow of the canvas that the painters actually need.
 ///
-/// `paint_layout_tree` builds one of these per parallel task by re-borrowing
-/// a disjoint slice of [`TermLayout::layout`], which lets us fan out across
-/// threads without leaking the whole `TermLayout` (and its `Vec`) into every
-/// task. The rest of the canvas API (`columns`, row math) is read-only and
-/// cheap to copy.
+/// `paint_layout_tree` builds a single canvas over the whole
+/// [`TermLayout::layout`] buffer and reuses it across the forest. The rest
+/// of the canvas API (`columns`, row math) is read-only and cheap to copy.
 pub(super) struct PaintCanvas<'a> {
     pub layout: &'a mut [Block],
     pub columns: u16,
@@ -50,23 +48,24 @@ impl<'a> PaintCanvas<'a> {
     }
 }
 
-/// Encode the raw layout pointer as a `usize` so the parallel closure's
-/// `Send` bound only sees primitive captures. The pointer is reconstructed
-/// inside each task via `addr as *mut Block`. This sidesteps the `*mut T` is
-/// `!Send + !Sync` problem entirely without needing `unsafe impl Send` on a
-/// wrapper (the raw pointer never appears as a captured variable — `usize`
-/// flows across the thread boundary instead).
-#[derive(Clone, Copy)]
-struct LayoutAddr(usize);
-
 /// Paint every box in `boxes` into `term_layout`.
 ///
-/// Boxes are independent: each paints into its own `rect` regardless of
-/// sibling order, so the top-level forest is fanned out across threads via
-/// `rayon::scope`. Children are still painted sequentially inside each
-/// top-level task — the parent must paint its background before the child
-/// reads `effective_bg` for its own cells, so the parent/child chain is a
-/// serial dependency.
+/// Painting is deliberately serial. The top-level forest is a single box
+/// for typical documents (root → `<html>`), so task-per-box parallelism
+/// would spawn exactly one task and only pay `rayon` dispatch overhead;
+/// the workload itself is memory-bound cell writes on a buffer of at most
+/// `columns × rows × MAX_SCROLL_MULTIPLIER` cells. Top-level boxes occupy
+/// disjoint `rect`s, so a sequential pass writes each cell at most once.
+/// Children are painted inside each box — the parent must paint its
+/// background before the child reads `effective_bg` for its own cells, so
+/// the parent/child chain is inherently sequential anyway.
+///
+/// Earlier versions tried to parallelise: the original used raw-pointer
+/// slicing of the whole buffer (`std::slice::from_raw_parts_mut` plus a
+/// lifetime `transmute_copy`), which the project forbids as `unsafe`; a
+/// later safe variant fanned out per-top-level-box bands via `split_at_mut`,
+/// which measured no speedup for the single-box documents that occur in
+/// practice.
 pub fn paint_layout_tree(boxes: &[LayoutBox], arena: &NodeArena, term_layout: &mut TermLayout) {
     let mut max_y = 0usize;
     for b in boxes {
@@ -80,40 +79,13 @@ pub fn paint_layout_tree(boxes: &[LayoutBox], arena: &NodeArena, term_layout: &m
     }
 
     let columns = term_layout.columns;
-    // Capture the raw pointer as a `usize` so the closure's `Send` bound only
-    // sees primitive captured values. The raw pointer is reconstructed
-    // inside each task via `usize as *mut Block`.
-    let layout_addr = LayoutAddr(term_layout.layout.as_mut_ptr() as usize);
-    let layout_len = term_layout.layout.len();
-
-    // SAFETY: `rayon::scope` blocks until every spawned task finishes, so the
-    // arena borrow is live for the duration of the scope. The transmute_copy
-    // extends the lifetime to `'static` only for the scope's bound; nothing
-    // outlives this function.
-    let arena_static: &'static NodeArena = unsafe { std::mem::transmute_copy(&arena) };
-
-    // SAFETY: Each top-level box paints within its own `rect`, which is
-    // disjoint from sibling boxes' rects by the CSS block-layout invariant
-    // (siblings are stacked or laid out side-by-side, never overlapping).
-    // The `from_raw_parts_mut` slices are therefore disjoint — every parallel
-    // write goes to a unique memory region, so no data race occurs.
-    rayon::scope(|s| {
-        for b in boxes {
-            let addr = layout_addr;
-            let len = layout_len;
-            let cols = columns;
-            let arena = arena_static;
-            s.spawn(move |_| {
-                let layout_ptr = addr.0 as *mut Block;
-                let layout_slice = unsafe { std::slice::from_raw_parts_mut(layout_ptr, len) };
-                let mut canvas = PaintCanvas {
-                    layout: layout_slice,
-                    columns: cols,
-                };
-                paint_box(b, arena, &mut canvas, None, None);
-            });
-        }
-    });
+    let mut canvas = PaintCanvas {
+        layout: &mut term_layout.layout,
+        columns,
+    };
+    for b in boxes {
+        paint_box(b, arena, &mut canvas, None, None);
+    }
 }
 
 /// Clamp `a` to the intersection with `b`, or return `None` when the two

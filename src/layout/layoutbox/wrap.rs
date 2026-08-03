@@ -215,8 +215,8 @@ fn apply_white_space(tokens: Vec<Token>, ws: WhiteSpace) -> Vec<Vec<Token>> {
         for t in tokens {
             if matches!(t, Token::Newline) {
                 lines.push(Vec::new());
-            } else {
-                lines.last_mut().unwrap().push(t);
+            } else if let Some(line) = lines.last_mut() {
+                line.push(t);
             }
         }
         return lines;
@@ -235,22 +235,21 @@ fn apply_white_space(tokens: Vec<Token>, ws: WhiteSpace) -> Vec<Vec<Token>> {
                 // collapsible-space boundary.
             }
             Token::Space { .. } => {
-                let last = lines.last().unwrap().last();
-                if !matches!(last, Some(Token::Space { .. })) {
-                    lines.last_mut().unwrap().push(Token::Space { width: 1, _count: 1 });
+                if let Some(line) = lines.last_mut() {
+                    let last_is_space = matches!(line.last(), Some(Token::Space { .. }));
+                    if !last_is_space {
+                        line.push(Token::Space { width: 1, _count: 1 });
+                    }
                 }
             }
-            Token::Word { .. } => lines.last_mut().unwrap().push(t),
+            Token::Word { .. } => {
+                if let Some(line) = lines.last_mut() {
+                    line.push(t);
+                }
+            }
         }
     }
     lines
-}
-
-/// Width of `text` in cells after font-size expansion, computed from
-/// the grapheme stream.
-fn grapheme_width_sum(text: &str, font_size_cells: usize) -> usize {
-    let font = font_size_cells.max(1);
-    text.graphemes(true).map(|g| grapheme_width(g).max(font)).sum()
 }
 
 /// Wrap a single logical line onto one or more visual lines. The
@@ -374,6 +373,85 @@ fn wrap_logical_line(
     out.push(current_line);
 }
 
+/// Emit one visual line per logical line under [`WhiteSpace::Pre`].
+///
+/// `pre` preserves every whitespace grapheme verbatim AND forces a
+/// break at each `\n`. Soft wrapping is off (no `max_width`
+/// splitting), so this routine is much simpler than the greedy
+/// wrap: walk graphemes, accumulate into a per-style buffer, and
+/// flush the buffer at each newline. Style changes flush the
+/// current buffer to a new [`InlineRun`] within the same visual
+/// line so span boundaries stay intact.
+///
+/// Always returns at least one entry (an empty visual line for an
+/// empty input). The returned visual lines preserve leading and
+/// trailing spaces, tabs, and any number of consecutive spaces
+/// within a line — the collapsing that the standard
+/// `apply_white_space` path applies for `normal` / `nowrap` is
+/// explicitly *not* in effect here.
+fn emit_preserving_newlines(runs: &[InlineRun]) -> Vec<Vec<InlineRun>> {
+    let mut lines: Vec<Vec<InlineRun>> = Vec::new();
+    let mut line: Vec<InlineRun> = Vec::new();
+    let mut buf = String::new();
+    let mut cur_fg: Option<Color> = None;
+    let mut cur_bg: Option<Color> = None;
+    let mut cur_style = FontStyle::empty();
+    let mut buffering = false;
+
+    for run in runs {
+        if run.is_empty() {
+            continue;
+        }
+        for g in run.text.graphemes(true) {
+            if g == "\n" {
+                if buffering {
+                    line.push(InlineRun::new(
+                        std::mem::take(&mut buf),
+                        cur_style,
+                        cur_fg,
+                        cur_bg,
+                    ));
+                    buffering = false;
+                }
+                lines.push(std::mem::take(&mut line));
+                continue;
+            }
+            // Style change inside a single visual line flushes the
+            // accumulated buffer so fg / bg / style never silently
+            // bleed across span boundaries.
+            if buffering
+                && (cur_fg != run.fg || cur_bg != run.bg || cur_style != run.style)
+            {
+                line.push(InlineRun::new(
+                    std::mem::take(&mut buf),
+                    cur_style,
+                    cur_fg,
+                    cur_bg,
+                ));
+                buffering = false;
+            }
+            if !buffering {
+                cur_fg = run.fg;
+                cur_bg = run.bg;
+                cur_style = run.style;
+                buffering = true;
+            }
+            buf.push_str(g);
+        }
+    }
+    if buffering {
+        line.push(InlineRun::new(buf, cur_style, cur_fg, cur_bg));
+    }
+    // Always emit a trailing visual line — even an empty one when
+    // the input ended on a newline. This keeps callers (which split
+    // the canvas one line at a time) aligned with the source.
+    lines.push(line);
+    if lines.is_empty() {
+        lines.push(Vec::new());
+    }
+    lines
+}
+
 /// Wrap `runs` into a list of visual lines, each no wider than
 /// `max_width` cells (after font-size expansion). The returned
 /// `Vec<Vec<InlineRun>>` always has at least one entry; an empty
@@ -402,7 +480,18 @@ fn wrap_runs_inner(
         return vec![Vec::new()];
     }
     if !white_space.allows_wrap() {
-        // `pre` / `nowrap`: preserve order, no wrapping. Single line.
+        if matches!(white_space, WhiteSpace::Pre) {
+            // `pre` keeps every whitespace grapheme (spaces, tabs) AND
+            // every newline. Soft wrapping is forbidden, but `\n` is
+            // a forced break: each newline starts a fresh visual line.
+            // Falls through to a dedicated splitter that walks the
+            // grapheme stream so it can keep multi-space runs intact
+            // (which the `tokenize_run` collapse phase would otherwise
+            // strip away).
+            return emit_preserving_newlines(runs);
+        }
+        // `nowrap`: collapse whitespace (still happens in apply_white_space)
+        // and never wrap. A single visual line; newlines collapse.
         let mut out: Vec<InlineRun> = Vec::with_capacity(runs.len());
         for r in runs {
             if !r.is_empty() {
@@ -472,13 +561,6 @@ pub fn wrapped_size(
         .unwrap_or(0);
     let total_rows = lines.len().saturating_mul(font);
     (max_line_w, total_rows)
-}
-
-/// Suppress unused-import warning for `grapheme_width_sum` — kept
-/// for future use by callers that want to measure without wrapping.
-#[allow(dead_code)]
-fn _unused() {
-    let _ = grapheme_width_sum;
 }
 
 #[cfg(test)]

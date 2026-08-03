@@ -135,7 +135,7 @@ pub(super) fn layout_flex_container(
             &body_runs,
             content_constraint.width.max(1),
             own_font_size_cells,
-            node.css_attr.get_white_space(),
+            node.css_attr.get_white_space(&node.node_type),
             node.css_attr.get_word_break(),
             node.css_attr.get_overflow_wrap(),
         )

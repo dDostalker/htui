@@ -3,7 +3,7 @@ use std::fmt;
 
 use slotmap::{Key, SlotMap, new_key_type};
 
-use crate::html::css_parse::{CssAttr, CssDisplay, FontContext, LengthContext, Viewport};
+use crate::html::css_parse::{CssAttr, CssDisplay, FontContext, LengthContext, Viewport, WhiteSpace};
 
 // ============================================================
 // NodeId — slotmap 生成的类型安全索引
@@ -32,6 +32,7 @@ pub enum NodeType {
     Span,
     Div,
     P,
+    Pre,
     Img,
     A,
     /// `<em>` — emphasis. Inline element with browser-default `font-style:
@@ -138,6 +139,19 @@ impl NodeType {
             NodeType::H3 => Some(1.17),
             NodeType::H4 => Some(1.0),
             NodeType::H5 => Some(0.83),
+            _ => None,
+        }
+    }
+
+    /// Browser-style UA `white-space` default for this element type.
+    ///
+    /// Mirrors the HTML5 user-agent stylesheet: `<pre>` ships with
+    /// `white-space: pre` so leading whitespace, tabs, and newlines are
+    /// preserved verbatim. Every other element returns `None` — the
+    /// layout falls back to the regular `WhiteSpace::Normal` default.
+    pub fn default_white_space(&self) -> Option<WhiteSpace> {
+        match self {
+            NodeType::Pre => Some(WhiteSpace::Pre),
             _ => None,
         }
     }
