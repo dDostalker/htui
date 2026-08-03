@@ -15,8 +15,10 @@ use super::PaintCanvas;
 /// `lines` is the result of [`crate::layout::layoutbox::wrap_runs`]:
 /// each inner `Vec<InlineRun>` is one visual line that fits within
 /// the content-box width after wrapping. This entry point lays out
-/// every line top-to-bottom, advancing `font_size_cells * canvas.columns`
-/// cells per line so each row of the rect paints a single visual line.
+/// every line top-to-bottom, advancing `line_height_cells * canvas.columns`
+/// cells per line so each row of the rect paints a single visual line
+/// (`line_height_cells` rows tall; `normal` line-height equals
+/// `font_size_cells`).
 ///
 /// Per-line width accounting uses [`InlineRun::width_at`] (which sums
 /// `max(grapheme_width, font_size)` per grapheme) so a wide CJK glyph
@@ -36,21 +38,25 @@ pub(crate) fn paint_runs(
     align: TextAlign,
     effective_bg: Option<Color>,
     font_size_cells: usize,
+    line_height_cells: usize,
     clip: Rect,
 ) {
     if lines.is_empty() {
         return;
     }
     let cols = canvas.columns as usize;
-    let font = font_size_cells.max(1);
+    // The number of canvas rows one visual line occupies (CSS `line-height`,
+    // resolved to whole rows). `normal` yields `font`, so the advance is the
+    // font-size unless the author enlarged the line box.
+    let line_h = line_height_cells.max(1);
     // The canvas row the first visual line's glyphs sit on. Each visual
-    // line advances `font` canvas rows below it.
+    // line advances `line_h` canvas rows below it.
     let first_line_row = cell_start / cols;
     for (line_idx, line_runs) in lines.iter().enumerate() {
         // Drop lines whose glyph row falls outside the inherited clip
         // (e.g. wrapped content of a box that was squeezed smaller than
         // its text on a very small terminal).
-        let line_row = first_line_row.saturating_add(line_idx.saturating_mul(font));
+        let line_row = first_line_row.saturating_add(line_idx.saturating_mul(line_h));
         if line_row < clip.y || line_row >= clip.y.saturating_add(clip.height) {
             continue;
         }
@@ -61,7 +67,7 @@ pub(crate) fn paint_runs(
             continue;
         }
         let line_start =
-            cell_start.saturating_add(line_idx.saturating_mul(font).saturating_mul(cols));
+            cell_start.saturating_add(line_idx.saturating_mul(line_h).saturating_mul(cols));
         paint_one_line(
             canvas,
             line_runs,

@@ -22,7 +22,7 @@ pub use layout::layout::TermMap;
 
 use crate::{
     html::css_parse::{self, CssRule},
-    tdom::node::{NodeArena, NodeId},
+    tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{RenderCmd, TermLayout, trigger_refresh},
 };
 
@@ -62,6 +62,38 @@ fn build_css_rules(html: &str, css: &str) -> CssRule {
     css_parser.parse()
 }
 
+/// Extract the document `<title>` text from the parsed DOM, if present.
+///
+/// Browsers use the first `<title>` element and ignore later ones; this walks
+/// the arena in document order and returns the concatenated text of the first
+/// `<title>` found. Returns `None` when the document has no `<title>` or it
+/// contains no non-whitespace text.
+fn extract_title(arena: &NodeArena, root_id: NodeId) -> Option<String> {
+    let mut stack = vec![root_id];
+    while let Some(id) = stack.pop() {
+        let node = &arena[id];
+        if node.node_type == NodeType::Title {
+            let text: String = node
+                .children
+                .iter()
+                .filter_map(|&child_id| match &arena[child_id].node_type {
+                    NodeType::Text(s) => Some(s.as_str()),
+                    _ => None,
+                })
+                .collect();
+            let text = text.trim();
+            return if text.is_empty() {
+                None
+            } else {
+                Some(text.to_string())
+            };
+        }
+        // Reverse so the stack visits children in document order (LIFO).
+        stack.extend(node.children.iter().rev().copied());
+    }
+    None
+}
+
 // ============================================================
 // Render thread
 // ============================================================
@@ -77,6 +109,10 @@ fn render_thread(
     // syscall instead of one per render call.
     let mut out = BufWriter::new(stdout());
     let mut term_layout: Option<TermLayout> = None;
+    // Terminal title: install the document `<title>` on the first successful
+    // draw. crossterm offers no title getter, so the previous title (if any)
+    // is intentionally left untouched on quit rather than being restored.
+    let mut title_set = false;
 
     loop {
         let mut cmd = match rx.recv() {
@@ -146,6 +182,19 @@ fn render_thread(
                 if let Err(e) = tl.draw(&arena, root_id, &term_map) {
                     log::error!("Layout failed: {}", e);
                     continue;
+                }
+
+                // Install the document `<title>` as the terminal window title
+                // once per session. The DOM is re-parsed on every `Redraw`
+                // but the title is static, so this only runs on the first
+                // successful layout.
+                if !title_set {
+                    if let Some(title) = extract_title(&arena, root_id) {
+                        execute!(stdout(), crossterm::terminal::SetTitle(title)).unwrap_or_else(
+                            |e| log::error!("Failed to set terminal title: {}", e),
+                        );
+                    }
+                    title_set = true;
                 }
 
                 // Publish the new upper bound of `scroll_y` so the input

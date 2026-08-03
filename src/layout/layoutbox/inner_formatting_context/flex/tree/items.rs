@@ -158,7 +158,16 @@ pub(super) fn layout_flex_items(
         };
         cursor_main = cursor_main.saturating_add(justify_leading);
         for (prep_idx, prep) in line_preps.iter().enumerate() {
-            let main_size = main_sizes[prep_idx];
+            // CSS `min-width` / `max-width` (row) or `min-height` /
+            // `max-height` (column) clamp the final main-axis size. The
+            // automatic min-content floor (`min_main`) is already enforced
+            // by the shrink distribution; explicit constraints layer on top.
+            // When min > max, the minimum wins (CSS).
+            let lower = prep.min_main.max(prep.css_min_main.unwrap_or(0));
+            let main_size = match prep.css_max_main {
+                Some(max) => main_sizes[prep_idx].clamp(lower, max.max(lower)),
+                None => main_sizes[prep_idx].max(lower),
+            };
             // Natural cross-axis size of this item (used as the fallback
             // for non-stretch alignments and for stretch when the
             // container's cross-axis size is unknown).

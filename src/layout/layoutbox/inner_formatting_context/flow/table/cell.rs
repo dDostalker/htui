@@ -141,6 +141,8 @@ pub fn layout_cell(
             Some(wrapped_lines)
         },
         font_size_cells: own_font_size_cells,
+        line_height_cells: own_font_size_cells.max(1),
+        border_radius: crate::html::css_parse::CornerRadii::default(),
         fill_bg,
         spacing_after: 0,
         chrome: false,

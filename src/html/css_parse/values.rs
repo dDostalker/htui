@@ -741,6 +741,202 @@ pub enum TextDecoration {
     UnderlineLineThrough,
 }
 
+/// Text case transformation (CSS `text-transform`).
+///
+/// The transform is applied to inline text before wrapping and painting, so
+/// width measurement reflects the transformed characters. `capitalize`
+/// uppercases the first character of each whitespace-delimited word.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TextTransform {
+    /// `none` — leave the text untouched.
+    #[default]
+    None,
+    /// `uppercase` — map every character to its uppercase form.
+    Uppercase,
+    /// `lowercase` — map every character to its lowercase form.
+    Lowercase,
+    /// `capitalize` — uppercase the first letter of each word.
+    Capitalize,
+}
+
+#[doc(hidden)]
+pub fn parse_text_transform(s: &str) -> Option<TextTransform> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "none" => Some(TextTransform::None),
+        "uppercase" => Some(TextTransform::Uppercase),
+        "lowercase" => Some(TextTransform::Lowercase),
+        "capitalize" => Some(TextTransform::Capitalize),
+        _ => None,
+    }
+}
+
+/// Line-box height (CSS `line-height`).
+///
+/// Inherited. Resolved into a concrete row count per visual line by
+/// [`resolve_line_height_cells`]; on a terminal grid every value collapses to
+/// a whole number of rows.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LineHeight {
+    /// `normal` — one row per font-size cell (the terminal's natural line
+    /// height).
+    Normal,
+    /// A unitless multiplier (CSS `1.5`): `n * font_size_cells` rows.
+    Number(f32),
+    /// An absolute length (`24px`, `2em`, `150%`). Percentages resolve
+    /// against the element's own font-size, mirroring the CSS spec.
+    Length(Length),
+}
+
+#[doc(hidden)]
+pub fn parse_line_height(s: &str) -> Option<LineHeight> {
+    let s = s.trim();
+    if s.eq_ignore_ascii_case("normal") {
+        return Some(LineHeight::Normal);
+    }
+    // A bare number is a unitless multiplier; everything else (including
+    // `0px`) falls through to `Length::parse`.
+    if let Ok(n) = s.parse::<f32>() {
+        return Some(LineHeight::Number(n));
+    }
+    Length::parse(s).map(LineHeight::Length)
+}
+
+/// Resolve a [`LineHeight`] into the number of canvas rows one visual line
+/// occupies, given the element's effective font-size in cells.
+///
+/// `normal` maps to `font_size_cells`; a number multiplies it; a length
+/// resolves like any other CSS length (`%` against the font-size). The result
+/// is rounded to a whole row count (min 1) — terminals cannot render partial
+/// rows.
+pub fn resolve_line_height_cells(
+    line_height: LineHeight,
+    font_size_cells: usize,
+    font_ctx: FontContext,
+    viewport: Viewport,
+) -> usize {
+    let font = font_size_cells.max(1);
+    match line_height {
+        LineHeight::Normal => font,
+        LineHeight::Number(n) => (n * font as f32).round().max(1.0) as usize,
+        LineHeight::Length(len) => match len {
+            // `line-height: 150%` resolves against the element's font-size,
+            // not the containing block — handle the percentage here instead
+            // of routing through `Length::resolve`.
+            Length::Pct(p) => ((p / 100.0) * font as f32).round().max(1.0) as usize,
+            other => other
+                .resolve(LengthContext {
+                    containing: 0,
+                    font: font_ctx,
+                    viewport,
+                })
+                .max(1),
+        },
+    }
+}
+
+/// Box sizing model (CSS `box-sizing`).
+///
+/// The engine's historical default applies `width` / `height` to the
+/// **border-box** (the terminal cell grid has no separate box-model
+/// primitive), so unset behaves like [`BoxSizing::BorderBox`]; declaring
+/// `content-box` switches those properties back to CSS semantics where
+/// padding + border are added on top.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BoxSizing {
+    /// `border-box` — `width` / `height` include padding and border.
+    #[default]
+    BorderBox,
+    /// `content-box` — `width` / `height` apply to the content box only;
+    /// padding + border are added on top.
+    ContentBox,
+}
+
+#[doc(hidden)]
+pub fn parse_box_sizing(s: &str) -> Option<BoxSizing> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "content-box" => Some(BoxSizing::ContentBox),
+        "border-box" => Some(BoxSizing::BorderBox),
+        _ => None,
+    }
+}
+
+/// Four corner radii of a box (CSS `border-radius`), in cells.
+///
+/// `0` means a square corner. The paint phase renders any non-zero radius
+/// with the rounded box-drawing corner glyphs (`╭ ╮ ╰ ╯`); radii larger than
+/// 1 currently render identically to radius 1 — the terminal grid has no
+/// finer rounding primitive.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct CornerRadii {
+    /// Top-left corner radius.
+    pub top_left: usize,
+    /// Top-right corner radius.
+    pub top_right: usize,
+    /// Bottom-right corner radius.
+    pub bottom_right: usize,
+    /// Bottom-left corner radius.
+    pub bottom_left: usize,
+}
+
+impl CornerRadii {
+    /// `true` when at least one corner carries a non-zero radius.
+    pub const fn is_rounded(&self) -> bool {
+        self.top_left > 0
+            || self.top_right > 0
+            || self.bottom_right > 0
+            || self.bottom_left > 0
+    }
+}
+
+/// Expand the `border-radius` shorthand (1–4 values) into a [`CornerRadii`].
+///
+/// Follows the standard CSS 1-/2-/3-/4-value pattern: one value applies to
+/// every corner, two set `(top-left & bottom-right) / (top-right &
+/// bottom-left)`, three set top-left / (top-right & bottom-left) /
+/// bottom-right, four set each corner in clockwise order. Tokens that cannot
+/// be parsed as a [`Length`] are treated as `0`.
+pub(super) fn parse_border_radius(
+    decls: &IndexMap<String, String>,
+    containing_width: usize,
+    font_ctx: FontContext,
+    viewport: Viewport,
+) -> CornerRadii {
+    let Some(value) = decls.get("border-radius") else {
+        return CornerRadii::default();
+    };
+    let radii: Vec<usize> = value
+        .split_whitespace()
+        .filter_map(|t| parse_length_token(Some(t), containing_width, font_ctx, viewport))
+        .collect();
+    match radii.len() {
+        0 => CornerRadii::default(),
+        1 => CornerRadii {
+            top_left: radii[0],
+            top_right: radii[0],
+            bottom_right: radii[0],
+            bottom_left: radii[0],
+        },
+        2 => CornerRadii {
+            top_left: radii[0],
+            top_right: radii[1],
+            bottom_right: radii[0],
+            bottom_left: radii[1],
+        },
+        3 => CornerRadii {
+            top_left: radii[0],
+            top_right: radii[1],
+            bottom_right: radii[2],
+            bottom_left: radii[1],
+        },
+        _ => CornerRadii {
+            top_left: radii[0],
+            top_right: radii[1],
+            bottom_right: radii[2],
+            bottom_left: radii[3],
+        },
+    }
+}
+
 // ============================================================
 // Text-wrapping property values (CSS Text Level 3 subset)
 //

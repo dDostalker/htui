@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<!--
+  htui 视觉测试 — 高频 CSS 属性 css_props
+  运行: cargo run -p visual_test -- css_props
+  浏览器直接打开本文件即可看到与终端渲染对应相同的样式
+  展示: 终端标题 (<title>) / text-transform / line-height /
+        min-width / max-width / min-height / max-height /
+        box-sizing / border-radius / flex 尺寸约束
+  注意: <title> 只在交互模式生效——运行后终端窗口标题会变成它
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>htui CSS Properties</title>
+    <style>
+        body { color: white; }
+        h2 { color: cyan; }
+
+        /* 1. text-transform — 大小写转换（可继承） */
+        .upper { text-transform: uppercase; }
+        .lower { text-transform: lowercase; }
+        .cap   { text-transform: capitalize; }
+
+        /* 2. line-height — 行高（数字 / 百分比 / 倍数） */
+        .lh-1   { line-height: 1;   background-color: darkblue; }
+        .lh-15  { line-height: 150%; background-color: darkred; }
+        .lh-2   { line-height: 2;   background-color: darkgreen; }
+        .lh-wrap { width: 30px; line-height: 2; background-color: darkmagenta; }
+
+        /* 3. max-width / min-width — 宽度约束 */
+        .maxw { max-width: 40px; background-color: darkcyan; color: black; }
+        .minw { width: 10px; min-width: 30px; background-color: yellow; color: black; }
+
+        /* 4. min-height / max-height — 高度约束 */
+        .minh { min-height: 4px; background-color: darkblue; }
+        .maxh { width: 24px; max-height: 2px; background-color: darkred; }
+
+        /* 5. box-sizing — 宽度的盒模型语义对比 */
+        .bs-border  { box-sizing: border-box;  width: 30px; padding: 2px; border: 1px solid yellow; background-color: darkgreen; }
+        .bs-content { box-sizing: content-box; width: 30px; padding: 2px; border: 1px solid yellow; background-color: darkmagenta; }
+
+        /* 6. border-radius — 圆角边框 */
+        .round  { border: 1px solid cyan;  border-radius: 2px; padding: 1px; width: 30px; background-color: darkblue; }
+        .round2 { border: 1px solid green; border-radius: 1px; padding: 1px; width: 22px; background-color: darkgrey; color: black; }
+
+        /* 7. flex item 尺寸约束 — min-width / max-width */
+        .flexrow { display: flex; width: 40px; background-color: darkgrey; color: black; }
+        .f-min { flex-basis: 4px; min-width: 10px; background-color: yellow; }
+        .f-fill { flex-grow: 1; background-color: cyan; }
+        .f-max { flex-grow: 1; max-width: 8px; background-color: magenta; color: white; }
+    </style>
+</head>
+<body>
+    <h1>CSS Properties</h1>
+    <p>新增属性: text-transform / line-height / min-max 尺寸 / box-sizing / border-radius</p>
+
+    <h2>text-transform</h2>
+    <p class="upper">uppercase: hello world</p>
+    <p class="lower">lowercase: Hello WORLD</p>
+    <p class="cap">capitalize: hello world</p>
+    <p>inherit: <span class="upper">nested span also upper</span></p>
+
+    <h2>line-height</h2>
+    <p class="lh-1">line-height: 1 (紧凑)</p>
+    <p class="lh-15">line-height: 150% (终端取整 2 行)</p>
+    <p class="lh-2">line-height: 2 (两倍行距)</p>
+    <p class="lh-wrap">wrapped lines are spread apart by line-height 2</p>
+
+    <h2>max-width / min-width</h2>
+    <p class="maxw">max-width: 40</p>
+    <p class="minw">min-width: 30</p>
+
+    <h2>min-height / max-height</h2>
+    <p class="minh">min-height: 4</p>
+    <p class="maxh">max-height: 2 crops the wrapped text</p>
+
+    <h2>box-sizing</h2>
+    <p class="bs-border">border-box 30</p>
+    <p class="bs-content">content-box 30</p>
+
+    <h2>border-radius</h2>
+    <div class="round">rounded corners 2px</div>
+    <div class="round2">rounded 1px</div>
+
+    <h2>flex item 尺寸约束</h2>
+    <div class="flexrow">
+        <div class="f-min">MIN</div>
+        <div class="f-fill">FILL</div>
+    </div>
+    <div class="flexrow">
+        <div class="f-fill">FILL</div>
+        <div class="f-max">MAX</div>
+    </div>
+
+    <p>=== End of CSS Properties Test ===</p>
+</body>
+</html>

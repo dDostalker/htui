@@ -2,9 +2,10 @@ use std::collections::HashMap;
 
 use crossterm::style::Color;
 use htui::html::css_parse::{
-    BorderStyle, Combinator, CssAttr, CssRule, CssSelector, EdgeSizes, FontContext, FontWeight,
-    INHERITED_PROPS, Length, LengthContext, NthExpr, PX_PER_CELL, Parser, SUPPORTED_PROPERTIES,
-    TextDecoration, Viewport, css_into_node, parse_color_str, parse_declaration_text,
+    BorderStyle, BoxSizing, Combinator, CornerRadii, CssAttr, CssRule, CssSelector, EdgeSizes,
+    FontContext, FontWeight, INHERITED_PROPS, Length, LengthContext, LineHeight, NthExpr,
+    PX_PER_CELL, Parser, SUPPORTED_PROPERTIES, TextDecoration, TextTransform, Viewport,
+    css_into_node, parse_color_str, parse_declaration_text, resolve_line_height_cells,
     selector_chain_matches,
 };
 use htui::tdom::node::{Node, NodeArena, NodeId, NodeType};
@@ -1307,4 +1308,212 @@ fn margin_rem_uses_root_font_size_not_element() {
     assert_eq!(attr.get_margin(80, font_ctx(1, 3), viewport()).top, 6);
     assert_eq!(attr.get_margin(80, font_ctx(5, 3), viewport()).top, 6);
     assert_eq!(attr.get_margin(80, font_ctx(1, 1), viewport()).top, 2);
+}
+
+// ============================================================
+// text-transform
+// ============================================================
+
+#[test]
+fn text_transform_parses_and_defaults_to_none() {
+    init();
+    let attr = attr_from_decl("text-transform", "uppercase");
+    assert_eq!(attr.get_text_transform(), TextTransform::Uppercase);
+    let attr = attr_from_decl("text-transform", "LOWERCASE");
+    assert_eq!(attr.get_text_transform(), TextTransform::Lowercase);
+    let attr = attr_from_decl("text-transform", "capitalize");
+    assert_eq!(attr.get_text_transform(), TextTransform::Capitalize);
+    // Unset / garbage -> none.
+    assert_eq!(CssAttr::new().get_text_transform(), TextTransform::None);
+    let attr = attr_from_decl("text-transform", "full-width");
+    assert_eq!(attr.get_text_transform(), TextTransform::None);
+}
+
+#[test]
+fn text_transform_is_supported_and_inheritable() {
+    init();
+    assert!(SUPPORTED_PROPERTIES.contains(&"text-transform"));
+    assert!(INHERITED_PROPS.contains(&"text-transform"));
+}
+
+// ============================================================
+// line-height
+// ============================================================
+
+#[test]
+fn line_height_parses_normal_number_and_length() {
+    init();
+    let attr = attr_from_decl("line-height", "normal");
+    assert_eq!(attr.get_line_height(), LineHeight::Normal);
+    let attr = attr_from_decl("line-height", "1.5");
+    assert_eq!(attr.get_line_height(), LineHeight::Number(1.5));
+    let attr = attr_from_decl("line-height", "2em");
+    assert_eq!(attr.get_line_height(), LineHeight::Length(Length::Em(2.0)));
+    let attr = attr_from_decl("line-height", "150%");
+    assert_eq!(attr.get_line_height(), LineHeight::Length(Length::Pct(150.0)));
+    assert_eq!(CssAttr::new().get_line_height(), LineHeight::Normal);
+}
+
+#[test]
+fn line_height_resolves_to_whole_rows() {
+    init();
+    // normal -> font size (1 row per cell).
+    assert_eq!(
+        resolve_line_height_cells(LineHeight::Normal, 1, default_font_ctx(), viewport()),
+        1
+    );
+    // A unitless multiplier scales the font-size, rounding to whole rows.
+    assert_eq!(
+        resolve_line_height_cells(LineHeight::Number(1.5), 1, default_font_ctx(), viewport()),
+        2
+    );
+    assert_eq!(
+        resolve_line_height_cells(LineHeight::Number(2.0), 2, default_font_ctx(), viewport()),
+        4
+    );
+    // em resolves against the element font-size.
+    assert_eq!(
+        resolve_line_height_cells(
+            LineHeight::Length(Length::Em(1.0)),
+            3,
+            font_ctx(3, 1),
+            viewport()
+        ),
+        3
+    );
+    // Percentage resolves against the font-size (not the containing block).
+    assert_eq!(
+        resolve_line_height_cells(
+            LineHeight::Length(Length::Pct(150.0)),
+            2,
+            font_ctx(2, 1),
+            viewport()
+        ),
+        3
+    );
+}
+
+#[test]
+fn line_height_is_supported_and_inheritable() {
+    init();
+    assert!(SUPPORTED_PROPERTIES.contains(&"line-height"));
+    assert!(INHERITED_PROPS.contains(&"line-height"));
+}
+
+// ============================================================
+// box-sizing
+// ============================================================
+
+#[test]
+fn box_sizing_defaults_to_border_box_and_parses() {
+    init();
+    // Unset -> the engine's historical border-box model.
+    assert_eq!(CssAttr::new().get_box_sizing(), BoxSizing::BorderBox);
+    let attr = attr_from_decl("box-sizing", "content-box");
+    assert_eq!(attr.get_box_sizing(), BoxSizing::ContentBox);
+    let attr = attr_from_decl("box-sizing", "BORDER-BOX");
+    assert_eq!(attr.get_box_sizing(), BoxSizing::BorderBox);
+    // Garbage falls back to the default.
+    let attr = attr_from_decl("box-sizing", "padding-box");
+    assert_eq!(attr.get_box_sizing(), BoxSizing::BorderBox);
+}
+
+#[test]
+fn box_sizing_is_supported() {
+    init();
+    assert!(SUPPORTED_PROPERTIES.contains(&"box-sizing"));
+}
+
+// ============================================================
+// border-radius
+// ============================================================
+
+#[test]
+fn border_radius_parses_one_to_four_values() {
+    init();
+    // One value -> every corner.
+    let attr = attr_from_decl("border-radius", "2px");
+    let r = attr.get_border_radius(80, default_font_ctx(), viewport());
+    assert_eq!(
+        r,
+        CornerRadii {
+            top_left: 2,
+            top_right: 2,
+            bottom_right: 2,
+            bottom_left: 2
+        }
+    );
+    // Two values -> diagonal pairs.
+    let attr = attr_from_decl("border-radius", "4px 1px");
+    let r = attr.get_border_radius(80, default_font_ctx(), viewport());
+    assert_eq!(
+        r,
+        CornerRadii {
+            top_left: 4,
+            top_right: 1,
+            bottom_right: 4,
+            bottom_left: 1
+        }
+    );
+    // Four values -> clockwise order.
+    let attr = attr_from_decl("border-radius", "1px 2px 3px 4px");
+    let r = attr.get_border_radius(80, default_font_ctx(), viewport());
+    assert_eq!(
+        r,
+        CornerRadii {
+            top_left: 1,
+            top_right: 2,
+            bottom_right: 3,
+            bottom_left: 4
+        }
+    );
+    // Unset -> square corners.
+    assert_eq!(CssAttr::new().get_border_radius(80, default_font_ctx(), viewport()), CornerRadii::default());
+}
+
+#[test]
+fn border_radius_is_supported() {
+    init();
+    assert!(SUPPORTED_PROPERTIES.contains(&"border-radius"));
+}
+
+// ============================================================
+// min-width / max-width / min-height / max-height
+// ============================================================
+
+#[test]
+fn min_max_size_getters_resolve_and_default_to_none() {
+    init();
+    let mut decls = IndexMap::new();
+    decls.insert("min-width".into(), "10px".into());
+    decls.insert("max-width".into(), "40px".into());
+    decls.insert("min-height".into(), "3px".into());
+    decls.insert("max-height".into(), "none".into());
+    let mut attr = CssAttr::new();
+    attr.add(CssAttr(decls));
+    let f = default_font_ctx();
+    assert_eq!(attr.get_min_width(80, f, viewport()), Some(10));
+    assert_eq!(attr.get_max_width(80, f, viewport()), Some(40));
+    assert_eq!(attr.get_min_height(80, f, viewport()), Some(3));
+    // `none` (and `auto`) mean "no constraint".
+    assert_eq!(attr.get_max_height(80, f, viewport()), None);
+    let attr = attr_from_decl("min-width", "auto");
+    assert_eq!(attr.get_min_width(80, f, viewport()), None);
+    // Unset properties -> None.
+    assert_eq!(CssAttr::new().get_min_width(80, f, viewport()), None);
+    assert_eq!(CssAttr::new().get_max_width(80, f, viewport()), None);
+    assert_eq!(CssAttr::new().get_min_height(80, f, viewport()), None);
+    assert_eq!(CssAttr::new().get_max_height(80, f, viewport()), None);
+}
+
+#[test]
+fn min_max_size_properties_are_supported_not_inherited() {
+    init();
+    assert!(SUPPORTED_PROPERTIES.contains(&"min-width"));
+    assert!(SUPPORTED_PROPERTIES.contains(&"max-width"));
+    assert!(SUPPORTED_PROPERTIES.contains(&"min-height"));
+    assert!(SUPPORTED_PROPERTIES.contains(&"max-height"));
+    // Sizes do not inherit in CSS.
+    assert!(!INHERITED_PROPS.contains(&"min-width"));
+    assert!(!INHERITED_PROPS.contains(&"max-height"));
 }

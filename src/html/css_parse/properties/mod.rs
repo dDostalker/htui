@@ -31,11 +31,13 @@ use indexmap::IndexMap;
 use crate::html::box_edges::{Border, BorderSides, BoxEdges, EdgeSizes};
 
 use super::values::{
-    AlignItems, CssDisplay, FlexBasis, FlexDirection, FlexWrap, FontStyleKind, FontWeight, GapSizes,
-    JustifyContent, Length, OverflowWrap, TextAlign, TextDecoration, WhiteSpace, WordBreak,
-    parse_align_items, parse_border_side, parse_border_style, parse_border_width, parse_color_str,
-    parse_edge_sizes, parse_flex_basis, parse_flex_direction, parse_flex_wrap, parse_gap_shorthand,
-    parse_justify_content, parse_non_negative_number, parse_order, parse_overflow_wrap,
+    AlignItems, BoxSizing, CornerRadii, CssDisplay, FlexBasis, FlexDirection, FlexWrap,
+    FontStyleKind, FontWeight, GapSizes, JustifyContent, Length, LineHeight, OverflowWrap,
+    TextAlign, TextDecoration, TextTransform, WhiteSpace, WordBreak, parse_align_items,
+    parse_border_radius, parse_border_side, parse_border_style, parse_border_width,
+    parse_box_sizing, parse_color_str, parse_edge_sizes, parse_flex_basis, parse_flex_direction,
+    parse_flex_wrap, parse_gap_shorthand, parse_justify_content, parse_line_height,
+    parse_non_negative_number, parse_order, parse_overflow_wrap, parse_text_transform,
     parse_white_space, parse_word_break, resolve_flex_basis,
 };
 
@@ -535,6 +537,117 @@ impl CssAttr {
         match Length::parse(raw)? {
             Length::Auto => None,
             len => Some(len.resolve(LengthContext { containing: containing_width, font: font_ctx, viewport })),
+        }
+    }
+
+    /// Text case transform (CSS `text-transform`). `none` when unset.
+    ///
+    /// Inherited, so the cascade already merged an ancestor's value into this
+    /// node's `css_attr` when applicable.
+    pub fn get_text_transform(&self) -> TextTransform {
+        self.0
+            .get("text-transform")
+            .and_then(|s| parse_text_transform(s))
+            .unwrap_or_default()
+    }
+
+    /// Line-box height (CSS `line-height`). `normal` when unset.
+    ///
+    /// Inherited, so the cascade already merged an ancestor's value into this
+    /// node's `css_attr` when applicable. Resolve the row count with
+    /// [`resolve_line_height_cells`](crate::html::css_parse::resolve_line_height_cells).
+    pub fn get_line_height(&self) -> LineHeight {
+        self.0
+            .get("line-height")
+            .and_then(|s| parse_line_height(s))
+            .unwrap_or(LineHeight::Normal)
+    }
+
+    /// Box sizing model (CSS `box-sizing`).
+    ///
+    /// The engine's default is `border-box` (see [`BoxSizing`]) so unset
+    /// preserves the historical width semantics; an explicit `content-box`
+    /// switches `width` / `height` to CSS content-box semantics.
+    pub fn get_box_sizing(&self) -> BoxSizing {
+        self.0
+            .get("box-sizing")
+            .and_then(|s| parse_box_sizing(s))
+            .unwrap_or_default()
+    }
+
+    /// Corner radii (CSS `border-radius` shorthand).
+    ///
+    /// Unset yields all-zero radii (square corners). Lengths resolve like any
+    /// other edge value (`%` against the containing width).
+    pub fn get_border_radius(
+        &self,
+        containing_width: usize,
+        font_ctx: FontContext,
+        viewport: Viewport,
+    ) -> CornerRadii {
+        parse_border_radius(&self.0, containing_width, font_ctx, viewport)
+    }
+
+    /// Minimum width (CSS `min-width`). `None` when unset / `auto`.
+    pub fn get_min_width(
+        &self,
+        containing_width: usize,
+        font_ctx: FontContext,
+        viewport: Viewport,
+    ) -> Option<usize> {
+        self.resolve_min_max_len("min-width", containing_width, font_ctx, viewport)
+    }
+
+    /// Maximum width (CSS `max-width`). `None` when unset / `none` / `auto`.
+    pub fn get_max_width(
+        &self,
+        containing_width: usize,
+        font_ctx: FontContext,
+        viewport: Viewport,
+    ) -> Option<usize> {
+        self.resolve_min_max_len("max-width", containing_width, font_ctx, viewport)
+    }
+
+    /// Minimum height (CSS `min-height`). `None` when unset / `auto`.
+    pub fn get_min_height(
+        &self,
+        containing_width: usize,
+        font_ctx: FontContext,
+        viewport: Viewport,
+    ) -> Option<usize> {
+        self.resolve_min_max_len("min-height", containing_width, font_ctx, viewport)
+    }
+
+    /// Maximum height (CSS `max-height`). `None` when unset / `none` / `auto`.
+    pub fn get_max_height(
+        &self,
+        containing_width: usize,
+        font_ctx: FontContext,
+        viewport: Viewport,
+    ) -> Option<usize> {
+        self.resolve_min_max_len("max-height", containing_width, font_ctx, viewport)
+    }
+
+    /// Shared resolution for the four min/max size longhands.
+    ///
+    /// `auto` (or `none`, which fails [`Length::parse`]) means "no
+    /// constraint" — the property's initial value — so both map to `None`
+    /// and the caller leaves the size unconstrained.
+    fn resolve_min_max_len(
+        &self,
+        key: &str,
+        containing_width: usize,
+        font_ctx: FontContext,
+        viewport: Viewport,
+    ) -> Option<usize> {
+        let raw = self.0.get(key)?;
+        match Length::parse(raw)? {
+            Length::Auto => None,
+            len => Some(len.resolve(LengthContext {
+                containing: containing_width,
+                font: font_ctx,
+                viewport,
+            })),
         }
     }
 }

@@ -63,7 +63,7 @@ pub use html::layout_html;
 pub use img::{layout_img, layout_img_with_rect};
 pub use layout_block::{
     LayoutBlockOptions, OuterGeometry, block_left, build_border_rect, compute_outer_geometry,
-    layout_block, reserve_border_box, resolve_block_width,
+    constrained_block_width, layout_block, reserve_border_box, resolve_block_width,
 };
 pub use list::{layout_li, layout_ol, layout_ul};
 pub use p::layout_p;

@@ -3,6 +3,7 @@
 use crate::html::box_edges::BoxEdges;
 
 use super::inline_run::InlineRun;
+use crate::html::css_parse::CornerRadii;
 
 /// Paint-only data carried by every [`crate::layout::LayoutBox`].
 ///
@@ -27,6 +28,13 @@ pub struct PaintStyle {
     /// `font_size_cells` expansion the paint phase applies so an `<h1>` with
     /// the default 2em font-size renders each character across 2 cells.
     pub font_size_cells: usize,
+    /// Rows one visual line occupies (CSS `line-height`, resolved to cells).
+    /// `normal` yields `font_size_cells` — one line box per font cell; larger
+    /// values spread wrapped lines apart vertically.
+    pub line_height_cells: usize,
+    /// Corner radii (CSS `border-radius`) in cells. Any non-zero corner
+    /// paints with the rounded box-drawing corner glyphs.
+    pub border_radius: CornerRadii,
     /// Whether the rect's background should be painted. `true` when the box
     /// has an explicit CSS `background-color`, or when the element opts into
     /// the chrome band semantics (`<aside>` / `<header>` / `<footer>`).
@@ -47,6 +55,8 @@ impl Default for PaintStyle {
             box_edges: BoxEdges::default(),
             runs: None,
             font_size_cells: 1,
+            line_height_cells: 1,
+            border_radius: CornerRadii::default(),
             fill_bg: false,
             spacing_after: 0,
             chrome: false,

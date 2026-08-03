@@ -137,6 +137,8 @@ pub fn layout_table(
         box_edges: edges,
         runs: None,
         font_size_cells: own_font_size_cells,
+        line_height_cells: own_font_size_cells.max(1),
+        border_radius: crate::html::css_parse::CornerRadii::default(),
         fill_bg,
         spacing_after: 0,
         chrome: false,

@@ -155,6 +155,7 @@ fn main() -> Result<()> {
         "flex_align_self" => test_case!(flex_align_self, no_css),
         "flex_align_content" => test_case!(flex_align_content, no_css),
         "flex_nested" => test_case!(flex_nested, no_css),
+        "css_props" => test_case!(css_props, no_css),
         "viewport_units" => test_case!(viewport_units, no_css),
         "showcase" => test_case!(showcase, no_css),
         _ => {
@@ -179,6 +180,7 @@ fn main() -> Result<()> {
                 "flex_align_self",
                 "flex_align_content",
                 "flex_nested",
+                "css_props",
                 "viewport_units",
                 "showcase",
             ];

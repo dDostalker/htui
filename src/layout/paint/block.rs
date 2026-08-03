@@ -53,6 +53,16 @@ pub(crate) fn paint_block(
     let chrome = lb.paint_style.chrome;
     let spacing_after = lb.paint_style.spacing_after;
     let box_edges = &lb.paint_style.box_edges;
+    let font = lb.paint_style.font_size_cells.max(1);
+    let line_h = lb.paint_style.line_height_cells.max(1);
+    // Row of the glyph block within its line box. With `line-height > font`
+    // the extra rows are split above and below the glyphs; otherwise the
+    // glyphs keep the historical centering within the font-sized line box.
+    let glyph_row_within_line = if line_h > font {
+        (line_h - font) / 2
+    } else {
+        font.saturating_sub(1) / 2
+    };
 
     if fill_bg {
         // Paint the background across every row of the rect that is *not* a
@@ -82,11 +92,7 @@ pub(crate) fn paint_block(
             > 0;
         let text_clamped =
             my_bg.is_some() && !chrome && !has_padding && lb.paint_style.font_size_cells > 1;
-        let text_row_offset: usize = if text_clamped {
-            (lb.paint_style.font_size_cells.saturating_sub(1)) / 2
-        } else {
-            0
-        };
+        let text_row_offset: usize = if text_clamped { glyph_row_within_line } else { 0 };
         let (bg_start_x, bg_width) = if text_clamped {
             if let Some(runs) = &lb.paint_style.runs {
                 let inner_h = box_edges.inner_horizontal();
@@ -171,11 +177,7 @@ pub(crate) fn paint_block(
         // The extra leading rows are also filled with `effective_bg` by the
         // background loop above, so the box reads as a tall band rather than
         // a 1-row strip.
-        let vertical_offset = if lb.paint_style.font_size_cells > 1 {
-            (lb.paint_style.font_size_cells.saturating_sub(1) / 2) * cols
-        } else {
-            0
-        };
+        let vertical_offset = glyph_row_within_line * cols;
         let content_row = cell_start
             + (border_top.saturating_add(padding_top)) * cols
             + content_x_offset
@@ -210,6 +212,7 @@ pub(crate) fn paint_block(
             align,
             effective_bg,
             lb.paint_style.font_size_cells,
+            lb.paint_style.line_height_cells,
             content_clip,
         );
     }

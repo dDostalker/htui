@@ -64,6 +64,16 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "font-size",
     "width",
     "height",
+    // High-frequency sizing & box-model semantics
+    "min-width",
+    "max-width",
+    "min-height",
+    "max-height",
+    "box-sizing",
+    "border-radius",
+    // Text
+    "text-transform",
+    "line-height",
     // Box-model edges
     "padding",
     "padding-top",
@@ -117,6 +127,8 @@ pub const INHERITED_PROPS: &[&str] = &[
     "font-style",
     "text-decoration",
     "font-size",
+    "text-transform",
+    "line-height",
 ];
 
 fn inherit_css(arena: &mut NodeArena, node_id: NodeId, parent_attrs: &IndexMap<String, String>) {

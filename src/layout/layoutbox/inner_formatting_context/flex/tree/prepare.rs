@@ -79,10 +79,24 @@ pub(super) fn prepare_flex_item(
     // `align-self: auto` defers to the container's `align-items` (CSS
     // default for `align-items` is `stretch`, so without an explicit
     // `align-items` this still ends up as `Stretch`).
+    let css_min_main = match direction {
+        FlexDirection::Row => css.get_min_width(containing_main, context.font, context.viewport),
+        FlexDirection::Column => {
+            css.get_min_height(containing_main, context.font, context.viewport)
+        }
+    };
+    let css_max_main = match direction {
+        FlexDirection::Row => css.get_max_width(containing_main, context.font, context.viewport),
+        FlexDirection::Column => {
+            css.get_max_height(containing_main, context.font, context.viewport)
+        }
+    };
     FlexItemPrep {
         node_id: item_id,
         basis: basis_resolved,
         min_main,
+        css_min_main,
+        css_max_main,
         grow: css.get_flex_grow(),
         shrink: css.get_flex_shrink(),
         align_self: match css.get_align_self() {

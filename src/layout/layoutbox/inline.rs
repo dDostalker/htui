@@ -11,6 +11,7 @@ use crossterm::style::Color;
 
 use super::InlineRun;
 use crate::{
+    html::css_parse::TextTransform,
     tdom::node::{Node, NodeArena, NodeType},
     tui::graph_api::{FontStyle, block_style},
 };
@@ -38,8 +39,9 @@ pub fn collect_runs(
     bg: Option<Color>,
     style: FontStyle,
 ) -> Vec<InlineRun> {
+    let transform = node.css_attr.get_text_transform();
     let mut runs = Vec::new();
-    walk_runs(arena, node, fg, bg, style, &mut runs);
+    walk_runs(arena, node, fg, bg, style, transform, &mut runs);
     runs
 }
 
@@ -49,6 +51,7 @@ fn walk_runs(
     fg: Option<Color>,
     bg: Option<Color>,
     style: FontStyle,
+    transform: TextTransform,
     runs: &mut Vec<InlineRun>,
 ) {
     for child_id in node.child_ids() {
@@ -56,7 +59,8 @@ fn walk_runs(
         match &child.node_type {
             NodeType::Text(s) => {
                 if !s.is_empty() {
-                    runs.push(InlineRun::new(s.clone(), style, fg, bg));
+                    let text = apply_text_transform(s, transform);
+                    runs.push(InlineRun::new(text, style, fg, bg));
                 }
             }
             NodeType::Span => {
@@ -64,7 +68,8 @@ fn walk_runs(
                 let span_fg = child.css_attr.get_color().or(fg);
                 let span_bg = child.css_attr.get_bg_color().or(bg);
                 let span_style = style | block_style(&child.css_attr);
-                walk_runs(arena, child, span_fg, span_bg, span_style, runs);
+                let span_transform = child.css_attr.get_text_transform();
+                walk_runs(arena, child, span_fg, span_bg, span_style, span_transform, runs);
             }
             NodeType::A => {
                 // A block-level anchor is painted by its own `LayoutBox`
@@ -104,7 +109,8 @@ fn walk_runs(
                 if !child.css_attr.is_set("text-decoration") {
                     a_style |= FontStyle::UNDERLINED;
                 }
-                walk_runs(arena, child, a_fg, a_bg, a_style, runs);
+                let a_transform = child.css_attr.get_text_transform();
+                walk_runs(arena, child, a_fg, a_bg, a_style, a_transform, runs);
             }
             NodeType::Em => {
                 // User-agent default: `<em>` renders italic. Anything the
@@ -117,12 +123,44 @@ fn walk_runs(
                 if !child.css_attr.is_set("font-style") {
                     em_style |= FontStyle::ITALIC;
                 }
-                walk_runs(arena, child, em_fg, em_bg, em_style, runs);
+                let em_transform = child.css_attr.get_text_transform();
+                walk_runs(arena, child, em_fg, em_bg, em_style, em_transform, runs);
             }
             // Block-level nested elements live in their own LayoutBox;
             // unknown inline tags are flattened by the HTML parser so they
             // never reach here as an unknown NodeType.
             _ => {}
+        }
+    }
+}
+
+/// Apply a [`TextTransform`] to a text node's content.
+///
+/// `capitalize` uppercases the first character of each whitespace / punct
+/// delimited word; `to_uppercase` / `to_lowercase` delegate to the Unicode
+/// case mappings (a single char may expand, e.g. `ß` → `SS`).
+fn apply_text_transform(text: &str, transform: TextTransform) -> String {
+    match transform {
+        TextTransform::None => text.to_string(),
+        TextTransform::Uppercase => text.to_uppercase(),
+        TextTransform::Lowercase => text.to_lowercase(),
+        TextTransform::Capitalize => {
+            let mut out = String::with_capacity(text.len());
+            let mut new_word = true;
+            for ch in text.chars() {
+                if ch.is_alphanumeric() {
+                    if new_word {
+                        out.extend(ch.to_uppercase());
+                    } else {
+                        out.push(ch);
+                    }
+                    new_word = false;
+                } else {
+                    out.push(ch);
+                    new_word = true;
+                }
+            }
+            out
         }
     }
 }

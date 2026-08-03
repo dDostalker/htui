@@ -129,7 +129,14 @@ pub(crate) fn paint_borders(
     }
 
     // Corners: overwrite the 4 corner cells so the edges join cleanly.
-    let corner_chars = ['┌', '┐', '└', '┘'];
+    // `border-radius: …` (any non-zero corner) swaps the square glyphs for
+    // the rounded box-drawing set; radii larger than 1 render identically
+    // to radius 1 because the terminal grid has no finer rounding primitive.
+    let corner_chars = if lb.paint_style.border_radius.is_rounded() {
+        ['╭', '╮', '╰', '╯']
+    } else {
+        ['┌', '┐', '└', '┘']
+    };
     let corner_positions: [(usize, usize); 4] = [
         (0, 0),
         (right_col_start, 0),

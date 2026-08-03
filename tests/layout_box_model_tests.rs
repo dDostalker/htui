@@ -430,3 +430,170 @@ fn margin_top_creates_visible_gap_between_siblings() {
         "B should sit at least margin-top=5 rows below A: a={a_row}, b={b_row}"
     );
 }
+
+// ============================================================
+// box-sizing
+// ============================================================
+
+#[test]
+fn box_sizing_content_box_adds_padding_and_border_to_width() {
+    init();
+    let yellow = Color::Rgb {
+        r: 255,
+        g: 255,
+        b: 0,
+    };
+    let css = "div { width: 10px; padding: 2px; border: 1px solid red; background-color: yellow; }";
+
+    // Default (border-box): `width` is the full border-box, so the bg
+    // (padding-box) covers cols 1..9 (10 minus the 1-col borders). Count the
+    // pure bg-fill cells (word == " ") on row 1 — the padding-top row that
+    // carries no border glyphs.
+    let (term_map, tl) = draw("<div>Hi</div>", css);
+    let cols = term_map.columns as usize;
+    let bg_count_row1 = tl.layout[cols..2 * cols]
+        .iter()
+        .filter(|b| b.bcolor == Some(yellow) && b.word == " ")
+        .count();
+    assert_eq!(bg_count_row1, 8, "border-box width=10 -> 8 bg cells");
+
+    // `box-sizing: content-box`: the 10px width is the content box, so the
+    // border-box grows to 10 + 4 (padding) + 2 (border) = 16 -> 14 bg cells.
+    let (_, tl) = draw(
+        "<div>Hi</div>",
+        "div { width: 10px; padding: 2px; border: 1px solid red; background-color: yellow; box-sizing: content-box; }",
+    );
+    let bg_count_row1 = tl.layout[cols..2 * cols]
+        .iter()
+        .filter(|b| b.bcolor == Some(yellow) && b.word == " ")
+        .count();
+    assert_eq!(bg_count_row1, 14, "content-box width=10 -> 14 bg cells");
+}
+
+// ============================================================
+// min-width / max-width
+// ============================================================
+
+#[test]
+fn min_width_overrides_declared_width() {
+    init();
+    // `min-width` floors the border-box width: 10px declared, 30px minimum
+    // -> the box spans 30 columns even though its content is narrow.
+    let (term_map, tl) = draw(
+        "<div>Hi</div>",
+        "div { width: 10px; min-width: 30px; background-color: yellow; }",
+    );
+    let cols = term_map.columns as usize;
+    let yellow = Color::Rgb {
+        r: 255,
+        g: 255,
+        b: 0,
+    };
+    let max_bg_col = tl.layout[0..cols]
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| b.bcolor == Some(yellow))
+        .map(|(i, _)| i)
+        .max()
+        .expect("bg should render");
+    assert_eq!(max_bg_col, 29, "min-width=30 -> bg spans cols 0..30");
+}
+
+#[test]
+fn max_width_caps_auto_and_declared_width() {
+    init();
+    let yellow = Color::Rgb {
+        r: 255,
+        g: 255,
+        b: 0,
+    };
+    // A block normally fills the whole viewport (80 cols); `max-width` caps
+    // it to 30 columns.
+    let (term_map, tl) = draw(
+        "<div>Hi</div>",
+        "div { max-width: 30px; background-color: yellow; }",
+    );
+    let cols = term_map.columns as usize;
+    let max_bg_col = tl.layout[0..cols]
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| b.bcolor == Some(yellow))
+        .map(|(i, _)| i)
+        .max()
+        .expect("bg should render");
+    assert_eq!(max_bg_col, 29, "max-width=30 -> auto width capped to 30");
+
+    // `max-width` also caps an explicit `width`.
+    let (_, tl) = draw(
+        "<div>Hi</div>",
+        "div { width: 60px; max-width: 30px; background-color: yellow; }",
+    );
+    let max_bg_col = tl.layout[0..cols]
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| b.bcolor == Some(yellow))
+        .map(|(i, _)| i)
+        .max()
+        .expect("bg should render");
+    assert_eq!(max_bg_col, 29, "width=60 with max-width=30 -> 30");
+}
+
+// ============================================================
+// min-height
+// ============================================================
+
+#[test]
+fn min_height_expands_short_box() {
+    init();
+    // An empty-ish block is 1 row tall by default; `min-height: 4` grows
+    // the border-box to 4 rows.
+    let (term_map, tl) = draw(
+        "<div>X</div>",
+        "div { min-height: 4px; background-color: yellow; }",
+    );
+    let cols = term_map.columns as usize;
+    let yellow = Color::Rgb {
+        r: 255,
+        g: 255,
+        b: 0,
+    };
+    let bg_rows: std::collections::HashSet<usize> = tl
+        .layout
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| b.bcolor == Some(yellow))
+        .map(|(i, _)| i / cols)
+        .collect();
+    for row in 0..4 {
+        assert!(bg_rows.contains(&row), "row {row} should carry the bg");
+    }
+}
+
+// ============================================================
+// border-radius
+// ============================================================
+
+#[test]
+fn border_radius_renders_rounded_corner_glyphs() {
+    init();
+    // `border-radius` swaps the square corner glyphs (┌ ┐ └ ┘) for the
+    // rounded box-drawing set (╭ ╮ ╰ ╯). Rect: width 6, height 3 (content
+    // row + top/bottom border).
+    let (term_map, tl) = draw(
+        "<div>X</div>",
+        "div { border: 1px solid red; border-radius: 2px; width: 6px; }",
+    );
+    let cols = term_map.columns as usize;
+    let word_at = |tl: &TermLayout, x: usize, y: usize| tl.layout[y * cols + x].word.clone();
+    assert_eq!(word_at(&tl, 0, 0), "╭", "top-left corner");
+    assert_eq!(word_at(&tl, 5, 0), "╮", "top-right corner");
+    assert_eq!(word_at(&tl, 0, 2), "╰", "bottom-left corner");
+    assert_eq!(word_at(&tl, 5, 2), "╯", "bottom-right corner");
+
+    // Control: without `border-radius` the corners stay square.
+    let (_, tl) = draw(
+        "<div>X</div>",
+        "div { border: 1px solid red; width: 6px; }",
+    );
+    assert_eq!(word_at(&tl, 0, 0), "┌", "square corner without radius");
+}

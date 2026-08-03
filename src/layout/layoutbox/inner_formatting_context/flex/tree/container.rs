@@ -2,8 +2,10 @@
 //! the container's [`LayoutBox`].
 
 use crate::{
+    html::css_parse::BoxSizing,
     layout::{
         BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, Rect,
+        inner_formatting_context::flow::constrained_block_width,
         layoutbox::{
             collect_runs,
             generation::{GeneratedBoxKind, generate_node},
@@ -13,6 +15,8 @@ use crate::{
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
     tui::graph_api::block_style,
 };
+
+use crate::html::css_parse::resolve_line_height_cells;
 
 use super::items::layout_flex_items;
 
@@ -33,6 +37,12 @@ pub(super) struct FlexItemPrep {
     /// auto`) — the item's min-content size. `flex-shrink` never takes an
     /// item below this floor.
     pub(super) min_main: usize,
+    /// Explicit CSS `min-width` (row) / `min-height` (column) constraint on
+    /// the main axis, in cells. `None` when unset.
+    pub(super) css_min_main: Option<usize>,
+    /// Explicit CSS `max-width` (row) / `max-height` (column) constraint on
+    /// the main axis, in cells. `None` when unset / `none`.
+    pub(super) css_max_main: Option<usize>,
     pub(super) grow: f32,
     pub(super) shrink: f32,
     pub(super) align_self: crate::html::css_parse::AlignItems,
@@ -66,6 +76,12 @@ pub(super) fn layout_flex_container(
     let edges =
         node.css_attr
             .get_box_edges(containing.width, child_context.font, child_context.viewport);
+    let line_height_cells = resolve_line_height_cells(
+        node.css_attr.get_line_height(),
+        own_font_size_cells,
+        child_context.font,
+        child_context.viewport,
+    );
 
     // A flex formatting context normally participates in block flow. When it
     // is itself a flex item, its parent has already chosen the border-box and
@@ -76,12 +92,13 @@ pub(super) fn layout_flex_container(
             cursor.skip(edges.margin.top);
             let outer_y_top = cursor.y;
             let available = containing.width.saturating_sub(edges.margin.horizontal());
-            let block_width = node
-                .css_attr
-                .get_width(available, child_context.font, child_context.viewport)
-                .unwrap_or(available)
-                .min(available)
-                .max(1);
+            let block_width = constrained_block_width(
+                &node.css_attr,
+                available,
+                edges,
+                child_context.font,
+                child_context.viewport,
+            );
             (
                 containing.x + edges.margin.left,
                 outer_y_top,
@@ -141,7 +158,7 @@ pub(super) fn layout_flex_container(
         )
     };
     let inline_line_count = flex_inline_lines.len();
-    let inline_rows = inline_line_count.saturating_mul(own_font_size_cells.max(1));
+    let inline_rows = inline_line_count.saturating_mul(line_height_cells.max(1));
     // Flex items begin below the container's own wrapped text.
     let content_y_with_inline = content_y.saturating_add(inline_rows);
 
@@ -190,11 +207,40 @@ pub(super) fn layout_flex_container(
         )
     };
 
-    let outer_height = match preallocated_height {
+    let mut outer_height = match preallocated_height {
         Some(height) => height,
         None if has_explicit_height => container_css_height.unwrap_or(0).max(lines_total_height),
         None => lines_total_height,
     };
+    // `min-height` / `max-height` clamp the border-box height. `outer_height`
+    // is a *content* height here (the border-box adds `inner_v`), so the
+    // constraint is converted back to a content target. Preallocated
+    // (flex-item) rects keep the size chosen by the parent context.
+    if preallocated_height.is_none() {
+        let inner_v = edges.padding.top
+            + edges.padding.bottom
+            + edges.border.top.thickness()
+            + edges.border.bottom.thickness();
+        let sizing = node.css_attr.get_box_sizing();
+        let to_content = |h: usize| match sizing {
+            BoxSizing::BorderBox => h.saturating_sub(inner_v),
+            BoxSizing::ContentBox => h,
+        };
+        if let Some(m) = node
+            .css_attr
+            .get_min_height(content_width, child_context.font, child_context.viewport)
+            .map(to_content)
+        {
+            outer_height = outer_height.max(m);
+        }
+        if let Some(m) = node
+            .css_attr
+            .get_max_height(content_width, child_context.font, child_context.viewport)
+            .map(to_content)
+        {
+            outer_height = outer_height.min(m).max(1);
+        }
+    }
 
     let chrome = matches!(
         node.node_type,
@@ -244,6 +290,10 @@ pub(super) fn layout_flex_container(
             Some(flex_inline_lines)
         },
         font_size_cells: own_font_size_cells,
+        line_height_cells,
+        border_radius: node
+            .css_attr
+            .get_border_radius(content_width, child_context.font, child_context.viewport),
         fill_bg,
         spacing_after,
         chrome,

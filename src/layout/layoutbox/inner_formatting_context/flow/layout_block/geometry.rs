@@ -6,6 +6,7 @@
 
 use crate::{
     html::box_edges::BoxEdges,
+    html::css_parse::{BoxSizing, CssAttr, FontContext, Viewport},
     layout::{BoxConstraint, Cursor, Rect},
 };
 
@@ -13,6 +14,46 @@ use crate::{
 /// the containing block.
 pub fn resolve_block_width(css_width: Option<usize>, containing_width: usize) -> usize {
     css_width.unwrap_or(containing_width).min(containing_width)
+}
+
+/// Resolve a block's border-box width from `width`, `box-sizing`, and the
+/// `min-width` / `max-width` constraints.
+///
+/// `containing_width` is the available width after margins / indents. The
+/// engine's historical model applies `width` to the **border-box**; with
+/// `box-sizing: content-box` the declared width (and the min/max constraints)
+/// are converted to border-box by adding padding + border, mirroring CSS
+/// semantics. `min-width` may push the box past the containing block
+/// (overflow); `max-width` caps it below.
+pub fn constrained_block_width(
+    css_attr: &CssAttr,
+    containing_width: usize,
+    edges: BoxEdges,
+    font_ctx: FontContext,
+    viewport: Viewport,
+) -> usize {
+    let inner_h = edges.inner_horizontal();
+    let to_border = |w: usize| match css_attr.get_box_sizing() {
+        BoxSizing::BorderBox => w,
+        BoxSizing::ContentBox => w.saturating_add(inner_h),
+    };
+    let declared = css_attr
+        .get_width(containing_width, font_ctx, viewport)
+        .map(to_border);
+    let min_w = css_attr
+        .get_min_width(containing_width, font_ctx, viewport)
+        .map(to_border);
+    let max_w = css_attr
+        .get_max_width(containing_width, font_ctx, viewport)
+        .map(to_border);
+    let mut width = resolve_block_width(declared, containing_width);
+    if let Some(m) = min_w {
+        width = width.max(m);
+    }
+    if let Some(m) = max_w {
+        width = width.min(m);
+    }
+    width.max(1)
 }
 
 /// Compute the left offset for a block-level element inside its containing

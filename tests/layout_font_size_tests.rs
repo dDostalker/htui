@@ -539,4 +539,110 @@ fn render_to_bytes_includes_bg_sgr_on_pad_cells_for_padded_em_block() {
     );
 }
 
+// ============================================================
+// text-transform
+// ============================================================
+
+#[test]
+fn text_transform_uppercase_renders() {
+    init();
+    let (term_map, tl) = draw("<p>hello world</p>", "p { text-transform: uppercase; }");
+    let cols = term_map.columns as usize;
+    let row0: String = tl.layout[0..cols]
+        .iter()
+        .map(|b| b.word.as_str())
+        .collect::<String>()
+        .trim_end()
+        .to_string();
+    assert_eq!(row0, "HELLO WORLD");
+}
+
+#[test]
+fn text_transform_lowercase_and_capitalize_render() {
+    init();
+    let (term_map, tl) = draw(
+        "<p>Hello WORLD</p>",
+        "p { text-transform: lowercase; }",
+    );
+    let cols = term_map.columns as usize;
+    let row0: String = tl.layout[0..cols]
+        .iter()
+        .map(|b| b.word.as_str())
+        .collect::<String>()
+        .trim_end()
+        .to_string();
+    assert_eq!(row0, "hello world");
+
+    let (_, tl) = draw("<p>hello world</p>", "p { text-transform: capitalize; }");
+    let row0: String = tl.layout[0..cols]
+        .iter()
+        .map(|b| b.word.as_str())
+        .collect::<String>()
+        .trim_end()
+        .to_string();
+    assert_eq!(row0, "Hello World");
+}
+
+#[test]
+fn text_transform_inherits_to_nested_spans() {
+    init();
+    // `text-transform` is inherited: a styled `<span>` inside a transformed
+    // parent still receives the parent's transform (the cascade merged it).
+    let (term_map, tl) = draw(
+        "<div><span>abc</span></div>",
+        "div { text-transform: uppercase; }",
+    );
+    let cols = term_map.columns as usize;
+    let row0: String = tl.layout[0..cols]
+        .iter()
+        .map(|b| b.word.as_str())
+        .collect::<String>()
+        .trim_end()
+        .to_string();
+    assert_eq!(row0, "ABC");
+}
+
+// ============================================================
+// line-height
+// ============================================================
+
+#[test]
+fn line_height_2_expands_single_line_box() {
+    init();
+    // `line-height: 2` doubles the line box: the glyph stays on row 0 and
+    // the rect grows to 2 rows tall.
+    let (term_map, tl) = draw("<p>X</p>", "p { line-height: 2; }");
+    let cols = term_map.columns as usize;
+    let idx = tl.layout.iter().position(|b| b.word == "X").unwrap();
+    assert_eq!(idx / cols, 0, "glyph sits on the first row");
+    assert!(tl.rendered_rows >= 2, "rect should be 2 rows tall");
+}
+
+#[test]
+fn line_height_2_separates_wrapped_lines() {
+    init();
+    // "ab cd" wraps into two lines inside a 2-col box; with `line-height:
+    // 2` the second line lands 2 rows below the first (instead of 1).
+    let (term_map, tl) = draw(
+        "<p>ab cd</p>",
+        "p { width: 2px; line-height: 2; }",
+    );
+    let cols = term_map.columns as usize;
+    let a_idx = tl.layout.iter().position(|b| b.word == "a").unwrap();
+    let c_idx = tl.layout.iter().position(|b| b.word == "c").unwrap();
+    assert_eq!(a_idx / cols, 0, "first line on row 0");
+    assert_eq!(c_idx / cols, 2, "second line 2 rows below (line-height 2)");
+}
+
+#[test]
+fn line_height_normal_keeps_one_row_per_line() {
+    init();
+    // Control: the default `line-height: normal` keeps the historical 1-row
+    // spacing, so the wrapped second line lands on row 1.
+    let (term_map, tl) = draw("<p>ab cd</p>", "p { width: 2px; }");
+    let cols = term_map.columns as usize;
+    let c_idx = tl.layout.iter().position(|b| b.word == "c").unwrap();
+    assert_eq!(c_idx / cols, 1, "second line on row 1 without line-height");
+}
+
 

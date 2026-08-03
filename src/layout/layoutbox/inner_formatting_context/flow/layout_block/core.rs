@@ -9,6 +9,7 @@
 
 use crate::{
     html::box_edges::BoxEdges,
+    html::css_parse::BoxSizing,
     layout::{
         BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, Rect,
         inner_formatting_context::flow::layout_children,
@@ -18,9 +19,11 @@ use crate::{
     tui::graph_api::block_style,
 };
 
+use crate::html::css_parse::resolve_line_height_cells;
+
 use super::geometry::{
-    OuterGeometry, block_left, build_border_rect, compute_outer_geometry, reserve_border_box,
-    resolve_block_width,
+    OuterGeometry, block_left, build_border_rect, compute_outer_geometry, constrained_block_width,
+    reserve_border_box,
 };
 use super::options::LayoutBlockOptions;
 
@@ -58,6 +61,19 @@ pub fn layout_block(
     let edges: BoxEdges =
         node.css_attr
             .get_box_edges(containing.width, child_context.font, child_context.viewport);
+    let sizing = node.css_attr.get_box_sizing();
+    let line_height_cells = resolve_line_height_cells(
+        node.css_attr.get_line_height(),
+        own_font_size_cells,
+        child_context.font,
+        child_context.viewport,
+    );
+    // The available width after margins / indent — shared by the width
+    // resolution and the min/max-height clamp below.
+    let available = containing
+        .width
+        .saturating_sub(opts.indent)
+        .saturating_sub(edges.margin.horizontal());
 
     let (geom, preallocated_height) = match pre_allocated_rect {
         Some(rect) => {
@@ -82,16 +98,13 @@ pub fn layout_block(
         None => {
             cursor.skip(edges.margin.top);
             let outer_y_top = cursor.y;
-            let available = containing
-                .width
-                .saturating_sub(opts.indent)
-                .saturating_sub(edges.margin.horizontal());
-            let block_width = resolve_block_width(
-                node.css_attr
-                    .get_width(available, child_context.font, child_context.viewport),
+            let block_width = constrained_block_width(
+                &node.css_attr,
                 available,
-            )
-            .max(1);
+                edges,
+                child_context.font,
+                child_context.viewport,
+            );
             let x = block_left(containing) + opts.indent;
             let geom = compute_outer_geometry(
                 BoxConstraint {
@@ -153,7 +166,7 @@ pub fn layout_block(
         )
     };
     let inline_line_count = wrapped_lines.len();
-    let inline_rows = inline_line_count.saturating_mul(own_font_size_cells.max(1));
+    let inline_rows = inline_line_count.saturating_mul(line_height_cells.max(1));
 
     // Block children begin BELOW the box's own inline text: in CSS the
     // inline content forms its own line(s) first and block-level children
@@ -185,13 +198,51 @@ pub fn layout_block(
 
     let outer_height = match preallocated_height {
         Some(height) => height.max(1),
-        None => reserve_border_box(
-            cursor,
-            geom.outer_y,
-            edges,
-            content_height,
-            own_font_size_cells.max(1),
-        ),
+        None => {
+            let mut height = reserve_border_box(
+                cursor,
+                geom.outer_y,
+                edges,
+                content_height,
+                line_height_cells.max(1),
+            );
+            // `min-height` / `max-height` clamp the border-box height
+            // (converted per `box-sizing`). `min-height` can push the box
+            // past its content; `max-height` caps it (content is clipped by
+            // the paint phase).
+            let inner_v = edges.padding.top
+                + edges.padding.bottom
+                + edges.border.top.thickness()
+                + edges.border.bottom.thickness();
+            let to_border = |h: usize| match sizing {
+                BoxSizing::BorderBox => h,
+                BoxSizing::ContentBox => h.saturating_add(inner_v),
+            };
+            if let Some(m) = node
+                .css_attr
+                .get_min_height(available, child_context.font, child_context.viewport)
+                .map(to_border)
+            {
+                height = height.max(m);
+            }
+            if let Some(m) = node
+                .css_attr
+                .get_max_height(available, child_context.font, child_context.viewport)
+                .map(to_border)
+            {
+                height = height.min(m).max(1);
+            }
+            // `reserve_border_box` already advanced the cursor using the
+            // pre-clamp height; re-position it so the next sibling starts
+            // below the clamped border-box (otherwise the parent's content
+            // area would stay short and the paint phase would clip this
+            // box's extra rows).
+            cursor.y = geom
+                .outer_y
+                .saturating_add(height)
+                .saturating_add(edges.margin.bottom);
+            height
+        }
     };
 
     // Spacing belongs to block flow. A flex formatting context has already
@@ -221,6 +272,10 @@ pub fn layout_block(
             Some(wrapped_lines)
         },
         font_size_cells: own_font_size_cells,
+        line_height_cells,
+        border_radius: node
+            .css_attr
+            .get_border_radius(containing.width, child_context.font, child_context.viewport),
         fill_bg,
         spacing_after: effective_spacing_after,
         chrome: effective_chrome,

@@ -1273,3 +1273,89 @@ fn test_flex_item_content_clipped_to_allocated_rect() {
         rows[after_row]
     );
 }
+
+#[test]
+fn test_flex_container_max_width_caps_fill() {
+    init();
+    // A flex container fills the viewport by default (80 cols); `max-width`
+    // caps the container's border-box to 30 columns, so its background
+    // only spans cols 0..30.
+    let html = r#"
+        <div class="container">
+            <div class="a">A</div>
+        </div>
+    "#;
+    let css = r#"
+        .container { display: flex; max-width: 30px; background-color: yellow; }
+    "#;
+    let (rows, tl) = render_rows(html, css);
+    let cols = COLS as usize;
+    let yellow = Color::Rgb {
+        r: 255,
+        g: 255,
+        b: 0,
+    };
+    let max_bg_col = tl.layout[0..cols]
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| b.bcolor == Some(yellow))
+        .map(|(i, _)| i)
+        .max()
+        .expect("container bg should render");
+    assert_eq!(max_bg_col, 29, "max-width=30 caps the container's bg");
+    assert!(
+        rows[0].contains("A"),
+        "item still renders inside the capped container"
+    );
+}
+
+#[test]
+fn test_flex_item_max_width_caps_grow() {
+    init();
+    // Two growing items in a 40-cell container split it evenly (20 each).
+    // `.a { max-width: 5px }` caps A's grown size at 5, so B starts at
+    // column 5 instead of column 20.
+    let html = r#"
+        <div class="container">
+            <div class="a">A</div>
+            <div class="b">B</div>
+        </div>
+    "#;
+    let css = r#"
+        .container { display: flex; width: 40px; }
+        .a { flex-grow: 1; max-width: 5px; }
+        .b { flex-grow: 1; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    let line0 = &rows[0];
+    let pos_a = line0.find("A").expect("A on row 0");
+    let pos_b = line0.find("B").expect("B on row 0");
+    assert_eq!(pos_a, 0, "A starts at col 0");
+    assert_eq!(pos_b, 5, "B starts after A's capped width of 5");
+}
+
+#[test]
+fn test_flex_item_min_width_prevents_shrink_below_floor() {
+    init();
+    // Two 10-cell items in a 24-cell container: without constraints the
+    // line exactly fills the container (10 + 10). `.a { min-width: 14px }`
+    // floors A's size at 14, pushing B to column 14 — the line still fits
+    // inside the container (14 + 10 = 24), so nothing is clipped.
+    let html = r#"
+        <div class="container">
+            <div class="a">A</div>
+            <div class="b">B</div>
+        </div>
+    "#;
+    let css = r#"
+        .container { display: flex; width: 24px; }
+        .a { flex-basis: 10px; min-width: 14px; }
+        .b { flex-basis: 10px; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    let line0 = &rows[0];
+    let pos_a = line0.find("A").expect("A on row 0");
+    let pos_b = line0.find("B").expect("B on row 0");
+    assert_eq!(pos_a, 0, "A starts at col 0");
+    assert_eq!(pos_b, 14, "B starts after A's min-width floor of 14");
+}

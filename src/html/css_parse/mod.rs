@@ -12,7 +12,8 @@ pub use properties::{AlignSelf, CssAttr};
 pub use selector::{Combinator, CompoundSelector, CssSelector, NthExpr, Selector};
 pub use stylesheet::{CssRule, Parser, parse_declaration_text};
 pub use values::{
-    AlignItems, CssDisplay, FlexBasis, FlexDirection, FlexWrap, FontContext, FontStyleKind,
-    FontWeight, GapSizes, JustifyContent, Length, LengthContext, OverflowWrap, PX_PER_CELL,
-    TextAlign, TextDecoration, Viewport, WhiteSpace, WordBreak, parse_color_str,
+    AlignItems, BoxSizing, CornerRadii, CssDisplay, FlexBasis, FlexDirection, FlexWrap,
+    FontContext, FontStyleKind, FontWeight, GapSizes, JustifyContent, Length, LengthContext,
+    LineHeight, OverflowWrap, PX_PER_CELL, TextAlign, TextDecoration, TextTransform, Viewport,
+    WhiteSpace, WordBreak, parse_color_str, resolve_line_height_cells,
 };
