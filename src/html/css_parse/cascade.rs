@@ -3,17 +3,23 @@ use indexmap::IndexMap;
 use crate::tdom::node::{NodeArena, NodeId};
 
 use super::{
-    matcher::selector_chain_matches, properties::CssAttr, selector::CssSelector,
+    matcher::selector_chain_matches_with_hover, properties::CssAttr, selector::CssSelector,
     stylesheet::{CssRule, parse_declaration_text},
 };
 
-fn apply_css_rule(arena: &mut NodeArena, node_id: NodeId, selector: &CssSelector, css: &CssAttr) {
-    if selector_chain_matches(arena, node_id, selector) {
+fn apply_css_rule(
+    arena: &mut NodeArena,
+    node_id: NodeId,
+    selector: &CssSelector,
+    css: &CssAttr,
+    hovered: Option<NodeId>,
+) {
+    if selector_chain_matches_with_hover(arena, node_id, selector, hovered) {
         arena[node_id].css_attr.add(css.clone());
     }
     let children: Vec<NodeId> = arena[node_id].children.clone();
     for child_id in children {
-        apply_css_rule(arena, child_id, selector, css);
+        apply_css_rule(arena, child_id, selector, css, hovered);
     }
 }
 fn apply_inline_styles(arena: &mut NodeArena, node_id: NodeId) {
@@ -32,9 +38,21 @@ fn apply_inline_styles(arena: &mut NodeArena, node_id: NodeId) {
 
 // css_into_node
 
-pub fn css_into_node(arena: &mut NodeArena, root_id: NodeId, css: &CssRule) {
+/// Apply all stylesheet rules, inline `style` attributes and inheritance to
+/// the arena, evaluating `:hover` pseudo-class rules against `hovered` (the
+/// session-local node currently under the pointer).
+///
+/// Callers that need a hover-aware cascade (the event system's hover
+/// highlight) use this; everything else should call [`css_into_node`], which
+/// cascades without any `:hover` matching.
+pub fn css_into_node_with_hover(
+    arena: &mut NodeArena,
+    root_id: NodeId,
+    css: &CssRule,
+    hovered: Option<NodeId>,
+) {
     for (selector, attr) in css.0.iter() {
-        apply_css_rule(arena, root_id, selector, attr);
+        apply_css_rule(arena, root_id, selector, attr, hovered);
     }
     // Inline declarations have higher author-level precedence than matching
     // stylesheet rules and must be present before inheritance is resolved.
@@ -42,6 +60,22 @@ pub fn css_into_node(arena: &mut NodeArena, root_id: NodeId, css: &CssRule) {
     // Propagate inheritable CSS properties (color, text-align, font-weight,
     // font-style, text-decoration)
     inherit_css(arena, root_id, &IndexMap::new());
+}
+
+/// Cascade styles without a hover context (no `:hover` rules match).
+pub fn css_into_node(arena: &mut NodeArena, root_id: NodeId, css: &CssRule) {
+    css_into_node_with_hover(arena, root_id, css, None);
+}
+
+/// Clear the parsed CSS attributes of every node in the subtree rooted at
+/// `root_id`, preparing the arena for a fresh [`css_into_node_with_hover`]
+/// pass (the cascade only ever adds, so re-running it requires a reset).
+pub fn reset_css_attr(arena: &mut NodeArena, root_id: NodeId) {
+    let mut stack = vec![root_id];
+    while let Some(id) = stack.pop() {
+        arena[id].css_attr = CssAttr::new();
+        stack.extend(arena[id].children.iter().copied());
+    }
 }
 
 /// All CSS properties the renderer recognises by name.

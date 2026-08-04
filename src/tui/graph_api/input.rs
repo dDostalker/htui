@@ -2,7 +2,10 @@ use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind};
 
-use crate::events::{EventBindings, HitMap, interaction};
+use crate::{
+    events::{EventBindings, HitMap, interaction},
+    tdom::node::NodeId,
+};
 
 const SCROLL_LINES_PER_TICK: u32 = 3;
 const ZOOM_STEP: f32 = 0.1;
@@ -13,6 +16,10 @@ const ZOOM_MAX: f32 = 5.0;
 pub enum RenderCmd {
     Rerender { scroll_y: u32 },
     Redraw { scroll_y: u32, zoom: f32 },
+    /// Re-style the cached document for the CSS `:hover` pseudo-class with the
+    /// given session-local node (`None` clears any hover), then repaint. With
+    /// no `:hover` rules in the stylesheet this repaints to the same pixels.
+    Hover { node_id: Option<NodeId> },
     Quit,
 }
 

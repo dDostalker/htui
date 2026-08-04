@@ -31,9 +31,11 @@ impl HoverState {
 ///
 /// Detects pointer enter / leave against the previous hover target and
 /// dispatches the matching [`EventType::MouseOver`] / [`EventType::MouseOut`]
-/// events (leave before enter, matching the DOM). Like a browser without CSS
-/// `:hover` rules, moving the pointer produces *no visual highlight* — the
-/// events are the only effect. Returns the render commands to run, in order.
+/// events (leave before enter, matching the DOM). When the hover target
+/// changes, a `Hover` command is emitted so the render thread can re-style
+/// the document for CSS `:hover` rules — with no `:hover` CSS, the command
+/// changes nothing visually, exactly like a browser. Returns the render
+/// commands to run, in order.
 pub fn on_move(
     state: &mut HoverState,
     hit_map: &HitMap,
@@ -54,15 +56,18 @@ pub fn on_move(
     if let Some(region) = new_hover {
         cmds.extend(dispatch(region, EventType::MouseOver, x, y, bindings));
     }
+    cmds.push(RenderCmd::Hover {
+        node_id: new_hover.map(|r| r.node_id),
+    });
     cmds
 }
 
 /// Process a click at canvas coordinates `(x, y)`.
 ///
 /// A click implies the pointer is over the target, so the hover state is
-/// synchronised first (keeping enter / leave tracking truthful even when the
-/// pointer never moved), then the [`EventType::Click`] event is dispatched
-/// with bubbling.
+/// synchronised first (emitting a `Hover` command when the target changed, so
+/// CSS `:hover` styling stays correct), then the [`EventType::Click`] event is
+/// dispatched with bubbling.
 pub fn on_click(
     state: &mut HoverState,
     hit_map: &HitMap,
@@ -76,6 +81,9 @@ pub fn on_click(
     };
     if state.current.as_ref().map(|r| r.node_id) != Some(region.node_id) {
         state.current = Some(region.clone());
+        cmds.push(RenderCmd::Hover {
+            node_id: Some(region.node_id),
+        });
     }
     cmds.extend(dispatch(region, EventType::Click, x, y, bindings));
     cmds

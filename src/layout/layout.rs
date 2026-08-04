@@ -95,6 +95,17 @@ impl TermLayout {
         Ok(boxes)
     }
 
+    /// Re-paint the canvas from an existing layout without re-laying out.
+    ///
+    /// Resets every cell and paints `boxes` against `arena`. Used by the
+    /// render thread on `RenderCmd::Hover`: the arena is a fresh cascade for
+    /// the CSS `:hover` pseudo-class, and since paint reads style from the
+    /// arena this picks up `:hover` backgrounds without re-layout.
+    pub fn repaint_from(&mut self, arena: &NodeArena, boxes: &[LayoutBox]) {
+        self.reset_canvas();
+        paint_layout_tree(boxes, arena, self);
+    }
+
     /// Reset every cell to a blank space and clear `rendered_rows`.
     ///
     /// Re-uses each `Block`'s existing `word` buffer (via `clear` +

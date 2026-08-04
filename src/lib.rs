@@ -23,7 +23,7 @@ pub use layout::layout::TermMap;
 
 use crate::{
     events::{EventBindings, Geometry, HitMap},
-    html::css_parse::{self, CssRule},
+    html::css_parse::{self, CssRule, css_into_node_with_hover, reset_css_attr},
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{InputState, RenderCmd, TermLayout, trigger_refresh},
 };
@@ -116,6 +116,10 @@ fn render_thread(
     // draw. crossterm offers no title getter, so the previous title (if any)
     // is intentionally left untouched on quit rather than being restored.
     let mut title_set = false;
+    // Cached geometry of the latest layout pass: the render thread keeps it
+    // so `RenderCmd::Hover` can re-style the document for CSS `:hover` rules
+    // and repaint without re-parsing or re-laying out.
+    let mut geometry: Option<Arc<Geometry>> = None;
 
     loop {
         let mut cmd = match rx.recv() {
@@ -203,9 +207,15 @@ fn render_thread(
                     title_set = true;
                 }
 
-                // Publish the layout snapshot to the hit-test thread when one
-                // is listening (the event system is active).
-                let geo = Arc::new(Geometry { arena, boxes });
+                // Publish the layout snapshot: cache it for `:hover` re-styling
+                // and forward a copy to the hit-test thread when one is
+                // listening (the event system is active).
+                let geo = Arc::new(Geometry {
+                    arena,
+                    boxes,
+                    root_id,
+                });
+                geometry = Some(Arc::clone(&geo));
                 if let Some(tx) = &geo_tx
                     && let Err(e) = tx.send(geo)
                 {
@@ -228,6 +238,27 @@ fn render_thread(
                 // a one-time full clear on the first frame / after resize),
                 // so redraws need no per-frame Clear. `flush_frame` is the
                 // single I/O per frame, skipped entirely when nothing changed.
+                tl.render(&mut out);
+                flush_frame(&mut out);
+            }
+
+            RenderCmd::Hover { node_id } => {
+                let Some(tl) = term_layout.as_mut() else {
+                    continue;
+                };
+                let Some(geo) = geometry.as_ref() else {
+                    continue;
+                };
+                // Re-run the cascade with the hovered node so `:hover` rules
+                // apply, then repaint. The arena is cloned — the shared
+                // snapshot stays immutable for the hit-test thread, and a
+                // slotmap clone keeps the same keys, so the cached boxes
+                // remain valid. With no `:hover` rules this repaints to the
+                // same pixels (browser-like no-op).
+                let mut arena = geo.arena.clone();
+                reset_css_attr(&mut arena, geo.root_id);
+                css_into_node_with_hover(&mut arena, geo.root_id, &css_rules, node_id);
+                tl.repaint_from(&arena, &geo.boxes);
                 tl.render(&mut out);
                 flush_frame(&mut out);
             }

@@ -30,7 +30,7 @@ htui/
 │   │   └── css_parse/      # CSS 解析
 │   │       ├── mod.rs
 │   │       ├── cascade.rs  # INHERITED_PROPS / SUPPORTED_PROPERTIES / css_into_node()
-│   │       ├── matcher.rs  # selector_chain_matches
+│   │       ├── matcher.rs  # selector_chain_matches(+with_hover)
 │   │       ├── selector.rs # CssSelector
 │   │       ├── stylesheet.rs # StyleSheet parsing 入口
 │   │       ├── values.rs   # CSS 值枚举 + 解析函数（Length / TextAlign / ...）
@@ -224,7 +224,7 @@ flow/flex/table 算法并生成统一的 `LayoutBox` 树，最终由
 ```
 渲染线程 Redraw 后 ──► Arc<Geometry>（arena + boxes）──► 命中线程
                                                             │
-                                            HitMap::build()（收集带 on* 属性的元素）
+                          HitMap::build()（收集所有盒子，:hover 可作用于任意元素）
                                                             │
                                               Arc<Mutex<Arc<HitMap>>>（共享）
                                                             ▼
@@ -240,8 +240,10 @@ flow/flex/table 算法并生成统一的 `LayoutBox` 树，最终由
 事件目标用元素 `id`（稳定身份）传递。`on*` 属性值按浏览器语义处理：属性体是
 JS 子集表达式（`eval.rs`），裸标识符只求值不调用（与浏览器 `function (event) { buy }`
 一致），`buy()` 才调用注册函数；未定义/解析失败仅告警不崩溃，对齐浏览器的
-ReferenceError 失败模式。hover 只驱动 `onmouseover`/`onmouseout` 事件，不产生任何
-视觉高亮——与浏览器一致：没有 CSS `:hover` 就没有视觉反馈。
+ReferenceError 失败模式。hover 驱动 `onmouseover`/`onmouseout` 事件，并在悬停目标
+变化时发出 `RenderCmd::Hover`，渲染线程克隆缓存 arena 后经
+`reset_css_attr` + `css_into_node_with_hover` 重新级联再重绘——只有样式表写了
+`:hover` 规则才产生视觉高亮，与浏览器一致。
 
 ## 必要事项
 `html → tdom → layout → tui` 四层不可破坏。不要引入新的抽象层，除非有充分理由。在修改之前进行询问。
@@ -331,12 +333,12 @@ ReferenceError 失败模式。hover 只驱动 `onmouseover`/`onmouseout` 事件�
 | `TermLayout`       | `tui::graph_api`        | 终端画布 + 渲染方法       |
 | `Block`            | `tui::graph_api`        | 单个屏幕字符单元格（含 `style: FontStyle`） |
 | `FontStyle`        | `tui::graph_api`        | `Block` 的聚合样式位掩码（`BOLD` / `ITALIC` / `UNDERLINED` / `CROSSED_OUT`） |
-| `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举（Rerender / Redraw / Quit）          |
+| `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举（Rerender / Redraw / Hover / Quit）          |
 | `InputState`       | `tui::graph_api::input` | 输入循环状态（scroll_y / zoom / pressed / hover）          |
 | `EventType`        | `events`                | DOM 事件类型（Click / MouseOver / MouseOut）               |
 | `HtmlEvent`        | `events`                | 事件对象（target / current_target / path / action / bubbles）|
 | `ElementRef`       | `events`                | 冒泡路径上的单个元素（id + on* 属性体）                |
-| `HitRegion`        | `events::hit_map`       | 可交互元素命中区域（node_id + rect + path 冒泡链）         |
+| `HitRegion`        | `events::hit_map`       | 元素命中区域（node_id + rect + path 冒泡链，所有盒子）|
 | `HitMap`           | `events::hit_map`       | 全部命中区域 + hit_test() / resolve_by_id() / build()     |
 | `EventBindings`    | `events`                | 函数名（JS 子集全局作用域）→ 用户回调（EventHandler）注册表 |
 | `HoverState`       | `events::interaction`   | 指针悬停跟踪（enter / leave 判定，不产生视觉）        |

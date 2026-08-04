@@ -11,8 +11,10 @@
 //!    arena + laid-out boxes) after every `Redraw`.
 //! 2. A dedicated hit-test thread consumes the snapshot, walks the layout
 //!    forest and builds a [`HitMap`] of [`HitRegion`]s — one rectangle per
-//!    element that declares an `onclick` / `onmouseover` / `onmouseout`
-//!    attribute — together with each element's DOM ancestor chain.
+//!    laid-out element, together with each element's DOM ancestor chain.
+//!    Every element is a region so CSS `:hover` rules can target any of them;
+//!    elements without `on*` attributes carry no handlers and are skipped by
+//!    the dispatcher.
 //! 3. The input loop hit-tests mouse coordinates against the [`HitMap`] and
 //!    dispatches [`EventType`]s through [`dispatch`], which walks the
 //!    target's ancestor path (target → root) and evaluates each element's

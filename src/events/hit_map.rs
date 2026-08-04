@@ -9,11 +9,15 @@ use crate::{
 
 use super::{ElementRef, EventType, Geometry};
 
-/// A rectangular hit region for one interactive element.
+/// A rectangular hit region for one laid-out element.
 ///
 /// `rect` is in canvas coordinates (column/row space); `path` is the DOM
 /// ancestor chain of the element (itself first, then parents), used for
 /// bubbling dispatch.
+///
+/// Every layout box becomes a region so CSS `:hover` rules can target any
+/// element; elements without `on*` attributes simply carry an empty `actions`
+/// map and are skipped by the dispatcher.
 #[derive(Debug, Clone)]
 pub struct HitRegion {
     /// Session-local node id, used by hover enter / leave tracking to tell
@@ -31,7 +35,7 @@ impl HitRegion {
     }
 }
 
-/// All interactive regions of the latest layout pass.
+/// All hit regions of the latest layout pass.
 #[derive(Default)]
 pub struct HitMap {
     regions: Vec<HitRegion>,
@@ -58,10 +62,13 @@ impl HitMap {
 
     /// Build the region list by walking the layout forest.
     ///
-    /// Only elements declaring at least one `on*` event attribute become
-    /// regions. Each region's bubbling path is resolved from the DOM `parent`
-    /// pointers so clicks on a non-interactive child can bubble to an
-    /// interactive ancestor.
+    /// Every laid-out box becomes a region, so hit testing finds the deepest
+    /// element under the pointer (needed for CSS `:hover`, which applies to
+    /// any element). Event dispatch is unaffected: the bubbling walk only
+    /// invokes handlers for elements that declare `on*` attributes, and a
+    /// non-interactive element's empty action map falls through to its
+    /// ancestors. Each region's bubbling path is resolved from the DOM
+    /// `parent` pointers.
     pub fn build(geometry: &Geometry) -> HitMap {
         let mut regions = Vec::new();
         collect_regions(&geometry.boxes, &geometry.arena, &mut regions);
@@ -105,15 +112,11 @@ impl HitMap {
 
 fn collect_regions(boxes: &[LayoutBox], arena: &NodeArena, out: &mut Vec<HitRegion>) {
     for b in boxes {
-        let node = &arena[b.node_id];
-        let actions = event_actions(node);
-        if !actions.is_empty() {
-            out.push(HitRegion {
-                node_id: b.node_id,
-                rect: b.rect,
-                path: ancestor_path(arena, b.node_id),
-            });
-        }
+        out.push(HitRegion {
+            node_id: b.node_id,
+            rect: b.rect,
+            path: ancestor_path(arena, b.node_id),
+        });
         collect_regions(&b.children, arena, out);
     }
 }
