@@ -33,28 +33,36 @@ use htui::script::HostCall;
 pub fn bindings() -> EventBindings {
     let mut bindings = EventBindings::default();
 
-    // Background sampler: keeps a fresh snapshot without blocking the input
-    // loop. `wmic cpu get loadpercentage` alone takes ~1.1 s, so sampling
-    // happens off the main thread and the host fn only reads the snapshot.
-    let sampler = Arc::new(Mutex::new(Sampler::new()));
+    // The published snapshot, written by the sampler thread and read by the
+    // host `sample()` on the input thread. The lock is held only for the
+    // microsecond-scale publish / clone — the slow `wmic` sampling happens on
+    // the background thread *before* acquiring it, so the input loop never
+    // blocks on a 1.1 s CPU query.
+    let snapshot: Arc<Mutex<Snapshot>> = Arc::new(Mutex::new(Snapshot::default()));
     {
-        let sampler = Arc::clone(&sampler);
-        std::thread::spawn(move || loop {
-            if let Ok(mut s) = sampler.lock() {
-                s.sample_tick();
+        let snapshot = Arc::clone(&snapshot);
+        std::thread::spawn(move || {
+            let mut sampler = Sampler::new();
+            loop {
+                // Slow sampling runs on this thread, lock-free.
+                let next = sampler.sample_tick();
+                // Publish: brief lock, memcpy-sized.
+                if let Ok(mut snap) = snapshot.lock() {
+                    *snap = next;
+                }
+                std::thread::sleep(Duration::from_millis(200));
             }
-            std::thread::sleep(Duration::from_millis(200));
         });
     }
 
-    let sampler_for_host = Arc::clone(&sampler);
+    let snapshot_for_host = Arc::clone(&snapshot);
     bindings.host.insert(
         "sample".to_string(),
         Box::new(move |call: &mut HostCall| {
-            let snap = sampler_for_host
+            let snap = snapshot_for_host
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .snapshot();
+                .clone();
             sample_to_js(call, &snap)
         }),
     );
@@ -256,8 +264,10 @@ impl Snapshot {
     }
 }
 
-/// Samples machine metrics on a rotation and keeps a fresh [`Snapshot`].
-/// Runs on a dedicated background thread; the input loop never blocks on it.
+/// Samples machine metrics on a rotation and produces fresh [`Snapshot`]s.
+/// Owned exclusively by the background sampler thread; the published snapshot
+/// (an `Arc<Mutex<Snapshot>>`) is written only after sampling finishes, so the
+/// input loop never blocks on a slow `wmic` query.
 struct Sampler {
     start: Instant,
     tick: u64,
@@ -277,10 +287,11 @@ impl Sampler {
         self.snapshot.clone()
     }
 
-    /// Sample one rotation. The first tick pays for everything; afterwards
-    /// every tick runs a single fast memory query and the slow queries
-    /// (`process`, `cpu`, `disk free`) are rotated in.
-    fn sample_tick(&mut self) {
+    /// Sample one rotation and return the next snapshot. The first tick pays
+    /// for everything; afterwards every tick runs a single fast memory query
+    /// and the slow queries (`process`, `cpu`, `disk free`) are rotated in.
+    /// All `wmic` calls happen here, lock-free, on the background thread.
+    fn sample_tick(&mut self) -> Snapshot {
         self.tick += 1;
 
         let static_info = if self.tick == 1 {
@@ -314,6 +325,7 @@ impl Sampler {
             .map(|d| d.as_secs())
             .unwrap_or(0);
         self.snapshot.session_secs = self.start.elapsed().as_secs();
+        self.snapshot.clone()
     }
 }
 
