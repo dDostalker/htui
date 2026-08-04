@@ -281,8 +281,12 @@ Geometry，**无需重新解析 HTML**。`RenderCmd::RenderHtml` 仍保留用于
    随 `RenderArena` 携带。渲染线程对每个 dirty 节点沿 DOM 找到最近的"有盒子的
    祖先"，若其 rect 在缓存布局与新布局中完全一致（说明改动不涉及几何），就只
    清空并重绘该区域（`TermLayout::repaint_region` + 写门控 `PaintCanvas.region`），
-   否则回退全量 `reset_canvas` + 重绘。`:hover` 目标一变即强制全量（高亮可能
-   在任意位置）。实测 80×24 / 60 行文档：全量 draw ~2.1ms → 增量 ~1.1ms。
+   否则回退全量 `reset_canvas` + 重绘。
+4. **Hover 增量**：单独的 `RenderCmd::Hover` 不再全量重绘——只清空并重绘
+   **新旧 hover 目标**（含 `:hover` 规则可匹配的祖先）所在区域的并集；样式表
+   没有 `:hover` 规则时直接跳过（与浏览器一致，移动指针不产生绘制）。
+   `RenderArena` 携带的 hover 变化仍回退全量（内容与高亮同帧变动时最安全）。
+   实测 sysmon：hover 全量重绘 ~1.6ms → 区域重绘 ~0.6ms。
 
 ## 必要事项
 `html → tdom → layout → tui` 四层不可破坏。不要引入新的抽象层，除非有充分理由。在修改之前进行询问。

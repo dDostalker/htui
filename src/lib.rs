@@ -24,7 +24,7 @@ pub use layout::layout::TermMap;
 
 use crate::{
     events::{AutoRefresh, EventBindings, Geometry, HitMap},
-    html::css_parse::{self, CssRule, css_into_node_with_hover, reset_css_attr},
+    html::css_parse::{self, CssRule, PseudoClass, Selector, css_into_node_with_hover, reset_css_attr},
     layout::{LayoutBox, Rect},
     script::ScriptEngine,
     tdom::node::{NodeArena, NodeId, NodeType},
@@ -111,6 +111,10 @@ fn extract_title(arena: &NodeArena, root_id: NodeId) -> Option<String> {
 struct RenderState {
     html: Arc<str>,
     css_rules: Arc<CssRule>,
+    /// Whether the stylesheet declares any `:hover` rule — when false, moving
+    /// the pointer can never change the painted output, so `Hover` commands
+    /// are skipped entirely (browser-like no-op).
+    has_hover_rules: bool,
     term_layout: Option<TermLayout>,
     /// Terminal title: install the document `<title>` once per session (or
     /// per replaced document). crossterm offers no title getter, so the
@@ -348,17 +352,7 @@ fn incremental_region(
                         return None;
                     }
                     region = Some(match region {
-                        Some(r) => {
-                            let left = r.x.min(rect.x);
-                            let top = r.y.min(rect.y);
-                            let right = r.x.saturating_add(r.width).max(
-                                rect.x.saturating_add(rect.width),
-                            );
-                            let bottom = r.y.saturating_add(r.height).max(
-                                rect.y.saturating_add(rect.height),
-                            );
-                            Rect::new(left, top, right - left, bottom - top)
-                        }
+                        Some(r) => union_rect(r, rect),
                         None => rect,
                     });
                 }
@@ -371,6 +365,18 @@ fn incremental_region(
         }
     }
     region
+}
+
+/// Union of two canvas rectangles (absolute coordinates).
+fn union_rect(a: Rect, b: Rect) -> Rect {
+    let left = a.x.min(b.x);
+    let top = a.y.min(b.y);
+    let right = a.x.saturating_add(a.width).max(b.x.saturating_add(b.width));
+    let bottom = a
+        .y
+        .saturating_add(a.height)
+        .max(b.y.saturating_add(b.height));
+    Rect::new(left, top, right - left, bottom - top)
 }
 
 /// Flatten the box forest into `(node_id, rect)` pairs.
@@ -386,6 +392,50 @@ fn collect_box_rects(boxes: &[LayoutBox]) -> Vec<(NodeId, Rect)> {
     out
 }
 
+/// Union of every box rect belonging to `node_id` or any of its ancestors
+/// that has a box.
+///
+/// `:hover` rules may match any element on the hovered node's ancestor chain
+/// (`#panel:hover` matches while a descendant is hovered), so repainting this
+/// union covers every cell the hover state can change. Used by the `Hover`
+/// command to repaint only the affected region instead of the whole canvas.
+fn hover_affected_region(
+    boxes: &[LayoutBox],
+    arena: &NodeArena,
+    node_id: Option<NodeId>,
+) -> Option<Rect> {
+    let mut region: Option<Rect> = None;
+    let mut cur = node_id;
+    while let Some(id) = cur {
+        let mut stack = vec![boxes];
+        while let Some(list) = stack.pop() {
+            for b in list {
+                if b.node_id == id {
+                    region = Some(match region {
+                        Some(r) => union_rect(r, b.rect),
+                        None => b.rect,
+                    });
+                }
+                stack.push(&b.children);
+            }
+        }
+        cur = arena.get(id).and_then(|n| n.parent);
+    }
+    region
+}
+
+/// True when the stylesheet contains any `:hover` rule — the only case where
+/// moving the pointer can change the painted output.
+fn css_has_hover_rules(css_rules: &CssRule) -> bool {
+    css_rules.0.keys().any(|sel| {
+        sel.compounds.iter().any(|compound| {
+            compound
+                .iter()
+                .any(|s| matches!(s, Selector::PseudoClass(PseudoClass::Hover)))
+        })
+    })
+}
+
 fn render_thread(
     rx: mpsc::Receiver<RenderCmd>,
     html: Arc<str>,
@@ -397,9 +447,11 @@ fn render_thread(
     // into it and is flushed exactly once, so a frame costs a single write
     // syscall instead of one per render call.
     let mut out = BufWriter::new(stdout());
+    let has_hover_rules = css_has_hover_rules(&css_rules);
     let mut state = RenderState {
         html,
         css_rules,
+        has_hover_rules,
         term_layout: None,
         title_set: false,
         geometry: None,
@@ -503,7 +555,15 @@ fn render_thread(
             }
 
             RenderCmd::Hover { node_id } => {
+                let prev = state.hovered;
                 state.hovered = node_id;
+                // Without any `:hover` rule the cascade is identical for every
+                // pointer position, so nothing can change on screen — skip the
+                // repaint entirely (browser behaviour: moving the pointer with
+                // no `:hover` styles produces no drawing).
+                if !state.has_hover_rules {
+                    continue;
+                }
                 let Some(tl) = state.term_layout.as_mut() else {
                     continue;
                 };
@@ -511,15 +571,31 @@ fn render_thread(
                     continue;
                 };
                 // Re-run the cascade with the hovered node so `:hover` rules
-                // apply, then repaint. The arena is cloned — the shared
-                // snapshot stays immutable for the hit-test thread, and a
-                // slotmap clone keeps the same keys, so the cached boxes
-                // remain valid. With no `:hover` rules this repaints to the
-                // same pixels (browser-like no-op).
+                // apply. The arena is cloned — the shared snapshot stays
+                // immutable for the hit-test thread, and a slotmap clone keeps
+                // the same keys, so the cached boxes remain valid (hover only
+                // changes colours / backgrounds, never geometry).
                 let mut arena = geo.arena.clone();
                 reset_css_attr(&mut arena, geo.root_id);
                 css_into_node_with_hover(&mut arena, geo.root_id, &state.css_rules, node_id);
-                tl.repaint_from(&arena, &geo.boxes);
+                // Incremental repaint: only the union of the old and new hover
+                // regions can differ from the previous frame (the old
+                // highlight is cleared, the new one painted). Repainting this
+                // small region instead of resetting the whole canvas keeps
+                // hover tracking responsive while the pointer moves.
+                let region = match (
+                    hover_affected_region(&geo.boxes, &arena, prev),
+                    hover_affected_region(&geo.boxes, &arena, node_id),
+                ) {
+                    (Some(a), Some(b)) => Some(union_rect(a, b)),
+                    (Some(a), None) => Some(a),
+                    (None, Some(b)) => Some(b),
+                    (None, None) => None,
+                };
+                match region {
+                    Some(r) => tl.repaint_region(&arena, &geo.boxes, r),
+                    None => tl.repaint_from(&arena, &geo.boxes),
+                }
                 tl.render(&mut out);
                 flush_frame(&mut out);
             }

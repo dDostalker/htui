@@ -1,6 +1,6 @@
 use crossterm::style::Color;
 use htui::{
-    html::{css_parse, html_parse},
+    html::{css_parse, css_parse::{css_into_node_with_hover, reset_css_attr}, html_parse},
     layout::layout::TermMap,
     tdom::node::{Node, NodeArena, NodeId, NodeType},
     tui::graph_api::TermLayout,
@@ -125,7 +125,10 @@ fn scrolling_emits_diff_and_stable_views_emit_nothing() {
 }
 
 /// Find the layout box for a node, searching the whole forest.
-fn find_box<'a>(boxes: &'a [htui::layout::LayoutBox], node_id: NodeId) -> Option<&'a htui::layout::LayoutBox> {
+fn find_box<'a>(
+    boxes: &'a [htui::layout::LayoutBox],
+    node_id: NodeId,
+) -> Option<&'a htui::layout::LayoutBox> {
     for b in boxes {
         if b.node_id == node_id {
             return Some(b);
