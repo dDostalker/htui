@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind};
@@ -16,6 +17,11 @@ const ZOOM_MAX: f32 = 5.0;
 pub enum RenderCmd {
     Rerender { scroll_y: u32 },
     Redraw { scroll_y: u32, zoom: f32 },
+    /// Replace the session document with `html` and fully re-render it,
+    /// keeping the current scroll position / zoom. The render thread swaps
+    /// the document and diff-renders, so handlers can build dynamic content
+    /// (e.g. a counter that re-renders on every click).
+    RenderHtml { html: Arc<str> },
     /// Re-style the cached document for the CSS `:hover` pseudo-class with the
     /// given session-local node (`None` clears any hover), then repaint. With
     /// no `:hover` rules in the stylesheet this repaints to the same pixels.

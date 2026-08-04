@@ -121,7 +121,7 @@ htui/
 │       ├── nested/
 │       ├── text/
 │       ├── css/
-│       ├── events/       # 事件系统交互演示（onclick / hover，render_with_events）
+│       ├── events/       # 事件系统交互演示（onclick / hover / 动态重渲染，render_with_events）
 │       ├── header_footer/
 │       ├── aside/
 │       ├── helloworld/
@@ -243,7 +243,9 @@ JS 子集表达式（`eval.rs`），裸标识符只求值不调用（与浏览�
 ReferenceError 失败模式。hover 驱动 `onmouseover`/`onmouseout` 事件，并在悬停目标
 变化时发出 `RenderCmd::Hover`，渲染线程克隆缓存 arena 后经
 `reset_css_attr` + `css_into_node_with_hover` 重新级联再重绘——只有样式表写了
-`:hover` 规则才产生视觉高亮，与浏览器一致。
+`:hover` 规则才产生视觉高亮，与浏览器一致。动态内容：handler 返回
+`RenderCmd::RenderHtml { html }` 可替换会话文档并保持滚动位置重渲染（渲染线程
+`RenderState::render_html`），diff 渲染只输出变化的格子。
 
 ## 必要事项
 `html → tdom → layout → tui` 四层不可破坏。不要引入新的抽象层，除非有充分理由。在修改之前进行询问。
@@ -333,7 +335,7 @@ ReferenceError 失败模式。hover 驱动 `onmouseover`/`onmouseout` 事件，�
 | `TermLayout`       | `tui::graph_api`        | 终端画布 + 渲染方法       |
 | `Block`            | `tui::graph_api`        | 单个屏幕字符单元格（含 `style: FontStyle`） |
 | `FontStyle`        | `tui::graph_api`        | `Block` 的聚合样式位掩码（`BOLD` / `ITALIC` / `UNDERLINED` / `CROSSED_OUT`） |
-| `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举（Rerender / Redraw / Hover / Quit）          |
+| `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举（Rerender / Redraw / RenderHtml / Hover / Quit） |
 | `InputState`       | `tui::graph_api::input` | 输入循环状态（scroll_y / zoom / pressed / hover）          |
 | `EventType`        | `events`                | DOM 事件类型（Click / MouseOver / MouseOut）               |
 | `HtmlEvent`        | `events`                | 事件对象（target / current_target / path / action / bubbles）|

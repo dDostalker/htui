@@ -607,3 +607,56 @@ fn hover_works_for_elements_without_on_attributes() {
         })
     );
 }
+
+// ============================================================
+// Dynamic re-rendering (`RenderCmd::RenderHtml`)
+// ============================================================
+
+#[test]
+fn handler_can_request_a_document_replacement() {
+    // A handler returns `RenderCmd::RenderHtml` with the new document; the
+    // command flows through the interaction layer to the render thread.
+    let geo = build_geometry(r#"<div id="btn" onclick="swap()">click</div>"#);
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("btn").expect("region");
+    let (x, y) = center(region.rect);
+
+    let mut bindings = EventBindings::default();
+    bindings.actions.insert(
+        "swap".to_string(),
+        Box::new(|_| {
+            Some(RenderCmd::RenderHtml {
+                html: "<p>new page</p>".into(),
+            })
+        }),
+    );
+    let mut hover = HoverState::new();
+    let cmds = on_click(&mut hover, &map, &mut bindings, x, y);
+
+    assert!(cmds.contains(&RenderCmd::RenderHtml {
+        html: "<p>new page</p>".into()
+    }));
+}
+
+#[test]
+fn redrawing_the_canvas_with_a_new_document_replaces_content() {
+    // The core of `RenderHtml`: the same canvas is re-drawn from a different
+    // document, replacing the old content entirely (the render thread wraps
+    // this with diff output).
+    let term_map = TermMap {
+        columns: COLS,
+        rows: ROWS,
+    };
+    let mut tl = TermLayout::new(&term_map, 1.0);
+
+    let (root_id, arena) = setup("<p>old content</p>");
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    let first: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
+    assert!(first.contains("old content"));
+
+    let (root_id, arena) = setup("<p>new content</p>");
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    let second: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
+    assert!(second.contains("new content"));
+    assert!(!second.contains("old content"));
+}

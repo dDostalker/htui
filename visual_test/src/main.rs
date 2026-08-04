@@ -15,10 +15,13 @@
 //!   src/{name}/index.html    — HTML document
 //!   src/{name}/style.css     — stylesheet (optional)
 
+use std::sync::{Arc, Mutex};
+
 use anyhow::Result;
 use htui::events::{EventBindings, HtmlEvent};
 use htui::render;
 use htui::render_with_events;
+use htui::tui::graph_api::RenderCmd;
 use log::info;
 
 /// Headless preview: parse the document, run the full layout pipeline into a
@@ -231,6 +234,21 @@ fn main() -> Result<()> {
                 }),
             );
         }
+        // Dynamic re-rendering demo: clicking the counter rebuilds the
+        // document with the incremented value, and the render thread swaps
+        // the session document and diff-renders the change.
+        let counter: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
+        let base_html = html.to_string();
+        bindings.actions.insert(
+            "increment".to_string(),
+            Box::new(move |_: &HtmlEvent| {
+                *counter.lock().unwrap() += 1;
+                let n = *counter.lock().unwrap();
+                Some(RenderCmd::RenderHtml {
+                    html: base_html.replace("Count: 0", &format!("Count: {n}")).into(),
+                })
+            }),
+        );
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {

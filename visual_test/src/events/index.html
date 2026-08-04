@@ -5,6 +5,8 @@
   <h1>Event test</h1>
   <p>Hover to see the CSS :hover highlight and fire onmouseover/onmouseout; click to fire functions (all logged to %TEMP%/htui-visual-test.log).</p>
 
+  <p id="counter" onclick="increment()">Count: 0</p>
+
   <div id="panel" onclick="panel()" onmouseover="hoverPanel()" onmouseout="leavePanel()">
     <p>Click inside this panel → panel() (children bubble up).</p>
     <p id="child">Plain text, no handler — a click here bubbles to the panel.</p>
