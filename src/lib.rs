@@ -22,7 +22,7 @@ pub use html::html_parse::Parser;
 pub use layout::layout::TermMap;
 
 use crate::{
-    events::{EventBindings, Geometry, HitMap},
+    events::{AutoRefresh, EventBindings, Geometry, HitMap, invoke_action},
     html::css_parse::{self, CssRule, css_into_node_with_hover, reset_css_attr},
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{InputState, RenderCmd, TermLayout, trigger_refresh},
@@ -505,6 +505,11 @@ fn run(html: &str, css: &str, mut bindings: Option<EventBindings>) {
         }
     }
 
+    // Periodic auto action (see `EventBindings::auto`): cloned once so the
+    // loop can read it while mutably borrowing `bindings` for dispatch.
+    let auto: Option<AutoRefresh> = bindings.as_ref().and_then(|b| b.auto.clone());
+    let mut last_auto = std::time::Instant::now();
+
     let mut quit = false;
     while !quit {
         // Detect a dead render thread (e.g. from a panic) promptly. Rust's
@@ -516,7 +521,7 @@ fn run(html: &str, css: &str, mut bindings: Option<EventBindings>) {
             break;
         }
 
-        let cmds = if bindings.is_some() {
+        let mut cmds = if bindings.is_some() {
             let map = match hit_map.lock() {
                 Ok(guard) => Arc::clone(&guard),
                 Err(e) => {
@@ -542,6 +547,21 @@ fn run(html: &str, css: &str, mut bindings: Option<EventBindings>) {
                 Some(Duration::from_millis(100)),
             )
         };
+
+        // Periodic auto action: when the interval has elapsed, invoke the
+        // configured action as if it fired (synthetic event) and forward its
+        // render command alongside the input events.
+        if let Some(auto) = &auto {
+            let now = std::time::Instant::now();
+            if now.duration_since(last_auto) >= auto.every {
+                last_auto = now;
+                if let Some(bindings) = bindings.as_mut()
+                    && let Some(cmd) = invoke_action(&auto.action, bindings, crate::events::EventType::Click)
+                {
+                    cmds.push(cmd);
+                }
+            }
+        }
 
         for cmd in cmds {
             if matches!(cmd, RenderCmd::Quit) {

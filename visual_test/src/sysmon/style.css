@@ -1,0 +1,14 @@
+/* Style sheet for the system-monitor visual test.
+ *
+ * The refresh / quit buttons highlight on hover via CSS `:hover`, which htui
+ * re-styles on pointer enter / leave — the same files behave identically in a
+ * browser.
+ */
+
+h1 { color: #00cc66; }
+h2 { color: #00aa55; }
+
+#refresh:hover,
+#quit:hover {
+  background-color: #3a3a3a;
+}

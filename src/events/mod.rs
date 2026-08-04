@@ -52,7 +52,7 @@ mod geometry;
 mod hit_map;
 pub mod interaction;
 
-pub use dispatch::dispatch;
+pub use dispatch::{dispatch, invoke_action};
 pub use geometry::Geometry;
 pub use hit_map::{HitMap, HitRegion};
 pub use interaction::{HoverState, on_click, on_move};
@@ -119,6 +119,20 @@ pub struct HtmlEvent<'a> {
 /// thread by the input loop.
 pub type EventHandler = Box<dyn FnMut(&HtmlEvent) -> Option<RenderCmd> + Send + 'static>;
 
+/// Periodic action configuration for [`EventBindings`].
+///
+/// When set, the input loop re-invokes the named action every `every`, so
+/// applications get an automatic refresh / tick without user input (system
+/// monitors, clocks, animations).
+#[derive(Debug, Clone)]
+pub struct AutoRefresh {
+    /// How often to re-invoke the action.
+    pub every: std::time::Duration,
+    /// Action name to invoke (must be registered in
+    /// [`EventBindings::actions`]).
+    pub action: String,
+}
+
 /// Action registry consulted when an `on*` attribute fires.
 ///
 /// Maps a **function name** — callable from an `onclick="buy()"` handler
@@ -127,4 +141,6 @@ pub type EventHandler = Box<dyn FnMut(&HtmlEvent) -> Option<RenderCmd> + Send + 
 #[derive(Default)]
 pub struct EventBindings {
     pub actions: HashMap<String, EventHandler>,
+    /// Optional periodic action (see [`AutoRefresh`]).
+    pub auto: Option<AutoRefresh>,
 }

@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use crossterm::style::Color;
 use htui::events::eval::{EventContext, eval_handler};
 use htui::events::{
-    EventBindings, EventType, Geometry, HitMap, HtmlEvent,
+    EventBindings, EventType, Geometry, HitMap, HtmlEvent, invoke_action,
     interaction::{HoverState, on_click, on_move},
 };
 use htui::html::css_parse::{
@@ -659,4 +659,31 @@ fn redrawing_the_canvas_with_a_new_document_replaces_content() {
     let second: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(second.contains("new content"));
     assert!(!second.contains("old content"));
+}
+
+#[test]
+fn invoke_action_runs_a_registered_handler_with_a_synthetic_event() {
+    // Backs the periodic auto-refresh: the input loop calls registered
+    // actions directly (no pointer position involved).
+    let mut bindings = EventBindings::default();
+    bindings.actions.insert(
+        "refresh".to_string(),
+        Box::new(|ev: &HtmlEvent| {
+            assert_eq!(ev.action, Some("refresh"));
+            assert_eq!(ev.target, None, "synthetic events have no hit target");
+            Some(RenderCmd::RenderHtml {
+                html: "<p>sampled</p>".into(),
+            })
+        }),
+    );
+
+    let cmd = invoke_action("refresh", &mut bindings, EventType::Click);
+    assert_eq!(
+        cmd,
+        Some(RenderCmd::RenderHtml {
+            html: "<p>sampled</p>".into()
+        })
+    );
+    // Unregistered action → None.
+    assert_eq!(invoke_action("nope", &mut bindings, EventType::Click), None);
 }

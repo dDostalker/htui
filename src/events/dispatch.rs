@@ -2,7 +2,7 @@
 
 use crate::tui::graph_api::RenderCmd;
 
-use super::{EventBindings, EventType, HitRegion, eval::{EventContext, eval_handler}};
+use super::{EventBindings, EventType, HitRegion, HtmlEvent, eval::{EventContext, eval_handler}};
 
 /// Dispatch `event_type` at canvas position `(x, y)` with bubbling.
 ///
@@ -36,4 +36,29 @@ pub fn dispatch(
         }
     }
     None
+}
+
+/// Invoke a registered action directly with a synthetic event.
+///
+/// Backs the periodic auto-refresh: no pointer position exists, so the event
+/// carries empty `target` / `current_target` / `path` fields and canvas
+/// coordinates `(0, 0)`. Returns the handler's [`RenderCmd`], or `None` when
+/// the action is not registered.
+pub fn invoke_action(
+    name: &str,
+    bindings: &mut EventBindings,
+    event_type: EventType,
+) -> Option<RenderCmd> {
+    let handler = bindings.actions.get_mut(name)?;
+    let event = HtmlEvent {
+        event_type,
+        target: None,
+        current_target: None,
+        path: &[],
+        action: Some(name),
+        x: 0,
+        y: 0,
+        bubbles: true,
+    };
+    handler(&event)
 }

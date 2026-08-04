@@ -24,6 +24,8 @@ use htui::render_with_events;
 use htui::tui::graph_api::RenderCmd;
 use log::info;
 
+mod sysmon;
+
 /// Headless preview: parse the document, run the full layout pipeline into a
 /// [`TermLayout`] canvas, and print each non-empty row as plain text so the
 /// structure can be inspected without an interactive terminal.
@@ -102,6 +104,17 @@ fn main() -> Result<()> {
     // `--dump` enables the headless preview (see `dump`); `--dump bg` prints
     // a background-fill map instead of the text glyphs.
     let dump_mode = args.iter().any(|a| a == "--dump");
+    // `--sample` (used with the `sysmon` test) prints the HTML string the
+    // refresh handler would produce, so the sampled page can be inspected
+    // without an interactive terminal.
+    let sample_mode = args.iter().any(|a| a == "--sample");
+    // `--watch` (used with the `sysmon` test) renders several consecutive
+    // sampled frames, simulating the auto-refresh headlessly so the changing
+    // values can be observed without an interactive terminal.
+    let watch_mode = args.iter().any(|a| a == "--watch");
+    // `--probe-wmic` (used with the `sysmon` test) benchmarks the two wmic
+    // capture paths (file redirect vs pipe) for timing and completeness.
+    let probe_wmic_mode = args.iter().any(|a| a == "--probe-wmic");
     let bg_map = dump_mode
         && args
             .iter()
@@ -116,21 +129,37 @@ fn main() -> Result<()> {
 
     let mut cols: u16 = 104;
     let mut rows: u16 = 32;
+    let mut count: usize = 5;
+    let mut every_ms: u64 = 800;
     let mut it = args.iter().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
             "--cols" => {
-                if let Some(v) = it.next() {
-                    if let Ok(n) = v.parse() {
-                        cols = n;
-                    }
+                if let Some(v) = it.next()
+                    && let Ok(n) = v.parse()
+                {
+                    cols = n;
                 }
             }
             "--rows" => {
-                if let Some(v) = it.next() {
-                    if let Ok(n) = v.parse() {
-                        rows = n;
-                    }
+                if let Some(v) = it.next()
+                    && let Ok(n) = v.parse()
+                {
+                    rows = n;
+                }
+            }
+            "--count" => {
+                if let Some(v) = it.next()
+                    && let Ok(n) = v.parse()
+                {
+                    count = n;
+                }
+            }
+            "--every" => {
+                if let Some(v) = it.next()
+                    && let Ok(n) = v.parse()
+                {
+                    every_ms = n;
                 }
             }
             _ => {}
@@ -162,6 +191,7 @@ fn main() -> Result<()> {
         "flex_nested" => test_case!(flex_nested, no_css),
         "css_props" => test_case!(css_props, no_css),
         "events" => test_case!(events),
+        "sysmon" => test_case!(sysmon),
         "viewport_units" => test_case!(viewport_units, no_css),
         "showcase" => test_case!(showcase, no_css),
         _ => {
@@ -188,6 +218,7 @@ fn main() -> Result<()> {
                 "flex_nested",
                 "css_props",
                 "events",
+                "sysmon",
                 "viewport_units",
                 "showcase",
             ];
@@ -204,6 +235,42 @@ fn main() -> Result<()> {
         html.len(),
         css.len()
     );
+
+    // The `sysmon` case runs through `render_with_events` with a dedicated
+    // bindings set (see `sysmon::bindings`): clicking Refresh rebuilds the
+    // document from live system samples via `RenderCmd::RenderHtml`, and the
+    // buttons highlight on hover through CSS `:hover`. `--dump` falls back to
+    // the static preview (sampling + interaction need a real terminal).
+    if test_name == "sysmon" {
+        if probe_wmic_mode {
+            print!("{}", sysmon::probe_wmic());
+            return Ok(());
+        }
+        if watch_mode {
+            // Headless simulation of the auto-refresh: render `count` sampled
+            // frames, `every_ms` apart, so the updating values are visible.
+            for i in 1..=count {
+                println!("\n===== frame {i}/{count} ===");
+                dump(&sysmon::preview_page(), css, cols, rows, bg_map);
+                if i < count {
+                    std::thread::sleep(std::time::Duration::from_millis(every_ms));
+                }
+            }
+            return Ok(());
+        }
+        if sample_mode {
+            // Render the page the `refresh` handler would produce, headlessly.
+            dump(&sysmon::preview_page(), css, cols, rows, bg_map);
+            return Ok(());
+        }
+        if dump_mode {
+            dump(html, css, cols, rows, bg_map);
+        } else {
+            render_with_events(html, css, sysmon::bindings());
+        }
+        info!("Test '{test_name}' completed");
+        return Ok(());
+    }
 
     // The `events` case runs through `render_with_events`: every action
     // declared in the on* attributes is logged to the visual-test log file,

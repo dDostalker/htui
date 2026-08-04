@@ -114,6 +114,7 @@ htui/
 ├── visual_test/          # 可视化测试工具（cargo run -p visual_test）
 │   └── src/
 │       ├── main.rs
+│       ├── sysmon.rs     # 系统监控器示例逻辑（wmic 采样 + 页面重建）
 │       ├── all_in_one/   # index.html: 可直接浏览器打开，内部 <style> 内联 CSS
 │       ├── headings/
 │       ├── image/        # includes pic.png
@@ -122,6 +123,7 @@ htui/
 │       ├── text/
 │       ├── css/
 │       ├── events/       # 事件系统交互演示（onclick / hover / 动态重渲染，render_with_events）
+│       ├── sysmon/       # 系统状态监控器（auto 每 200ms 触发，分层采样 CPU/内存/磁盘并重建页面）
 │       ├── header_footer/
 │       ├── aside/
 │       ├── helloworld/
@@ -245,7 +247,9 @@ ReferenceError 失败模式。hover 驱动 `onmouseover`/`onmouseout` 事件，�
 `reset_css_attr` + `css_into_node_with_hover` 重新级联再重绘——只有样式表写了
 `:hover` 规则才产生视觉高亮，与浏览器一致。动态内容：handler 返回
 `RenderCmd::RenderHtml { html }` 可替换会话文档并保持滚动位置重渲染（渲染线程
-`RenderState::render_html`），diff 渲染只输出变化的格子。
+`RenderState::render_html`），diff 渲染只输出变化的格子。定时任务：
+`EventBindings::auto`（`AutoRefresh`）让输入循环按间隔经 `invoke_action` 自动触发
+已注册 action（监控器/时钟/动画用）。
 
 ## 必要事项
 `html → tdom → layout → tui` 四层不可破坏。不要引入新的抽象层，除非有充分理由。在修改之前进行询问。
@@ -342,7 +346,8 @@ ReferenceError 失败模式。hover 驱动 `onmouseover`/`onmouseout` 事件，�
 | `ElementRef`       | `events`                | 冒泡路径上的单个元素（id + on* 属性体）                |
 | `HitRegion`        | `events::hit_map`       | 元素命中区域（node_id + rect + path 冒泡链，所有盒子）|
 | `HitMap`           | `events::hit_map`       | 全部命中区域 + hit_test() / resolve_by_id() / build()     |
-| `EventBindings`    | `events`                | 函数名（JS 子集全局作用域）→ 用户回调（EventHandler）注册表 |
+| `EventBindings`    | `events`                | 函数名（JS 子集全局作用域）→ 用户回调注册表 + auto 定时刷新 |
+| `AutoRefresh`      | `events`                | 周期自动触发的 action（every + action 名）                  |
 | `HoverState`       | `events::interaction`   | 指针悬停跟踪（enter / leave 判定，不产生视觉）        |
 | `EdgeSizes`        | `html::box_edges`       | 四边长度（top/right/bottom/left），用于 padding / margin |
 | `BorderStyle`      | `html::box_edges`       | `border-style` 枚举（`None` / `Solid`） |
