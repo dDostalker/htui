@@ -33,6 +33,14 @@ impl NthExpr {
     }
 }
 
+/// Dynamic pseudo-classes supported by the selector parser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PseudoClass {
+    /// `:hover` — matches while the pointer is over the element (or one of
+    /// its descendants). Evaluated against the cascade's hovered node.
+    Hover,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Selector {
     Tag(NodeType),
@@ -41,6 +49,8 @@ pub enum Selector {
     /// `:nth-child(<expr>)` — match when the element is the n-th child of its
     /// parent (counting all siblings, including text nodes, per CSS spec).
     NthChild(NthExpr),
+    /// A dynamic pseudo-class (currently `:hover`).
+    PseudoClass(PseudoClass),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -235,7 +245,12 @@ fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, anyhow::Erro
                     i += 1;
                 }
                 let name: String = chars[name_start..i].iter().collect();
-                if name.eq_ignore_ascii_case("nth-child") {
+                if name.eq_ignore_ascii_case("hover") {
+                    if i < chars.len() && chars[i] == '(' {
+                        return Err(anyhow::anyhow!(":hover takes no arguments"));
+                    }
+                    out.push(Selector::PseudoClass(PseudoClass::Hover));
+                } else if name.eq_ignore_ascii_case("nth-child") {
                     if i >= chars.len() || chars[i] != '(' {
                         return Err(anyhow::anyhow!(":nth-child requires `(...)`"));
                     }

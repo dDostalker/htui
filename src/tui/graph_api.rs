@@ -14,7 +14,7 @@ pub use image::{
     IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, ClipRect, ImageCache, Img,
     render_image_at, render_image_at_slice,
 };
-pub use input::{RenderCmd, trigger_refresh};
+pub use input::{DirtyInfo, InputState, RenderCmd, trigger_refresh};
 pub use render::is_rendered_as_bare_space;
 pub use style::block_style;
 pub use text::{char_width, grapheme_width};

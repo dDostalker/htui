@@ -1,11 +1,13 @@
+pub mod events;
 pub mod html;
 pub mod layout;
 pub mod logging;
+pub mod script;
 pub mod tdom;
 pub mod tui;
 
 use std::io::{BufWriter, Write, stdout};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -21,9 +23,12 @@ pub use html::html_parse::Parser;
 pub use layout::layout::TermMap;
 
 use crate::{
-    html::css_parse::{self, CssRule},
+    events::{AutoRefresh, EventBindings, Geometry, HitMap},
+    html::css_parse::{self, CssRule, PseudoClass, Selector, css_into_node_with_hover, reset_css_attr},
+    layout::{LayoutBox, Rect},
+    script::ScriptEngine,
     tdom::node::{NodeArena, NodeId, NodeType},
-    tui::graph_api::{RenderCmd, TermLayout, trigger_refresh},
+    tui::graph_api::{DirtyInfo, InputState, RenderCmd, TermLayout, trigger_refresh},
 };
 
 fn parse_and_apply(html: &str, css_rules: &CssRule) -> (NodeId, NodeArena) {
@@ -35,7 +40,7 @@ fn parse_and_apply(html: &str, css_rules: &CssRule) -> (NodeId, NodeArena) {
 
 /// Flush one rendered frame from the session's `BufWriter`, skipping the
 /// syscall entirely when the frame wrote nothing (an unchanged viewport).
-fn flush_frame(out: &mut BufWriter<std::io::Stdout>) {
+fn flush_frame<W: Write>(out: &mut BufWriter<W>) {
     if out.buffer().is_empty() {
         return;
     }
@@ -98,21 +103,361 @@ fn extract_title(arena: &NodeArena, root_id: NodeId) -> Option<String> {
 // Render thread
 // ============================================================
 
+/// Per-session state owned by the render thread.
+///
+/// Holds everything that outlives a single frame: the session document, the
+/// stylesheet, the reused canvas, the cached geometry and the scroll bound
+/// shared with the input loop.
+struct RenderState {
+    html: Arc<str>,
+    css_rules: Arc<CssRule>,
+    /// Whether the stylesheet declares any `:hover` rule — when false, moving
+    /// the pointer can never change the painted output, so `Hover` commands
+    /// are skipped entirely (browser-like no-op).
+    has_hover_rules: bool,
+    term_layout: Option<TermLayout>,
+    /// Terminal title: install the document `<title>` once per session (or
+    /// per replaced document). crossterm offers no title getter, so the
+    /// previous title is intentionally left untouched on quit.
+    title_set: bool,
+    /// Cached geometry of the latest layout pass: kept so `RenderCmd::Hover`
+    /// can re-style the document for CSS `:hover` rules and repaint without
+    /// re-parsing or re-laying out.
+    geometry: Option<Arc<Geometry>>,
+    /// The node currently under the pointer (for CSS `:hover` cascade on
+    /// `RenderArena` re-renders).
+    hovered: Option<NodeId>,
+    max_scroll: Arc<AtomicU32>,
+}
+
+impl RenderState {
+    /// Parse the current session document and cascade its styles.
+    fn parse_and_apply(&self) -> (NodeId, NodeArena) {
+        parse_and_apply(&self.html, &self.css_rules)
+    }
+
+    /// Re-parse, re-layout, re-paint, publish the geometry and flush a frame.
+    ///
+    /// Shared by `Redraw` (same document) and `RenderHtml` (new document).
+    /// `out` is generic so tests can drive the pipeline against an in-memory
+    /// writer.
+    fn redraw<W: Write>(
+        &mut self,
+        out: &mut BufWriter<W>,
+        geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>,
+        term_map: &TermMap,
+        scroll_y: u32,
+        zoom: f32,
+    ) {
+        let (root_id, arena) = self.parse_and_apply();
+        self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom, None);
+    }
+
+    /// Re-layout / re-paint a supplied DOM arena, publishing geometry.
+    ///
+    /// Shared tail of [`redraw`](Self::redraw) and
+    /// [`render_arena`](Self::render_arena). `arena` must already carry its
+    /// cascaded CSS (`css_attr`); the caller handles parsing or re-cascading.
+    /// `dirty` carries the nodes JS mutated since the previous frame: when
+    /// the re-layout leaves every box rect unchanged, only those nodes'
+    /// region is repainted instead of the whole canvas.
+    fn layout_and_paint<W: Write>(
+        &mut self,
+        out: &mut BufWriter<W>,
+        geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>,
+        term_map: &TermMap,
+        arena: NodeArena,
+        root_id: NodeId,
+        scroll_y: u32,
+        zoom: f32,
+        dirty: Option<&DirtyInfo>,
+    ) {
+        // Reuse the existing canvas when its dimensions still match the
+        // terminal. Only allocate a fresh Vec on the first render or after a
+        // terminal resize, when the buffer size must change. A resize also
+        // invalidates every cached pixel, so it forces the full-repaint path.
+        let size_changed = match self.term_layout.as_ref() {
+            Some(tl) => tl.columns != term_map.columns || tl.rows != term_map.rows,
+            None => true,
+        };
+        if size_changed {
+            self.term_layout = Some(TermLayout::new(term_map, zoom));
+        }
+        let tl = self
+            .term_layout
+            .as_mut()
+            .expect("TermLayout just allocated above or reused from prior render");
+
+        let boxes = match tl.layout_only(&arena, root_id, term_map) {
+            Ok(b) => b,
+            Err(e) => {
+                log::error!("Layout failed: {}", e);
+                return;
+            }
+        };
+
+        // Install the document `<title>` as the terminal window title once
+        // per session. The DOM is re-parsed on every `Redraw` but the title
+        // is static, so this only runs on the first successful layout.
+        if !self.title_set {
+            if let Some(title) = extract_title(&arena, root_id) {
+                execute!(stdout(), crossterm::terminal::SetTitle(title)).unwrap_or_else(|e| {
+                    log::error!("Failed to set terminal title: {}", e)
+                });
+            }
+            self.title_set = true;
+        }
+
+        let geo = Arc::new(Geometry {
+            arena,
+            boxes,
+            root_id,
+        });
+
+        // Incremental repaint: when JS only touched a few nodes, the fresh
+        // layout usually keeps every box rect identical to the cached one, so
+        // only the dirty nodes' region can differ from the previous frame.
+        // Repainting just that region (plus the ancestor background fills)
+        // avoids clearing and re-painting the whole buffer. Any mismatch — a
+        // moved / reflowed box, a hover change, a canvas resize — falls back
+        // to the full repaint.
+        let region = if !size_changed
+            && let Some(dirty) = dirty
+            && !dirty.is_empty()
+            && let Some(prev) = &self.geometry
+        {
+            incremental_region(&prev.boxes, &geo.boxes, &geo.arena, &dirty.nodes)
+        } else {
+            None
+        };
+
+        // Publish the layout snapshot: cache it for `:hover` re-styling and
+        // forward a copy to the hit-test thread when one is listening (the
+        // event system is active).
+        self.geometry = Some(Arc::clone(&geo));
+        if let Some(tx) = geo_tx
+            && let Err(e) = tx.send(Arc::clone(&geo))
+        {
+            // No hit-test thread is listening (plain `render`), so the
+            // snapshot has no consumer — benign.
+            log::debug!("Hit-test channel closed: {}", e);
+        }
+
+        // Publish the new upper bound of `scroll_y` so the input loop can
+        // drop events that would no-op against it. u32::MAX is used as the
+        // startup placeholder (no upper bound known yet), and the first
+        // successful layout will overwrite it with the real value.
+        self.max_scroll.store(tl.max_scroll(), Ordering::Relaxed);
+
+        tl.scroll_y = scroll_y;
+        tl.clamp_scroll();
+
+        match region {
+            Some(r) => tl.repaint_region(&geo.arena, &geo.boxes, r),
+            None => tl.repaint_from(&geo.arena, &geo.boxes),
+        }
+
+        // The incremental renderer emits only the changed cells (and a
+        // one-time full clear on the first frame / after resize), so redraws
+        // need no per-frame Clear. `flush_frame` is the single I/O per frame,
+        // skipped entirely when nothing changed.
+        tl.render(out);
+        flush_frame(out);
+    }
+
+    /// Re-cascade CSS (with the current `:hover`) into a script-engine arena
+    /// snapshot and render it without re-parsing HTML.
+    ///
+    /// Backs `RenderCmd::RenderArena`: JS mutated the live DOM, so the arena
+    /// arrives raw (no `css_attr`) and must be cascaded first. `dirty` lists
+    /// the mutated nodes for the incremental repaint; `hover_changed` is true
+    /// when the `:hover` target moved, which invalidates the incremental path
+    /// (the highlight may live anywhere in the tree).
+    fn render_arena<W: Write>(
+        &mut self,
+        out: &mut BufWriter<W>,
+        geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>,
+        term_map: &TermMap,
+        arena: &NodeArena,
+        root_id: NodeId,
+        scroll_y: u32,
+        zoom: f32,
+        dirty: DirtyInfo,
+        hover_changed: bool,
+    ) {
+        let mut arena = arena.clone();
+        reset_css_attr(&mut arena, root_id);
+        css_into_node_with_hover(&mut arena, root_id, &self.css_rules, self.hovered);
+        let dirty = if hover_changed { None } else { Some(&dirty) };
+        self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom, dirty);
+    }
+
+    /// Replace the session document and fully re-render it, keeping the
+    /// current scroll position / zoom.
+    ///
+    /// Backs `RenderCmd::RenderHtml` — the dynamic-content entry point that
+    /// lets event handlers rebuild the document (e.g. a counter that
+    /// re-renders on every click).
+    fn render_html<W: Write>(
+        &mut self,
+        out: &mut BufWriter<W>,
+        geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>,
+        term_map: &TermMap,
+        html: Arc<str>,
+    ) {
+        let (scroll_y, zoom) = match &self.term_layout {
+            Some(tl) => (tl.scroll_y, tl.zoom),
+            None => (0, 1.0),
+        };
+        self.html = html;
+        // The new document may carry a different `<title>`.
+        self.title_set = false;
+        self.redraw(out, geo_tx, term_map, scroll_y, zoom);
+    }
+}
+
+/// Compute the smallest rectangle whose repaint covers every change caused by
+/// the dirty nodes, or `None` when the incremental path must be abandoned.
+///
+/// A DOM node paints inside the box of its nearest box-carrying ancestor
+/// (inline elements fold into the enclosing block's runs), so each dirty node
+/// is mapped up the DOM to the first ancestor that produced a `LayoutBox`.
+/// That box must exist in both the cached and the fresh layout with an
+/// identical rect — otherwise the change moved geometry (e.g. wrapping or a
+/// structural mutation) and only a full repaint is safe. The union of the
+/// matched boxes' rects is the repaint region.
+fn incremental_region(
+    old_boxes: &[LayoutBox],
+    new_boxes: &[LayoutBox],
+    arena: &NodeArena,
+    dirty: &[NodeId],
+) -> Option<Rect> {
+    let old_rects = collect_box_rects(old_boxes);
+    let new_rects = collect_box_rects(new_boxes);
+    let mut region: Option<Rect> = None;
+    for &node_id in dirty {
+        let mut found = false;
+        let mut cur = Some(node_id);
+        while let Some(id) = cur {
+            let rects: Vec<Rect> = new_rects
+                .iter()
+                .filter(|(n, _)| *n == id)
+                .map(|(_, r)| *r)
+                .collect();
+            if !rects.is_empty() {
+                found = true;
+                for rect in rects {
+                    let old_ok = old_rects.iter().any(|(n, r)| *n == id && *r == rect);
+                    if !old_ok {
+                        return None;
+                    }
+                    region = Some(match region {
+                        Some(r) => union_rect(r, rect),
+                        None => rect,
+                    });
+                }
+                break;
+            }
+            cur = arena.get(id).and_then(|n| n.parent);
+        }
+        if !found {
+            return None;
+        }
+    }
+    region
+}
+
+/// Union of two canvas rectangles (absolute coordinates).
+fn union_rect(a: Rect, b: Rect) -> Rect {
+    let left = a.x.min(b.x);
+    let top = a.y.min(b.y);
+    let right = a.x.saturating_add(a.width).max(b.x.saturating_add(b.width));
+    let bottom = a
+        .y
+        .saturating_add(a.height)
+        .max(b.y.saturating_add(b.height));
+    Rect::new(left, top, right - left, bottom - top)
+}
+
+/// Flatten the box forest into `(node_id, rect)` pairs.
+fn collect_box_rects(boxes: &[LayoutBox]) -> Vec<(NodeId, Rect)> {
+    fn walk(boxes: &[LayoutBox], out: &mut Vec<(NodeId, Rect)>) {
+        for b in boxes {
+            out.push((b.node_id, b.rect));
+            walk(&b.children, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(boxes, &mut out);
+    out
+}
+
+/// Union of every box rect belonging to `node_id` or any of its ancestors
+/// that has a box.
+///
+/// `:hover` rules may match any element on the hovered node's ancestor chain
+/// (`#panel:hover` matches while a descendant is hovered), so repainting this
+/// union covers every cell the hover state can change. Used by the `Hover`
+/// command to repaint only the affected region instead of the whole canvas.
+fn hover_affected_region(
+    boxes: &[LayoutBox],
+    arena: &NodeArena,
+    node_id: Option<NodeId>,
+) -> Option<Rect> {
+    let mut region: Option<Rect> = None;
+    let mut cur = node_id;
+    while let Some(id) = cur {
+        let mut stack = vec![boxes];
+        while let Some(list) = stack.pop() {
+            for b in list {
+                if b.node_id == id {
+                    region = Some(match region {
+                        Some(r) => union_rect(r, b.rect),
+                        None => b.rect,
+                    });
+                }
+                stack.push(&b.children);
+            }
+        }
+        cur = arena.get(id).and_then(|n| n.parent);
+    }
+    region
+}
+
+/// True when the stylesheet contains any `:hover` rule — the only case where
+/// moving the pointer can change the painted output.
+fn css_has_hover_rules(css_rules: &CssRule) -> bool {
+    css_rules.0.keys().any(|sel| {
+        sel.compounds.iter().any(|compound| {
+            compound
+                .iter()
+                .any(|s| matches!(s, Selector::PseudoClass(PseudoClass::Hover)))
+        })
+    })
+}
+
 fn render_thread(
     rx: mpsc::Receiver<RenderCmd>,
     html: Arc<str>,
     css_rules: Arc<CssRule>,
     max_scroll: Arc<AtomicU32>,
+    geo_tx: Option<mpsc::Sender<Arc<Geometry>>>,
 ) {
     // One persistent write buffer for the whole session: every frame writes
     // into it and is flushed exactly once, so a frame costs a single write
     // syscall instead of one per render call.
     let mut out = BufWriter::new(stdout());
-    let mut term_layout: Option<TermLayout> = None;
-    // Terminal title: install the document `<title>` on the first successful
-    // draw. crossterm offers no title getter, so the previous title (if any)
-    // is intentionally left untouched on quit rather than being restored.
-    let mut title_set = false;
+    let has_hover_rules = css_has_hover_rules(&css_rules);
+    let mut state = RenderState {
+        html,
+        css_rules,
+        has_hover_rules,
+        term_layout: None,
+        title_set: false,
+        geometry: None,
+        hovered: None,
+        max_scroll,
+    };
 
     loop {
         let mut cmd = match rx.recv() {
@@ -133,7 +478,7 @@ fn render_thread(
             RenderCmd::Quit => break,
 
             RenderCmd::Rerender { scroll_y } => {
-                let Some(tl) = term_layout.as_mut() else {
+                let Some(tl) = state.term_layout.as_mut() else {
                     continue;
                 };
                 let prev = tl.scroll_y;
@@ -155,8 +500,6 @@ fn render_thread(
             }
 
             RenderCmd::Redraw { scroll_y, zoom } => {
-                let (root_id, arena) = parse_and_apply(&html, &css_rules);
-
                 let term_map = match TermMap::get_ter_map() {
                     Ok(m) => m,
                     Err(e) => {
@@ -164,58 +507,116 @@ fn render_thread(
                         continue;
                     }
                 };
+                state.redraw(&mut out, &geo_tx, &term_map, scroll_y, zoom);
+            }
 
-                // Reuse the existing canvas when its dimensions still match
-                // the terminal. Only allocate a fresh Vec on the first render
-                // or after a terminal resize, when the buffer size must change.
-                let size_changed = match term_layout.as_ref() {
-                    Some(tl) => tl.columns != term_map.columns || tl.rows != term_map.rows,
-                    None => true,
+            RenderCmd::RenderArena {
+                arena,
+                root_id,
+                scroll_y,
+                zoom,
+                hovered,
+                dirty,
+            } => {
+                // A hover change re-styles the whole tree (the `:hover`
+                // highlight may sit anywhere), so the incremental repaint is
+                // only valid when the hover target is unchanged.
+                let hover_changed = state.hovered != hovered;
+                state.hovered = hovered;
+                let term_map = match TermMap::get_ter_map() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        log::error!("Failed to get terminal size: {}", e);
+                        continue;
+                    }
                 };
-                if size_changed {
-                    term_layout = Some(TermLayout::new(&term_map, zoom));
-                }
-                let tl = term_layout
-                    .as_mut()
-                    .expect("TermLayout just allocated above or reused from prior render");
+                state.render_arena(
+                    &mut out,
+                    &geo_tx,
+                    &term_map,
+                    &arena,
+                    root_id,
+                    scroll_y,
+                    zoom,
+                    dirty,
+                    hover_changed,
+                );
+            }
 
-                if let Err(e) = tl.draw(&arena, root_id, &term_map) {
-                    log::error!("Layout failed: {}", e);
+            RenderCmd::RenderHtml { html } => {
+                let term_map = match TermMap::get_ter_map() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        log::error!("Failed to get terminal size: {}", e);
+                        continue;
+                    }
+                };
+                state.render_html(&mut out, &geo_tx, &term_map, html);
+            }
+
+            RenderCmd::Hover { node_id } => {
+                let prev = state.hovered;
+                state.hovered = node_id;
+                // Without any `:hover` rule the cascade is identical for every
+                // pointer position, so nothing can change on screen — skip the
+                // repaint entirely (browser behaviour: moving the pointer with
+                // no `:hover` styles produces no drawing).
+                if !state.has_hover_rules {
                     continue;
                 }
-
-                // Install the document `<title>` as the terminal window title
-                // once per session. The DOM is re-parsed on every `Redraw`
-                // but the title is static, so this only runs on the first
-                // successful layout.
-                if !title_set {
-                    if let Some(title) = extract_title(&arena, root_id) {
-                        execute!(stdout(), crossterm::terminal::SetTitle(title)).unwrap_or_else(
-                            |e| log::error!("Failed to set terminal title: {}", e),
-                        );
-                    }
-                    title_set = true;
+                let Some(tl) = state.term_layout.as_mut() else {
+                    continue;
+                };
+                let Some(geo) = state.geometry.as_ref() else {
+                    continue;
+                };
+                // Re-run the cascade with the hovered node so `:hover` rules
+                // apply. The arena is cloned — the shared snapshot stays
+                // immutable for the hit-test thread, and a slotmap clone keeps
+                // the same keys, so the cached boxes remain valid (hover only
+                // changes colours / backgrounds, never geometry).
+                let mut arena = geo.arena.clone();
+                reset_css_attr(&mut arena, geo.root_id);
+                css_into_node_with_hover(&mut arena, geo.root_id, &state.css_rules, node_id);
+                // Incremental repaint: only the union of the old and new hover
+                // regions can differ from the previous frame (the old
+                // highlight is cleared, the new one painted). Repainting this
+                // small region instead of resetting the whole canvas keeps
+                // hover tracking responsive while the pointer moves.
+                let region = match (
+                    hover_affected_region(&geo.boxes, &arena, prev),
+                    hover_affected_region(&geo.boxes, &arena, node_id),
+                ) {
+                    (Some(a), Some(b)) => Some(union_rect(a, b)),
+                    (Some(a), None) => Some(a),
+                    (None, Some(b)) => Some(b),
+                    (None, None) => None,
+                };
+                match region {
+                    Some(r) => tl.repaint_region(&arena, &geo.boxes, r),
+                    None => tl.repaint_from(&arena, &geo.boxes),
                 }
-
-                // Publish the new upper bound of `scroll_y` so the input
-                // loop can drop events that would no-op against it.
-                // u32::MAX is used as the startup placeholder (no upper
-                // bound known yet), and the first successful layout will
-                // overwrite it with the real value.
-                max_scroll.store(tl.max_scroll(), Ordering::Relaxed);
-
-                tl.scroll_y = scroll_y;
-                tl.clamp_scroll();
-
-                // The incremental renderer emits only the changed cells (and
-                // a one-time full clear on the first frame / after resize),
-                // so redraws need no per-frame Clear. `flush_frame` is the
-                // single I/O per frame, skipped entirely when nothing changed.
                 tl.render(&mut out);
                 flush_frame(&mut out);
             }
         }
     }
+}
+
+/// Worker of the dedicated hit-test thread.
+///
+/// Consumes geometry snapshots published by the render thread and replaces
+/// the shared hit map with a freshly built region list. Exits when the render
+/// thread drops the channel (i.e. on quit).
+fn hit_test_thread(rx: mpsc::Receiver<Arc<Geometry>>, hit_map: Arc<Mutex<Arc<HitMap>>>) {
+    while let Ok(geo) = rx.recv() {
+        let map = Arc::new(HitMap::build(&geo));
+        match hit_map.lock() {
+            Ok(mut guard) => *guard = map,
+            Err(e) => log::error!("Hit map lock poisoned: {}", e),
+        }
+    }
+    log::debug!("Hit-test thread exiting");
 }
 
 // debug panic hook
@@ -280,7 +681,29 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
 // Entry point
 // ============================================================
 
+/// Render an HTML document in the terminal with keyboard navigation, mouse
+/// scrolling and zoom.
+///
+/// This is the plain entry point without event handling; use
+/// [`render_with_events`] to enable click / hover interaction.
 pub fn render(html: &str, css: &str) {
+    run(html, css, None);
+}
+
+/// Render an HTML document with JS-like event handling enabled.
+///
+/// In addition to everything [`render`] does, elements that declare `onclick`
+/// / `onmouseover` / `onmouseout` attributes become hit regions, a dedicated
+/// hit-test thread records their positions, and events bubble through the DOM
+/// ancestor chain to the handlers registered in `bindings`. Hovering produces
+/// no visual highlight (matching a browser without CSS `:hover` rules) —
+/// only the `onmouseover` / `onmouseout` events fire. See the
+/// [`events`](crate::events) module for the event model.
+pub fn render_with_events(html: &str, css: &str, bindings: EventBindings) {
+    run(html, css, Some(bindings));
+}
+
+fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
     // install debug hook
     #[cfg(debug_assertions)]
     install_debug_panic_hook();
@@ -300,23 +723,47 @@ pub fn render(html: &str, css: &str) {
     let css_rules = Arc::new(build_css_rules(html, css));
 
     let html: Arc<str> = Arc::from(html);
+    // The script engine owns the live DOM when events are enabled; it parses
+    // the document itself (arena + `<script>` blocks) and reports dirty flags
+    // when JS mutates the DOM.
+    let mut engine: Option<ScriptEngine> = None;
+    if let Some(bindings) = bindings {
+        engine = match ScriptEngine::new(html.as_ref(), bindings) {
+            Ok(e) => Some(e),
+            Err(err) => {
+                log::error!("Failed to initialize script engine: {err}");
+                None
+            }
+        };
+    }
+
     // Shared scroll upper bound — initial value `u32::MAX` means "not yet
     // known" (the first layout hasn't run); the render thread overwrites it
-    // on every successful `Redraw` with the real `tl.max_scroll()`.
+    // on every successful render with the real `tl.max_scroll()`.
     let max_scroll = Arc::new(AtomicU32::new(u32::MAX));
-    let (tx, rx) = mpsc::channel::<RenderCmd>();
 
+    // Geometry snapshot channel (render thread → hit-test thread) and the
+    // published hit map (hit-test thread → input loop). The hit-test thread
+    // is only spawned when event handling is requested.
+    let (geo_tx, geo_rx) = mpsc::channel::<Arc<Geometry>>();
+    let hit_map: Arc<Mutex<Arc<HitMap>>> = Arc::new(Mutex::new(Arc::new(HitMap::new())));
+    if engine.is_some() {
+        let hit_map_thread = Arc::clone(&hit_map);
+        std::thread::spawn(move || hit_test_thread(geo_rx, hit_map_thread));
+    }
+
+    let (tx, rx) = mpsc::channel::<RenderCmd>();
     let render_handle = std::thread::spawn({
         let html_clone = Arc::clone(&html);
         let css_clone = Arc::clone(&css_rules);
         let max_scroll_clone = Arc::clone(&max_scroll);
+        let geo_tx = engine.is_some().then_some(geo_tx);
         move || {
-            render_thread(rx, html_clone, css_clone, max_scroll_clone);
+            render_thread(rx, html_clone, css_clone, max_scroll_clone, geo_tx);
         }
     });
 
-    let mut scroll_y: u32 = 0;
-    let mut zoom: f32 = 1.0;
+    let mut state = InputState::new();
     let mut rows: u16 = match TermMap::get_ter_map() {
         Ok(m) => m.rows,
         Err(e) => {
@@ -325,14 +772,36 @@ pub fn render(html: &str, css: &str) {
         }
     };
 
-    if let Err(e) = tx.send(RenderCmd::Redraw { scroll_y, zoom }) {
-        log::error!("Failed to send initial Redraw: {}", e);
+    // First frame: the engine's live arena (scripts already ran and may have
+    // mutated the DOM) or a plain parse-based redraw.
+    let first_cmd = match engine.as_mut() {
+        Some(eng) => RenderCmd::RenderArena {
+            arena: Arc::new(eng.arena()),
+            root_id: eng.root_id(),
+            scroll_y: state.scroll_y,
+            zoom: state.zoom,
+            hovered: None,
+            dirty: DirtyInfo::default(),
+        },
+        None => RenderCmd::Redraw {
+            scroll_y: state.scroll_y,
+            zoom: state.zoom,
+        },
+    };
+    if let Err(e) = tx.send(first_cmd) {
+        log::error!("Failed to send initial render: {}", e);
         if let Err(e2) = tx.send(RenderCmd::Quit) {
             log::error!("Failed to send Quit during cleanup: {}", e2);
         }
     }
 
-    loop {
+    // Periodic auto action (see `EventBindings::auto`): cloned once so the
+    // loop can read it while mutably borrowing `engine` for dispatch.
+    let auto: Option<AutoRefresh> = engine.as_ref().and_then(|e| e.auto());
+    let mut last_auto = std::time::Instant::now();
+
+    let mut quit = false;
+    while !quit {
         // Detect a dead render thread (e.g. from a panic) promptly. Rust's
         // spawned-thread panic handler swallows the panic and kills just the
         // worker, so without this check the main loop would keep polling
@@ -342,31 +811,123 @@ pub fn render(html: &str, css: &str) {
             break;
         }
 
-        match trigger_refresh(
-            &mut scroll_y,
-            &mut zoom,
-            rows,
-            max_scroll.load(Ordering::Relaxed),
-            Some(Duration::from_millis(100)),
-        ) {
-            Some(RenderCmd::Quit) => {
+        let mut cmds = if engine.is_some() {
+            let map = match hit_map.lock() {
+                Ok(guard) => Arc::clone(&guard),
+                Err(e) => {
+                    log::error!("Hit map lock poisoned: {}", e);
+                    break;
+                }
+            };
+            trigger_refresh(
+                &mut state,
+                rows,
+                max_scroll.load(Ordering::Relaxed),
+                Some(&map),
+                engine.as_mut(),
+                Some(Duration::from_millis(100)),
+            )
+        } else {
+            trigger_refresh(
+                &mut state,
+                rows,
+                max_scroll.load(Ordering::Relaxed),
+                None,
+                None,
+                Some(Duration::from_millis(100)),
+            )
+        };
+
+        // Periodic auto action: when the interval has elapsed, invoke the
+        // configured JS global function (see `ScriptEngine::invoke_action`)
+        // and forward its render commands alongside the input events.
+        if let Some(auto) = &auto {
+            let now = std::time::Instant::now();
+            if now.duration_since(last_auto) >= auto.every
+                && let Some(engine) = engine.as_mut()
+            {
+                last_auto = now;
+                cmds.extend(engine.invoke_action(&auto.action));
+            }
+        }
+
+        // JS mutations of the live DOM need a re-render from the engine's
+        // arena (no HTML re-parse). The hover target is folded in so the
+        // `RenderArena` cascade re-applies the current `:hover` highlight
+        // without a separate `Hover` command. The mutated node ids ride along
+        // so the render thread can repaint just those regions.
+        if let Some(engine) = engine.as_mut() {
+            let dirty = engine.take_dirty();
+            if !dirty.is_empty() {
+                cmds.push(RenderCmd::RenderArena {
+                    arena: Arc::new(engine.arena()),
+                    root_id: engine.root_id(),
+                    scroll_y: state.scroll_y,
+                    zoom: state.zoom,
+                    hovered: state.hover.current().map(|r| r.node_id),
+                    dirty,
+                });
+            }
+        }
+
+        // Coalesce: when a full `RenderArena` is pending, drop any queued
+        // `Hover` commands — the render thread's `try_recv` would otherwise
+        // drop them anyway (it keeps only the last command), losing the
+        // highlight, or the duplicate repaint would be wasted work. The hover
+        // target is already carried by `RenderArena.hovered`.
+        let cmds = {
+            let mut merged: Vec<RenderCmd> = Vec::with_capacity(cmds.len());
+            let mut arena_pending = false;
+            for cmd in cmds {
+                match cmd {
+                    RenderCmd::RenderArena { .. } => {
+                        arena_pending = true;
+                        merged.push(cmd);
+                    }
+                    RenderCmd::Hover { .. } if arena_pending => {
+                        // Dropped: the arena render re-cascades with `hovered`.
+                    }
+                    other => merged.push(other),
+                }
+            }
+            merged
+        };
+
+        for cmd in cmds {
+            if matches!(cmd, RenderCmd::Quit) {
                 if let Err(e) = tx.send(RenderCmd::Quit) {
                     log::error!("Failed to send Quit: {}", e);
                 }
+                quit = true;
                 break;
             }
-            Some(cmd) => {
-                if let RenderCmd::Redraw { .. } = &cmd {
-                    if let Ok(map) = TermMap::get_ter_map() {
-                        rows = map.rows;
-                    }
-                }
-                if let Err(e) = tx.send(cmd) {
-                    log::error!("Failed to send render command: {}", e);
-                    break;
-                }
+            // With the script engine active, the engine's live arena is the
+            // source of truth: convert parse-based `Redraw` (zoom / resize)
+            // into a `RenderArena` so JS DOM mutations survive re-renders.
+            let cmd = match (cmd, engine.as_mut()) {
+                (
+                    RenderCmd::Redraw { scroll_y, zoom },
+                    Some(engine),
+                ) => RenderCmd::RenderArena {
+                    arena: Arc::new(engine.arena()),
+                    root_id: engine.root_id(),
+                    scroll_y,
+                    zoom,
+                    hovered: state.hover.current().map(|r| r.node_id),
+                    dirty: DirtyInfo::default(),
+                },
+                (other, _) => other,
+            };
+            if let RenderCmd::Redraw { .. } = &cmd
+                && let Ok(map) = TermMap::get_ter_map()
+            {
+                rows = map.rows;
             }
-            None => {}
+            if let Err(e) = tx.send(cmd) {
+                log::error!("Failed to send render command: {}", e);
+                quit = true;
+                break;
+            }
         }
     }
 

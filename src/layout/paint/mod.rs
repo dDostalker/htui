@@ -44,11 +44,34 @@ pub(super) struct PaintCanvas<'a> {
     /// `<img>` paints across frames reuse the decoded grid instead of
     /// re-reading the file.
     pub image_cache: &'a mut ImageCache,
+    /// Optional absolute canvas rect restricting cell writes. `None` paints
+    /// unrestricted (full frame); `Some` is the incremental-repaint region
+    /// where every write outside it is dropped so the rest of the canvas
+    /// keeps the previous frame's pixels.
+    pub(super) region: Option<Rect>,
 }
 
 impl<'a> PaintCanvas<'a> {
     pub(super) fn cell_index(&self, x: usize, y: usize) -> usize {
         y.saturating_mul(self.columns as usize).saturating_add(x)
+    }
+
+    /// True when the canvas cell at 1-D index `idx` may be written by this
+    /// pass. Unrestricted when no repaint region is set.
+    #[inline]
+    pub(super) fn in_region(&self, idx: usize) -> bool {
+        match self.region {
+            None => true,
+            Some(r) => {
+                let cols = self.columns as usize;
+                let y = idx / cols;
+                let x = idx - y * cols;
+                x >= r.x
+                    && x < r.x.saturating_add(r.width)
+                    && y >= r.y
+                    && y < r.y.saturating_add(r.height)
+            }
+        }
     }
 }
 
@@ -87,9 +110,52 @@ pub fn paint_layout_tree(boxes: &[LayoutBox], arena: &NodeArena, term_layout: &m
         layout: &mut term_layout.layout,
         columns,
         image_cache: &mut term_layout.image_cache,
+        region: None,
     };
     for b in boxes {
         paint_box(b, arena, &mut canvas, None, None);
+    }
+}
+
+/// Repaint only the cells inside `region`, leaving the rest of the canvas
+/// untouched.
+///
+/// Backs the incremental render path: the layout has already been re-run and
+/// every box rect verified unchanged against the cached layout, so only the
+/// cells the dirty nodes' boxes (and their ancestors' background fills) cover
+/// can differ from the previous frame. Boxes whose rect does not intersect
+/// `region` are skipped entirely; the rest paint normally, with every cell
+/// write gated to the region by [`PaintCanvas::in_region`]. Because only the
+/// region's cells are rewritten, the diff renderer emits exactly the cells
+/// that changed.
+pub fn paint_layout_tree_region(
+    boxes: &[LayoutBox],
+    arena: &NodeArena,
+    term_layout: &mut TermLayout,
+    region: Rect,
+) {
+    let mut max_y = 0usize;
+    for b in boxes {
+        let bottom = b.rect.y.saturating_add(b.rect.height.max(1));
+        if bottom > max_y {
+            max_y = bottom;
+        }
+    }
+    if max_y as u32 > term_layout.rendered_rows {
+        term_layout.rendered_rows = max_y as u32;
+    }
+
+    let columns = term_layout.columns;
+    let mut canvas = PaintCanvas {
+        layout: &mut term_layout.layout,
+        columns,
+        image_cache: &mut term_layout.image_cache,
+        region: Some(region),
+    };
+    for b in boxes {
+        if intersect_rects(b.rect, region).is_some() {
+            paint_box(b, arena, &mut canvas, None, None);
+        }
     }
 }
 

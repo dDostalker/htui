@@ -9,6 +9,16 @@ use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
 use crate::tdom::node::{Node, NodeArena, NodeId, NodeType};
 
+/// Parsed HTML document: the DOM arena plus the embedded `<style>` CSS and
+/// `<script>` JS sources extracted during parsing.
+#[derive(Debug)]
+pub struct ParsedDocument {
+    pub root_id: NodeId,
+    pub arena: NodeArena,
+    pub css: String,
+    pub scripts: Vec<String>,
+}
+
 /// HTML parser (slotmap arena-based).
 #[derive(Debug)]
 pub struct Parser {
@@ -24,22 +34,36 @@ impl Parser {
 
     /// Parse HTML and return (root_id, arena, embedded_css).
     pub fn parse(&mut self) -> (NodeId, NodeArena, String) {
+        let doc = self.parse_with_scripts();
+        (doc.root_id, doc.arena, doc.css)
+    }
+
+    /// Parse HTML and return the arena plus the embedded `<style>` CSS and
+    /// `<script>` JS sources.
+    pub fn parse_with_scripts(&mut self) -> ParsedDocument {
         let opts = ParseOpts::default();
         let dom = html5ever::parse_document(RcDom::default(), opts).one(self.input.clone());
 
         let mut arena = NodeArena::default();
         let root_id = arena.insert(Node::from(NodeType::Global));
         let mut css_sources: Vec<String> = Vec::new();
+        let mut scripts: Vec<String> = Vec::new();
 
-        convert_children(&dom.document, root_id, &mut arena, &mut css_sources);
+        convert_children(&dom.document, root_id, &mut arena, &mut css_sources, &mut scripts);
 
         debug!(
-            "解析完成: root={}, {} 节点, CSS: {} 字节",
+            "解析完成: root={}, {} 节点, CSS: {} 字节, JS: {} 字节",
             root_id,
             arena.len(),
-            css_sources.join("\n").len()
+            css_sources.join("\n").len(),
+            scripts.join("\n").len()
         );
-        (root_id, arena, css_sources.join("\n"))
+        ParsedDocument {
+            root_id,
+            arena,
+            css: css_sources.join("\n"),
+            scripts,
+        }
     }
 }
 
@@ -55,15 +79,27 @@ fn convert_children(
     parent_id: NodeId,
     arena: &mut NodeArena,
     css_sources: &mut Vec<String>,
+    scripts: &mut Vec<String>,
 ) {
     let children = handle.children.borrow().clone();
     for child_handle in &children {
         match &child_handle.data {
             NodeData::Document => {
-                convert_children(child_handle, parent_id, arena, css_sources);
+                convert_children(child_handle, parent_id, arena, css_sources, scripts);
             }
             NodeData::Element { name, attrs, .. } => {
                 let tag = name.local.as_ref();
+                // `<script>` is extracted verbatim (like `<style>`) rather than
+                // becoming a DOM node: the script layer evaluates its source
+                // against the rendered document.
+                if tag.eq_ignore_ascii_case("script") {
+                    let js = extract_text_content(child_handle);
+                    if !js.trim().is_empty() {
+                        info!("提取 <script> JS: {} 字节", js.len());
+                        scripts.push(js);
+                    }
+                    continue;
+                }
                 match tag_name_to_node_type(tag) {
                     Some(node_type) => {
                         if node_type == NodeType::Style {
@@ -72,7 +108,7 @@ fn convert_children(
                                 info!("提取 <style> CSS: {} 字节", css.len());
                                 css_sources.push(css);
                             }
-                            return;
+                            continue;
                         }
                         if node_type == NodeType::Link {
                             let link_attrs = {
@@ -91,7 +127,7 @@ fn convert_children(
                                     Err(e) => warn!("读取 {} 失败: {}", href, e),
                                 }
                             }
-                            return;
+                            continue;
                         }
                         let child_id = arena.insert(Node::from(node_type));
                         {
@@ -99,11 +135,11 @@ fn convert_children(
                             arena[child_id].attributes = convert_attributes(&ar);
                         }
                         Node::append_child(arena, parent_id, child_id);
-                        convert_children(child_handle, child_id, arena, css_sources);
+                        convert_children(child_handle, child_id, arena, css_sources, scripts);
                     }
                     None => {
                         warn!("不支持标签 <{}>，压平", tag);
-                        convert_children(child_handle, parent_id, arena, css_sources);
+                        convert_children(child_handle, parent_id, arena, css_sources, scripts);
                     }
                 }
             }
@@ -122,7 +158,7 @@ fn convert_children(
             }
             NodeData::Comment { .. } => {}
             NodeData::Doctype { .. } | NodeData::ProcessingInstruction { .. } => {
-                convert_children(child_handle, parent_id, arena, css_sources);
+                convert_children(child_handle, parent_id, arena, css_sources, scripts);
             }
         }
     }

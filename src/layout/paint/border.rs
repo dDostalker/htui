@@ -58,7 +58,7 @@ pub(crate) fn paint_borders(
             let row_start = cell_start + row_offset * cols;
             for col in left_t..right_col_start {
                 let idx = row_start + col;
-                if idx < max_cells {
+                if idx < max_cells && canvas.in_region(idx) {
                     // In-place: capsule-reuse the 4-byte buffer from
                     // `Block::default()` to push `─` (3 bytes) without
                     // reallocating.
@@ -80,7 +80,7 @@ pub(crate) fn paint_borders(
             let row_start = bottom_row + row_offset * cols;
             for col in left_t..right_col_start {
                 let idx = row_start + col;
-                if idx < max_cells {
+                if idx < max_cells && canvas.in_region(idx) {
                     let cell = &mut canvas.layout[idx];
                     cell.word.clear();
                     cell.word.push('─');
@@ -98,7 +98,7 @@ pub(crate) fn paint_borders(
             let row_start = cell_start + row_offset * cols;
             for col_offset in 0..left_t {
                 let idx = row_start + col_offset;
-                if idx < max_cells {
+                if idx < max_cells && canvas.in_region(idx) {
                     let cell = &mut canvas.layout[idx];
                     cell.word.clear();
                     cell.word.push('│');
@@ -116,7 +116,7 @@ pub(crate) fn paint_borders(
             let row_start = cell_start + row_offset * cols;
             for col_offset in 0..right_t {
                 let idx = row_start + right_col_start + col_offset;
-                if idx < max_cells {
+                if idx < max_cells && canvas.in_region(idx) {
                     let cell = &mut canvas.layout[idx];
                     cell.word.clear();
                     cell.word.push('│');
@@ -154,7 +154,7 @@ pub(crate) fn paint_borders(
         let (cx, cy) = corner_positions[i];
         let color = corner_colors[i];
         let idx = cell_start + cy * cols + cx;
-        if idx < max_cells {
+        if idx < max_cells && canvas.in_region(idx) {
             let cell = &mut canvas.layout[idx];
             cell.word.clear();
             cell.word.push(ch);

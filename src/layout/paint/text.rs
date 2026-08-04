@@ -152,6 +152,14 @@ fn paint_text_row(
         if w == 2 && idx + 1 >= max {
             break;
         }
+        if !canvas.in_region(idx) {
+            // Incremental repaint: the glyph sits outside the repaint region
+            // (e.g. an ancestor's run that merely touches the region), so it
+            // must not be rewritten. Advance past the slot regardless so
+            // later clusters keep their positions.
+            idx += slot_width;
+            continue;
+        }
         // In-place mutation: the buffer from `Block::default()` (32 bytes
         // by default) fits any single grapheme cluster so `push_str(g)`
         // reuses it without reallocating.
@@ -166,11 +174,13 @@ fn paint_text_row(
             // occupy two columns; the second column is marked with an empty
             // word so the renderer (`render_to_bytes`) skips it and doesn't
             // double-print the glyph.
-            let pad = &mut canvas.layout[idx + 1];
-            pad.word.clear();
-            pad.fcolor = fg;
-            pad.bcolor = bg;
-            pad.style = style;
+            if canvas.in_region(idx + 1) {
+                let pad = &mut canvas.layout[idx + 1];
+                pad.word.clear();
+                pad.fcolor = fg;
+                pad.bcolor = bg;
+                pad.style = style;
+            }
         }
         // Fill the remaining columns the "font" would occupy beyond the glyph
         // itself. Each character cell is expanded to `font_size` columns
@@ -192,6 +202,9 @@ fn paint_text_row(
                 break;
             }
             if w == 2 && pad == 1 {
+                continue;
+            }
+            if !canvas.in_region(target) {
                 continue;
             }
             let pad_cell = &mut canvas.layout[target];

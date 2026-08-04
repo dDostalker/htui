@@ -19,6 +19,7 @@ tendril = "0.4.3"
 rayon = "1.12.0"
 unicode-segmentation = "1.12"
 unicode-width = "0.2"
+boa_engine = "0.21.1"
 
 [dev-dependencies]
 criterion = "0.8"

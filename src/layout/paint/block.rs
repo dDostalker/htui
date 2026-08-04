@@ -140,7 +140,7 @@ pub(crate) fn paint_block(
             let row_cell_start = cell_start + (row_offset + border_top) * cols;
             for i in 0..bg_width {
                 let idx = row_cell_start + (bg_start_x - r.x) + i;
-                if idx < canvas.layout.len() {
+                if idx < canvas.layout.len() && canvas.in_region(idx) {
                     // Mutate in place: `clear()` keeps the 4-byte buffer from
                     // `Block::default()`, `push(' ')` reuses it, then the
                     // colour fields flip. This avoids the per-cell

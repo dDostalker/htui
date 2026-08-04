@@ -1,25 +1,110 @@
+use std::sync::Arc;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind};
+
+use crate::{
+    events::interaction,
+    script::ScriptEngine,
+    tdom::node::NodeId,
+};
+use crate::events::HitMap;
 
 const SCROLL_LINES_PER_TICK: u32 = 3;
+const ZOOM_STEP: f32 = 0.1;
+const ZOOM_MIN: f32 = 0.2;
+const ZOOM_MAX: f32 = 5.0;
+
+/// DOM mutations to repaint on the next `RenderArena` frame.
+///
+/// The script engine records the session-local node ids whose content or
+/// attributes JS changed since the last render. When the set is non-empty the
+/// render thread can try a region-limited repaint (re-layout the tree, then
+/// repaint only the affected rectangles) instead of clearing and re-painting
+/// the whole canvas; the rect comparison against the cached layout decides
+/// whether that path is safe and falls back to a full repaint otherwise.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DirtyInfo {
+    pub nodes: Vec<crate::tdom::node::NodeId>,
+}
+
+impl DirtyInfo {
+    /// True when no DOM mutation is pending (nothing to repaint).
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum RenderCmd {
     Rerender { scroll_y: u32 },
     Redraw { scroll_y: u32, zoom: f32 },
+    /// Render a supplied DOM arena snapshot (the script engine's live arena
+    /// after JS mutations), cascading styles and re-laying-out without
+    /// re-parsing HTML. `hovered` is the current `:hover` target so the
+    /// re-cascade re-applies the highlight in the same pass (no separate
+    /// `Hover` command needed). `dirty` lists the nodes JS mutated since the
+    /// previous frame, letting the render thread repaint only the affected
+    /// rectangles when the re-layout leaves every box rect unchanged.
+    RenderArena {
+        arena: Arc<crate::tdom::node::NodeArena>,
+        root_id: crate::tdom::node::NodeId,
+        scroll_y: u32,
+        zoom: f32,
+        hovered: Option<crate::tdom::node::NodeId>,
+        dirty: DirtyInfo,
+    },
+    /// Replace the session document with `html` and fully re-render it,
+    /// keeping the current scroll position / zoom. The render thread swaps
+    /// the document and diff-renders, so handlers can build dynamic content
+    /// (e.g. a counter that re-renders on every click).
+    RenderHtml { html: Arc<str> },
+    /// Re-style the cached document for the CSS `:hover` pseudo-class with the
+    /// given session-local node (`None` clears any hover), then repaint. With
+    /// no `:hover` rules in the stylesheet this repaints to the same pixels.
+    Hover { node_id: Option<NodeId> },
     Quit,
 }
-const ZOOM_STEP: f32 = 0.1;
-const ZOOM_MIN: f32 = 0.2;
-const ZOOM_MAX: f32 = 5.0;
 
-/// Wait for the next input event and translate it into a [`RenderCmd`].
+/// Input-loop state that persists between events.
+///
+/// Groups the variables the input loop mutates (`scroll_y`, `zoom`) with the
+/// mouse-tracking state (press position, hover target) so the loop only
+/// passes one state value around.
+#[derive(Debug)]
+pub struct InputState {
+    pub scroll_y: u32,
+    pub zoom: f32,
+    /// Screen coordinates of the last left-button press; a click is only
+    /// recognised when the release lands on the same cell.
+    pressed: Option<(u16, u16)>,
+    /// Hover tracking state for mouse enter / leave detection.
+    pub hover: interaction::HoverState,
+}
+
+impl InputState {
+    pub fn new() -> Self {
+        Self {
+            scroll_y: 0,
+            zoom: 1.0,
+            pressed: None,
+            hover: interaction::HoverState::new(),
+        }
+    }
+}
+
+impl Default for InputState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Wait for the next input event and translate it into render commands.
 ///
 /// `timeout` controls how long to block on `event::poll`:
 /// - `None` blocks indefinitely (legacy behaviour, suitable for tests or
 ///   one-shot tools that don't need to react to the render thread dying).
-/// - `Some(duration)` returns `None` when no event arrives within the
+/// - `Some(duration)` returns an empty vec when no event arrives within the
 ///   duration, giving the caller a chance to check other state (e.g.
 ///   whether the render thread is still alive).
 ///
@@ -31,123 +116,135 @@ const ZOOM_MAX: f32 = 5.0;
 /// guard for that, but every dropped command here is one fewer channel
 /// send and, more importantly, one fewer frame that risks a visible flash
 /// at the scroll bounds.
+///
+/// `hit_map` and `engine` activate mouse interaction (pass both together,
+/// or neither):
+/// - left `Down` records the press position; left `Up` on the same cell is
+///   dispatched as a bubbling `Click` via
+///   [`interaction::on_click`](crate::events::interaction::on_click);
+/// - `Moved` detects pointer enter / leave and dispatches `MouseOver` /
+///   `MouseOut` via [`interaction::on_move`](crate::events::interaction::on_move).
+///   Like a browser without CSS `:hover`, moving the pointer never changes
+///   what is painted.
 pub fn trigger_refresh(
-    scroll_y: &mut u32,
-    zoom: &mut f32,
+    state: &mut InputState,
     rows: u16,
     max_scroll: u32,
+    hit_map: Option<&HitMap>,
+    engine: Option<&mut ScriptEngine>,
     timeout: Option<Duration>,
-) -> Option<RenderCmd> {
+) -> Vec<RenderCmd> {
+    let mut cmds = Vec::new();
     if let Some(t) = timeout {
         // `poll` returns `Ok(false)` on timeout and `Err` on a system error;
-        // both cases should be surfaced as `None` so the outer loop can
+        // both cases should be surfaced as an empty vec so the outer loop can
         // re-check the render thread instead of blocking forever.
         if !event::poll(t).unwrap_or(false) {
-            return None;
+            return cmds;
         }
     }
     match event::read() {
         Ok(Event::Key(key)) => {
             if key.kind == KeyEventKind::Release {
-                return None;
+                return cmds;
             }
 
             if key.modifiers.contains(event::KeyModifiers::CONTROL) {
                 match key.code {
                     KeyCode::Char('=') | KeyCode::Char('+') => {
-                        *zoom = (*zoom + ZOOM_STEP).min(ZOOM_MAX);
-                        return Some(RenderCmd::Redraw {
-                            scroll_y: *scroll_y,
-                            zoom: *zoom,
-                        });
+                        state.zoom = (state.zoom + ZOOM_STEP).min(ZOOM_MAX);
+                        return vec![RenderCmd::Redraw {
+                            scroll_y: state.scroll_y,
+                            zoom: state.zoom,
+                        }];
                     }
                     KeyCode::Char('-') | KeyCode::Char('_') => {
-                        *zoom = (*zoom - ZOOM_STEP).max(ZOOM_MIN);
-                        return Some(RenderCmd::Redraw {
-                            scroll_y: *scroll_y,
-                            zoom: *zoom,
-                        });
+                        state.zoom = (state.zoom - ZOOM_STEP).max(ZOOM_MIN);
+                        return vec![RenderCmd::Redraw {
+                            scroll_y: state.scroll_y,
+                            zoom: state.zoom,
+                        }];
                     }
                     KeyCode::Char('0') => {
-                        *zoom = 1.0;
-                        return Some(RenderCmd::Redraw {
-                            scroll_y: *scroll_y,
-                            zoom: *zoom,
-                        });
+                        state.zoom = 1.0;
+                        return vec![RenderCmd::Redraw {
+                            scroll_y: state.scroll_y,
+                            zoom: state.zoom,
+                        }];
                     }
                     _ => {}
                 }
             }
 
             match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => return Some(RenderCmd::Quit),
+                KeyCode::Esc | KeyCode::Char('q') => cmds.push(RenderCmd::Quit),
 
                 KeyCode::Up | KeyCode::Char('k') => {
                     // Already at the top boundary — drop the event instead
                     // of forwarding a no-op scroll to the render thread.
-                    if *scroll_y == 0 {
-                        return None;
+                    if state.scroll_y == 0 {
+                        return cmds;
                     }
-                    *scroll_y -= 1;
-                    return Some(RenderCmd::Rerender {
-                        scroll_y: *scroll_y,
+                    state.scroll_y -= 1;
+                    cmds.push(RenderCmd::Rerender {
+                        scroll_y: state.scroll_y,
                     });
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     // Already at the bottom boundary — drop the event.
-                    if *scroll_y >= max_scroll {
-                        return None;
+                    if state.scroll_y >= max_scroll {
+                        return cmds;
                     }
-                    *scroll_y += 1;
-                    return Some(RenderCmd::Rerender {
-                        scroll_y: *scroll_y,
+                    state.scroll_y += 1;
+                    cmds.push(RenderCmd::Rerender {
+                        scroll_y: state.scroll_y,
                     });
                 }
                 KeyCode::PageUp => {
-                    if *scroll_y == 0 {
-                        return None;
+                    if state.scroll_y == 0 {
+                        return cmds;
                     }
                     let step = (rows as u32).saturating_sub(1).max(1);
-                    *scroll_y = scroll_y.saturating_sub(step);
-                    return Some(RenderCmd::Rerender {
-                        scroll_y: *scroll_y,
+                    state.scroll_y = state.scroll_y.saturating_sub(step);
+                    cmds.push(RenderCmd::Rerender {
+                        scroll_y: state.scroll_y,
                     });
                 }
                 KeyCode::PageDown => {
-                    if *scroll_y >= max_scroll {
-                        return None;
+                    if state.scroll_y >= max_scroll {
+                        return cmds;
                     }
                     let step = (rows as u32).saturating_sub(1).max(1);
-                    *scroll_y = scroll_y.saturating_add(step);
-                    return Some(RenderCmd::Rerender {
-                        scroll_y: *scroll_y,
+                    state.scroll_y = state.scroll_y.saturating_add(step);
+                    cmds.push(RenderCmd::Rerender {
+                        scroll_y: state.scroll_y,
                     });
                 }
                 KeyCode::Home => {
                     // No-op move — drop to avoid a wasted rerender.
-                    if *scroll_y == 0 {
-                        return None;
+                    if state.scroll_y == 0 {
+                        return cmds;
                     }
-                    *scroll_y = 0;
-                    return Some(RenderCmd::Rerender {
-                        scroll_y: *scroll_y,
+                    state.scroll_y = 0;
+                    cmds.push(RenderCmd::Rerender {
+                        scroll_y: state.scroll_y,
                     });
                 }
                 KeyCode::End => {
                     // No-op move (already at the bottom) — drop.
-                    if *scroll_y >= max_scroll {
-                        return None;
+                    if state.scroll_y >= max_scroll {
+                        return cmds;
                     }
                     // Use the actual upper bound rather than u32::MAX so the
                     // render thread receives a value it doesn't have to clamp.
-                    *scroll_y = max_scroll;
-                    return Some(RenderCmd::Rerender {
-                        scroll_y: *scroll_y,
+                    state.scroll_y = max_scroll;
+                    cmds.push(RenderCmd::Rerender {
+                        scroll_y: state.scroll_y,
                     });
                 }
                 _ => {}
             }
-            None
+            cmds
         }
 
         Ok(Event::Mouse(mouse)) => {
@@ -155,47 +252,88 @@ pub fn trigger_refresh(
             match mouse.kind {
                 MouseEventKind::ScrollUp => {
                     if ctrl {
-                        *zoom = (*zoom - ZOOM_STEP).max(ZOOM_MIN);
-                        Some(RenderCmd::Redraw {
-                            scroll_y: *scroll_y,
-                            zoom: *zoom,
-                        })
-                    } else {
-                        if *scroll_y == 0 {
-                            return None;
-                        }
-                        *scroll_y = scroll_y.saturating_sub(SCROLL_LINES_PER_TICK);
-                        Some(RenderCmd::Rerender {
-                            scroll_y: *scroll_y,
-                        })
+                        state.zoom = (state.zoom - ZOOM_STEP).max(ZOOM_MIN);
+                        return vec![RenderCmd::Redraw {
+                            scroll_y: state.scroll_y,
+                            zoom: state.zoom,
+                        }];
                     }
+                    if state.scroll_y == 0 {
+                        return cmds;
+                    }
+                    state.scroll_y = state.scroll_y.saturating_sub(SCROLL_LINES_PER_TICK);
+                    cmds.push(RenderCmd::Rerender {
+                        scroll_y: state.scroll_y,
+                    });
                 }
                 MouseEventKind::ScrollDown => {
                     if ctrl {
-                        *zoom = (*zoom + ZOOM_STEP).min(ZOOM_MAX);
-                        Some(RenderCmd::Redraw {
-                            scroll_y: *scroll_y,
-                            zoom: *zoom,
-                        })
-                    } else {
-                        if *scroll_y >= max_scroll {
-                            return None;
-                        }
-                        *scroll_y = scroll_y.saturating_add(SCROLL_LINES_PER_TICK);
-                        Some(RenderCmd::Rerender {
-                            scroll_y: *scroll_y,
-                        })
+                        state.zoom = (state.zoom + ZOOM_STEP).min(ZOOM_MAX);
+                        return vec![RenderCmd::Redraw {
+                            scroll_y: state.scroll_y,
+                            zoom: state.zoom,
+                        }];
+                    }
+                    if state.scroll_y >= max_scroll {
+                        return cmds;
+                    }
+                    state.scroll_y = state.scroll_y.saturating_add(SCROLL_LINES_PER_TICK);
+                    cmds.push(RenderCmd::Rerender {
+                        scroll_y: state.scroll_y,
+                    });
+                }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if hit_map.is_some() && engine.is_some() {
+                        state.pressed = Some((mouse.column, mouse.row));
                     }
                 }
-                _ => None,
+                MouseEventKind::Up(MouseButton::Left) => {
+                    if let (Some((px, py)), Some(hit_map), Some(engine)) =
+                        (state.pressed, hit_map, engine)
+                    {
+                        state.pressed = None;
+                        if px == mouse.column && py == mouse.row {
+                            let (x, y) = canvas_pos(state, mouse.column, mouse.row);
+                            cmds.extend(interaction::on_click(
+                                &mut state.hover,
+                                hit_map,
+                                engine,
+                                x,
+                                y,
+                            ));
+                        }
+                    } else {
+                        state.pressed = None;
+                    }
+                }
+                MouseEventKind::Moved => {
+                    if let (Some(hit_map), Some(engine)) = (hit_map, engine) {
+                        let (x, y) = canvas_pos(state, mouse.column, mouse.row);
+                        cmds.extend(interaction::on_move(
+                            &mut state.hover,
+                            hit_map,
+                            engine,
+                            x,
+                            y,
+                        ));
+                    }
+                }
+                _ => {}
             }
+            cmds
         }
 
-        Ok(Event::Resize(_, _new_rows)) => Some(RenderCmd::Redraw {
-            scroll_y: *scroll_y,
-            zoom: *zoom,
-        }),
+        Ok(Event::Resize(_, _new_rows)) => vec![RenderCmd::Redraw {
+            scroll_y: state.scroll_y,
+            zoom: state.zoom,
+        }],
 
-        _ => None,
+        _ => cmds,
     }
+}
+
+/// Convert a screen position to canvas coordinates by adding the scroll
+/// offset. Zoom is not yet wired into layout, so no zoom scaling is applied.
+fn canvas_pos(state: &InputState, column: u16, row: u16) -> (u32, u32) {
+    (column as u32, row as u32 + state.scroll_y)
 }

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head><title>Events</title></head>
+<body>
+  <script>
+    // JS-driven demo: functions are defined in a `<script>` block (exactly
+    // like a browser) and bound to elements via `on*` attributes or
+    // `addEventListener`. `console.log` goes to the htui log file.
+    function log(msg) {
+      document.getElementById('log').textContent = msg;
+    }
+    function panel() { log('panel() — from a click inside the panel'); }
+    function buy() { log('buy()'); }
+    function sell() { log('sell()'); }
+    function hoverPanel() { log('mouseover: panel'); }
+    function leavePanel() { log('mouseout: panel'); }
+    function hoverBuy() { log('mouseover: buy button'); }
+    function hoverFooter() { log('mouseover: footer'); }
+
+    // Dynamic re-render via DOM mutation: increment the counter by reading and
+    // writing `textContent` (no HTML re-parse — the engine flags the dirty
+    // DOM and the render thread diff-renders the changed cells).
+    function increment() {
+      var c = document.getElementById('count');
+      var n = parseInt(c.textContent.replace('Count: ', '')) + 1;
+      c.textContent = 'Count: ' + n;
+    }
+
+    // Programmatic binding demo: this button has no `onclick` attribute.
+    document.getElementById('btn-add').addEventListener('click', buy);
+  </script>
+  <h1>Event test</h1>
+  <p>Hover to see the CSS :hover highlight and fire mouseover/mouseout; click to run JS handlers (logged to the status line and %TEMP%/htui-visual-test.log).</p>
+
+  <p id="count" onclick="increment()">Count: 0</p>
+
+  <div id="panel" onclick="panel()" onmouseover="hoverPanel()" onmouseout="leavePanel()">
+    <p>Click inside this panel → panel() (children bubble up).</p>
+    <p id="child">Plain text, no handler — a click here bubbles to the panel.</p>
+    <button id="btn-a" onclick="buy()" onmouseover="hoverBuy()">Buy</button>
+    <button id="btn-b" onclick="sell()">Sell</button>
+    <button id="btn-add">Buy (addEventListener)</button>
+  </div>
+
+  <p id="footer" onmouseover="hoverFooter()">Move the pointer over this line too.</p>
+  <p id="log">—</p>
+</body>
+</html>

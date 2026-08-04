@@ -1,0 +1,89 @@
+/* Style sheet for the system-monitor visual test.
+ *
+ * Tokyo Night inspired palette on a dark canvas; the same file behaves
+ * identically in a browser. Buttons highlight on hover via CSS `:hover`,
+ * which htui re-styles on pointer enter / leave.
+ */
+
+/* ---------- canvas ---------- */
+body {
+  background-color: #1a1b26;
+  color: #c0caf5;
+}
+.app {
+  padding: 1px 2px;
+}
+
+/* ---------- header ---------- */
+.header {
+  padding: 0px 1px;
+}
+.brand {
+  color: #7aa2f7;
+  font-weight: bold;
+}
+.btn {
+  color: #7dcfff;
+}
+.btn:hover {
+  background-color: #2f334d;
+}
+.meta {
+  padding: 0px 1px 1px 1px;
+}
+
+/* ---------- typography ---------- */
+.dim {
+  color: #565f89;
+}
+.val {
+  color: #c0caf5;
+  font-weight: bold;
+}
+.bar {
+  color: #a9b1d6;
+}
+.pct {
+  font-weight: bold;
+}
+.pad-x1 {
+  padding: 0px 1px;
+}
+
+/* ---------- cards / panels ---------- */
+.card {
+  border: 1px solid #2f334d;
+  background-color: #24283b;
+  margin: 1px 0;
+}
+.card-head {
+  background-color: #2f334d;
+  font-weight: bold;
+  padding: 0px 1px;
+}
+
+/* ---------- layout helpers ---------- */
+.row {
+  display: flex;
+  flex-direction: row;
+}
+.grow {
+  flex-grow: 1;
+}
+.gap-1 {
+  gap: 1;
+}
+.gap-2 {
+  gap: 2;
+}
+
+/* Disk list keeps one line per volume (the `\n` separators survive). */
+#disks {
+  white-space: pre;
+}
+
+/* ---------- accent colours ---------- */
+.cyan  { color: #7dcfff; }
+.yel   { color: #e0af68; }
+.purp  { color: #bb9af7; }
+.green { color: #9ece6a; }
