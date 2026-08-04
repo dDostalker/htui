@@ -25,9 +25,10 @@ pub use layout::layout::TermMap;
 use crate::{
     events::{AutoRefresh, EventBindings, Geometry, HitMap},
     html::css_parse::{self, CssRule, css_into_node_with_hover, reset_css_attr},
+    layout::{LayoutBox, Rect},
     script::ScriptEngine,
     tdom::node::{NodeArena, NodeId, NodeType},
-    tui::graph_api::{InputState, RenderCmd, TermLayout, trigger_refresh},
+    tui::graph_api::{DirtyInfo, InputState, RenderCmd, TermLayout, trigger_refresh},
 };
 
 fn parse_and_apply(html: &str, css_rules: &CssRule) -> (NodeId, NodeArena) {
@@ -145,7 +146,7 @@ impl RenderState {
         zoom: f32,
     ) {
         let (root_id, arena) = self.parse_and_apply();
-        self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom);
+        self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom, None);
     }
 
     /// Re-layout / re-paint a supplied DOM arena, publishing geometry.
@@ -153,6 +154,9 @@ impl RenderState {
     /// Shared tail of [`redraw`](Self::redraw) and
     /// [`render_arena`](Self::render_arena). `arena` must already carry its
     /// cascaded CSS (`css_attr`); the caller handles parsing or re-cascading.
+    /// `dirty` carries the nodes JS mutated since the previous frame: when
+    /// the re-layout leaves every box rect unchanged, only those nodes'
+    /// region is repainted instead of the whole canvas.
     fn layout_and_paint<W: Write>(
         &mut self,
         out: &mut BufWriter<W>,
@@ -162,10 +166,12 @@ impl RenderState {
         root_id: NodeId,
         scroll_y: u32,
         zoom: f32,
+        dirty: Option<&DirtyInfo>,
     ) {
         // Reuse the existing canvas when its dimensions still match the
         // terminal. Only allocate a fresh Vec on the first render or after a
-        // terminal resize, when the buffer size must change.
+        // terminal resize, when the buffer size must change. A resize also
+        // invalidates every cached pixel, so it forces the full-repaint path.
         let size_changed = match self.term_layout.as_ref() {
             Some(tl) => tl.columns != term_map.columns || tl.rows != term_map.rows,
             None => true,
@@ -178,7 +184,7 @@ impl RenderState {
             .as_mut()
             .expect("TermLayout just allocated above or reused from prior render");
 
-        let boxes = match tl.draw(&arena, root_id, term_map) {
+        let boxes = match tl.layout_only(&arena, root_id, term_map) {
             Ok(b) => b,
             Err(e) => {
                 log::error!("Layout failed: {}", e);
@@ -198,17 +204,35 @@ impl RenderState {
             self.title_set = true;
         }
 
-        // Publish the layout snapshot: cache it for `:hover` re-styling and
-        // forward a copy to the hit-test thread when one is listening (the
-        // event system is active).
         let geo = Arc::new(Geometry {
             arena,
             boxes,
             root_id,
         });
+
+        // Incremental repaint: when JS only touched a few nodes, the fresh
+        // layout usually keeps every box rect identical to the cached one, so
+        // only the dirty nodes' region can differ from the previous frame.
+        // Repainting just that region (plus the ancestor background fills)
+        // avoids clearing and re-painting the whole buffer. Any mismatch — a
+        // moved / reflowed box, a hover change, a canvas resize — falls back
+        // to the full repaint.
+        let region = if !size_changed
+            && let Some(dirty) = dirty
+            && !dirty.is_empty()
+            && let Some(prev) = &self.geometry
+        {
+            incremental_region(&prev.boxes, &geo.boxes, &geo.arena, &dirty.nodes)
+        } else {
+            None
+        };
+
+        // Publish the layout snapshot: cache it for `:hover` re-styling and
+        // forward a copy to the hit-test thread when one is listening (the
+        // event system is active).
         self.geometry = Some(Arc::clone(&geo));
         if let Some(tx) = geo_tx
-            && let Err(e) = tx.send(geo)
+            && let Err(e) = tx.send(Arc::clone(&geo))
         {
             // No hit-test thread is listening (plain `render`), so the
             // snapshot has no consumer — benign.
@@ -224,6 +248,11 @@ impl RenderState {
         tl.scroll_y = scroll_y;
         tl.clamp_scroll();
 
+        match region {
+            Some(r) => tl.repaint_region(&geo.arena, &geo.boxes, r),
+            None => tl.repaint_from(&geo.arena, &geo.boxes),
+        }
+
         // The incremental renderer emits only the changed cells (and a
         // one-time full clear on the first frame / after resize), so redraws
         // need no per-frame Clear. `flush_frame` is the single I/O per frame,
@@ -236,7 +265,10 @@ impl RenderState {
     /// snapshot and render it without re-parsing HTML.
     ///
     /// Backs `RenderCmd::RenderArena`: JS mutated the live DOM, so the arena
-    /// arrives raw (no `css_attr`) and must be cascaded first.
+    /// arrives raw (no `css_attr`) and must be cascaded first. `dirty` lists
+    /// the mutated nodes for the incremental repaint; `hover_changed` is true
+    /// when the `:hover` target moved, which invalidates the incremental path
+    /// (the highlight may live anywhere in the tree).
     fn render_arena<W: Write>(
         &mut self,
         out: &mut BufWriter<W>,
@@ -246,11 +278,14 @@ impl RenderState {
         root_id: NodeId,
         scroll_y: u32,
         zoom: f32,
+        dirty: DirtyInfo,
+        hover_changed: bool,
     ) {
         let mut arena = arena.clone();
         reset_css_attr(&mut arena, root_id);
         css_into_node_with_hover(&mut arena, root_id, &self.css_rules, self.hovered);
-        self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom);
+        let dirty = if hover_changed { None } else { Some(&dirty) };
+        self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom, dirty);
     }
 
     /// Replace the session document and fully re-render it, keeping the
@@ -275,6 +310,80 @@ impl RenderState {
         self.title_set = false;
         self.redraw(out, geo_tx, term_map, scroll_y, zoom);
     }
+}
+
+/// Compute the smallest rectangle whose repaint covers every change caused by
+/// the dirty nodes, or `None` when the incremental path must be abandoned.
+///
+/// A DOM node paints inside the box of its nearest box-carrying ancestor
+/// (inline elements fold into the enclosing block's runs), so each dirty node
+/// is mapped up the DOM to the first ancestor that produced a `LayoutBox`.
+/// That box must exist in both the cached and the fresh layout with an
+/// identical rect — otherwise the change moved geometry (e.g. wrapping or a
+/// structural mutation) and only a full repaint is safe. The union of the
+/// matched boxes' rects is the repaint region.
+fn incremental_region(
+    old_boxes: &[LayoutBox],
+    new_boxes: &[LayoutBox],
+    arena: &NodeArena,
+    dirty: &[NodeId],
+) -> Option<Rect> {
+    let old_rects = collect_box_rects(old_boxes);
+    let new_rects = collect_box_rects(new_boxes);
+    let mut region: Option<Rect> = None;
+    for &node_id in dirty {
+        let mut found = false;
+        let mut cur = Some(node_id);
+        while let Some(id) = cur {
+            let rects: Vec<Rect> = new_rects
+                .iter()
+                .filter(|(n, _)| *n == id)
+                .map(|(_, r)| *r)
+                .collect();
+            if !rects.is_empty() {
+                found = true;
+                for rect in rects {
+                    let old_ok = old_rects.iter().any(|(n, r)| *n == id && *r == rect);
+                    if !old_ok {
+                        return None;
+                    }
+                    region = Some(match region {
+                        Some(r) => {
+                            let left = r.x.min(rect.x);
+                            let top = r.y.min(rect.y);
+                            let right = r.x.saturating_add(r.width).max(
+                                rect.x.saturating_add(rect.width),
+                            );
+                            let bottom = r.y.saturating_add(r.height).max(
+                                rect.y.saturating_add(rect.height),
+                            );
+                            Rect::new(left, top, right - left, bottom - top)
+                        }
+                        None => rect,
+                    });
+                }
+                break;
+            }
+            cur = arena.get(id).and_then(|n| n.parent);
+        }
+        if !found {
+            return None;
+        }
+    }
+    region
+}
+
+/// Flatten the box forest into `(node_id, rect)` pairs.
+fn collect_box_rects(boxes: &[LayoutBox]) -> Vec<(NodeId, Rect)> {
+    fn walk(boxes: &[LayoutBox], out: &mut Vec<(NodeId, Rect)>) {
+        for b in boxes {
+            out.push((b.node_id, b.rect));
+            walk(&b.children, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(boxes, &mut out);
+    out
 }
 
 fn render_thread(
@@ -354,7 +463,14 @@ fn render_thread(
                 root_id,
                 scroll_y,
                 zoom,
+                hovered,
+                dirty,
             } => {
+                // A hover change re-styles the whole tree (the `:hover`
+                // highlight may sit anywhere), so the incremental repaint is
+                // only valid when the hover target is unchanged.
+                let hover_changed = state.hovered != hovered;
+                state.hovered = hovered;
                 let term_map = match TermMap::get_ter_map() {
                     Ok(m) => m,
                     Err(e) => {
@@ -362,7 +478,17 @@ fn render_thread(
                         continue;
                     }
                 };
-                state.render_arena(&mut out, &geo_tx, &term_map, &arena, root_id, scroll_y, zoom);
+                state.render_arena(
+                    &mut out,
+                    &geo_tx,
+                    &term_map,
+                    &arena,
+                    root_id,
+                    scroll_y,
+                    zoom,
+                    dirty,
+                    hover_changed,
+                );
             }
 
             RenderCmd::RenderHtml { html } => {
@@ -578,6 +704,8 @@ fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
             root_id: eng.root_id(),
             scroll_y: state.scroll_y,
             zoom: state.zoom,
+            hovered: None,
+            dirty: DirtyInfo::default(),
         },
         None => RenderCmd::Redraw {
             scroll_y: state.scroll_y,
@@ -648,17 +776,46 @@ fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
         }
 
         // JS mutations of the live DOM need a re-render from the engine's
-        // arena (no HTML re-parse).
-        if let Some(engine) = engine.as_mut()
-            && engine.take_dirty()
-        {
-            cmds.push(RenderCmd::RenderArena {
-                arena: Arc::new(engine.arena()),
-                root_id: engine.root_id(),
-                scroll_y: state.scroll_y,
-                zoom: state.zoom,
-            });
+        // arena (no HTML re-parse). The hover target is folded in so the
+        // `RenderArena` cascade re-applies the current `:hover` highlight
+        // without a separate `Hover` command. The mutated node ids ride along
+        // so the render thread can repaint just those regions.
+        if let Some(engine) = engine.as_mut() {
+            let dirty = engine.take_dirty();
+            if !dirty.is_empty() {
+                cmds.push(RenderCmd::RenderArena {
+                    arena: Arc::new(engine.arena()),
+                    root_id: engine.root_id(),
+                    scroll_y: state.scroll_y,
+                    zoom: state.zoom,
+                    hovered: state.hover.current().map(|r| r.node_id),
+                    dirty,
+                });
+            }
         }
+
+        // Coalesce: when a full `RenderArena` is pending, drop any queued
+        // `Hover` commands — the render thread's `try_recv` would otherwise
+        // drop them anyway (it keeps only the last command), losing the
+        // highlight, or the duplicate repaint would be wasted work. The hover
+        // target is already carried by `RenderArena.hovered`.
+        let cmds = {
+            let mut merged: Vec<RenderCmd> = Vec::with_capacity(cmds.len());
+            let mut arena_pending = false;
+            for cmd in cmds {
+                match cmd {
+                    RenderCmd::RenderArena { .. } => {
+                        arena_pending = true;
+                        merged.push(cmd);
+                    }
+                    RenderCmd::Hover { .. } if arena_pending => {
+                        // Dropped: the arena render re-cascades with `hovered`.
+                    }
+                    other => merged.push(other),
+                }
+            }
+            merged
+        };
 
         for cmd in cmds {
             if matches!(cmd, RenderCmd::Quit) {
@@ -680,6 +837,8 @@ fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
                     root_id: engine.root_id(),
                     scroll_y,
                     zoom,
+                    hovered: state.hover.current().map(|r| r.node_id),
+                    dirty: DirtyInfo::default(),
                 },
                 (other, _) => other,
             };

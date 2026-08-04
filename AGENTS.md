@@ -118,7 +118,7 @@ htui/
 ├── visual_test/          # 可视化测试工具（cargo run -p visual_test）
 │   └── src/
 │       ├── main.rs
-│       ├── sysmon.rs     # 系统监控器示例逻辑（wmic 采样 + 页面重建）
+│       ├── sysmon.rs     # 系统监控器示例逻辑（sysinfo 采样 + 页面重建）
 │       ├── all_in_one/   # index.html: 可直接浏览器打开，内部 <style> 内联 CSS
 │       ├── headings/
 │       ├── image/        # includes pic.png
@@ -257,13 +257,32 @@ hover 驱动 `onmouseover`/`onmouseout` 事件，并在悬停目标变化时发�
 `css_into_node_with_hover` 重新级联再重绘——只有样式表写了 `:hover` 规则才产生视觉
 高亮，与浏览器一致。
 
-动态内容：JS 修改 live DOM 后引擎置 `dom_dirty`，输入循环发送
-`RenderCmd::RenderArena { arena, root_id, scroll_y, zoom }`——渲染线程重新级联
-（保留当前 `:hover`）→ 重排 → 重绘 → 发布新 Geometry，**无需重新解析 HTML**。
-`RenderCmd::RenderHtml` 仍保留用于整文档替换。定时任务：`EventBindings::auto`
-（`AutoRefresh`）让输入循环按间隔经 `ScriptEngine::invoke_action` 自动触发 JS
-全局函数（监控器/时钟/动画用）。宿主函数在输入循环线程执行，重活应放后台线程
-（参考 `visual_test/src/sysmon.rs` 后台采样 + 快照模式）。
+### 动态内容：JS 修改 live DOM 后引擎把被改动的 `NodeId` 记入 `dirty`，输入循环发送
+`RenderCmd::RenderArena { arena, root_id, scroll_y, zoom, hovered, dirty }`——渲染线程
+重新级联（保留当前 `:hover`）→ 重排 → 重绘（**仅 dirty 区域，见下**）→ 发布新
+Geometry，**无需重新解析 HTML**。`RenderCmd::RenderHtml` 仍保留用于整文档替换。
+定时任务：`EventBindings::auto`（`AutoRefresh`）让输入循环按间隔经
+`ScriptEngine::invoke_action` 自动触发 JS 全局函数（监控器/时钟/动画用）。宿主函数在
+输入循环线程执行，重活应放后台线程（参考 `visual_test/src/sysmon.rs` 后台采样 +
+快照模式）。
+
+## 渲染合并优化（避免无意义的重排）
+
+终端刷新卡顿常见于两处，本项目已内置缓解：
+
+1. **值未变不触发渲染**：`el.textContent = v` 在 `v` 与当前文本相同时直接短路，
+   不置 `dirty`——监控器每 200ms 刷新但值基本不变时，实际 `RenderArena`
+   次数远少于刷新次数（sysmon 实测 200 次刷新只触发约 14 次渲染）。
+2. **命令合并**：输入循环发送前合并命令流。`RenderArena` 携带 `hovered` 字段，
+   重排时会重新应用当前 `:hover` 高亮，因此同轮的 `Hover` 命令会被丢弃
+   （渲染线程的 `try_recv` 合并本就只保留最后一个命令）。
+3. **增量重绘（Region Repaint）**：引擎侧每个 DOM 写操作（`textContent` /
+   `style` / `setAttribute` / `appendChild`…）把 `NodeId` 记入 `ScriptState.dirty`，
+   随 `RenderArena` 携带。渲染线程对每个 dirty 节点沿 DOM 找到最近的"有盒子的
+   祖先"，若其 rect 在缓存布局与新布局中完全一致（说明改动不涉及几何），就只
+   清空并重绘该区域（`TermLayout::repaint_region` + 写门控 `PaintCanvas.region`），
+   否则回退全量 `reset_canvas` + 重绘。`:hover` 目标一变即强制全量（高亮可能
+   在任意位置）。实测 80×24 / 60 行文档：全量 draw ~2.1ms → 增量 ~1.1ms。
 
 ## 必要事项
 `html → tdom → layout → tui` 四层不可破坏。不要引入新的抽象层，除非有充分理由。在修改之前进行询问。
@@ -354,6 +373,7 @@ hover 驱动 `onmouseover`/`onmouseout` 事件，并在悬停目标变化时发�
 | `Block`            | `tui::graph_api`        | 单个屏幕字符单元格（含 `style: FontStyle`） |
 | `FontStyle`        | `tui::graph_api`        | `Block` 的聚合样式位掩码（`BOLD` / `ITALIC` / `UNDERLINED` / `CROSSED_OUT`） |
 | `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举（Rerender / Redraw / RenderArena / RenderHtml / Hover / Quit） |
+| `DirtyInfo`        | `tui::graph_api`        | `RenderArena` 携带的脏节点集合（`nodes: Vec<NodeId>`，JS 本轮改动的节点） |
 | `InputState`       | `tui::graph_api::input` | 输入循环状态（scroll_y / zoom / pressed / hover）          |
 | `EventType`        | `events`                | DOM 事件类型（Click / MouseOver / MouseOut）               |
 | `HtmlEvent`        | `events`                | 事件对象（event_type / target / current_target / x / y / bubbles）|

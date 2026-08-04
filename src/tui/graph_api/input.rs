@@ -15,18 +15,44 @@ const ZOOM_STEP: f32 = 0.1;
 const ZOOM_MIN: f32 = 0.2;
 const ZOOM_MAX: f32 = 5.0;
 
+/// DOM mutations to repaint on the next `RenderArena` frame.
+///
+/// The script engine records the session-local node ids whose content or
+/// attributes JS changed since the last render. When the set is non-empty the
+/// render thread can try a region-limited repaint (re-layout the tree, then
+/// repaint only the affected rectangles) instead of clearing and re-painting
+/// the whole canvas; the rect comparison against the cached layout decides
+/// whether that path is safe and falls back to a full repaint otherwise.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DirtyInfo {
+    pub nodes: Vec<crate::tdom::node::NodeId>,
+}
+
+impl DirtyInfo {
+    /// True when no DOM mutation is pending (nothing to repaint).
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum RenderCmd {
     Rerender { scroll_y: u32 },
     Redraw { scroll_y: u32, zoom: f32 },
     /// Render a supplied DOM arena snapshot (the script engine's live arena
     /// after JS mutations), cascading styles and re-laying-out without
-    /// re-parsing HTML.
+    /// re-parsing HTML. `hovered` is the current `:hover` target so the
+    /// re-cascade re-applies the highlight in the same pass (no separate
+    /// `Hover` command needed). `dirty` lists the nodes JS mutated since the
+    /// previous frame, letting the render thread repaint only the affected
+    /// rectangles when the re-layout leaves every box rect unchanged.
     RenderArena {
         arena: Arc<crate::tdom::node::NodeArena>,
         root_id: crate::tdom::node::NodeId,
         scroll_y: u32,
         zoom: f32,
+        hovered: Option<crate::tdom::node::NodeId>,
+        dirty: DirtyInfo,
     },
     /// Replace the session document with `html` and fully re-render it,
     /// keeping the current scroll position / zoom. The render thread swaps

@@ -48,6 +48,8 @@ pub use host::{HostCall, HostFn};
 
 use dom::{add_listener, element_wrapper, get_listeners, install_builtins, with_state};
 
+use crate::tui::graph_api::DirtyInfo;
+
 /// Per-session engine state shared between the Boa natives and the Rust side.
 ///
 /// Held as `Rc<RefCell<…>>` inside a `thread_local` so every native (a plain
@@ -58,8 +60,10 @@ pub(crate) struct ScriptState {
     pub root_id: NodeId,
     /// Render commands pushed by host functions during JS execution.
     pub render_cmds: Vec<RenderCmd>,
-    /// Whether a JS call mutated the DOM since the last layout.
-    pub dom_dirty: bool,
+    /// Nodes whose content or attributes JS changed since the last render.
+    /// Non-empty means the DOM needs a re-render (the old `dom_dirty` flag
+    /// merged into this set).
+    pub dirty: DirtyInfo,
     /// The event currently being dispatched (for host functions).
     pub current_event: Option<HtmlEvent>,
     /// Registered host functions, keyed by JS global name.
@@ -107,7 +111,7 @@ impl ScriptEngine {
             arena: doc.arena,
             root_id: doc.root_id,
             render_cmds: Vec::new(),
-            dom_dirty: false,
+            dirty: DirtyInfo::default(),
             current_event: None,
             host_fns: bindings.host,
         }));
@@ -158,9 +162,11 @@ impl ScriptEngine {
         self.state.borrow().root_id
     }
 
-    /// Whether a JS call mutated the DOM since the last take.
-    pub fn take_dirty(&mut self) -> bool {
-        std::mem::take(&mut self.state.borrow_mut().dom_dirty)
+    /// Whether a JS call mutated the DOM since the last take, and which nodes
+    /// were touched. Consumes the accumulated set so each mutation batch is
+    /// reported exactly once.
+    pub fn take_dirty(&mut self) -> DirtyInfo {
+        std::mem::take(&mut self.state.borrow_mut().dirty)
     }
 
     /// Dispatch a DOM event along the hit region's ancestor path.

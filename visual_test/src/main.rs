@@ -109,9 +109,6 @@ fn main() -> Result<()> {
     // sampled frames, simulating the auto-refresh headlessly so the changing
     // values can be observed without an interactive terminal.
     let watch_mode = args.iter().any(|a| a == "--watch");
-    // `--probe-wmic` (used with the `sysmon` test) benchmarks the two wmic
-    // capture paths (file redirect vs pipe) for timing and completeness.
-    let probe_wmic_mode = args.iter().any(|a| a == "--probe-wmic");
     let bg_map = dump_mode
         && args
             .iter()
@@ -234,15 +231,12 @@ fn main() -> Result<()> {
     );
 
     // The `sysmon` case runs through `render_with_events` with a dedicated
-    // bindings set (see `sysmon::bindings`): clicking Refresh rebuilds the
-    // document from live system samples via `RenderCmd::RenderHtml`, and the
-    // buttons highlight on hover through CSS `:hover`. `--dump` falls back to
-    // the static preview (sampling + interaction need a real terminal).
+    // bindings set (see `sysmon::bindings`): a background thread samples the
+    // machine via `sysinfo`, and JS `refresh()` (auto every 200 ms) writes the
+    // values into the DOM with `textContent`; the buttons highlight on hover
+    // through CSS `:hover`. `--dump` / `--sample` / `--watch` fall back to the
+    // static preview (interaction needs a real terminal).
     if test_name == "sysmon" {
-        if probe_wmic_mode {
-            print!("{}", sysmon::probe_wmic());
-            return Ok(());
-        }
         if watch_mode {
             // Headless simulation of the auto-refresh: render `count` sampled
             // frames, `every_ms` apart, so the updating values are visible.

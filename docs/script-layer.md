@@ -182,19 +182,59 @@ JS 全局函数 `action`（可以是在 `<script>` 里定义的函数，也可�
 
 ## 6. 渲染集成（RenderArena）
 
-JS 修改 DOM 后，引擎设置 `dom_dirty` 标志；输入循环把引擎的 live arena 通过
-`RenderCmd::RenderArena { arena, root_id, scroll_y, zoom }` 发给渲染线程。
-渲染线程：
+JS 修改 DOM 后，引擎把被改动的节点 id 记入 `dirty`（一组 `NodeId`）；输入循环把引擎的
+live arena 通过 `RenderCmd::RenderArena { arena, root_id, scroll_y, zoom, hovered, dirty }`
+发给渲染线程。渲染线程：
 
-1. `reset_css_attr` + `css_into_node_with_hover`（保留当前 `:hover`）重新级联；
-2. 重新布局、绘制；
-3. 发布新 `Geometry` 快照给命中线程 → HitMap 重建。
+1. 记录 `hovered` 节点（`RenderArena` 直接携带，无需单独的 `Hover` 命令）；
+2. `reset_css_attr` + `css_into_node_with_hover`（保留当前 `:hover`）重新级联；
+3. 重新布局（`layout_only`，不做画布重置）；
+4. **增量重绘**：若 `dirty` 非空、`:hover` 目标未变、且重排后每个受影响盒子的
+   rect 与缓存的布局完全一致，则只清空并重绘这些节点所在的区域（见
+   [增量重绘](#增量重绘region-repaint)）；否则回退到全量 `reset_canvas` + 重绘；
+5. 发布新 `Geometry` 快照给命中线程 → HitMap 重建。
 
 **好处**：不再像旧 `RenderCmd::RenderHtml` 那样整文档重新解析——CSS 级联/布局
-在渲染线程内完成，只有引擎持有的 arena 被克隆发送。
+在渲染线程内完成，只有引擎持有的 arena 被克隆发送；且单个 `textContent` 变化
+不再触发整张画布的清空与重绘。
 
 > 注意：`RenderCmd::RenderHtml` 仍保留用于"整文档替换"场景；输入循环遇到它时
 > 会交给引擎重新解析并走 `RenderArena` 路径。
+
+### 增量重绘（Region Repaint）
+
+JS 每 200ms 刷一次监控器，大部分帧只改几个 `<p>` 的文本。旧实现每帧都
+`reset_canvas`（清空 `cols×rows×20` 个 cell）+ 全树重绘，单帧 ~2.1–2.7ms。
+增量重绘把这一路径拆开：
+
+1. **引擎侧记账**：每个 DOM 原生写操作（`textContent` / `style` / `setAttribute` /
+   `appendChild`…）把对应 `NodeId` 追加进 `ScriptState.dirty`；`take_dirty()`
+   一次性取出，随 `RenderArena` 送到渲染线程。
+2. **渲染线程判定**：对每个 dirty 节点沿 DOM 向上找到第一个"有盒子的祖先"
+   （inline 元素折叠进外层 block 的 runs，因此按祖先盒子的 rect 计算区域）。
+   该盒子的 rect 必须在缓存布局与新布局中完全一致——否则说明改动影响了几何
+   （换行 / 结构变化），回退全量重绘。
+3. **区域重绘**：`TermLayout::repaint_region(arena, boxes, region)` 先清空 region
+   内的 cell，再走一次 `paint_layout_tree_region`——每个 cell 写操作通过
+   `PaintCanvas.region` 门控，只落 region 内的格子；祖先盒子的背景填充照常经过
+   `parent_bg` 链传递，文字不会丢背景。`render_diff` 自然只输出变化的格子。
+
+实测（80×24，60 行文档，debug 构建）：全量 draw ~2.1ms → 增量路径 ~1.1ms，其中
+布局 ~0.7ms、区域重绘 ~0.23ms、diff 输出 ~0.2ms。sysmon 页面（~15 个元素）更小。
+
+### 渲染合并优化（避免无意义的重排）
+
+1. **值未变不触发渲染**：`el.textContent = v` 在 `v` 与当前文本相同时直接短路，
+   不置 `dirty`。监控器每 200ms 刷新但值基本不变时，实际 `RenderArena`
+   次数远少于刷新次数（sysmon 实测 200 次刷新只触发约 14 次渲染）。
+2. **命令合并**：输入循环发送前合并命令流。`RenderArena` 携带 `hovered` 字段，
+   重排时自动重新应用当前 `:hover` 高亮，因此同轮的 `Hover` 命令会被丢弃；
+   渲染线程的 `try_recv` 合并本就只保留最后一个命令，避免重复重绘。
+3. **增量重绘的前提是 `:hover` 未变**：hover 目标一变，整个树都可能换高亮，
+   渲染线程检测到 `hovered` 变化即回退全量重绘。
+
+如果仍觉得卡顿，优先检查：**宿主函数是否在输入线程做了慢操作**（重活必须放
+后台线程 + 快照发布，参考 `visual_test/src/sysmon.rs`）。
 
 ---
 

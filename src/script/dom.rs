@@ -36,6 +36,12 @@ pub(crate) fn with_state() -> Option<std::rc::Rc<std::cell::RefCell<ScriptState>
     super::ENGINE_STATE.with(|s| s.borrow().clone())
 }
 
+/// Record a DOM mutation: remember the node so the render thread can repaint
+/// the smallest region that covers its affected boxes.
+pub(crate) fn mark_dirty(st: &mut ScriptState, node_id: NodeId) {
+    st.dirty.nodes.push(node_id);
+}
+
 /// Convert a `NodeId` into a JS-safe `f64` (opaque, round-trippable).
 pub(crate) fn node_id_to_f64(id: NodeId) -> f64 {
     Key::data(&id).as_ffi() as f64
@@ -208,7 +214,7 @@ fn native_set_attribute(
     let mut st = rc.borrow_mut();
     if let Some(node) = st.arena.get_mut(node_id) {
         node.attributes.insert(name, value);
-        st.dom_dirty = true;
+        mark_dirty(&mut st, node_id);
     }
     Ok(JsValue::undefined())
 }
@@ -229,7 +235,7 @@ fn native_remove_attribute(
     let mut st = rc.borrow_mut();
     if let Some(node) = st.arena.get_mut(node_id) {
         node.attributes.remove(&name);
-        st.dom_dirty = true;
+        mark_dirty(&mut st, node_id);
     }
     Ok(JsValue::undefined())
 }
@@ -255,23 +261,48 @@ fn native_set_text(this: &JsValue, args: &[JsValue], context: &mut Context) -> J
         return Ok(JsValue::undefined());
     };
     let mut st = rc.borrow_mut();
-    if let Some(node) = st.arena.get_mut(node_id) {
-        // Detach existing children and replace with a single text node.
-        let old_children = std::mem::take(&mut node.children);
-        for child in old_children {
-            if let Some(c) = st.arena.get_mut(child) {
-                c.parent = None;
+
+    // Fast path: the node already holds exactly one text child — reuse it so
+    // repeated `textContent` updates don't grow the arena (each grown node
+    // makes the per-frame `RenderArena` clone progressively slower). When the
+    // new text equals the existing one, skip entirely so no re-render is
+    // scheduled (monitors that refresh identical values avoid full relayouts).
+    let reuse_child = st
+        .arena
+        .get(node_id)
+        .filter(|n| n.children.len() == 1)
+        .and_then(|n| n.children.first().copied())
+        .filter(|&c| matches!(st.arena.get(c).map(|n| &n.node_type), Some(NodeType::Text(_))));
+    if let Some(child_id) = reuse_child {
+        let existing = st.arena.get_mut(child_id).map(|c| &mut c.node_type);
+        if let Some(NodeType::Text(existing)) = existing {
+            if *existing == text {
+                return Ok(JsValue::undefined());
             }
+            *existing = text;
+            mark_dirty(&mut st, node_id);
+            return Ok(JsValue::undefined());
         }
-        let text_id = st.arena.insert(Node::text(&text));
-        if let Some(parent) = st.arena.get_mut(node_id) {
-            parent.children.push(text_id);
-        }
-        if let Some(t) = st.arena.get_mut(text_id) {
-            t.parent = Some(node_id);
-        }
-        st.dom_dirty = true;
     }
+
+    // Structural change: detach all children and insert a fresh text node.
+    let Some(node) = st.arena.get_mut(node_id) else {
+        return Ok(JsValue::undefined());
+    };
+    let old_children = std::mem::take(&mut node.children);
+    for child in old_children {
+        if let Some(c) = st.arena.get_mut(child) {
+            c.parent = None;
+        }
+    }
+    let text_id = st.arena.insert(Node::text(&text));
+    if let Some(parent) = st.arena.get_mut(node_id) {
+        parent.children.push(text_id);
+    }
+    if let Some(t) = st.arena.get_mut(text_id) {
+        t.parent = Some(node_id);
+    }
+    mark_dirty(&mut st, node_id);
     Ok(JsValue::undefined())
 }
 
@@ -302,7 +333,7 @@ fn native_set_class(this: &JsValue, args: &[JsValue], context: &mut Context) -> 
     let mut st = rc.borrow_mut();
     if let Some(node) = st.arena.get_mut(node_id) {
         node.attributes.insert("class".to_string(), value);
-        st.dom_dirty = true;
+        mark_dirty(&mut st, node_id);
     }
     Ok(JsValue::undefined())
 }
@@ -334,7 +365,7 @@ fn native_set_id(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsR
     let mut st = rc.borrow_mut();
     if let Some(node) = st.arena.get_mut(node_id) {
         node.attributes.insert("id".to_string(), value);
-        st.dom_dirty = true;
+        mark_dirty(&mut st, node_id);
     }
     Ok(JsValue::undefined())
 }
@@ -476,7 +507,7 @@ fn style_set(
     if let Some(node) = st.arena.get_mut(node_id) {
         node.attributes
             .insert("style".to_string(), serialized.join("; "));
-        st.dom_dirty = true;
+        mark_dirty(&mut st, node_id);
     }
     Ok(JsValue::undefined())
 }
@@ -508,7 +539,7 @@ fn style_set_css_text(this: &JsValue, args: &[JsValue], context: &mut Context) -
     let mut st = rc.borrow_mut();
     if let Some(node) = st.arena.get_mut(node_id) {
         node.attributes.insert("style".to_string(), value);
-        st.dom_dirty = true;
+        mark_dirty(&mut st, node_id);
     }
     Ok(JsValue::undefined())
 }
@@ -564,7 +595,8 @@ fn native_append_child(
     }
     if let Some(parent) = st.arena.get_mut(parent_id) {
         parent.children.push(child_id);
-        st.dom_dirty = true;
+        mark_dirty(&mut st, parent_id);
+        mark_dirty(&mut st, child_id);
     }
     Ok(JsValue::undefined())
 }
@@ -585,7 +617,8 @@ fn native_remove_child(
     }
     if let Some(parent) = st.arena.get_mut(parent_id) {
         parent.children.retain(|c| *c != child_id);
-        st.dom_dirty = true;
+        mark_dirty(&mut st, parent_id);
+        mark_dirty(&mut st, child_id);
     }
     Ok(JsValue::undefined())
 }

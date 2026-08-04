@@ -253,7 +253,7 @@ fn js_can_mutate_the_dom_and_marks_dirty() {
     "#;
     let mut engine = ScriptEngine::new(html, EventBindings::default()).expect("engine");
     assert!(
-        engine.take_dirty(),
+        !engine.take_dirty().is_empty(),
         "script textContent mutation must mark dirty"
     );
     let arena = engine.arena();
@@ -434,9 +434,72 @@ fn visual_test_sysmon_document_initializes() {
     assert!(
         arena
             .iter()
-            .any(|(_, n)| n.attributes.get("id").map(String::as_str) == Some("cpu")),
-        "sysmon cpu cell must exist"
+            .any(|(_, n)| n.attributes.get("id").map(String::as_str) == Some("cpuBar")),
+        "sysmon cpuBar cell must exist"
     );
+    assert!(
+        arena
+            .iter()
+            .any(|(_, n)| n.attributes.get("id").map(String::as_str) == Some("disks")),
+        "sysmon disks cell must exist"
+    );
+}
+
+/// Text content of the first text child of `id="target"`.
+fn text_of(arena: &NodeArena, id: &str) -> String {
+    let node = find_node_by_id(arena, id);
+    arena[node]
+        .children
+        .iter()
+        .filter_map(|&c| match &arena[c].node_type {
+            htui::tdom::node::NodeType::Text(s) => Some(s.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn sysmon_page_refresh_populates_all_cards() {
+    // End-to-end over the real demo page: the host `sample()` returns the full
+    // field set and the page's own `refresh()` writes every card. Any typo in
+    // the page's element ids fails here.
+    let html = include_str!("../visual_test/src/sysmon/index.html");
+    let mut bindings = EventBindings::default();
+    bindings.host.insert(
+        "sample".to_string(),
+        Box::new(|call: &mut htui::script::HostCall| {
+            let mut init = boa_engine::object::ObjectInitializer::new(call.context);
+            init.property(boa_engine::js_string!("host"), boa_engine::js_string!("testhost"), boa_engine::property::Attribute::all())
+                .property(boa_engine::js_string!("os"), boa_engine::js_string!("TestOS"), boa_engine::property::Attribute::all())
+                .property(boa_engine::js_string!("cores"), boa_engine::js_string!("8"), boa_engine::property::Attribute::all())
+                .property(boa_engine::js_string!("cpuBar"), boa_engine::js_string!("[########------]"), boa_engine::property::Attribute::all())
+                .property(boa_engine::js_string!("cpuPct"), boa_engine::js_string!("45%"), boa_engine::property::Attribute::all())
+                .property(boa_engine::js_string!("cpuName"), boa_engine::js_string!("Test CPU"), boa_engine::property::Attribute::all())
+                .property(boa_engine::js_string!("memBar"), boa_engine::js_string!("[####----------]"), boa_engine::property::Attribute::all())
+                .property(boa_engine::js_string!("memText"), boa_engine::js_string!("8.0 / 16.0 GB"), boa_engine::property::Attribute::all())
+                .property(boa_engine::js_string!("disks"), boa_engine::js_string!("C: [####] 10.0 / 100.0 GB\nD: [--] 5.0 / 50.0 GB"), boa_engine::property::Attribute::all())
+                .property(boa_engine::js_string!("proc"), boa_engine::js_string!("42"), boa_engine::property::Attribute::all())
+                .property(boa_engine::js_string!("now"), boa_engine::js_string!("2026-01-01 00:00:00"), boa_engine::property::Attribute::all())
+                .property(boa_engine::js_string!("session"), boa_engine::js_string!("00:01"), boa_engine::property::Attribute::all());
+            init.build().into()
+        }),
+    );
+    let mut engine = ScriptEngine::new(html, bindings).expect("engine");
+    engine.invoke_action("refresh");
+    assert!(
+        !engine.take_dirty().is_empty(),
+        "refresh must mark the DOM dirty"
+    );
+
+    let arena = engine.arena();
+    assert_eq!(text_of(&arena, "meta"), "testhost · TestOS · cores 8");
+    assert_eq!(text_of(&arena, "cpuBar"), "[########------]");
+    assert_eq!(text_of(&arena, "cpuPct"), "45%");
+    assert_eq!(text_of(&arena, "cpuName"), "Test CPU");
+    assert_eq!(text_of(&arena, "memBar"), "[####----------]");
+    assert_eq!(text_of(&arena, "memText"), "8.0 / 16.0 GB");
+    assert_eq!(text_of(&arena, "proc"), "processes: 42");
+    assert_eq!(text_of(&arena, "now"), "2026-01-01 00:00:00 · session 00:01");
 }
 
 #[test]
@@ -470,9 +533,9 @@ fn sysmon_refresh_pipeline_updates_the_dom() {
     let mut engine = ScriptEngine::new(html, bindings).expect("engine");
 
     // Before refresh: initial script didn't call sample, so cpu is untouched.
-    assert!(!engine.take_dirty());
+    assert!(engine.take_dirty().is_empty());
     engine.invoke_action("refresh");
-    assert!(engine.take_dirty(), "refresh must mark the DOM dirty");
+    assert!(!engine.take_dirty().is_empty(), "refresh must mark the DOM dirty");
 
     let arena = engine.arena();
     let cpu = find_node_by_id(&arena, "cpu");
@@ -485,6 +548,57 @@ fn sysmon_refresh_pipeline_updates_the_dom() {
         })
         .collect();
     assert_eq!(text, "23%");
+}
+
+#[test]
+fn sysmon_refresh_renders_the_progress_bar() {
+    // End-to-end over the interactive path: JS `refresh()` calls the host
+    // `sample()` and writes a progress-bar string into `<p id=cpu>`, then the
+    // engine's arena is laid out the way the render thread does it. The bar
+    // glyphs (fill + track) must appear in the canvas.
+    let html = r#"
+      <script>
+        function refresh() {
+          var d = sample();
+          document.getElementById('cpu').textContent = d.cpu;
+        }
+      </script>
+      <p id="cpu">n/a</p>
+    "#;
+    let mut bindings = EventBindings::default();
+    bindings.host.insert(
+        "sample".to_string(),
+        Box::new(|call: &mut htui::script::HostCall| {
+            boa_engine::object::ObjectInitializer::new(call.context)
+                .property(
+                    boa_engine::js_string!("cpu"),
+                    boa_engine::js_string!("[########--------] 45%"),
+                    boa_engine::property::Attribute::all(),
+                )
+                .build()
+                .into()
+        }),
+    );
+    let mut engine = ScriptEngine::new(html, bindings).expect("engine");
+    engine.invoke_action("refresh");
+    assert!(
+        !engine.take_dirty().is_empty(),
+        "refresh must mark the DOM dirty"
+    );
+
+    let arena = engine.arena();
+    let root_id = engine.root_id();
+    let map = TermMap {
+        columns: COLS,
+        rows: ROWS,
+    };
+    let mut tl = htui::tui::graph_api::TermLayout::new(&map, 1.0);
+    tl.draw(&arena, root_id, &map).unwrap();
+    let frame = tl.render_to_bytes();
+    let text = String::from_utf8_lossy(&frame);
+    assert!(text.contains("#"), "progress-bar fill must render");
+    assert!(text.contains("-"), "progress-bar track must render");
+    assert!(text.contains("45%"), "percentage must render");
 }
 
 // ============================================================
