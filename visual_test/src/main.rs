@@ -16,7 +16,9 @@
 //!   src/{name}/style.css     — stylesheet (optional)
 
 use anyhow::Result;
+use htui::events::{EventBindings, HtmlEvent};
 use htui::render;
+use htui::render_with_events;
 use log::info;
 
 /// Headless preview: parse the document, run the full layout pipeline into a
@@ -156,6 +158,7 @@ fn main() -> Result<()> {
         "flex_align_content" => test_case!(flex_align_content, no_css),
         "flex_nested" => test_case!(flex_nested, no_css),
         "css_props" => test_case!(css_props, no_css),
+        "events" => test_case!(events, no_css),
         "viewport_units" => test_case!(viewport_units, no_css),
         "showcase" => test_case!(showcase, no_css),
         _ => {
@@ -181,6 +184,7 @@ fn main() -> Result<()> {
                 "flex_align_content",
                 "flex_nested",
                 "css_props",
+                "events",
                 "viewport_units",
                 "showcase",
             ];
@@ -197,6 +201,45 @@ fn main() -> Result<()> {
         html.len(),
         css.len()
     );
+
+    // The `events` case runs through `render_with_events`: every action
+    // declared in the on* attributes is logged to the visual-test log file,
+    // and the hover highlight is visible on screen. `--dump` falls back to
+    // the static preview (interaction needs a real terminal).
+    if test_name == "events" {
+        let mut bindings = EventBindings::default();
+        // Register the functions the demo's `on*` bodies call. In a browser
+        // the same file would define these in a <script> block; here they are
+        // the global scope for the handler-body evaluator.
+        for name in [
+            "panel", "buy", "sell", "hoverPanel", "leavePanel", "hoverBuy",
+            "hoverFooter",
+        ] {
+            let name = name.to_owned();
+            bindings.actions.insert(
+                name.clone(),
+                Box::new(move |ev: &HtmlEvent| {
+                    info!(
+                        "event: action={} type={:?} target={:?} at ({}, {})",
+                        name,
+                        ev.event_type,
+                        ev.target,
+                        ev.x,
+                        ev.y
+                    );
+                    None
+                }),
+            );
+        }
+        if dump_mode {
+            dump(html, css, cols, rows, bg_map);
+        } else {
+            render_with_events(html, css, bindings);
+        }
+        info!("Test '{test_name}' completed");
+        return Ok(());
+    }
+
     if dump_mode {
         dump(html, css, cols, rows, bg_map);
         return Ok(());

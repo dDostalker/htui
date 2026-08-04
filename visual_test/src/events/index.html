@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head><title>Events</title></head>
+<body>
+  <h1>Event test</h1>
+  <p>Hover elements to fire onmouseover/onmouseout; click to fire functions (both logged to %TEMP%/htui-visual-test.log).</p>
+
+  <div id="panel" onclick="panel()" onmouseover="hoverPanel()" onmouseout="leavePanel()">
+    <p>Click inside this panel → panel() (children bubble up).</p>
+    <p id="child">Plain text, no handler — a click here bubbles to the panel.</p>
+    <button id="btn-a" onclick="buy()" onmouseover="hoverBuy()">Buy</button>
+    <button id="btn-b" onclick="sell()">Sell</button>
+  </div>
+
+  <p id="footer" onmouseover="hoverFooter()">Move the pointer over this line too.</p>
+</body>
+</html>

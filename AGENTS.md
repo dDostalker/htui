@@ -14,8 +14,15 @@
 ```
 htui/
 ├── src/
-│   ├── lib.rs              # 入口：render() 主循环 + 渲染线程
+│   ├── lib.rs              # 入口：render() / render_with_events() 主循环 + 渲染线程 + 命中线程
 │   ├── logging.rs          # 文件 logger 初始化
+│   ├── events/             # JS 风格事件系统（旁路，不参与渲染管线）
+│   │   ├── mod.rs          # EventType / HtmlEvent / ElementRef / EventBindings
+│   │   ├── geometry.rs     # Geometry（arena + boxes 快照，Arc 共享）
+│   │   ├── hit_map.rs      # HitRegion / HitMap / build / hit_test / resolve_by_id
+│   │   ├── interaction.rs  # 纯逻辑鼠标交互（HoverState / on_move / on_click）
+│   │   ├── eval.rs         # on* 属性体 JS 子集解析器 + 求值器（对齐浏览器语义）
+│   │   └── dispatch.rs     # 冒泡分派 dispatch()（沿 path 求值 on* body）
 │   ├── html/
 │   │   ├── mod.rs
 │   │   ├── html_parse.rs   # HTML → tdom 树（html5ever）
@@ -36,7 +43,7 @@ htui/
 │   │   └── attribute.rs    # Attr（HTML 属性解析与查询）
 │   ├── layout/
 │   │   ├── mod.rs          # DEFAULT_LAYOUT 注册表 + LayoutFn + BoxConstraint
-│   │   ├── layout.rs       # TermMap / TermLayout::draw()
+│   │   ├── layout.rs       # TermMap / TermLayout::draw()（返回 boxes）
 │   │   ├── layoutbox/      # LayoutBox 数据结构（镜像浏览器 CSS Display 三轴分类）
 │   │   │   ├── mod.rs      # LayoutBox struct + 三个轴分类 re-exports
 │   │   │   ├── rect.rs, paint_style.rs, inline_run.rs, cursor.rs, inline.rs, wrap.rs
@@ -98,7 +105,7 @@ htui/
 │               ├── canvas.rs   # TermLayout 画布
 │               ├── cell.rs     # Block / FontStyle
 │               ├── image.rs    # Img / 图像加载
-│               ├── input.rs    # RenderCmd / trigger_refresh
+│               ├── input.rs    # RenderCmd / InputState / trigger_refresh / 鼠标点击与 hover 跟踪
 │               ├── render.rs   # TermLayout::render（增量） / render_diff_to_bytes / render_to_bytes
 │               ├── style.rs    # block_style
 │               └── text.rs     # char_width / grapheme_width
@@ -114,6 +121,7 @@ htui/
 │       ├── nested/
 │       ├── text/
 │       ├── css/
+│       ├── events/       # 事件系统交互演示（onclick / hover，render_with_events）
 │       ├── header_footer/
 │       ├── aside/
 │       ├── helloworld/
@@ -151,6 +159,7 @@ htui/
 │   ├── layout_emoji_tests.rs
 │   ├── layout_table_tests.rs
 │   ├── layout_wrap_tests.rs
+│   ├── layout_events_tests.rs # 事件系统测试（命中 / 冒泡 / hover / click，纯内存）
 │   ├── render_diff_tests.rs # 帧差增量渲染（不变零输出 / 滚动 diff / 全帧对比）
 │   └── logging_tests.rs
 ```
@@ -209,6 +218,30 @@ normal/text/anonymous/replaced 盒语义和 `OuterDisplay` / `FormattingContext`
 flow/flex/table 算法并生成统一的 `LayoutBox` 树，最终由
 `paint::paint_layout_tree()` 绘制。现有标签级 `LayoutFn` 仅作为 normal flow
 内部适配器保留；flex、table 和 `<img>` 不再通过 `DEFAULT_LAYOUT` 抢占分派。
+
+## 事件系统（旁路，不参与上述管线）
+
+```
+渲染线程 Redraw 后 ──► Arc<Geometry>（arena + boxes）──► 命中线程
+                                                            │
+                                            HitMap::build()（收集带 on* 属性的元素）
+                                                            │
+                                              Arc<Mutex<Arc<HitMap>>>（共享）
+                                                            ▼
+                   主线程 input ── 鼠标 Down/Up/Moved ──► interaction::on_click / on_move
+                                                            │
+                           冒泡 dispatch() ──► eval 求值 on* 属性体（JS 子集，对齐浏览器）
+                                                            │
+                                      用户 EventHandler（函数名 → 回调注册表）
+                                                            │
+                                              RenderCmd ──► 渲染线程
+```
+
+事件目标用元素 `id`（稳定身份）传递。`on*` 属性值按浏览器语义处理：属性体是
+JS 子集表达式（`eval.rs`），裸标识符只求值不调用（与浏览器 `function (event) { buy }`
+一致），`buy()` 才调用注册函数；未定义/解析失败仅告警不崩溃，对齐浏览器的
+ReferenceError 失败模式。hover 只驱动 `onmouseover`/`onmouseout` 事件，不产生任何
+视觉高亮——与浏览器一致：没有 CSS `:hover` 就没有视觉反馈。
 
 ## 必要事项
 `html → tdom → layout → tui` 四层不可破坏。不要引入新的抽象层，除非有充分理由。在修改之前进行询问。
@@ -298,7 +331,15 @@ flow/flex/table 算法并生成统一的 `LayoutBox` 树，最终由
 | `TermLayout`       | `tui::graph_api`        | 终端画布 + 渲染方法       |
 | `Block`            | `tui::graph_api`        | 单个屏幕字符单元格（含 `style: FontStyle`） |
 | `FontStyle`        | `tui::graph_api`        | `Block` 的聚合样式位掩码（`BOLD` / `ITALIC` / `UNDERLINED` / `CROSSED_OUT`） |
-| `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举          |
+| `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举（Rerender / Redraw / Quit）          |
+| `InputState`       | `tui::graph_api::input` | 输入循环状态（scroll_y / zoom / pressed / hover）          |
+| `EventType`        | `events`                | DOM 事件类型（Click / MouseOver / MouseOut）               |
+| `HtmlEvent`        | `events`                | 事件对象（target / current_target / path / action / bubbles）|
+| `ElementRef`       | `events`                | 冒泡路径上的单个元素（id + on* 属性体）                |
+| `HitRegion`        | `events::hit_map`       | 可交互元素命中区域（node_id + rect + path 冒泡链）         |
+| `HitMap`           | `events::hit_map`       | 全部命中区域 + hit_test() / resolve_by_id() / build()     |
+| `EventBindings`    | `events`                | 函数名（JS 子集全局作用域）→ 用户回调（EventHandler）注册表 |
+| `HoverState`       | `events::interaction`   | 指针悬停跟踪（enter / leave 判定，不产生视觉）        |
 | `EdgeSizes`        | `html::box_edges`       | 四边长度（top/right/bottom/left），用于 padding / margin |
 | `BorderStyle`      | `html::box_edges`       | `border-style` 枚举（`None` / `Solid`） |
 | `Border`           | `html::box_edges`       | 单边 border 的 width/style/color |

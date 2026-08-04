@@ -3,7 +3,7 @@ use crossterm::terminal;
 
 use crate::{
     layout::{
-        BoxConstraint, Cursor,
+        BoxConstraint, Cursor, LayoutBox,
         inner_formatting_context::flow::layout_tree,
         paint::paint_layout_tree,
     },
@@ -52,7 +52,8 @@ impl TermLayout {
 }
 
 impl TermLayout {
-    /// Render the DOM tree into the canvas (virtual, may exceed terminal size).
+    /// Render the DOM tree into the canvas (virtual, may exceed terminal size)
+    /// and return the laid-out box forest.
     ///
     /// The canvas is reset at the start of every call so a single
     /// [`TermLayout`] allocated by [`new`](Self::new) can be re-used across
@@ -67,7 +68,15 @@ impl TermLayout {
     ///    inside the containing block.
     /// 3. [`paint_layout_tree`] writes the resulting rects into `self.layout`
     ///    using each box's own coordinates — no shared cursor.
-    pub fn draw(&mut self, arena: &NodeArena, root_id: NodeId, term_map: &TermMap) -> Result<()> {
+    ///
+    /// The returned `Vec<LayoutBox>` is the caller's to keep (e.g. shared
+    /// with the hit-test thread of the event system).
+    pub fn draw(
+        &mut self,
+        arena: &NodeArena,
+        root_id: NodeId,
+        term_map: &TermMap,
+    ) -> Result<Vec<LayoutBox>> {
         self.reset_canvas();
 
         let root = &arena[root_id];
@@ -83,7 +92,7 @@ impl TermLayout {
             term_map.rows as usize,
         );
         paint_layout_tree(&boxes, arena, self);
-        Ok(())
+        Ok(boxes)
     }
 
     /// Reset every cell to a blank space and clear `rendered_rows`.

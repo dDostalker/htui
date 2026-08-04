@@ -1,3 +1,4 @@
+pub mod events;
 pub mod html;
 pub mod layout;
 pub mod logging;
@@ -5,7 +6,7 @@ pub mod tdom;
 pub mod tui;
 
 use std::io::{BufWriter, Write, stdout};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -21,9 +22,10 @@ pub use html::html_parse::Parser;
 pub use layout::layout::TermMap;
 
 use crate::{
+    events::{EventBindings, Geometry, HitMap},
     html::css_parse::{self, CssRule},
     tdom::node::{NodeArena, NodeId, NodeType},
-    tui::graph_api::{RenderCmd, TermLayout, trigger_refresh},
+    tui::graph_api::{InputState, RenderCmd, TermLayout, trigger_refresh},
 };
 
 fn parse_and_apply(html: &str, css_rules: &CssRule) -> (NodeId, NodeArena) {
@@ -103,6 +105,7 @@ fn render_thread(
     html: Arc<str>,
     css_rules: Arc<CssRule>,
     max_scroll: Arc<AtomicU32>,
+    geo_tx: Option<mpsc::Sender<Arc<Geometry>>>,
 ) {
     // One persistent write buffer for the whole session: every frame writes
     // into it and is flushed exactly once, so a frame costs a single write
@@ -179,10 +182,13 @@ fn render_thread(
                     .as_mut()
                     .expect("TermLayout just allocated above or reused from prior render");
 
-                if let Err(e) = tl.draw(&arena, root_id, &term_map) {
-                    log::error!("Layout failed: {}", e);
-                    continue;
-                }
+                let boxes = match tl.draw(&arena, root_id, &term_map) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        log::error!("Layout failed: {}", e);
+                        continue;
+                    }
+                };
 
                 // Install the document `<title>` as the terminal window title
                 // once per session. The DOM is re-parsed on every `Redraw`
@@ -195,6 +201,17 @@ fn render_thread(
                         );
                     }
                     title_set = true;
+                }
+
+                // Publish the layout snapshot to the hit-test thread when one
+                // is listening (the event system is active).
+                let geo = Arc::new(Geometry { arena, boxes });
+                if let Some(tx) = &geo_tx
+                    && let Err(e) = tx.send(geo)
+                {
+                    // No hit-test thread is listening (plain `render`), so the
+                    // snapshot has no consumer — benign.
+                    log::debug!("Hit-test channel closed: {}", e);
                 }
 
                 // Publish the new upper bound of `scroll_y` so the input
@@ -216,6 +233,22 @@ fn render_thread(
             }
         }
     }
+}
+
+/// Worker of the dedicated hit-test thread.
+///
+/// Consumes geometry snapshots published by the render thread and replaces
+/// the shared hit map with a freshly built region list. Exits when the render
+/// thread drops the channel (i.e. on quit).
+fn hit_test_thread(rx: mpsc::Receiver<Arc<Geometry>>, hit_map: Arc<Mutex<Arc<HitMap>>>) {
+    while let Ok(geo) = rx.recv() {
+        let map = Arc::new(HitMap::build(&geo));
+        match hit_map.lock() {
+            Ok(mut guard) => *guard = map,
+            Err(e) => log::error!("Hit map lock poisoned: {}", e),
+        }
+    }
+    log::debug!("Hit-test thread exiting");
 }
 
 // debug panic hook
@@ -280,7 +313,29 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
 // Entry point
 // ============================================================
 
+/// Render an HTML document in the terminal with keyboard navigation, mouse
+/// scrolling and zoom.
+///
+/// This is the plain entry point without event handling; use
+/// [`render_with_events`] to enable click / hover interaction.
 pub fn render(html: &str, css: &str) {
+    run(html, css, None);
+}
+
+/// Render an HTML document with JS-like event handling enabled.
+///
+/// In addition to everything [`render`] does, elements that declare `onclick`
+/// / `onmouseover` / `onmouseout` attributes become hit regions, a dedicated
+/// hit-test thread records their positions, and events bubble through the DOM
+/// ancestor chain to the handlers registered in `bindings`. Hovering produces
+/// no visual highlight (matching a browser without CSS `:hover` rules) —
+/// only the `onmouseover` / `onmouseout` events fire. See the
+/// [`events`](crate::events) module for the event model.
+pub fn render_with_events(html: &str, css: &str, bindings: EventBindings) {
+    run(html, css, Some(bindings));
+}
+
+fn run(html: &str, css: &str, mut bindings: Option<EventBindings>) {
     // install debug hook
     #[cfg(debug_assertions)]
     install_debug_panic_hook();
@@ -304,19 +359,29 @@ pub fn render(html: &str, css: &str) {
     // known" (the first layout hasn't run); the render thread overwrites it
     // on every successful `Redraw` with the real `tl.max_scroll()`.
     let max_scroll = Arc::new(AtomicU32::new(u32::MAX));
-    let (tx, rx) = mpsc::channel::<RenderCmd>();
 
+    // Geometry snapshot channel (render thread → hit-test thread) and the
+    // published hit map (hit-test thread → input loop). The hit-test thread
+    // is only spawned when event handling is requested.
+    let (geo_tx, geo_rx) = mpsc::channel::<Arc<Geometry>>();
+    let hit_map: Arc<Mutex<Arc<HitMap>>> = Arc::new(Mutex::new(Arc::new(HitMap::new())));
+    if bindings.is_some() {
+        let hit_map_thread = Arc::clone(&hit_map);
+        std::thread::spawn(move || hit_test_thread(geo_rx, hit_map_thread));
+    }
+
+    let (tx, rx) = mpsc::channel::<RenderCmd>();
     let render_handle = std::thread::spawn({
         let html_clone = Arc::clone(&html);
         let css_clone = Arc::clone(&css_rules);
         let max_scroll_clone = Arc::clone(&max_scroll);
+        let geo_tx = bindings.is_some().then_some(geo_tx);
         move || {
-            render_thread(rx, html_clone, css_clone, max_scroll_clone);
+            render_thread(rx, html_clone, css_clone, max_scroll_clone, geo_tx);
         }
     });
 
-    let mut scroll_y: u32 = 0;
-    let mut zoom: f32 = 1.0;
+    let mut state = InputState::new();
     let mut rows: u16 = match TermMap::get_ter_map() {
         Ok(m) => m.rows,
         Err(e) => {
@@ -325,14 +390,18 @@ pub fn render(html: &str, css: &str) {
         }
     };
 
-    if let Err(e) = tx.send(RenderCmd::Redraw { scroll_y, zoom }) {
+    if let Err(e) = tx.send(RenderCmd::Redraw {
+        scroll_y: state.scroll_y,
+        zoom: state.zoom,
+    }) {
         log::error!("Failed to send initial Redraw: {}", e);
         if let Err(e2) = tx.send(RenderCmd::Quit) {
             log::error!("Failed to send Quit during cleanup: {}", e2);
         }
     }
 
-    loop {
+    let mut quit = false;
+    while !quit {
         // Detect a dead render thread (e.g. from a panic) promptly. Rust's
         // spawned-thread panic handler swallows the panic and kills just the
         // worker, so without this check the main loop would keep polling
@@ -342,31 +411,51 @@ pub fn render(html: &str, css: &str) {
             break;
         }
 
-        match trigger_refresh(
-            &mut scroll_y,
-            &mut zoom,
-            rows,
-            max_scroll.load(Ordering::Relaxed),
-            Some(Duration::from_millis(100)),
-        ) {
-            Some(RenderCmd::Quit) => {
+        let cmds = if bindings.is_some() {
+            let map = match hit_map.lock() {
+                Ok(guard) => Arc::clone(&guard),
+                Err(e) => {
+                    log::error!("Hit map lock poisoned: {}", e);
+                    break;
+                }
+            };
+            trigger_refresh(
+                &mut state,
+                rows,
+                max_scroll.load(Ordering::Relaxed),
+                Some(&map),
+                bindings.as_mut(),
+                Some(Duration::from_millis(100)),
+            )
+        } else {
+            trigger_refresh(
+                &mut state,
+                rows,
+                max_scroll.load(Ordering::Relaxed),
+                None,
+                None,
+                Some(Duration::from_millis(100)),
+            )
+        };
+
+        for cmd in cmds {
+            if matches!(cmd, RenderCmd::Quit) {
                 if let Err(e) = tx.send(RenderCmd::Quit) {
                     log::error!("Failed to send Quit: {}", e);
                 }
+                quit = true;
                 break;
             }
-            Some(cmd) => {
-                if let RenderCmd::Redraw { .. } = &cmd {
-                    if let Ok(map) = TermMap::get_ter_map() {
-                        rows = map.rows;
-                    }
-                }
-                if let Err(e) = tx.send(cmd) {
-                    log::error!("Failed to send render command: {}", e);
-                    break;
-                }
+            if let RenderCmd::Redraw { .. } = &cmd
+                && let Ok(map) = TermMap::get_ter_map()
+            {
+                rows = map.rows;
             }
-            None => {}
+            if let Err(e) = tx.send(cmd) {
+                log::error!("Failed to send render command: {}", e);
+                quit = true;
+                break;
+            }
         }
     }
 
