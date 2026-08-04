@@ -2,9 +2,33 @@
 <html>
 <head><title>System Monitor</title></head>
 <body>
+  <script>
+    // Auto-refresh driver: pull the latest snapshot from the host `sample()`
+    // function and write it into the DOM (browser-style DOM mutation).
+    function refresh() {
+      var d = sample();
+      setText('cpu', d.cpu);
+      setText('mem', d.mem);
+      setText('proc', d.proc);
+      setText('now', d.now + ' · session ' + d.session);
+      setText('meta', d.host + ' · ' + d.os + ' · ' + d.cores);
+      setText('cpuName', d.cpuName);
+    }
+    function setText(id, v) {
+      document.getElementById(id).textContent = v;
+    }
+  </script>
   <h1>System Monitor</h1>
   <p id="refresh" onclick="refresh()">[ Refresh ] — manual sample</p>
   <p id="quit" onclick="quit()">[ Quit ]</p>
-  <p>Auto-refreshes every 2 seconds; the first sample appears shortly.</p>
+  <p id="meta">sampling…</p>
+  <h2>CPU</h2>
+  <p id="cpu">n/a</p>
+  <p id="cpuName">n/a</p>
+  <h2>Memory</h2>
+  <p id="mem">n/a</p>
+  <h2>System</h2>
+  <p id="proc">processes: n/a</p>
+  <p id="now">now: n/a</p>
 </body>
 </html>

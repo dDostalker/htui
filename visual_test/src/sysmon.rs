@@ -1,32 +1,17 @@
 //! System-monitor visual test.
 //!
-//! Demonstrates htui's dynamic re-rendering end to end: the `refresh` handler
-//! samples the machine (CPU load, memory, disks, process count, wall clock)
-//! and rebuilds the *entire* document via [`RenderCmd::RenderHtml`]; the
-//! render thread re-parses the new HTML, re-lays it out and diff-renders it.
-//! Hover highlight comes from the CSS `:hover` rules in `style.css`.
+//! Demonstrates htui's script layer end to end: the demo document carries a
+//! `<script>` block whose `refresh()` function calls the registered **host
+//! function** `sample()` (a Rust callback) and writes the returned values into
+//! the DOM via `document.getElementById(...).textContent`. A background
+//! sampling thread keeps the data fresh; the main thread only reads the latest
+//! snapshot, so clicks / hover stay responsive even though a `wmic` query
+//! costs ~0.1–1.1 s. Auto-refresh every 200 ms re-invokes `refresh`.
 //!
 //! Sampling deliberately uses only the standard library: `wmic` subprocess
 //! output on Windows plus a few environment variables. When a sample fails
 //! (e.g. `wmic` missing on a modern Windows), the affected field falls back
 //! to `n/a` instead of crashing.
-//!
-//! ## Refresh rate vs. sampling cost
-//!
-//! The auto-refresh interval is 200 ms (`EventBindings::auto`), but a `wmic`
-//! subprocess query costs ~0.1–0.3 s each and `wmic cpu get loadpercentage`
-//! alone takes ~1.1 s, so the [`Monitor`] splits sampling into tiers:
-//!
-//! - **static** (once): CPU model, host, OS, core count, disk labels + total
-//!   size;
-//! - **fast** (every tick): memory usage (one `wmic` call);
-//! - **slow rotation**: process count / CPU load every 5th tick, disk free
-//!   every 10th tick.
-//!
-//! Measured on a Windows box this bottoms out around 0.4 s per tick — the
-//! `wmic` subprocess + WMI provider overhead. A true 200 ms cadence needs an
-//! in-process sampler (e.g. the `sysinfo` crate, currently unreachable from
-//! crates.io).
 
 use std::collections::HashMap;
 use std::env;
@@ -35,26 +20,42 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use htui::events::{AutoRefresh, EventBindings, EventHandler, HtmlEvent};
-use htui::tui::graph_api::RenderCmd;
+use boa_engine::{JsValue, js_string};
+use boa_engine::object::ObjectInitializer;
+use boa_engine::property::Attribute;
+use htui::events::{AutoRefresh, EventBindings};
+use htui::script::HostCall;
 
-/// Register the two functions the demo document calls: `refresh()` rebuilds
-/// the page with fresh samples, `quit()` exits the render loop. The page also
-/// auto-refreshes every 200 ms (see [`Monitor`] for the sampling budget).
+/// Register the functions the demo document calls: the host function
+/// `sample()` returns the latest snapshot as a JS object, and the document's
+/// `<script>` defines `refresh()` to update the DOM with it. The page
+/// auto-refreshes every 200 ms.
 pub fn bindings() -> EventBindings {
     let mut bindings = EventBindings::default();
-    let monitor = Arc::new(Mutex::new(Monitor::new()));
 
-    let quit: EventHandler = Box::new(|_| Some(RenderCmd::Quit));
-    bindings.actions.insert("quit".to_string(), quit);
+    // Background sampler: keeps a fresh snapshot without blocking the input
+    // loop. `wmic cpu get loadpercentage` alone takes ~1.1 s, so sampling
+    // happens off the main thread and the host fn only reads the snapshot.
+    let sampler = Arc::new(Mutex::new(Sampler::new()));
+    {
+        let sampler = Arc::clone(&sampler);
+        std::thread::spawn(move || loop {
+            if let Ok(mut s) = sampler.lock() {
+                s.sample_tick();
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        });
+    }
 
-    bindings.actions.insert(
-        "refresh".to_string(),
-        Box::new(move |_: &HtmlEvent| {
-            let mut monitor = monitor.lock().unwrap_or_else(|e| e.into_inner());
-            Some(RenderCmd::RenderHtml {
-                html: monitor.page().into(),
-            })
+    let sampler_for_host = Arc::clone(&sampler);
+    bindings.host.insert(
+        "sample".to_string(),
+        Box::new(move |call: &mut HostCall| {
+            let snap = sampler_for_host
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .snapshot();
+            sample_to_js(call, &snap)
         }),
     );
     bindings.auto = Some(AutoRefresh {
@@ -64,18 +65,19 @@ pub fn bindings() -> EventBindings {
     bindings
 }
 
-/// Render the sampled page to an HTML string.
+/// Render a one-off sampled page to an HTML string.
 ///
-/// Backs the `--sample` / `--watch` diagnostic flags so the page the
-/// `refresh` handler produces can be previewed without an interactive
-/// terminal. The monitor (and its session timer) is shared across previews.
+/// Backs the `--sample` / `--watch` diagnostic flags so the sampled page can
+/// be previewed without an interactive terminal. The snapshot is read from the
+/// shared sampler.
 pub fn preview_page() -> String {
-    static MONITOR: OnceLock<Arc<Mutex<Monitor>>> = OnceLock::new();
-    let monitor = MONITOR.get_or_init(|| Arc::new(Mutex::new(Monitor::new())));
-    monitor
+    static SAMPLER: OnceLock<Arc<Mutex<Sampler>>> = OnceLock::new();
+    let sampler = SAMPLER.get_or_init(|| Arc::new(Mutex::new(Sampler::new())));
+    let snap = sampler
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .page()
+        .snapshot();
+    snap.render_html()
 }
 
 /// Diagnostic: compare the file-redirect and pipe wmic capture paths for
@@ -153,7 +155,7 @@ pub fn probe_wmic() -> String {
 }
 
 // ============================================================
-// Monitor
+// Sampler
 // ============================================================
 
 /// Static, rarely-changing machine facts (sampled once).
@@ -166,67 +168,29 @@ struct StaticInfo {
     disks: Vec<(String, u64)>,
 }
 
-/// Tracks the sampling tiers and renders the page.
-struct Monitor {
-    start: Instant,
-    tick: u64,
-    static_info: Option<StaticInfo>,
+/// A point-in-time machine snapshot read by the host `sample()` function.
+#[derive(Clone, Default)]
+struct Snapshot {
+    cpu_name: String,
+    host: String,
+    os: String,
+    cores: String,
+    /// `(label, total_bytes)` per mounted volume.
+    disks: Vec<(String, u64)>,
+    /// Per-disk free bytes, aligned with `disks`.
+    disk_free: Vec<u64>,
     cpu_load: Option<f32>,
     process_count: usize,
-    /// Per-disk free bytes, aligned with `static_info.disks` (refreshed on a
-    /// slow rotation).
-    disk_free: Vec<u64>,
+    /// `(used_bytes, total_bytes)`.
+    memory: Option<(u64, u64)>,
+    now_secs: u64,
+    /// Seconds since the sampler started.
+    session_secs: u64,
 }
 
-impl Monitor {
-    fn new() -> Self {
-        Self {
-            start: Instant::now(),
-            tick: 0,
-            static_info: None,
-            cpu_load: None,
-            process_count: 0,
-            disk_free: Vec::new(),
-        }
-    }
-
-    /// Sample and render one frame.
-    fn page(&mut self) -> String {
-        self.tick += 1;
-
-        // First tick pays for everything; afterwards every tick runs a single
-        // fast memory query (~90 ms) and the slow queries are rotated in.
-        // `wmic cpu get loadpercentage` alone costs ~1.1 s, so CPU load is
-        // cached and refreshed on a rotation instead of every tick.
-        if self.static_info.is_none() {
-            self.static_info = Some(sample_static());
-            self.process_count = sample_process_count();
-            self.disk_free = sample_disk_free();
-            self.cpu_load = sample_cpu_load();
-        } else {
-            if self.tick.is_multiple_of(5) {
-                self.process_count = sample_process_count();
-            }
-            if self.tick % 5 == 2 {
-                self.cpu_load = sample_cpu_load();
-            }
-            if self.tick.is_multiple_of(10) {
-                self.disk_free = sample_disk_free();
-            }
-        }
-        let mem = sample_memory();
-
-        let s = self
-            .static_info
-            .as_ref()
-            .expect("static tier sampled on the first tick");
-
-        let now_secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let session = self.start.elapsed();
-
+impl Snapshot {
+    /// Render a static, self-contained HTML page for the diagnostic flags.
+    fn render_html(&self) -> String {
         let mut page = String::from(
             "<html><head><title>System Monitor</title></head><body>\n\
              <h1>System Monitor</h1>\n\
@@ -234,11 +198,11 @@ impl Monitor {
              <p id=\"quit\" onclick=\"quit()\">[ Quit ]</p>\n\
              <p>host: ",
         );
-        page.push_str(&s.host);
+        page.push_str(&self.host);
         page.push_str(" · os: ");
-        page.push_str(&s.os);
+        page.push_str(&self.os);
         page.push_str(" · cores: ");
-        page.push_str(&s.cores);
+        page.push_str(&self.cores);
         page.push_str("</p>\n");
 
         page.push_str("<h2>CPU</h2><p>");
@@ -250,11 +214,11 @@ impl Monitor {
             None => page.push_str("n/a"),
         }
         page.push_str("</p><p>");
-        page.push_str(&s.cpu_name);
+        page.push_str(&self.cpu_name);
         page.push_str("</p>\n");
 
         page.push_str("<h2>Memory</h2><p>");
-        match mem {
+        match self.memory {
             Some((used, total)) => {
                 page.push_str(&bar(used as f32 / total.max(1) as f32, 16));
                 page.push_str(&format!(" {} / {}", gb(used), gb(total)));
@@ -263,9 +227,9 @@ impl Monitor {
         }
         page.push_str("</p>\n");
 
-        if !s.disks.is_empty() {
+        if !self.disks.is_empty() {
             page.push_str("<h2>Disks</h2>\n");
-            for (i, (label, total)) in s.disks.iter().enumerate() {
+            for (i, (label, total)) in self.disks.iter().enumerate() {
                 let free = self.disk_free.get(i).copied().unwrap_or(0);
                 let used = (*total).saturating_sub(free);
                 page.push_str(&format!(
@@ -280,16 +244,104 @@ impl Monitor {
         page.push_str("<h2>System</h2><p>processes: ");
         page.push_str(&self.process_count.to_string());
         page.push_str(" · now: ");
-        page.push_str(&format_datetime(now_secs));
+        page.push_str(&format_datetime(self.now_secs));
         page.push_str(" · session: ");
         page.push_str(&format!(
             "{:02}:{:02}",
-            session.as_secs() / 60,
-            session.as_secs() % 60
+            self.session_secs / 60,
+            self.session_secs % 60
         ));
         page.push_str("</p></body></html>\n");
         page
     }
+}
+
+/// Samples machine metrics on a rotation and keeps a fresh [`Snapshot`].
+/// Runs on a dedicated background thread; the input loop never blocks on it.
+struct Sampler {
+    start: Instant,
+    tick: u64,
+    snapshot: Snapshot,
+}
+
+impl Sampler {
+    fn new() -> Self {
+        Self {
+            start: Instant::now(),
+            tick: 0,
+            snapshot: Snapshot::default(),
+        }
+    }
+
+    fn snapshot(&self) -> Snapshot {
+        self.snapshot.clone()
+    }
+
+    /// Sample one rotation. The first tick pays for everything; afterwards
+    /// every tick runs a single fast memory query and the slow queries
+    /// (`process`, `cpu`, `disk free`) are rotated in.
+    fn sample_tick(&mut self) {
+        self.tick += 1;
+
+        let static_info = if self.tick == 1 {
+            Some(sample_static())
+        } else {
+            None
+        };
+        if let Some(s) = static_info {
+            self.snapshot.cpu_name = s.cpu_name;
+            self.snapshot.host = s.host;
+            self.snapshot.os = s.os;
+            self.snapshot.cores = s.cores;
+            self.snapshot.disks = s.disks;
+            self.snapshot.process_count = sample_process_count();
+            self.snapshot.disk_free = sample_disk_free();
+            self.snapshot.cpu_load = sample_cpu_load();
+        } else {
+            if self.tick.is_multiple_of(5) {
+                self.snapshot.process_count = sample_process_count();
+            }
+            if self.tick % 5 == 2 {
+                self.snapshot.cpu_load = sample_cpu_load();
+            }
+            if self.tick.is_multiple_of(10) {
+                self.snapshot.disk_free = sample_disk_free();
+            }
+        }
+        self.snapshot.memory = sample_memory();
+        self.snapshot.now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        self.snapshot.session_secs = self.start.elapsed().as_secs();
+    }
+}
+
+/// Build a JS object from a snapshot (`{ host, os, cores, cpu, mem, … }`).
+fn sample_to_js(call: &mut HostCall, snap: &Snapshot) -> JsValue {
+    let cpu_text = snap
+        .cpu_load
+        .map(|l| format!("{l:.0}%"))
+        .unwrap_or_else(|| "n/a".to_string());
+    let mem_text = match snap.memory {
+        Some((used, total)) => format!("{} / {}", gb(used), gb(total)),
+        None => "n/a".to_string(),
+    };
+    let proc_text = snap.process_count.to_string();
+    let now_text = format_datetime(snap.now_secs);
+    let session_text = format!("{:02}:{:02}", snap.session_secs / 60, snap.session_secs % 60);
+
+    let mut init = ObjectInitializer::new(call.context);
+    init.property(js_string!("host"), js_string!(snap.host.as_str()), Attribute::all())
+        .property(js_string!("os"), js_string!(snap.os.as_str()), Attribute::all())
+        .property(js_string!("cores"), js_string!(snap.cores.as_str()), Attribute::all())
+        .property(js_string!("cpuName"), js_string!(snap.cpu_name.as_str()), Attribute::all())
+        .property(js_string!("cpu"), js_string!(cpu_text.as_str()), Attribute::all())
+        .property(js_string!("mem"), js_string!(mem_text.as_str()), Attribute::all())
+        .property(js_string!("proc"), js_string!(proc_text.as_str()), Attribute::all())
+        .property(js_string!("now"), js_string!(now_text.as_str()), Attribute::all())
+        .property(js_string!("session"), js_string!(session_text.as_str()), Attribute::all());
+    init.build().into()
 }
 
 // ============================================================

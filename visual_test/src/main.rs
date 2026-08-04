@@ -15,13 +15,10 @@
 //!   src/{name}/index.html    — HTML document
 //!   src/{name}/style.css     — stylesheet (optional)
 
-use std::sync::{Arc, Mutex};
-
 use anyhow::Result;
-use htui::events::{EventBindings, HtmlEvent};
+use htui::events::EventBindings;
 use htui::render;
 use htui::render_with_events;
-use htui::tui::graph_api::RenderCmd;
 use log::info;
 
 mod sysmon;
@@ -272,54 +269,17 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // The `events` case runs through `render_with_events`: every action
-    // declared in the on* attributes is logged to the visual-test log file,
-    // and the hover highlight is visible on screen. `--dump` falls back to
+    // The `events` case runs through `render_with_events`. The demo is fully
+    // script-driven: its `<script>` block defines the handler functions and
+    // registers listeners (on* attributes + `addEventListener`), and
+    // `console.log` / DOM mutation demonstrate the JS-DOM bridge. No host
+    // functions are needed, so bindings stay empty. `--dump` falls back to
     // the static preview (interaction needs a real terminal).
     if test_name == "events" {
-        let mut bindings = EventBindings::default();
-        // Register the functions the demo's `on*` bodies call. In a browser
-        // the same file would define these in a <script> block; here they are
-        // the global scope for the handler-body evaluator.
-        for name in [
-            "panel", "buy", "sell", "hoverPanel", "leavePanel", "hoverBuy",
-            "hoverFooter",
-        ] {
-            let name = name.to_owned();
-            bindings.actions.insert(
-                name.clone(),
-                Box::new(move |ev: &HtmlEvent| {
-                    info!(
-                        "event: action={} type={:?} target={:?} at ({}, {})",
-                        name,
-                        ev.event_type,
-                        ev.target,
-                        ev.x,
-                        ev.y
-                    );
-                    None
-                }),
-            );
-        }
-        // Dynamic re-rendering demo: clicking the counter rebuilds the
-        // document with the incremented value, and the render thread swaps
-        // the session document and diff-renders the change.
-        let counter: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
-        let base_html = html.to_string();
-        bindings.actions.insert(
-            "increment".to_string(),
-            Box::new(move |_: &HtmlEvent| {
-                *counter.lock().unwrap() += 1;
-                let n = *counter.lock().unwrap();
-                Some(RenderCmd::RenderHtml {
-                    html: base_html.replace("Count: 0", &format!("Count: {n}")).into(),
-                })
-            }),
-        );
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
-            render_with_events(html, css, bindings);
+            render_with_events(html, css, EventBindings::default());
         }
         info!("Test '{test_name}' completed");
         return Ok(());

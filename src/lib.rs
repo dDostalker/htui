@@ -2,6 +2,7 @@ pub mod events;
 pub mod html;
 pub mod layout;
 pub mod logging;
+pub mod script;
 pub mod tdom;
 pub mod tui;
 
@@ -22,8 +23,9 @@ pub use html::html_parse::Parser;
 pub use layout::layout::TermMap;
 
 use crate::{
-    events::{AutoRefresh, EventBindings, Geometry, HitMap, invoke_action},
+    events::{AutoRefresh, EventBindings, Geometry, HitMap},
     html::css_parse::{self, CssRule, css_into_node_with_hover, reset_css_attr},
+    script::ScriptEngine,
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{InputState, RenderCmd, TermLayout, trigger_refresh},
 };
@@ -117,6 +119,9 @@ struct RenderState {
     /// can re-style the document for CSS `:hover` rules and repaint without
     /// re-parsing or re-laying out.
     geometry: Option<Arc<Geometry>>,
+    /// The node currently under the pointer (for CSS `:hover` cascade on
+    /// `RenderArena` re-renders).
+    hovered: Option<NodeId>,
     max_scroll: Arc<AtomicU32>,
 }
 
@@ -140,7 +145,24 @@ impl RenderState {
         zoom: f32,
     ) {
         let (root_id, arena) = self.parse_and_apply();
+        self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom);
+    }
 
+    /// Re-layout / re-paint a supplied DOM arena, publishing geometry.
+    ///
+    /// Shared tail of [`redraw`](Self::redraw) and
+    /// [`render_arena`](Self::render_arena). `arena` must already carry its
+    /// cascaded CSS (`css_attr`); the caller handles parsing or re-cascading.
+    fn layout_and_paint<W: Write>(
+        &mut self,
+        out: &mut BufWriter<W>,
+        geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>,
+        term_map: &TermMap,
+        arena: NodeArena,
+        root_id: NodeId,
+        scroll_y: u32,
+        zoom: f32,
+    ) {
         // Reuse the existing canvas when its dimensions still match the
         // terminal. Only allocate a fresh Vec on the first render or after a
         // terminal resize, when the buffer size must change.
@@ -210,6 +232,27 @@ impl RenderState {
         flush_frame(out);
     }
 
+    /// Re-cascade CSS (with the current `:hover`) into a script-engine arena
+    /// snapshot and render it without re-parsing HTML.
+    ///
+    /// Backs `RenderCmd::RenderArena`: JS mutated the live DOM, so the arena
+    /// arrives raw (no `css_attr`) and must be cascaded first.
+    fn render_arena<W: Write>(
+        &mut self,
+        out: &mut BufWriter<W>,
+        geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>,
+        term_map: &TermMap,
+        arena: &NodeArena,
+        root_id: NodeId,
+        scroll_y: u32,
+        zoom: f32,
+    ) {
+        let mut arena = arena.clone();
+        reset_css_attr(&mut arena, root_id);
+        css_into_node_with_hover(&mut arena, root_id, &self.css_rules, self.hovered);
+        self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom);
+    }
+
     /// Replace the session document and fully re-render it, keeping the
     /// current scroll position / zoom.
     ///
@@ -251,6 +294,7 @@ fn render_thread(
         term_layout: None,
         title_set: false,
         geometry: None,
+        hovered: None,
         max_scroll,
     };
 
@@ -305,6 +349,22 @@ fn render_thread(
                 state.redraw(&mut out, &geo_tx, &term_map, scroll_y, zoom);
             }
 
+            RenderCmd::RenderArena {
+                arena,
+                root_id,
+                scroll_y,
+                zoom,
+            } => {
+                let term_map = match TermMap::get_ter_map() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        log::error!("Failed to get terminal size: {}", e);
+                        continue;
+                    }
+                };
+                state.render_arena(&mut out, &geo_tx, &term_map, &arena, root_id, scroll_y, zoom);
+            }
+
             RenderCmd::RenderHtml { html } => {
                 let term_map = match TermMap::get_ter_map() {
                     Ok(m) => m,
@@ -317,6 +377,7 @@ fn render_thread(
             }
 
             RenderCmd::Hover { node_id } => {
+                state.hovered = node_id;
                 let Some(tl) = state.term_layout.as_mut() else {
                     continue;
                 };
@@ -440,7 +501,7 @@ pub fn render_with_events(html: &str, css: &str, bindings: EventBindings) {
     run(html, css, Some(bindings));
 }
 
-fn run(html: &str, css: &str, mut bindings: Option<EventBindings>) {
+fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
     // install debug hook
     #[cfg(debug_assertions)]
     install_debug_panic_hook();
@@ -460,9 +521,23 @@ fn run(html: &str, css: &str, mut bindings: Option<EventBindings>) {
     let css_rules = Arc::new(build_css_rules(html, css));
 
     let html: Arc<str> = Arc::from(html);
+    // The script engine owns the live DOM when events are enabled; it parses
+    // the document itself (arena + `<script>` blocks) and reports dirty flags
+    // when JS mutates the DOM.
+    let mut engine: Option<ScriptEngine> = None;
+    if let Some(bindings) = bindings {
+        engine = match ScriptEngine::new(html.as_ref(), bindings) {
+            Ok(e) => Some(e),
+            Err(err) => {
+                log::error!("Failed to initialize script engine: {err}");
+                None
+            }
+        };
+    }
+
     // Shared scroll upper bound — initial value `u32::MAX` means "not yet
     // known" (the first layout hasn't run); the render thread overwrites it
-    // on every successful `Redraw` with the real `tl.max_scroll()`.
+    // on every successful render with the real `tl.max_scroll()`.
     let max_scroll = Arc::new(AtomicU32::new(u32::MAX));
 
     // Geometry snapshot channel (render thread → hit-test thread) and the
@@ -470,7 +545,7 @@ fn run(html: &str, css: &str, mut bindings: Option<EventBindings>) {
     // is only spawned when event handling is requested.
     let (geo_tx, geo_rx) = mpsc::channel::<Arc<Geometry>>();
     let hit_map: Arc<Mutex<Arc<HitMap>>> = Arc::new(Mutex::new(Arc::new(HitMap::new())));
-    if bindings.is_some() {
+    if engine.is_some() {
         let hit_map_thread = Arc::clone(&hit_map);
         std::thread::spawn(move || hit_test_thread(geo_rx, hit_map_thread));
     }
@@ -480,7 +555,7 @@ fn run(html: &str, css: &str, mut bindings: Option<EventBindings>) {
         let html_clone = Arc::clone(&html);
         let css_clone = Arc::clone(&css_rules);
         let max_scroll_clone = Arc::clone(&max_scroll);
-        let geo_tx = bindings.is_some().then_some(geo_tx);
+        let geo_tx = engine.is_some().then_some(geo_tx);
         move || {
             render_thread(rx, html_clone, css_clone, max_scroll_clone, geo_tx);
         }
@@ -495,19 +570,30 @@ fn run(html: &str, css: &str, mut bindings: Option<EventBindings>) {
         }
     };
 
-    if let Err(e) = tx.send(RenderCmd::Redraw {
-        scroll_y: state.scroll_y,
-        zoom: state.zoom,
-    }) {
-        log::error!("Failed to send initial Redraw: {}", e);
+    // First frame: the engine's live arena (scripts already ran and may have
+    // mutated the DOM) or a plain parse-based redraw.
+    let first_cmd = match engine.as_mut() {
+        Some(eng) => RenderCmd::RenderArena {
+            arena: Arc::new(eng.arena()),
+            root_id: eng.root_id(),
+            scroll_y: state.scroll_y,
+            zoom: state.zoom,
+        },
+        None => RenderCmd::Redraw {
+            scroll_y: state.scroll_y,
+            zoom: state.zoom,
+        },
+    };
+    if let Err(e) = tx.send(first_cmd) {
+        log::error!("Failed to send initial render: {}", e);
         if let Err(e2) = tx.send(RenderCmd::Quit) {
             log::error!("Failed to send Quit during cleanup: {}", e2);
         }
     }
 
     // Periodic auto action (see `EventBindings::auto`): cloned once so the
-    // loop can read it while mutably borrowing `bindings` for dispatch.
-    let auto: Option<AutoRefresh> = bindings.as_ref().and_then(|b| b.auto.clone());
+    // loop can read it while mutably borrowing `engine` for dispatch.
+    let auto: Option<AutoRefresh> = engine.as_ref().and_then(|e| e.auto());
     let mut last_auto = std::time::Instant::now();
 
     let mut quit = false;
@@ -521,7 +607,7 @@ fn run(html: &str, css: &str, mut bindings: Option<EventBindings>) {
             break;
         }
 
-        let mut cmds = if bindings.is_some() {
+        let mut cmds = if engine.is_some() {
             let map = match hit_map.lock() {
                 Ok(guard) => Arc::clone(&guard),
                 Err(e) => {
@@ -534,7 +620,7 @@ fn run(html: &str, css: &str, mut bindings: Option<EventBindings>) {
                 rows,
                 max_scroll.load(Ordering::Relaxed),
                 Some(&map),
-                bindings.as_mut(),
+                engine.as_mut(),
                 Some(Duration::from_millis(100)),
             )
         } else {
@@ -549,18 +635,29 @@ fn run(html: &str, css: &str, mut bindings: Option<EventBindings>) {
         };
 
         // Periodic auto action: when the interval has elapsed, invoke the
-        // configured action as if it fired (synthetic event) and forward its
-        // render command alongside the input events.
+        // configured JS global function (see `ScriptEngine::invoke_action`)
+        // and forward its render commands alongside the input events.
         if let Some(auto) = &auto {
             let now = std::time::Instant::now();
-            if now.duration_since(last_auto) >= auto.every {
+            if now.duration_since(last_auto) >= auto.every
+                && let Some(engine) = engine.as_mut()
+            {
                 last_auto = now;
-                if let Some(bindings) = bindings.as_mut()
-                    && let Some(cmd) = invoke_action(&auto.action, bindings, crate::events::EventType::Click)
-                {
-                    cmds.push(cmd);
-                }
+                cmds.extend(engine.invoke_action(&auto.action));
             }
+        }
+
+        // JS mutations of the live DOM need a re-render from the engine's
+        // arena (no HTML re-parse).
+        if let Some(engine) = engine.as_mut()
+            && engine.take_dirty()
+        {
+            cmds.push(RenderCmd::RenderArena {
+                arena: Arc::new(engine.arena()),
+                root_id: engine.root_id(),
+                scroll_y: state.scroll_y,
+                zoom: state.zoom,
+            });
         }
 
         for cmd in cmds {
@@ -571,6 +668,21 @@ fn run(html: &str, css: &str, mut bindings: Option<EventBindings>) {
                 quit = true;
                 break;
             }
+            // With the script engine active, the engine's live arena is the
+            // source of truth: convert parse-based `Redraw` (zoom / resize)
+            // into a `RenderArena` so JS DOM mutations survive re-renders.
+            let cmd = match (cmd, engine.as_mut()) {
+                (
+                    RenderCmd::Redraw { scroll_y, zoom },
+                    Some(engine),
+                ) => RenderCmd::RenderArena {
+                    arena: Arc::new(engine.arena()),
+                    root_id: engine.root_id(),
+                    scroll_y,
+                    zoom,
+                },
+                (other, _) => other,
+            };
             if let RenderCmd::Redraw { .. } = &cmd
                 && let Ok(map) = TermMap::get_ter_map()
             {

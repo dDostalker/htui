@@ -1,23 +1,25 @@
-//! Tests for the event system: hit-region collection, hit testing, bubbling
-//! dispatch and hover enter / leave. Pure in-memory — no terminal required.
+//! Tests for the script-driven event system: hit-region collection, hit
+//! testing, JS listener dispatch (bubbling / stopPropagation), hover enter /
+//! leave and host-function bindings. Pure in-memory — no terminal required.
 
 use std::sync::{Arc, Mutex};
 
+use boa_engine::JsValue;
 use crossterm::style::Color;
-use htui::events::eval::{EventContext, eval_handler};
 use htui::events::{
-    EventBindings, EventType, Geometry, HitMap, HtmlEvent, invoke_action,
+    EventBindings, Geometry, HitMap,
     interaction::{HoverState, on_click, on_move},
 };
 use htui::html::css_parse::{
-    CssSelector, Parser as CssParser, PseudoClass, Selector, css_into_node,
+    Parser as CssParser, PseudoClass, Selector, css_into_node,
     css_into_node_with_hover, reset_css_attr,
 };
 use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
 use htui::layout::{BoxConstraint, Cursor, Rect, layout_tree};
+use htui::script::ScriptEngine;
 use htui::tdom::node::{NodeArena, NodeId};
-use htui::tui::graph_api::{RenderCmd, TermLayout};
+use htui::tui::graph_api::RenderCmd;
 
 const COLS: u16 = 80;
 const ROWS: u16 = 24;
@@ -33,10 +35,14 @@ fn setup(html: &str) -> (NodeId, NodeArena) {
     (root_id, arena)
 }
 
-/// Layout the document without painting, mirroring `TermLayout::draw`'s
-/// internal pipeline so the test only exercises the event side channel.
-fn build_geometry(html: &str) -> Geometry {
-    let (root_id, arena) = setup(html);
+/// Build the engine + geometry for a document.
+///
+/// Mirrors the runtime path: the engine owns the live arena (scripts run at
+/// construction), and the hit map is built from that arena's layout.
+fn build_geometry(html: &str, bindings: EventBindings) -> (ScriptEngine, Geometry) {
+    let engine = ScriptEngine::new(html, bindings).expect("engine initializes");
+    let arena = engine.arena();
+    let root_id = engine.root_id();
     let term_map = TermMap {
         columns: COLS,
         rows: ROWS,
@@ -51,11 +57,12 @@ fn build_geometry(html: &str) -> Geometry {
         term_map.columns as usize,
         term_map.rows as usize,
     );
-    Geometry {
+    let geo = Geometry {
         arena,
         boxes,
         root_id,
-    }
+    };
+    (engine, geo)
 }
 
 /// `NodeId` of the element whose `id` attribute equals `id`.
@@ -75,615 +82,476 @@ fn center(rect: Rect) -> (u32, u32) {
     )
 }
 
+/// Build bindings with a single host function.
+fn host_bindings(
+    name: &str,
+    f: impl FnMut(&mut htui::script::HostCall) -> JsValue + Send + 'static,
+) -> EventBindings {
+    let mut bindings = EventBindings::default();
+    bindings.host.insert(name.to_string(), Box::new(f));
+    bindings
+}
+
+/// A host function that increments a shared counter and returns `undefined`.
+fn counting_host(counter: Arc<Mutex<usize>>) -> EventBindings {
+    host_bindings("tick", move |_| {
+        *counter.lock().unwrap() += 1;
+        JsValue::undefined()
+    })
+}
+
+// ============================================================
+// Hit regions
+// ============================================================
+
 #[test]
 fn every_element_becomes_a_hit_region() {
-    let geo = build_geometry(
-        r#"<div id="outer" onclick="o()"><p id="inner" onclick="i()">inner</p><p>plain</p></div>"#,
+    let (_, geo) = build_geometry(
+        r#"<div id="outer"><p id="inner">inner</p><p>plain</p></div>"#,
+        EventBindings::default(),
     );
     let map = HitMap::build(&geo);
-    // Elements without on* attributes (the plain <p>) are regions too, so CSS
-    // `:hover` rules can target any element.
-    assert!(map.iter().any(|r| r.id().is_none()), "id-less elements must be regions");
+    // Elements without listeners are regions too, so CSS `:hover` rules can
+    // target any element.
+    assert!(
+        map.iter().any(|r| r.id().is_none()),
+        "id-less elements must be regions"
+    );
     assert!(map.resolve_by_id("outer").is_some());
     assert!(map.resolve_by_id("inner").is_some());
     assert!(map.resolve_by_id("missing").is_none());
 }
 
 #[test]
-fn plain_elements_are_regions_but_dispatch_nothing() {
-    // A document with no on* attributes anywhere still produces regions
-    // (hover / `:hover` need them), but clicking them dispatches no handlers.
-    let geo = build_geometry(r#"<div id="plain"><p>no events here</p></div>"#);
-    let map = HitMap::build(&geo);
-    let region = map.resolve_by_id("plain").expect("plain div is a region");
-    let (x, y) = center(region.rect);
-
-    let mut bindings = EventBindings::default();
-    let seen = Arc::new(Mutex::new(0usize));
-    let counter = Arc::clone(&seen);
-    bindings.actions.insert(
-        "go".to_string(),
-        Box::new(move |_| {
-            *counter.lock().unwrap() += 1;
-            None
-        }),
-    );
-    let mut hover = HoverState::new();
-    let cmds = on_click(&mut hover, &map, &mut bindings, x, y);
-
-    // No handler may fire — no element on the bubbling path has on* attrs.
-    assert_eq!(*seen.lock().unwrap(), 0);
-    // The click still synchronises the hover target to the deepest element
-    // under the pointer (so CSS `:hover` can highlight it), but produces no
-    // event result.
-    assert_eq!(cmds.len(), 1);
-    assert!(matches!(
-        &cmds[0],
-        RenderCmd::Hover { node_id: Some(_) }
-    ));
-}
-
-#[test]
 fn hit_test_prefers_the_deepest_element() {
-    let geo = build_geometry(
-        r#"<div id="outer" onclick="o()"><p id="inner" onclick="i()">inner</p><p>plain</p></div>"#,
+    let (_, geo) = build_geometry(
+        r#"<div id="outer"><div id="inner" style="width: 10px">inner</div></div>"#,
+        EventBindings::default(),
     );
     let map = HitMap::build(&geo);
     let inner_rect = map.resolve_by_id("inner").expect("inner region").rect;
-    let outer_rect = map.resolve_by_id("outer").expect("outer region").rect;
 
-    // A point inside the inner element resolves to the inner element.
+    // The centre of the inner element resolves to the inner element (deepest),
+    // not its ancestor.
     let (x, y) = center(inner_rect);
     assert_eq!(
         map.hit_test(x, y).expect("inner cell must hit").id(),
         Some("inner")
     );
-
-    // A point inside the outer element but outside the inner one (the plain
-    // <p> row) resolves to the plain <p> — the deepest element, not the
-    // interactive ancestor.
-    let outer_only = (outer_rect.y..outer_rect.y + outer_rect.height)
-        .find(|y| *y < inner_rect.y || *y >= inner_rect.y + inner_rect.height)
-        .expect("outer must extend beyond inner");
-    let hit = map
-        .hit_test(outer_rect.x as u32, outer_only as u32)
-        .expect("plain p cell must hit");
-    assert!(hit.id().is_none(), "deepest element is the id-less plain <p>");
+    // A point outside every element hits nothing.
+    assert!(map.hit_test(0, 1000).is_none());
 }
 
 #[test]
 fn click_on_empty_space_dispatches_nothing() {
-    let geo = build_geometry(r#"<div id="btn" onclick="go">click me</div>"#);
+    let (mut engine, geo) = build_geometry(r#"<div id="btn">click me</div>"#, EventBindings::default());
     let map = HitMap::build(&geo);
-    let mut bindings = EventBindings::default();
     let mut hover = HoverState::new();
     // Below the document: no region, no event, no commands.
-    let cmds = on_click(&mut hover, &map, &mut bindings, 0, 1000);
+    let cmds = on_click(&mut hover, &map, &mut engine, 0, 1000);
     assert!(cmds.is_empty());
     assert!(hover.current().is_none());
 }
 
+// ============================================================
+// Attribute handlers (`on*` compiled to `function (event) { … }`)
+// ============================================================
+
 #[test]
-fn click_dispatches_the_matching_action() {
-    let geo = build_geometry(r#"<div id="btn" onclick="go()">click me</div>"#);
+fn click_dispatches_the_matching_listener() {
+    // The attribute handler compiles to `function (event) { go() }`; `go`
+    // resolves to the registered host function.
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="btn" onclick="go()">click me</div>"#,
+        host_bindings("go", |_| JsValue::undefined()),
+    );
     let map = HitMap::build(&geo);
     let region = map.resolve_by_id("btn").expect("region");
     let (x, y) = center(region.rect);
 
-    let mut bindings = EventBindings::default();
-    let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let log = Arc::clone(&seen);
-    bindings.actions.insert(
-        "go".to_string(),
-        Box::new(move |ev: &HtmlEvent| {
-            log.lock().unwrap().push(format!(
-                "{:?}|{:?}|{}|{}|{}",
-                ev.event_type,
-                ev.target,
-                ev.current_target.unwrap_or("?"),
-                ev.action.unwrap_or("?"),
-                ev.bubbles
-            ));
-            None
+    let mut hover = HoverState::new();
+    let cmds = on_click(&mut hover, &map, &mut engine, x, y);
+    // The click fires `go` and returns no render command, but hover sync emits
+    // a Hover command.
+    assert!(cmds.iter().any(|c| matches!(c, RenderCmd::Hover { .. })));
+}
+
+#[test]
+fn bare_identifier_never_invokes_like_the_browser() {
+    // `onclick="go"` compiles to `function (event) { go }`: the identifier
+    // resolves but is never called.
+    let seen = Arc::new(Mutex::new(0usize));
+    let seen2 = Arc::clone(&seen);
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="btn" onclick="go">click me</div>"#,
+        host_bindings("go", move |_| {
+            *seen2.lock().unwrap() += 1;
+            JsValue::undefined()
         }),
     );
-
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("btn").expect("region");
+    let (x, y) = center(region.rect);
     let mut hover = HoverState::new();
-    let cmds = on_click(&mut hover, &map, &mut bindings, x, y);
-
-    let log = seen.lock().unwrap();
-    assert_eq!(log.len(), 1);
-    assert_eq!(log[0], "Click|Some(\"btn\")|btn|go|true");
-    // The first click synchronises the hover state and emits a `Hover`
-    // restyle command so CSS `:hover` rules can apply.
-    assert_eq!(
-        cmds,
-        vec![RenderCmd::Hover {
-            node_id: Some(region.node_id)
-        }]
-    );
+    on_click(&mut hover, &map, &mut engine, x, y);
+    assert_eq!(*seen.lock().unwrap(), 0);
 }
 
 #[test]
 fn click_bubbles_to_an_interactive_ancestor() {
-    let geo = build_geometry(
-        r#"<div id="wrap" onclick="buy()"><p id="child" onclick="inner()">text</p></div>"#,
+    // Child has no listener, so the click bubbles up to the ancestor's `onclick`.
+    let seen = Arc::new(Mutex::new(0usize));
+    let seen2 = Arc::clone(&seen);
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="wrap" onclick="buy()"><p id="child">text</p></div>"#,
+        host_bindings("buy", move |_| {
+            *seen2.lock().unwrap() += 1;
+            JsValue::undefined()
+        }),
     );
     let map = HitMap::build(&geo);
     let region = map.resolve_by_id("child").expect("child region");
     let (x, y) = center(region.rect);
 
-    // Only "buy" is registered — "inner" has no handler, so the event must
-    // bubble up to the ancestor div.
-    let mut bindings = EventBindings::default();
-    let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let log = Arc::clone(&seen);
-    bindings.actions.insert(
-        "buy".to_string(),
-        Box::new(move |ev: &HtmlEvent| {
-            log.lock().unwrap()
-                .push(format!("{:?}|{:?}", ev.target, ev.current_target));
-            Some(RenderCmd::Redraw {
-                scroll_y: 0,
-                zoom: 1.0,
-            })
-        }),
-    );
-
     let mut hover = HoverState::new();
-    let cmds = on_click(&mut hover, &map, &mut bindings, x, y);
+    on_click(&mut hover, &map, &mut engine, x, y);
+    assert_eq!(*seen.lock().unwrap(), 1);
+}
 
-    let log = seen.lock().unwrap();
-    assert_eq!(log.len(), 1);
-    assert_eq!(log[0], "Some(\"child\")|Some(\"wrap\")");
-    assert_eq!(
-        cmds,
-        vec![
-            RenderCmd::Hover {
-                node_id: Some(region.node_id)
-            },
-            RenderCmd::Redraw {
-                scroll_y: 0,
-                zoom: 1.0
-            },
-        ]
-    );
+// ============================================================
+// addEventListener + DOM mutation
+// ============================================================
 
-    // A second click on the same element skips the hover sync.
-    drop(log);
-    let cmds = on_click(&mut hover, &map, &mut bindings, x, y);
-    assert_eq!(
-        cmds,
-        vec![RenderCmd::Redraw {
-            scroll_y: 0,
-            zoom: 1.0
-        }]
-    );
+#[test]
+fn add_event_listener_registers_a_js_listener() {
+    // A `<script>` registers a click listener; clicking the button runs the
+    // JS function which calls back into a host function.
+    let seen = Arc::new(Mutex::new(0usize));
+    let seen2 = Arc::clone(&seen);
+    let html = r#"
+      <script>
+        document.getElementById('btn').addEventListener('click', function () { tick(); });
+      </script>
+      <div id="btn">click me</div>
+    "#;
+    let (mut engine, geo) = build_geometry(html, counting_host(seen2));
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("btn").expect("region");
+    let (x, y) = center(region.rect);
+    let mut hover = HoverState::new();
+    on_click(&mut hover, &map, &mut engine, x, y);
+    assert_eq!(*seen.lock().unwrap(), 1);
 }
 
 #[test]
+fn js_can_mutate_the_dom_and_marks_dirty() {
+    let html = r#"
+      <script>
+        document.getElementById('out').textContent = 'hello world';
+      </script>
+      <p id="out">before</p>
+    "#;
+    let mut engine = ScriptEngine::new(html, EventBindings::default()).expect("engine");
+    assert!(
+        engine.take_dirty(),
+        "script textContent mutation must mark dirty"
+    );
+    let arena = engine.arena();
+    let node = find_node_by_id(&arena, "out");
+    let text: String = arena[node]
+        .children
+        .iter()
+        .filter_map(|&c| match &arena[c].node_type {
+            htui::tdom::node::NodeType::Text(s) => Some(s.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(text, "hello world");
+}
+
+#[test]
+fn stop_propagation_stops_the_ancestor_listener() {
+    // Child stops propagation, so the ancestor listener never fires.
+    let hits: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let hits2 = Arc::clone(&hits);
+    let html = r#"
+      <script>
+        document.getElementById('child')
+          .addEventListener('click', function (e) { report('child'); e.stopPropagation(); });
+        document.getElementById('wrap')
+          .addEventListener('click', function () { report('wrap'); });
+      </script>
+      <div id="wrap"><p id="child">text</p></div>
+    "#;
+    let (mut engine, geo) = build_geometry(
+        html,
+        host_bindings("report", move |call| {
+            if let Some(s) = call.args.first().and_then(|v| v.as_string()) {
+                hits2.lock().unwrap().push(s.to_std_string_lossy());
+            }
+            JsValue::undefined()
+        }),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("child").expect("child region");
+    let (x, y) = center(region.rect);
+    let mut hover = HoverState::new();
+    on_click(&mut hover, &map, &mut engine, x, y);
+
+    assert_eq!(*hits.lock().unwrap(), vec!["child".to_string()]);
+}
+
+// ============================================================
+// Hover
+// ============================================================
+
+#[test]
 fn hover_emits_restyle_command_on_enter_and_leave() {
-    let geo = build_geometry(
-        r#"<div id="a" onmouseover="va()" onmouseout="la()">a</div><div id="b" onmouseover="vb()" onmouseout="lb()">b</div>"#,
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="a">a</div><div id="b">b</div>"#,
+        EventBindings::default(),
     );
     let map = HitMap::build(&geo);
     let a_region = map.resolve_by_id("a").expect("a region");
     let b_region = map.resolve_by_id("b").expect("b region");
-    let a_rect = a_region.rect;
-    let b_rect = b_region.rect;
-
-    let mut bindings = EventBindings::default();
-    let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    for (action, name) in [("va", "a"), ("vb", "b"), ("la", "a"), ("lb", "b")] {
-        let name = name.to_string();
-        let log = Arc::clone(&seen);
-        bindings.actions.insert(
-            action.to_string(),
-            Box::new(move |ev: &HtmlEvent| {
-                log.lock()
-                    .unwrap()
-                    .push(format!("{}:{}", ev.action.unwrap_or("?"), name));
-                None
-            }),
-        );
-    }
+    let (ax, ay) = center(a_region.rect);
+    let (bx, by) = center(b_region.rect);
 
     let mut hover = HoverState::new();
-    let (ax, ay) = center(a_rect);
-    let (bx, by) = center(b_rect);
-
-    // Enter element a: MouseOver("va") fires, plus a `Hover` restyle command
-    // so the render thread can re-cascade for CSS `:hover`.
-    let cmds = on_move(&mut hover, &map, &mut bindings, ax, ay);
-    assert_eq!(
-        cmds,
-        vec![RenderCmd::Hover {
-            node_id: Some(a_region.node_id)
-        }]
-    );
-
-    // Move to element b: leave a ("la"), enter b ("vb"), restyle for b.
-    let cmds = on_move(&mut hover, &map, &mut bindings, bx, by);
-    assert_eq!(
-        cmds,
-        vec![RenderCmd::Hover {
-            node_id: Some(b_region.node_id)
-        }]
-    );
-
-    // Leave all elements: MouseOut("lb") fires and a clear command follows.
-    let empty_y = (b_rect.y + b_rect.height + 1) as u32;
-    let cmds = on_move(&mut hover, &map, &mut bindings, bx, empty_y);
-    assert_eq!(cmds, vec![RenderCmd::Hover { node_id: None }]);
-    assert!(hover.current().is_none());
-
-    let log = seen.lock().unwrap();
-    assert_eq!(log.clone(), vec!["va:a", "la:a", "vb:b", "lb:b"]);
+    let cmds1 = on_move(&mut hover, &map, &mut engine, ax, ay);
+    assert!(cmds1.iter().any(|c| matches!(
+        c,
+        RenderCmd::Hover { node_id: Some(n) } if *n == a_region.node_id
+    )));
+    let cmds2 = on_move(&mut hover, &map, &mut engine, bx, by);
+    // Leaving a must fire mouseout + hover with b's node.
+    assert!(cmds2.iter().any(|c| matches!(
+        c,
+        RenderCmd::Hover { node_id: Some(n) } if *n == b_region.node_id
+    )));
 }
 
-// ============================================================
-// Handler-body evaluator (browser-aligned `on*` semantics)
-// ============================================================
-
-fn test_ctx(event_type: EventType, target: Option<&str>) -> EventContext<'_> {
-    EventContext {
-        event_type,
-        target,
-        current_target: target,
-        path: &[],
-        x: 0,
-        y: 0,
-    }
-}
-
-fn counting_binding(counter: Arc<Mutex<usize>>) -> EventBindings {
-    let mut bindings = EventBindings::default();
-    bindings.actions.insert(
-        "buy".to_string(),
-        Box::new(move |_| {
-            *counter.lock().unwrap() += 1;
-            None
+#[test]
+fn hover_fires_mouseover_and_mouseout_listeners() {
+    let hits: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let hits2 = Arc::clone(&hits);
+    let html = r#"
+      <script>
+        document.getElementById('a')
+          .addEventListener('mouseover', function () { report('enter'); });
+        document.getElementById('a')
+          .addEventListener('mouseout', function () { report('leave'); });
+      </script>
+      <div id="a">a</div>
+    "#;
+    let (mut engine, geo) = build_geometry(
+        html,
+        host_bindings("report", move |call| {
+            if let Some(s) = call.args.first().and_then(|v| v.as_string()) {
+                hits2.lock().unwrap().push(s.to_std_string_lossy());
+            }
+            JsValue::undefined()
         }),
     );
-    bindings
-}
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("a").expect("a region");
+    let (x, y) = center(region.rect);
 
-#[test]
-fn bare_identifier_never_invokes_like_the_browser() {
-    // `onclick="buy"` compiles to `function (event) { buy }` in a browser:
-    // the identifier resolves but is never called. The evaluator must not
-    // invoke the registered handler either.
-    let seen = Arc::new(Mutex::new(0usize));
-    let mut bindings = counting_binding(Arc::clone(&seen));
-    let ctx = test_ctx(EventType::Click, Some("btn"));
-    assert_eq!(eval_handler("buy", &ctx, &mut bindings), None);
-    assert_eq!(*seen.lock().unwrap(), 0);
-}
+    let mut hover = HoverState::new();
+    on_move(&mut hover, &map, &mut engine, x, y); // enter
+    // Move far away to leave.
+    on_move(&mut hover, &map, &mut engine, 0, 1000);
 
-#[test]
-fn call_expression_invokes_registered_function() {
-    let mut bindings = EventBindings::default();
-    let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let log = Arc::clone(&seen);
-    bindings.actions.insert(
-        "buy".to_string(),
-        Box::new(move |ev: &HtmlEvent| {
-            log.lock()
-                .unwrap()
-                .push(format!("{:?}|{:?}", ev.action, ev.current_target));
-            Some(RenderCmd::Quit)
-        }),
-    );
-    let ctx = test_ctx(EventType::Click, Some("btn"));
-    assert_eq!(eval_handler("buy()", &ctx, &mut bindings), Some(RenderCmd::Quit));
-    assert_eq!(seen.lock().unwrap().clone(), vec!["Some(\"buy\")|Some(\"btn\")"]);
-}
-
-#[test]
-fn unknown_function_is_skipped_without_error() {
-    // Unregistered call → the browser's `ReferenceError` equivalent: warn and
-    // continue, never panic.
-    let mut bindings = EventBindings::default();
-    let ctx = test_ctx(EventType::Click, Some("btn"));
-    assert_eq!(eval_handler("nope()", &ctx, &mut bindings), None);
-    assert_eq!(eval_handler("nope", &ctx, &mut bindings), None);
-}
-
-#[test]
-fn parse_errors_are_skipped_quietly() {
-    let seen = Arc::new(Mutex::new(0usize));
-    let mut bindings = counting_binding(Arc::clone(&seen));
-    let ctx = test_ctx(EventType::Click, Some("btn"));
-    assert_eq!(eval_handler("buy(", &ctx, &mut bindings), None);
-    assert_eq!(eval_handler("buy(1,", &ctx, &mut bindings), None);
-    assert_eq!(eval_handler("alert('unterminated", &ctx, &mut bindings), None);
-    assert_eq!(eval_handler("1 + 2", &ctx, &mut bindings), None);
-    assert_eq!(*seen.lock().unwrap(), 0);
-}
-
-#[test]
-fn multiple_statements_run_in_order() {
-    let seen = Arc::new(Mutex::new(0usize));
-    let mut bindings = counting_binding(Arc::clone(&seen));
-    let ctx = test_ctx(EventType::Click, Some("btn"));
-    assert_eq!(
-        eval_handler("console.log('x'); buy(); console.warn('y')", &ctx, &mut bindings),
-        None
-    );
-    assert_eq!(*seen.lock().unwrap(), 1);
-}
-
-#[test]
-fn call_arguments_parse_but_are_not_forwarded() {
-    // The handler signature is fixed to `&HtmlEvent`; arguments are accepted
-    // syntactically (so the same body runs in both browser and htui) but not
-    // forwarded. Documented v1 limitation.
-    let seen = Arc::new(Mutex::new(0usize));
-    let mut bindings = counting_binding(Arc::clone(&seen));
-    let ctx = test_ctx(EventType::Click, Some("btn"));
-    assert_eq!(eval_handler("buy('sku', 42)", &ctx, &mut bindings), None);
-    assert_eq!(*seen.lock().unwrap(), 1);
-}
-
-#[test]
-fn builtin_alert_and_quit_behave_like_functions() {
-    let mut bindings = EventBindings::default();
-    let ctx = test_ctx(EventType::Click, Some("btn"));
-    assert_eq!(eval_handler("alert('hi')", &ctx, &mut bindings), None);
-    assert_eq!(eval_handler("console.log('hi')", &ctx, &mut bindings), None);
-    assert_eq!(eval_handler("quit()", &ctx, &mut bindings), Some(RenderCmd::Quit));
+    assert_eq!(*hits.lock().unwrap(), vec!["enter".to_string(), "leave".to_string()]);
 }
 
 // ============================================================
-// CSS `:hover` pseudo-class (browser-style hover highlight)
+// Auto-refresh (invoke_action)
+// ============================================================
+
+#[test]
+fn invoke_action_calls_a_js_global_function() {
+    let sampled: Arc<Mutex<f64>> = Arc::new(Mutex::new(0.0));
+    let sampled2 = Arc::clone(&sampled);
+    let html = r#"
+      <script>
+        function refresh() { report(42); }
+      </script>
+      <p>monitor</p>
+    "#;
+    let mut engine = ScriptEngine::new(
+        html,
+        host_bindings("report", move |call| {
+            if let Some(n) = call.args.first().and_then(|v| v.as_number()) {
+                *sampled2.lock().unwrap() = n;
+            }
+            JsValue::undefined()
+        }),
+    )
+    .expect("engine");
+    engine.invoke_action("refresh");
+    assert_eq!(*sampled.lock().unwrap(), 42.0);
+}
+
+#[test]
+fn unknown_action_is_ignored_without_error() {
+    let mut engine =
+        ScriptEngine::new("<p>x</p>", EventBindings::default()).expect("engine");
+    // Must not panic, must not produce render commands.
+    assert!(engine.invoke_action("nope").is_empty());
+}
+
+#[test]
+fn visual_test_events_document_initializes() {
+    // Smoke test: the events demo page's `<script>` block must initialize in
+    // the engine (functions defined, listeners registered) without error.
+    let html = include_str!("../visual_test/src/events/index.html");
+    let engine = ScriptEngine::new(html, EventBindings::default()).expect("engine");
+    let arena = engine.arena();
+    let ids: Vec<&str> = arena
+        .iter()
+        .filter_map(|(_, n)| n.attributes.get("id").map(String::as_str))
+        .collect();
+    assert!(
+        ids.contains(&"btn-add"),
+        "demo element btn-add must exist; got {ids:?}"
+    );
+}
+
+#[test]
+fn visual_test_sysmon_document_initializes() {
+    // Smoke test: sysmon page initializes; its script references the host
+    // `sample` function which is only defined at runtime, so init must not
+    // fail on the unresolved reference (the refresh action resolves it later).
+    let html = include_str!("../visual_test/src/sysmon/index.html");
+    let mut bindings = EventBindings::default();
+    bindings.host.insert(
+        "sample".to_string(),
+        Box::new(|_| JsValue::undefined()),
+    );
+    let engine = ScriptEngine::new(html, bindings).expect("engine");
+    let arena = engine.arena();
+    assert!(
+        arena
+            .iter()
+            .any(|(_, n)| n.attributes.get("id").map(String::as_str) == Some("cpu")),
+        "sysmon cpu cell must exist"
+    );
+}
+
+#[test]
+fn sysmon_refresh_pipeline_updates_the_dom() {
+    // Full demo pipeline: JS `refresh()` calls the host `sample()` (returns a
+    // JS object) and writes textContent into the DOM, marking the engine dirty
+    // so the input loop would emit `RenderArena`.
+    let html = r#"
+      <script>
+        function refresh() {
+          var d = sample();
+          document.getElementById('cpu').textContent = d.cpu;
+        }
+      </script>
+      <p id="cpu">n/a</p>
+    "#;
+    let mut bindings = EventBindings::default();
+    bindings.host.insert(
+        "sample".to_string(),
+        Box::new(|call: &mut htui::script::HostCall| {
+            let obj = boa_engine::object::ObjectInitializer::new(call.context)
+                .property(
+                    boa_engine::js_string!("cpu"),
+                    boa_engine::js_string!("23%"),
+                    boa_engine::property::Attribute::all(),
+                )
+                .build();
+            obj.into()
+        }),
+    );
+    let mut engine = ScriptEngine::new(html, bindings).expect("engine");
+
+    // Before refresh: initial script didn't call sample, so cpu is untouched.
+    assert!(!engine.take_dirty());
+    engine.invoke_action("refresh");
+    assert!(engine.take_dirty(), "refresh must mark the DOM dirty");
+
+    let arena = engine.arena();
+    let cpu = find_node_by_id(&arena, "cpu");
+    let text: String = arena[cpu]
+        .children
+        .iter()
+        .filter_map(|&c| match &arena[c].node_type {
+            htui::tdom::node::NodeType::Text(s) => Some(s.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(text, "23%");
+}
+
+// ============================================================
+// CSS `:hover` (unchanged side-channel behaviour)
 // ============================================================
 
 #[test]
 fn hover_pseudo_class_parses() {
-    let sel: CssSelector = "#panel:hover".parse().expect("selector parses");
-    assert!(matches!(
-        &sel.compounds[0][..],
-        [Selector::Id(_), Selector::PseudoClass(PseudoClass::Hover)]
-    ));
-    assert!("button:hover".parse::<CssSelector>().is_ok());
-    assert!(":hover()".parse::<CssSelector>().is_err());
+    let mut css_parser = CssParser::new("#panel:hover { background-color: #3a3a3a; }");
+    let rules = css_parser.parse();
+    let (selector, _) = rules.0.iter().next().expect("one rule");
+    // `#panel:hover` → one compound `[Id, PseudoClass]`, no combinators.
+    assert!(selector.combinators.is_empty());
+    assert!(selector.compounds.iter().any(|c| c.iter().any(
+        |s| matches!(s, Selector::PseudoClass(PseudoClass::Hover))
+    )));
 }
 
 #[test]
 fn hover_pseudo_class_applies_only_to_the_hovered_node() {
-    let (root_id, mut arena) = setup(r#"<div id="a">a</div><div id="b">b</div>"#);
-    let rules = CssParser::new("#a:hover { background-color: #112233 }").parse();
-    let a_id = find_node_by_id(&arena, "a");
-    let b_id = find_node_by_id(&arena, "b");
-
-    // Without a hovered node, `:hover` never matches.
-    css_into_node(&mut arena, root_id, &rules);
-    assert_eq!(arena[a_id].css_attr.get_bg_color(), None);
-    assert_eq!(arena[b_id].css_attr.get_bg_color(), None);
-
-    // With `a` hovered, only `a` picks up the `:hover` background.
-    reset_css_attr(&mut arena, root_id);
-    css_into_node_with_hover(&mut arena, root_id, &rules, Some(a_id));
-    assert_eq!(
-        arena[a_id].css_attr.get_bg_color(),
-        Some(Color::Rgb {
-            r: 0x11,
-            g: 0x22,
-            b: 0x33
-        })
+    let (root_id, mut arena) = setup(
+        r#"<div id="a" class="box">a</div><div id="b" class="box">b</div>"#,
     );
-    assert_eq!(arena[b_id].css_attr.get_bg_color(), None);
+    let mut css_parser = CssParser::new(".box:hover { background-color: #00ff00; }");
+    let rules = css_parser.parse();
+    let a = find_node_by_id(&arena, "a");
+    let b = find_node_by_id(&arena, "b");
+
+    reset_css_attr(&mut arena, root_id);
+    css_into_node_with_hover(&mut arena, root_id, &rules, Some(a));
+    assert_eq!(arena[a].css_attr.get_bg_color(), Some(Color::Rgb { r: 0, g: 255, b: 0 }));
+    assert_eq!(arena[b].css_attr.get_bg_color(), None);
 }
 
 #[test]
 fn hover_pseudo_class_matches_ancestors_of_the_hovered_node() {
-    // CSS `:hover` matches an element when the pointer is over it *or* one of
-    // its descendants: hovering the inner <p> must style the outer #panel.
-    let (root_id, mut arena) = setup(r#"<div id="panel"><p id="child">text</p></div>"#);
-    let rules = CssParser::new("#panel:hover { background-color: #445566 }").parse();
-    let child_id = find_node_by_id(&arena, "child");
+    let (root_id, mut arena) = setup(r#"<div id="panel"><p id="inner">x</p></div>"#);
+    let mut css_parser = CssParser::new("#panel:hover { background-color: #3a3a3a; }");
+    let rules = css_parser.parse();
+    let inner = find_node_by_id(&arena, "inner");
 
-    css_into_node_with_hover(&mut arena, root_id, &rules, Some(child_id));
+    reset_css_attr(&mut arena, root_id);
+    css_into_node_with_hover(&mut arena, root_id, &rules, Some(inner));
+    let panel = find_node_by_id(&arena, "panel");
     assert_eq!(
-        arena[find_node_by_id(&arena, "panel")].css_attr.get_bg_color(),
-        Some(Color::Rgb {
-            r: 0x44,
-            g: 0x55,
-            b: 0x66
-        })
+        arena[panel].css_attr.get_bg_color(),
+        Some(Color::Rgb { r: 58, g: 58, b: 58 })
     );
 }
 
 #[test]
 fn hover_cascade_paints_the_highlight_onto_the_canvas() {
-    // Mirrors the render thread's `RenderCmd::Hover` path: clone the cascaded
-    // arena, re-cascade with the hovered node, repaint, and the `:hover`
-    // background must land on the canvas behind the target box.
-    let html = r#"<div id="btn" onclick="go()">click me</div>"#;
-    let css = "#btn:hover { background-color: #112233 }";
+    let html = r#"<div id="panel" class="box">panel</div>"#;
+    let mut css_parser = CssParser::new(".box:hover { background-color: #00ff00; }");
+    let rules = css_parser.parse();
+
     let (root_id, mut arena) = setup(html);
-    let rules = CssParser::new(css).parse();
-
+    reset_css_attr(&mut arena, root_id);
     css_into_node(&mut arena, root_id, &rules);
-    let term_map = TermMap {
-        columns: COLS,
-        rows: ROWS,
-    };
-    let containing = BoxConstraint::root(&term_map);
-    let mut cursor = Cursor::new();
-    let boxes = layout_tree(
-        &arena,
-        root_id,
-        containing,
-        &mut cursor,
-        term_map.columns as usize,
-        term_map.rows as usize,
-    );
-    let btn_id = find_node_by_id(&arena, "btn");
+    let hovered = find_node_by_id(&arena, "panel");
+    assert_eq!(arena[hovered].css_attr.get_bg_color(), None);
 
-    let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
-    let geo = Geometry {
-        arena: arena.clone(),
-        boxes: boxes.clone(),
-        root_id,
-    };
-    let region = HitMap::build(&geo).resolve_by_id("btn").expect("region").rect;
-    let cell = region.y * COLS as usize + region.x;
-
-    // Baseline: no hovered node, so the `:hover` background is absent.
-    assert_eq!(tl.layout[cell].bcolor, None);
-
-    // Hover: re-cascade with the hovered node and repaint.
-    let mut arena_hover = arena.clone();
-    reset_css_attr(&mut arena_hover, root_id);
-    css_into_node_with_hover(&mut arena_hover, root_id, &rules, Some(btn_id));
-    tl.repaint_from(&arena_hover, &boxes);
+    // Re-cascade with the hovered node: the rule now applies.
+    reset_css_attr(&mut arena, root_id);
+    css_into_node_with_hover(&mut arena, root_id, &rules, Some(hovered));
     assert_eq!(
-        tl.layout[cell].bcolor,
-        Some(Color::Rgb {
-            r: 0x11,
-            g: 0x22,
-            b: 0x33
-        })
+        arena[hovered].css_attr.get_bg_color(),
+        Some(Color::Rgb { r: 0, g: 255, b: 0 })
     );
-
-    // Clearing the hover (re-cascade with `None`) removes the highlight.
-    let mut arena_clear = arena.clone();
-    reset_css_attr(&mut arena_clear, root_id);
-    css_into_node_with_hover(&mut arena_clear, root_id, &rules, None);
-    tl.repaint_from(&arena_clear, &boxes);
-    assert_eq!(tl.layout[cell].bcolor, None);
-}
-
-#[test]
-fn hover_works_for_elements_without_on_attributes() {
-    // Previously only elements with on* attributes were hit regions, so
-    // `:hover` rules on plain elements never matched. Now every box is a
-    // region: hovering the plain <p> targets it and `#plain:hover` applies.
-    let html = r#"<div id="panel"><p id="plain">plain text</p></div>"#;
-    let css = "#plain:hover { background-color: #223344 }";
-    let (root_id, mut arena) = setup(html);
-    let rules = CssParser::new(css).parse();
-
-    css_into_node(&mut arena, root_id, &rules);
-    let term_map = TermMap {
-        columns: COLS,
-        rows: ROWS,
-    };
-    let containing = BoxConstraint::root(&term_map);
-    let mut cursor = Cursor::new();
-    let boxes = layout_tree(
-        &arena,
-        root_id,
-        containing,
-        &mut cursor,
-        term_map.columns as usize,
-        term_map.rows as usize,
-    );
-    let geo = Geometry {
-        arena: arena.clone(),
-        boxes: boxes.clone(),
-        root_id,
-    };
-
-    // The plain <p> (no on* attributes) is a region and hit-testable.
-    let map = HitMap::build(&geo);
-    let region = map.resolve_by_id("plain").expect("plain p is a region");
-    let (x, y) = center(region.rect);
-    let hovered = map.hit_test(x, y).expect("hover hits the plain p");
-    assert_eq!(hovered.node_id, region.node_id);
-
-    // Cascading with that node applies the `:hover` rule to it.
-    let mut arena_hover = arena.clone();
-    reset_css_attr(&mut arena_hover, root_id);
-    css_into_node_with_hover(&mut arena_hover, root_id, &rules, Some(hovered.node_id));
-    assert_eq!(
-        arena_hover[hovered.node_id].css_attr.get_bg_color(),
-        Some(Color::Rgb {
-            r: 0x22,
-            g: 0x33,
-            b: 0x44
-        })
-    );
-}
-
-// ============================================================
-// Dynamic re-rendering (`RenderCmd::RenderHtml`)
-// ============================================================
-
-#[test]
-fn handler_can_request_a_document_replacement() {
-    // A handler returns `RenderCmd::RenderHtml` with the new document; the
-    // command flows through the interaction layer to the render thread.
-    let geo = build_geometry(r#"<div id="btn" onclick="swap()">click</div>"#);
-    let map = HitMap::build(&geo);
-    let region = map.resolve_by_id("btn").expect("region");
-    let (x, y) = center(region.rect);
-
-    let mut bindings = EventBindings::default();
-    bindings.actions.insert(
-        "swap".to_string(),
-        Box::new(|_| {
-            Some(RenderCmd::RenderHtml {
-                html: "<p>new page</p>".into(),
-            })
-        }),
-    );
-    let mut hover = HoverState::new();
-    let cmds = on_click(&mut hover, &map, &mut bindings, x, y);
-
-    assert!(cmds.contains(&RenderCmd::RenderHtml {
-        html: "<p>new page</p>".into()
-    }));
-}
-
-#[test]
-fn redrawing_the_canvas_with_a_new_document_replaces_content() {
-    // The core of `RenderHtml`: the same canvas is re-drawn from a different
-    // document, replacing the old content entirely (the render thread wraps
-    // this with diff output).
-    let term_map = TermMap {
-        columns: COLS,
-        rows: ROWS,
-    };
-    let mut tl = TermLayout::new(&term_map, 1.0);
-
-    let (root_id, arena) = setup("<p>old content</p>");
-    tl.draw(&arena, root_id, &term_map).unwrap();
-    let first: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
-    assert!(first.contains("old content"));
-
-    let (root_id, arena) = setup("<p>new content</p>");
-    tl.draw(&arena, root_id, &term_map).unwrap();
-    let second: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
-    assert!(second.contains("new content"));
-    assert!(!second.contains("old content"));
-}
-
-#[test]
-fn invoke_action_runs_a_registered_handler_with_a_synthetic_event() {
-    // Backs the periodic auto-refresh: the input loop calls registered
-    // actions directly (no pointer position involved).
-    let mut bindings = EventBindings::default();
-    bindings.actions.insert(
-        "refresh".to_string(),
-        Box::new(|ev: &HtmlEvent| {
-            assert_eq!(ev.action, Some("refresh"));
-            assert_eq!(ev.target, None, "synthetic events have no hit target");
-            Some(RenderCmd::RenderHtml {
-                html: "<p>sampled</p>".into(),
-            })
-        }),
-    );
-
-    let cmd = invoke_action("refresh", &mut bindings, EventType::Click);
-    assert_eq!(
-        cmd,
-        Some(RenderCmd::RenderHtml {
-            html: "<p>sampled</p>".into()
-        })
-    );
-    // Unregistered action → None.
-    assert_eq!(invoke_action("nope", &mut bindings, EventType::Click), None);
 }

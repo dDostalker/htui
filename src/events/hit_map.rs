@@ -1,13 +1,11 @@
 //! Hit regions and spatial lookup over the laid-out box forest.
 
-use std::collections::HashMap;
-
 use crate::{
     layout::layoutbox::{LayoutBox, Rect},
-    tdom::node::{Node, NodeArena, NodeId},
+    tdom::node::{NodeArena, NodeId},
 };
 
-use super::{ElementRef, EventType, Geometry};
+use super::{ElementRef, Geometry};
 
 /// A rectangular hit region for one laid-out element.
 ///
@@ -16,8 +14,7 @@ use super::{ElementRef, EventType, Geometry};
 /// bubbling dispatch.
 ///
 /// Every layout box becomes a region so CSS `:hover` rules can target any
-/// element; elements without `on*` attributes simply carry an empty `actions`
-/// map and are skipped by the dispatcher.
+/// element; elements without listeners simply fire nothing when dispatched.
 #[derive(Debug, Clone)]
 pub struct HitRegion {
     /// Session-local node id, used by hover enter / leave tracking to tell
@@ -121,22 +118,7 @@ fn collect_regions(boxes: &[LayoutBox], arena: &NodeArena, out: &mut Vec<HitRegi
     }
 }
 
-/// Collect the `on*` event attributes of a node into an action map.
-fn event_actions(node: &Node) -> HashMap<EventType, String> {
-    let mut actions = HashMap::new();
-    if let Some(value) = node.attributes.get("onclick") {
-        actions.insert(EventType::Click, value.clone());
-    }
-    if let Some(value) = node.attributes.get("onmouseover") {
-        actions.insert(EventType::MouseOver, value.clone());
-    }
-    if let Some(value) = node.attributes.get("onmouseout") {
-        actions.insert(EventType::MouseOut, value.clone());
-    }
-    actions
-}
-
-/// Resolve the DOM ancestor chain of `start`, target first.
+/// Collect the DOM ancestor chain of `start`, target first.
 fn ancestor_path(arena: &NodeArena, start: NodeId) -> Vec<ElementRef> {
     let mut path = Vec::new();
     let mut current = Some(start);
@@ -144,7 +126,7 @@ fn ancestor_path(arena: &NodeArena, start: NodeId) -> Vec<ElementRef> {
         let node = &arena[id];
         path.push(ElementRef {
             id: node.get_id().cloned(),
-            actions: event_actions(node),
+            node_id: id,
         });
         current = node.parent;
     }

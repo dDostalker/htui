@@ -4,19 +4,30 @@ use std::time::Duration;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind};
 
 use crate::{
-    events::{EventBindings, HitMap, interaction},
+    events::interaction,
+    script::ScriptEngine,
     tdom::node::NodeId,
 };
+use crate::events::HitMap;
 
 const SCROLL_LINES_PER_TICK: u32 = 3;
 const ZOOM_STEP: f32 = 0.1;
 const ZOOM_MIN: f32 = 0.2;
 const ZOOM_MAX: f32 = 5.0;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum RenderCmd {
     Rerender { scroll_y: u32 },
     Redraw { scroll_y: u32, zoom: f32 },
+    /// Render a supplied DOM arena snapshot (the script engine's live arena
+    /// after JS mutations), cascading styles and re-laying-out without
+    /// re-parsing HTML.
+    RenderArena {
+        arena: Arc<crate::tdom::node::NodeArena>,
+        root_id: crate::tdom::node::NodeId,
+        scroll_y: u32,
+        zoom: f32,
+    },
     /// Replace the session document with `html` and fully re-render it,
     /// keeping the current scroll position / zoom. The render thread swaps
     /// the document and diff-renders, so handlers can build dynamic content
@@ -80,7 +91,7 @@ impl Default for InputState {
 /// send and, more importantly, one fewer frame that risks a visible flash
 /// at the scroll bounds.
 ///
-/// `hit_map` and `bindings` activate mouse interaction (pass both together,
+/// `hit_map` and `engine` activate mouse interaction (pass both together,
 /// or neither):
 /// - left `Down` records the press position; left `Up` on the same cell is
 ///   dispatched as a bubbling `Click` via
@@ -94,7 +105,7 @@ pub fn trigger_refresh(
     rows: u16,
     max_scroll: u32,
     hit_map: Option<&HitMap>,
-    bindings: Option<&mut EventBindings>,
+    engine: Option<&mut ScriptEngine>,
     timeout: Option<Duration>,
 ) -> Vec<RenderCmd> {
     let mut cmds = Vec::new();
@@ -246,13 +257,13 @@ pub fn trigger_refresh(
                     });
                 }
                 MouseEventKind::Down(MouseButton::Left) => {
-                    if hit_map.is_some() {
+                    if hit_map.is_some() && engine.is_some() {
                         state.pressed = Some((mouse.column, mouse.row));
                     }
                 }
                 MouseEventKind::Up(MouseButton::Left) => {
-                    if let (Some((px, py)), Some(hit_map), Some(bindings)) =
-                        (state.pressed, hit_map, bindings)
+                    if let (Some((px, py)), Some(hit_map), Some(engine)) =
+                        (state.pressed, hit_map, engine)
                     {
                         state.pressed = None;
                         if px == mouse.column && py == mouse.row {
@@ -260,7 +271,7 @@ pub fn trigger_refresh(
                             cmds.extend(interaction::on_click(
                                 &mut state.hover,
                                 hit_map,
-                                bindings,
+                                engine,
                                 x,
                                 y,
                             ));
@@ -270,12 +281,12 @@ pub fn trigger_refresh(
                     }
                 }
                 MouseEventKind::Moved => {
-                    if let (Some(hit_map), Some(bindings)) = (hit_map, bindings) {
+                    if let (Some(hit_map), Some(engine)) = (hit_map, engine) {
                         let (x, y) = canvas_pos(state, mouse.column, mouse.row);
                         cmds.extend(interaction::on_move(
                             &mut state.hover,
                             hit_map,
-                            bindings,
+                            engine,
                             x,
                             y,
                         ));

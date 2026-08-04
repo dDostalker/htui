@@ -7,3 +7,4 @@ edition = "2024"
 htui = { path = ".." }
 anyhow = "1.0.101"
 log = "0.4.29"
+boa_engine = "0.21.1"

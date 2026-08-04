@@ -17,12 +17,14 @@ htui/
 │   ├── lib.rs              # 入口：render() / render_with_events() 主循环 + 渲染线程 + 命中线程
 │   ├── logging.rs          # 文件 logger 初始化
 │   ├── events/             # JS 风格事件系统（旁路，不参与渲染管线）
-│   │   ├── mod.rs          # EventType / HtmlEvent / ElementRef / EventBindings
+│   │   ├── mod.rs          # EventType / HtmlEvent / ElementRef / EventBindings（宿主函数注册表）
 │   │   ├── geometry.rs     # Geometry（arena + boxes 快照，Arc 共享）
 │   │   ├── hit_map.rs      # HitRegion / HitMap / build / hit_test / resolve_by_id
-│   │   ├── interaction.rs  # 纯逻辑鼠标交互（HoverState / on_move / on_click）
-│   │   ├── eval.rs         # on* 属性体 JS 子集解析器 + 求值器（对齐浏览器语义）
-│   │   └── dispatch.rs     # 冒泡分派 dispatch()（沿 path 求值 on* body）
+│   │   └── interaction.rs  # 纯逻辑鼠标交互（HoverState / on_move / on_click，调 ScriptEngine::fire）
+│   ├── script/             # JS 脚本层（旁路：Boa 引擎 + live DOM + 宿主函数）
+│   │   ├── mod.rs          # ScriptEngine：Context + ScriptState(thread_local) + 引导脚本 + fire/invoke_action + on* 属性编译
+│   │   ├── host.rs         # HostFn / HostCall（Rust 回调 → JS 可调用）
+│   │   └── dom.rs          # DOM 绑定：document / element 包装 / style / addEventListener / console / alert / quit
 │   ├── html/
 │   │   ├── mod.rs
 │   │   ├── html_parse.rs   # HTML → tdom 树（html5ever）
@@ -105,12 +107,14 @@ htui/
 │               ├── canvas.rs   # TermLayout 画布
 │               ├── cell.rs     # Block / FontStyle
 │               ├── image.rs    # Img / 图像加载
-│               ├── input.rs    # RenderCmd / InputState / trigger_refresh / 鼠标点击与 hover 跟踪
+│   │   ├── input.rs    # RenderCmd（含 RenderArena） / InputState / trigger_refresh / 鼠标点击与 hover 跟踪
 │               ├── render.rs   # TermLayout::render（增量） / render_diff_to_bytes / render_to_bytes
 │               ├── style.rs    # block_style
 │               └── text.rs     # char_width / grapheme_width
 ├── benches/               # criterion 基准（parse / cascade / paint / render_to_bytes / full_redraw）
 ├── Cargo.toml
+├── docs/
+│   └── script-layer.md    # 脚本层完整使用与架构文档（脚本 / on* / 宿主函数 / RenderArena）
 ├── visual_test/          # 可视化测试工具（cargo run -p visual_test）
 │   └── src/
 │       ├── main.rs
@@ -224,7 +228,7 @@ flow/flex/table 算法并生成统一的 `LayoutBox` 树，最终由
 ## 事件系统（旁路，不参与上述管线）
 
 ```
-渲染线程 Redraw 后 ──► Arc<Geometry>（arena + boxes）──► 命中线程
+渲染线程渲染后 ──► Arc<Geometry>（arena + boxes）──► 命中线程
                                                             │
                           HitMap::build()（收集所有盒子，:hover 可作用于任意元素）
                                                             │
@@ -232,24 +236,34 @@ flow/flex/table 算法并生成统一的 `LayoutBox` 树，最终由
                                                             ▼
                    主线程 input ── 鼠标 Down/Up/Moved ──► interaction::on_click / on_move
                                                             │
-                           冒泡 dispatch() ──► eval 求值 on* 属性体（JS 子集，对齐浏览器）
+                                    ScriptEngine::fire(region, type, x, y)
                                                             │
-                                      用户 EventHandler（函数名 → 回调注册表）
+                           沿 path 触发 JS 监听器（addEventListener / 编译后的 on* 属性体）
                                                             │
-                                              RenderCmd ──► 渲染线程
+                                     宿主函数（HostFn，可返回值 + push RenderCmd）
+                                                            │
+                        JS 改 DOM → dom_dirty → RenderArena{arena} ──► 渲染线程
 ```
 
-事件目标用元素 `id`（稳定身份）传递。`on*` 属性值按浏览器语义处理：属性体是
-JS 子集表达式（`eval.rs`），裸标识符只求值不调用（与浏览器 `function (event) { buy }`
-一致），`buy()` 才调用注册函数；未定义/解析失败仅告警不崩溃，对齐浏览器的
-ReferenceError 失败模式。hover 驱动 `onmouseover`/`onmouseout` 事件，并在悬停目标
-变化时发出 `RenderCmd::Hover`，渲染线程克隆缓存 arena 后经
-`reset_css_attr` + `css_into_node_with_hover` 重新级联再重绘——只有样式表写了
-`:hover` 规则才产生视觉高亮，与浏览器一致。动态内容：handler 返回
-`RenderCmd::RenderHtml { html }` 可替换会话文档并保持滚动位置重渲染（渲染线程
-`RenderState::render_html`），diff 渲染只输出变化的格子。定时任务：
-`EventBindings::auto`（`AutoRefresh`）让输入循环按间隔经 `invoke_action` 自动触发
-已注册 action（监控器/时钟/动画用）。
+事件目标用元素 `node_id`（会话内稳定）传递，命中路径沿 DOM 祖先链冒泡。
+`on*` 属性值按浏览器语义编译为 `function (event) { body }`：裸标识符只求值不调用
+（与浏览器 `function (event) { buy }` 一致），`buy()` 才调用——脚本层由 Boa 引擎求值
+（`src/script/`），未定义/解析失败仅告警不崩溃，对齐浏览器的 ReferenceError
+失败模式。脚本通过浏览器语义的 DOM API（`document.getElementById` /
+`el.textContent` / `el.style` / `addEventListener` / `appendChild`…）读写文档；
+Rust 应用回调以宿主函数（`EventBindings.host` → `HostFn`）形式注册为 JS 全局函数。
+hover 驱动 `onmouseover`/`onmouseout` 事件，并在悬停目标变化时发出
+`RenderCmd::Hover`，渲染线程克隆缓存 arena 后经 `reset_css_attr` +
+`css_into_node_with_hover` 重新级联再重绘——只有样式表写了 `:hover` 规则才产生视觉
+高亮，与浏览器一致。
+
+动态内容：JS 修改 live DOM 后引擎置 `dom_dirty`，输入循环发送
+`RenderCmd::RenderArena { arena, root_id, scroll_y, zoom }`——渲染线程重新级联
+（保留当前 `:hover`）→ 重排 → 重绘 → 发布新 Geometry，**无需重新解析 HTML**。
+`RenderCmd::RenderHtml` 仍保留用于整文档替换。定时任务：`EventBindings::auto`
+（`AutoRefresh`）让输入循环按间隔经 `ScriptEngine::invoke_action` 自动触发 JS
+全局函数（监控器/时钟/动画用）。宿主函数在输入循环线程执行，重活应放后台线程
+（参考 `visual_test/src/sysmon.rs` 后台采样 + 快照模式）。
 
 ## 必要事项
 `html → tdom → layout → tui` 四层不可破坏。不要引入新的抽象层，除非有充分理由。在修改之前进行询问。
@@ -339,16 +353,19 @@ ReferenceError 失败模式。hover 驱动 `onmouseover`/`onmouseout` 事件，�
 | `TermLayout`       | `tui::graph_api`        | 终端画布 + 渲染方法       |
 | `Block`            | `tui::graph_api`        | 单个屏幕字符单元格（含 `style: FontStyle`） |
 | `FontStyle`        | `tui::graph_api`        | `Block` 的聚合样式位掩码（`BOLD` / `ITALIC` / `UNDERLINED` / `CROSSED_OUT`） |
-| `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举（Rerender / Redraw / RenderHtml / Hover / Quit） |
+| `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举（Rerender / Redraw / RenderArena / RenderHtml / Hover / Quit） |
 | `InputState`       | `tui::graph_api::input` | 输入循环状态（scroll_y / zoom / pressed / hover）          |
 | `EventType`        | `events`                | DOM 事件类型（Click / MouseOver / MouseOut）               |
-| `HtmlEvent`        | `events`                | 事件对象（target / current_target / path / action / bubbles）|
-| `ElementRef`       | `events`                | 冒泡路径上的单个元素（id + on* 属性体）                |
+| `HtmlEvent`        | `events`                | 事件对象（event_type / target / current_target / x / y / bubbles）|
+| `ElementRef`       | `events`                | 冒泡路径上的单个元素（id + node_id）                |
 | `HitRegion`        | `events::hit_map`       | 元素命中区域（node_id + rect + path 冒泡链，所有盒子）|
 | `HitMap`           | `events::hit_map`       | 全部命中区域 + hit_test() / resolve_by_id() / build()     |
-| `EventBindings`    | `events`                | 函数名（JS 子集全局作用域）→ 用户回调注册表 + auto 定时刷新 |
-| `AutoRefresh`      | `events`                | 周期自动触发的 action（every + action 名）                  |
+| `EventBindings`    | `events`                | 宿主函数注册表（host: 名字 → HostFn）+ auto 定时刷新      |
+| `AutoRefresh`      | `events`                | 周期自动触发的 action（every + JS 全局函数名）            |
 | `HoverState`       | `events::interaction`   | 指针悬停跟踪（enter / leave 判定，不产生视觉）        |
+| `ScriptEngine`     | `script`                | Boa 引擎封装：live NodeArena + DOM 绑定 + fire/invoke_action + eval_source |
+| `HostCall`         | `script::host`          | 宿主函数调用上下文（args / event / render / context）     |
+| `HostFn`           | `script::host`          | 宿主函数类型：`Box<dyn FnMut(&mut HostCall) -> JsValue + Send>` |
 | `EdgeSizes`        | `html::box_edges`       | 四边长度（top/right/bottom/left），用于 padding / margin |
 | `BorderStyle`      | `html::box_edges`       | `border-style` 枚举（`None` / `Solid`） |
 | `Border`           | `html::box_edges`       | 单边 border 的 width/style/color |

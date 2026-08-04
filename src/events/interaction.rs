@@ -5,9 +5,12 @@
 //! after converting screen coordinates to canvas coordinates; the tests drive
 //! these functions directly with canvas coordinates, so no terminal is needed.
 
-use crate::tui::graph_api::RenderCmd;
+use crate::{
+    script::ScriptEngine,
+    tui::graph_api::RenderCmd,
+};
 
-use super::{EventBindings, EventType, HitMap, HitRegion, dispatch};
+use super::{EventType, HitMap, HitRegion};
 
 /// Tracks the element currently under the pointer for enter / leave
 /// detection.
@@ -39,7 +42,7 @@ impl HoverState {
 pub fn on_move(
     state: &mut HoverState,
     hit_map: &HitMap,
-    bindings: &mut EventBindings,
+    engine: &mut ScriptEngine,
     x: u32,
     y: u32,
 ) -> Vec<RenderCmd> {
@@ -50,11 +53,11 @@ pub fn on_move(
         return cmds;
     }
     if let Some(old) = state.current.take() {
-        cmds.extend(dispatch(&old, EventType::MouseOut, x, y, bindings));
+        cmds.extend(engine.fire(&old, EventType::MouseOut, x, y));
     }
     state.current = new_hover.cloned();
     if let Some(region) = new_hover {
-        cmds.extend(dispatch(region, EventType::MouseOver, x, y, bindings));
+        cmds.extend(engine.fire(region, EventType::MouseOver, x, y));
     }
     cmds.push(RenderCmd::Hover {
         node_id: new_hover.map(|r| r.node_id),
@@ -67,11 +70,11 @@ pub fn on_move(
 /// A click implies the pointer is over the target, so the hover state is
 /// synchronised first (emitting a `Hover` command when the target changed, so
 /// CSS `:hover` styling stays correct), then the [`EventType::Click`] event is
-/// dispatched with bubbling.
+/// dispatched with bubbling through the script engine.
 pub fn on_click(
     state: &mut HoverState,
     hit_map: &HitMap,
-    bindings: &mut EventBindings,
+    engine: &mut ScriptEngine,
     x: u32,
     y: u32,
 ) -> Vec<RenderCmd> {
@@ -85,6 +88,6 @@ pub fn on_click(
             node_id: Some(region.node_id),
         });
     }
-    cmds.extend(dispatch(region, EventType::Click, x, y, bindings));
+    cmds.extend(engine.fire(region, EventType::Click, x, y));
     cmds
 }

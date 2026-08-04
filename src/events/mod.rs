@@ -1,58 +1,60 @@
-//! JS-like event semantics on top of the terminal HTML renderer.
+//! JS-driven event system on top of the terminal HTML renderer.
 //!
 //! This module is a *side channel*: it does not participate in the
 //! `html → tdom → layout → tui` rendering pipeline. Instead it records where
-//! interactive elements landed after a layout pass and lets the input loop
-//! translate terminal mouse events into DOM-style events with bubbling.
+//! elements landed after a layout pass and lets the input loop translate
+//! terminal mouse events into DOM-style events with bubbling.
 //!
 //! ## Architecture
 //!
 //! 1. The render thread publishes an immutable [`Geometry`] snapshot (DOM
-//!    arena + laid-out boxes) after every `Redraw`.
+//!    arena + laid-out boxes) after every redraw.
 //! 2. A dedicated hit-test thread consumes the snapshot, walks the layout
 //!    forest and builds a [`HitMap`] of [`HitRegion`]s — one rectangle per
 //!    laid-out element, together with each element's DOM ancestor chain.
-//!    Every element is a region so CSS `:hover` rules can target any of them;
-//!    elements without `on*` attributes carry no handlers and are skipped by
-//!    the dispatcher.
 //! 3. The input loop hit-tests mouse coordinates against the [`HitMap`] and
-//!    dispatches [`EventType`]s through [`dispatch`], which walks the
-//!    target's ancestor path (target → root) and evaluates each element's
-//!    `on*` handler body.
+//!    forwards the event to the [`ScriptEngine`](crate::script::ScriptEngine),
+//!    which fires the JS listeners registered on the bubbling path
+//!    (`addEventListener` or compiled `on*` attribute bodies).
 //!
 //! The pure interaction logic (enter / leave detection, click dispatch) lives
-//! in [`interaction`] so it can be tested without a terminal. The handler
-//! bodies themselves are evaluated by [`eval`] — a small JavaScript-subset
-//! interpreter.
+//! in [`interaction`] so it can be tested without a terminal.
 //!
 //! ## Event handler semantics (browser-aligned)
 //!
-//! Elements declare behaviour with the familiar HTML event attributes:
+//! Elements declare behaviour either with the familiar HTML event attributes
 //!
 //! ```html
 //! <div onclick="open()" onmouseover="highlight()">…</div>
 //! ```
 //!
-//! Like a browser, the attribute value is *code*: it is parsed as a
-//! JavaScript-subset expression and executed when the event fires. Function
-//! names resolve against the [`EventBindings::actions`] registry — the
-//! application's global scope — plus a few built-ins (`console.*`, `alert`,
-//! `quit`). A bare identifier (`onclick="open"`) is evaluated but never
-//! invoked, matching the browser's handler semantics. The event model
-//! (`target`, `current_target`, `path`, `bubbles`) mirrors the DOM; a future
-//! full JS engine can replace the subset evaluator behind the same interface.
+//! or programmatically from a `<script>` block:
+//!
+//! ```html
+//! <script>
+//!   document.getElementById('btn').addEventListener('click', function () { … });
+//! </script>
+//! ```
+//!
+//! Like a browser, an attribute value is *code*: it is compiled to
+//! `function (event) { <body> }` and registered as a listener. A bare
+//! identifier (`onclick="open"`) is evaluated but never invoked, matching the
+//! browser's handler semantics. Scripts run in the Boa engine with the DOM
+//! bindings described in [`crate::script`]; Rust application callbacks are
+//! registered as **host functions** (see [`EventBindings::host`]) and become
+//! JS globals callable from scripts.
 
 use std::collections::HashMap;
 
-use crate::tui::graph_api::RenderCmd;
+use crate::{
+    script::HostFn,
+    tdom::node::NodeId,
+};
 
-mod dispatch;
-pub mod eval;
 mod geometry;
 mod hit_map;
 pub mod interaction;
 
-pub use dispatch::{dispatch, invoke_action};
 pub use geometry::Geometry;
 pub use hit_map::{HitMap, HitRegion};
 pub use interaction::{HoverState, on_click, on_move};
@@ -74,73 +76,58 @@ pub enum EventType {
 
 /// One element on a bubbling path (target first, then its ancestors).
 ///
-/// `id` is the stable cross-session identity delivered to handlers; `actions`
-/// are the raw `on*` handler bodies (JavaScript-subset expressions) declared
-/// by that element, consulted during bubbling dispatch.
+/// `id` is the stable cross-session identity; `node_id` is the session-local
+/// arena key used by the script engine to look up JS listeners.
 #[derive(Debug, Clone)]
 pub struct ElementRef {
     pub id: Option<String>,
-    pub actions: HashMap<EventType, String>,
+    pub node_id: NodeId,
 }
 
-/// Event object delivered to a handler, mirroring the DOM `Event` shape.
-///
-/// `target` is the deepest element under the pointer; `current_target` is the
-/// element whose handler is being invoked (they differ when an ancestor
-/// handles a bubbled event). `action` carries the `on*` attribute value that
-/// fired the event; `bubbles` is always `true` in the current implementation
-/// (reserved so later work can model non-bubbling events).
-#[derive(Debug)]
-pub struct HtmlEvent<'a> {
+/// Event context delivered to a Rust host function, mirroring the DOM `Event`
+/// shape. `target` is the deepest element under the pointer; `current_target`
+/// is the element whose listener is being invoked (they differ when an
+/// ancestor handles a bubbled event).
+#[derive(Debug, Clone)]
+pub struct HtmlEvent {
     /// The event being dispatched.
     pub event_type: EventType,
-    /// `id` of the deepest element under the pointer (the original target).
-    pub target: Option<&'a str>,
-    /// `id` of the element whose handler is being invoked (the bubbling
-    /// current target). Differs from `target` when an ancestor handles the
-    /// event.
-    pub current_target: Option<&'a str>,
-    /// Full bubbling chain: target first, then ancestors up to the root.
-    pub path: &'a [ElementRef],
-    /// The `on*` attribute value that fired the event.
-    pub action: Option<&'a str>,
-    /// Canvas coordinates (column / row in the virtual canvas, i.e. already
-    /// offset by `scroll_y`).
+    /// `id` of the deepest element under the pointer.
+    pub target: Option<String>,
+    /// `id` of the element whose listener is currently running.
+    pub current_target: Option<String>,
+    /// Canvas coordinates (column / row in the virtual canvas, already offset
+    /// by `scroll_y`).
     pub x: u32,
     pub y: u32,
     /// Always `true` — bubbling is the only supported propagation model.
     pub bubbles: bool,
 }
 
-/// User handler for one action name.
-///
-/// Returning `Some(RenderCmd)` lets a handler request a re-render (or exit)
-/// after mutating application state; the command is forwarded to the render
-/// thread by the input loop.
-pub type EventHandler = Box<dyn FnMut(&HtmlEvent) -> Option<RenderCmd> + Send + 'static>;
-
 /// Periodic action configuration for [`EventBindings`].
 ///
-/// When set, the input loop re-invokes the named action every `every`, so
-/// applications get an automatic refresh / tick without user input (system
-/// monitors, clocks, animations).
+/// When set, the input loop re-invokes the named **JS global function** every
+/// `every`, so applications get an automatic refresh / tick without user input
+/// (system monitors, clocks, animations). The action may be a `<script>`
+///-defined function or a registered host function.
 #[derive(Debug, Clone)]
 pub struct AutoRefresh {
     /// How often to re-invoke the action.
     pub every: std::time::Duration,
-    /// Action name to invoke (must be registered in
-    /// [`EventBindings::actions`]).
+    /// JS global function name to invoke (a `<script>` function or a host
+    /// function registered in [`EventBindings::host`]).
     pub action: String,
 }
 
-/// Action registry consulted when an `on*` attribute fires.
+/// Application bindings for the script engine.
 ///
-/// Maps a **function name** — callable from an `onclick="buy()"` handler
-/// body — to the handler that should run when that function is invoked. This
-/// is the application's global scope for the event-handler evaluator.
+/// `host` maps JS global names to Rust callbacks (see [`HostFn`]). Every entry
+/// is exposed to the document's scripts as a callable global, so JS code can
+/// hand logic back to the application — e.g. `sample()` for a system monitor.
 #[derive(Default)]
 pub struct EventBindings {
-    pub actions: HashMap<String, EventHandler>,
+    /// JS-callable host functions.
+    pub host: HashMap<String, HostFn>,
     /// Optional periodic action (see [`AutoRefresh`]).
     pub auto: Option<AutoRefresh>,
 }
