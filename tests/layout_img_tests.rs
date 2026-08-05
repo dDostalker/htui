@@ -377,6 +377,14 @@ fn render_image_at_slice_crops_to_clip_region() {
     img.save(&img_path).unwrap();
 
     let term_map = mock_term_map();
+    // The canvas now starts at one viewport (24 rows) but this unit test
+    // stamps a raw 64×32-cell grid directly through `render_image_at_slice`
+    // (bypassing the paint pipeline's on-demand grow), so give it enough
+    // rows to hold the full image.
+    let term_map = TermMap {
+        columns: term_map.columns,
+        rows: 48,
+    };
     let mut tl = TermLayout::new(&term_map, 1.0);
     let mut cache = ImageCache::new();
     let cells_per_row = term_map.columns as usize;

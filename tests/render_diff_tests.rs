@@ -261,6 +261,45 @@ fn block_element_char_width() {
     assert_eq!(grapheme_width("░"), 1, "light shade must be single-width");
 }
 
+#[test]
+fn canvas_starts_at_one_viewport_and_grows_on_demand() {
+    let map = term_map(); // 80×24
+    let viewport = map.columns as usize * map.rows as usize;
+    let mut tl = TermLayout::new(&map, 1.0);
+    assert_eq!(
+        tl.layout.len(),
+        viewport,
+        "canvas must start at a single viewport, not the full scroll capacity"
+    );
+
+    // A short document must not grow the buffer.
+    let (root_id, arena) = setup("<div>hi</div>");
+    tl.draw(&arena, root_id, &map).unwrap();
+    assert_eq!(
+        tl.layout.len(),
+        viewport,
+        "short doc must keep the 1-viewport canvas"
+    );
+
+    // A tall document grows the buffer exactly to its content height, capped
+    // at the scroll-buffer limit.
+    let mut html = String::from("<div>");
+    for i in 0..60 {
+        html.push_str(&format!("<p>line {i}</p>"));
+    }
+    html.push_str("</div>");
+    let (root_id, arena) = setup(&html);
+    tl.draw(&arena, root_id, &map).unwrap();
+    assert!(
+        tl.layout.len() >= 60 * map.columns as usize,
+        "tall doc must grow the canvas to its content height"
+    );
+    assert!(
+        tl.layout.len() <= viewport * 20,
+        "growth must stay under the MAX_SCROLL_MULTIPLIER limit"
+    );
+}
+
 /// Replace the children of `id="target"` with a single text node (the DOM
 /// shape `el.textContent = v` leaves behind).
 fn set_text_by_id(arena: &mut NodeArena, target: &str, text: &str) {

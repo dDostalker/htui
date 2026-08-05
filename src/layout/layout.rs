@@ -29,15 +29,13 @@ impl TermMap {
 
 impl TermLayout {
     pub fn new(map: &TermMap, zoom: f32) -> TermLayout {
-        // Buffer up to MAX_SCROLL_MULTIPLIER screens of content so documents
-        // taller than the visible viewport (e.g. an image-heavy page that
-        // produces 200+ rows) keep their trailing boxes in the canvas and
-        // remain reachable through scrolling instead of being silently dropped
-        // at the layout boundary.
-        let max_cells = map.columns as usize
-            * map.rows as usize
-            * crate::tui::graph_api::MAX_SCROLL_MULTIPLIER;
-        let layout = vec![Block::default(); max_cells];
+        // The canvas starts at a single viewport and grows on demand (see
+        // [`ensure_capacity`](Self::ensure_capacity)) up to
+        // `MAX_SCROLL_MULTIPLIER` screens. A short document therefore keeps a
+        // small buffer instead of pre-allocating the whole scroll capacity up
+        // front (which is `columns × rows × 20` cells on a tall page).
+        let viewport_cells = map.columns as usize * map.rows as usize;
+        let layout = vec![Block::default(); viewport_cells];
         TermLayout {
             layout,
             last_frame: Vec::new(),
@@ -79,6 +77,7 @@ impl TermLayout {
     ) -> Result<Vec<LayoutBox>> {
         self.reset_canvas();
         let boxes = self.layout_only(arena, root_id, term_map)?;
+        self.ensure_capacity(&boxes);
         paint_layout_tree(&boxes, arena, self);
         Ok(boxes)
     }
@@ -118,6 +117,7 @@ impl TermLayout {
     /// is cleared first (stale text from a shortened value would otherwise
     /// stay on screen), then re-painted with writes gated to it.
     pub fn repaint_region(&mut self, arena: &NodeArena, boxes: &[LayoutBox], region: Rect) {
+        self.ensure_capacity(boxes);
         self.clear_region(region);
         paint_layout_tree_region(boxes, arena, self, region);
     }
@@ -130,7 +130,37 @@ impl TermLayout {
     /// arena this picks up `:hover` backgrounds without re-layout.
     pub fn repaint_from(&mut self, arena: &NodeArena, boxes: &[LayoutBox]) {
         self.reset_canvas();
+        self.ensure_capacity(boxes);
         paint_layout_tree(boxes, arena, self);
+    }
+
+    /// Grow the canvas on demand so it can hold every box in `boxes`.
+    ///
+    /// The buffer starts at one viewport ([`new`](Self::new)) and only grows
+    /// here, to exactly the height the layout needs — a short document never
+    /// pays for the full scroll capacity. Growth is clamped to the
+    /// `MAX_SCROLL_MULTIPLIER` limit so an unboundedly tall document cannot
+    /// exhaust memory, and the buffer never shrinks (content height is
+    /// monotonic within a session). Freshly added cells are blank, so the
+    /// subsequent paint pass fills them exactly like the rest of the buffer.
+    fn ensure_capacity(&mut self, boxes: &[LayoutBox]) {
+        fn walk(boxes: &[LayoutBox], bottom: &mut usize) {
+            for b in boxes {
+                *bottom = (*bottom).max(b.rect.y.saturating_add(b.rect.height.max(1)));
+                walk(&b.children, bottom);
+            }
+        }
+        let mut bottom = self.rows as usize;
+        walk(boxes, &mut bottom);
+
+        let cols = self.columns as usize;
+        let needed = bottom
+            .saturating_mul(cols)
+            .min(self.max_cells())
+            .max(cols.saturating_mul(self.rows as usize));
+        if needed > self.layout.len() {
+            self.layout.resize(needed, Block::default());
+        }
     }
 
     /// Reset every cell to a blank space and clear `rendered_rows`.
