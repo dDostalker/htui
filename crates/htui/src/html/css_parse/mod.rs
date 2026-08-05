@@ -15,7 +15,8 @@ pub use selector::{Combinator, CompoundSelector, CssSelector, NthExpr, PseudoCla
 pub use stylesheet::{CssRule, Parser, parse_declaration_text};
 pub use values::{
     AlignItems, BoxSizing, CornerRadii, CssDisplay, FlexBasis, FlexDirection, FlexWrap,
-    FontContext, FontStyleKind, FontWeight, GapSizes, JustifyContent, Length, LengthContext,
-    LineHeight, OverflowWrap, PX_PER_CELL, TextAlign, TextDecoration, TextTransform, Viewport,
-    WhiteSpace, WordBreak, parse_color_str, resolve_line_height_cells,
+    FontContext, FontStyleKind, FontWeight, GapSizes, InsetSides, JustifyContent, Length,
+    LengthContext, LineHeight, OverflowWrap, PX_PER_CELL, Position, Positioning, TextAlign,
+    TextDecoration, TextTransform, Viewport, WhiteSpace, WordBreak, parse_color_str,
+    parse_position, resolve_line_height_cells,
 };

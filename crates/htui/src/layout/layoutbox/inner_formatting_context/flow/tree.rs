@@ -15,7 +15,10 @@ use crate::{
     html::css_parse::{FontContext, Viewport},
     layout::{
         BoxConstraint, Cursor, LayoutBox, LayoutContext, Rect,
-        layoutbox::{generate_box_tree, generate_node, layout_generated_box, layout_generated_tree},
+        layoutbox::{
+            generate_box_tree, generate_node, layout_generated_box, layout_generated_tree,
+            resolve_positioned_rects,
+        },
         DEFAULT_LAYOUT,
     },
     tdom::node::{NodeArena, NodeId},
@@ -38,7 +41,7 @@ pub fn layout_tree(
     viewport_rows: usize,
 ) -> Vec<LayoutBox> {
     let generated = generate_box_tree(arena, root_id);
-    layout_generated_tree(
+    let mut boxes = layout_generated_tree(
         arena,
         &generated,
         containing,
@@ -50,7 +53,12 @@ pub fn layout_tree(
                 rows: viewport_rows,
             },
         },
-    )
+    );
+    // Positioned boxes resolve against their containing blocks once the whole
+    // forest is assembled (`fixed` and unanchored `absolute` use the viewport
+    // as the initial containing block).
+    resolve_positioned_rects(&mut boxes, Rect::new(0, 0, viewport_cols, viewport_rows));
+    boxes
 }
 
 /// Lay out a sequence of sibling node IDs under `containing`.

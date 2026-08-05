@@ -187,6 +187,7 @@ fn main() -> Result<()> {
         "events" => test_case!(events),
         "sysmon" => test_case!(sysmon),
         "viewport_units" => test_case!(viewport_units, no_css),
+        "position" => test_case!(position, no_css),
         "showcase" => test_case!(showcase, no_css),
         _ => {
             let available = [
@@ -214,6 +215,7 @@ fn main() -> Result<()> {
                 "events",
                 "sysmon",
                 "viewport_units",
+                "position",
                 "showcase",
             ];
             eprintln!(

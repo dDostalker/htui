@@ -79,6 +79,7 @@ mod inline;
 mod inline_run;
 mod outer_display;
 mod paint_style;
+mod position;
 mod rect;
 mod wrap;
 
@@ -93,9 +94,11 @@ pub use inline_run::InlineRun;
 pub use inner_formatting_context::FormattingContext;
 pub use outer_display::OuterDisplay;
 pub use paint_style::PaintStyle;
+pub use position::{apply_relative_offset, resolve_positioned_rects};
 pub use rect::Rect;
 pub use wrap::{is_cjk_break_opportunity, wrap_runs, wrapped_size};
 
+use crate::html::css_parse::Positioning;
 use crate::tdom::node::NodeId;
 
 /// One rectangle in the layout tree.
@@ -109,6 +112,8 @@ use crate::tdom::node::NodeId;
 /// - `kind` — the box's content shape ([`BoxKind`]).
 /// - `outer_display` — how the box participates in its parent's flow.
 /// - `inner_formatting_context` — how the box arranges its own children.
+/// - `positioning` — resolved `position` / insets / `z-index`, driving the
+///   post-layout positioning pass and paint stacking order.
 /// - `children` — nested [`LayoutBox`]es laid out below this box.
 ///
 /// The classification fields (`kind`, `outer_display`,
@@ -125,6 +130,7 @@ pub struct LayoutBox {
     pub outer_display: OuterDisplay,
     /// How this box arranges its own children.
     pub inner_formatting_context: FormattingContext,
+    pub positioning: Positioning,
     pub children: Vec<LayoutBox>,
 }
 
@@ -171,6 +177,7 @@ impl LayoutBox {
             kind: BoxKind::Normal,
             outer_display,
             inner_formatting_context,
+            positioning: Positioning::default(),
             children,
         }
     }
@@ -217,6 +224,7 @@ impl LayoutBox {
             kind: BoxKind::Replaced(content),
             outer_display: OuterDisplay::BlockLevel { container: false },
             inner_formatting_context: FormattingContext::Flow,
+            positioning: Positioning::default(),
             children: Vec::new(),
         }
     }
@@ -242,6 +250,7 @@ impl LayoutBox {
             kind: BoxKind::Anonymous,
             outer_display: OuterDisplay::BlockLevel { container: true },
             inner_formatting_context: FormattingContext::Flow,
+            positioning: Positioning::default(),
             children,
         }
     }

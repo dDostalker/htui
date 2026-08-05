@@ -147,6 +147,13 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "word-break",
     "overflow-wrap",
     "word-wrap",
+    // Positioning (CSS Positioned Layout)
+    "position",
+    "z-index",
+    "top",
+    "right",
+    "bottom",
+    "left",
 ];
 
 /// Inheritable subset of [`SUPPORTED_PROPERTIES`]: a child without an explicit

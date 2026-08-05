@@ -860,6 +860,60 @@ pub fn parse_box_sizing(s: &str) -> Option<BoxSizing> {
     }
 }
 
+/// CSS `position` value (CSS Positioned Layout).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Position {
+    /// `static` — normal flow; `top` / `right` / `bottom` / `left` have no
+    /// effect.
+    #[default]
+    Static,
+    /// `relative` — keeps its normal-flow slot, then offsets by the insets.
+    Relative,
+    /// `absolute` — removed from flow and positioned against the nearest
+    /// positioned ancestor (or the initial containing block when there is
+    /// none).
+    Absolute,
+    /// `fixed` — removed from flow and positioned against the viewport.
+    Fixed,
+}
+
+/// CSS `top` / `right` / `bottom` / `left`, resolved to cells.
+///
+/// Each side is `None` when the property is unset / `auto`, in which case
+/// the positioning pass keeps the box's static position on that axis.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct InsetSides {
+    pub top: Option<usize>,
+    pub right: Option<usize>,
+    pub bottom: Option<usize>,
+    pub left: Option<usize>,
+}
+
+/// Resolved positioning for a layout box: `position` + insets + `z-index`.
+///
+/// Computed once at layout time (when the length context is available) and
+/// stored on the [`LayoutBox`](crate::layout::LayoutBox) so the post-layout
+/// positioning pass and the paint phase can read it without re-parsing CSS.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Positioning {
+    pub position: Position,
+    pub inset: InsetSides,
+    /// CSS `z-index` — only meaningful on positioned boxes; higher values
+    /// paint on top (negative values paint below static siblings).
+    pub z_index: Option<i32>,
+}
+
+#[doc(hidden)]
+pub fn parse_position(s: &str) -> Option<Position> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "relative" => Some(Position::Relative),
+        "absolute" => Some(Position::Absolute),
+        "fixed" => Some(Position::Fixed),
+        "static" => Some(Position::Static),
+        _ => None,
+    }
+}
+
 /// Four corner radii of a box (CSS `border-radius`), in cells.
 ///
 /// `0` means a square corner. The paint phase renders any non-zero radius

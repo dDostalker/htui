@@ -24,6 +24,7 @@ mod text;
 use crossterm::style::Color;
 
 use crate::{
+    html::css_parse::Position,
     layout::{BoxKind, LayoutBox, Rect, ReplacedContent},
     tdom::node::NodeArena,
     tui::graph_api::{Block, ImageCache, TermLayout},
@@ -200,6 +201,15 @@ fn paint_box(
         None => lb.rect,
     };
     if own_clip.width == 0 || own_clip.height == 0 {
+        // Zero-area box: no chrome of its own, but positioned children are
+        // anchored to a containing block (or offset out of this area) and
+        // must still paint. Static / relative-in-place children stay clipped
+        // away by the zero clip.
+        for child in sorted_children(lb) {
+            if !matches!(child.positioning.position, Position::Static) {
+                paint_box(child, arena, canvas, parent_bg, None);
+            }
+        }
         return;
     }
     let my_bg = match &lb.kind {
@@ -248,7 +258,46 @@ fn paint_box(
         Some(c) => c,
         None => return,
     };
-    for child in &lb.children {
-        paint_box(child, arena, canvas, effective_bg, Some(children_clip));
+    paint_children(lb, arena, canvas, effective_bg, Some(children_clip));
+}
+
+/// Paint `lb`'s children in stacking order.
+///
+/// `children_clip` is inherited by static / relative children (the parent's
+/// content area). Detached positioned children are not clipped by the parent
+/// — they are anchored to a containing block that may extend beyond it — and
+/// their own rects clip their descendants via [`paint_box`].
+fn paint_children(
+    lb: &LayoutBox,
+    arena: &NodeArena,
+    canvas: &mut PaintCanvas<'_>,
+    effective_bg: Option<Color>,
+    children_clip: Option<Rect>,
+) {
+    for child in sorted_children(lb) {
+        // Positioned children (absolute / fixed / relative) may paint outside
+        // the parent's content area — they are anchored to a containing block
+        // or offset out of flow — so they are not clipped by the ancestor
+        // chain. Their own rects still clip their descendants via
+        // [`paint_box`]. Static children inherit the parent's clip.
+        let clip = match child.positioning.position {
+            Position::Static => children_clip,
+            _ => None,
+        };
+        paint_box(child, arena, canvas, effective_bg, clip);
     }
+}
+
+/// Children in paint stacking order.
+///
+/// Higher `z-index` paints later (on top); among equal values a positioned
+/// box paints above static content (browser rule); the stable sort keeps DOM
+/// order within the same level.
+fn sorted_children(lb: &LayoutBox) -> Vec<&LayoutBox> {
+    let mut children: Vec<&LayoutBox> = lb.children.iter().collect();
+    children.sort_by_key(|c| {
+        let positioned = !matches!(c.positioning.position, Position::Static);
+        (c.positioning.z_index.unwrap_or(0), positioned as u8)
+    });
+    children
 }

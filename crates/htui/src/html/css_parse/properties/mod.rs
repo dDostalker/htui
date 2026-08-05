@@ -21,7 +21,9 @@ mod align_self;
 
 pub use align_self::AlignSelf;
 
-use crate::html::css_parse::{FontContext, LengthContext, Viewport};
+use crate::html::css_parse::{
+    FontContext, InsetSides, LengthContext, Positioning, Viewport, parse_position,
+};
 use crate::layout::layoutbox::{FormattingContext, OuterDisplay};
 use crate::tdom::node::NodeType;
 
@@ -648,6 +650,49 @@ impl CssAttr {
                 font: font_ctx,
                 viewport,
             })),
+        }
+    }
+
+    /// Resolved `position` + insets + `z-index` (CSS Positioned Layout).
+    ///
+    /// Insets resolve against `containing_width` so percentage / `vw`
+    /// lengths have a containing block; `auto` sides become `None`. `auto`
+    /// `z-index` (or an unparseable value) becomes `None`, which paints the
+    /// box at stacking order 0.
+    pub fn get_positioning(
+        &self,
+        containing_width: usize,
+        font_ctx: FontContext,
+        viewport: Viewport,
+    ) -> Positioning {
+        let position = self
+            .0
+            .get("position")
+            .and_then(|v| parse_position(v))
+            .unwrap_or_default();
+        let resolve_inset = |key: &str| {
+            self.0.get(key).and_then(|raw| match Length::parse(raw)? {
+                Length::Auto => None,
+                len => Some(len.resolve(LengthContext {
+                    containing: containing_width,
+                    font: font_ctx,
+                    viewport,
+                })),
+            })
+        };
+        let z_index = self
+            .0
+            .get("z-index")
+            .and_then(|v| v.trim().parse::<i32>().ok());
+        Positioning {
+            position,
+            inset: InsetSides {
+                top: resolve_inset("top"),
+                right: resolve_inset("right"),
+                bottom: resolve_inset("bottom"),
+                left: resolve_inset("left"),
+            },
+            z_index,
         }
     }
 }

@@ -139,6 +139,7 @@ htui/
 │   │   │   ├── layout_table_tests.rs
 │   │   │   ├── layout_wrap_tests.rs
 │   │   │   ├── layout_events_tests.rs # 事件系统测试（命中 / 冒泡 / hover / click，纯内存）
+│   │   │   ├── layout_position_tests.rs # CSS 定位测试（relative / absolute / fixed + z-index）
 │   │   │   ├── render_diff_tests.rs # 帧差增量渲染（不变零输出 / 滚动 diff / 全帧对比）
 │   │   │   └── logging_tests.rs
 │   │   └── benches/               # criterion 基准（parse / cascade / paint / render_to_bytes / full_redraw）
@@ -174,6 +175,7 @@ htui/
 │       ├── pre/
 │       ├── showcase/
 │       ├── table/
+│       ├── position/     # CSS 定位演示（relative / absolute / fixed / z-index）
 │       └── viewport_units/
 ```
 
@@ -406,6 +408,9 @@ Geometry，**无需重新解析 HTML**。`RenderCmd::RenderHtml` 仍保留用于
 | `Border`           | `html::box_edges`       | 单边 border 的 width/style/color |
 | `BorderSides`      | `html::box_edges`       | 四边 `Border` 组合 |
 | `BoxEdges`         | `html::box_edges`       | padding + border + margin 三件套，供布局函数使用 |
+| `Position`         | `html::css_parse::values` | CSS `position` 枚举（`Static` / `Relative` / `Absolute` / `Fixed`） |
+| `InsetSides`       | `html::css_parse::values` | `top`/`right`/`bottom`/`left` 解析结果（`Option<usize>`） |
+| `Positioning`      | `html::css_parse::values` | 定位组合（position + inset + z-index），布局期解析后存于 `LayoutBox.positioning` |
 
 ### 盒模型在 `CssAttr` 上的访问器
 

@@ -5,7 +5,7 @@ use crate::{
     html::css_parse::BoxSizing,
     layout::{
         BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, Rect,
-        inner_formatting_context::flow::constrained_block_width,
+        inner_formatting_context::flow::{constrained_block_width, dispatch},
         layoutbox::{
             collect_runs,
             generation::{GeneratedBoxKind, generate_node},
@@ -16,6 +16,7 @@ use crate::{
     tui::graph_api::block_style,
 };
 
+use crate::html::css_parse::Position;
 use crate::html::css_parse::resolve_line_height_cells;
 
 use super::items::layout_flex_items;
@@ -166,6 +167,7 @@ pub(super) fn layout_flex_container(
     //    order. Inline and text nodes are already wrapped by the generator
     //    into anonymous boxes that contribute their runs to the container
     //    itself rather than participating as flex items.
+    let mut positioned_boxes: Vec<LayoutBox> = Vec::new();
     let block_child_ids: Vec<NodeId> = node
         .children
         .iter()
@@ -176,8 +178,36 @@ pub(super) fn layout_flex_container(
                     // Only block-level children become flex items. Inline
                     // children (`<span>` / `<a>` / `<em>`) are folded into
                     // the container's own runs by `collect_runs`.
-                    generated.kind == GeneratedBoxKind::Normal
-                        && !generated.outer_display.is_inline()
+                    if generated.kind != GeneratedBoxKind::Normal
+                        || generated.outer_display.is_inline()
+                    {
+                        return false;
+                    }
+                    let positioning = arena[id].css_attr.get_positioning(
+                        content_width,
+                        child_context.font,
+                        child_context.viewport,
+                    );
+                    match positioning.position {
+                        // Detached from the flex layout: lay out against a
+                        // local cursor (no row claims) and let the post-layout
+                        // pass anchor it to its containing block.
+                        Position::Absolute | Position::Fixed => {
+                            let mut local_cursor = Cursor { y: 0 };
+                            if let Some(b) = dispatch(
+                                arena,
+                                id,
+                                content_constraint,
+                                &mut local_cursor,
+                                child_context,
+                                None,
+                            ) {
+                                positioned_boxes.push(b);
+                            }
+                            false
+                        }
+                        _ => true,
+                    }
                 })
                 .unwrap_or(false)
         })
@@ -187,7 +217,8 @@ pub(super) fn layout_flex_container(
     // handler with the rectangle allocated by the flex algorithm. This preserves
     // special item behaviour such as image painting, chrome, tables, and nested
     // flex containers.
-    let (child_boxes, lines_total_height) = if block_child_ids.is_empty() {
+    // (block_child_ids already excludes detached positioned children.)
+    let (mut child_boxes, lines_total_height) = if block_child_ids.is_empty() {
         (Vec::new(), 0usize)
     } else {
         layout_flex_items(
@@ -206,6 +237,9 @@ pub(super) fn layout_flex_container(
             container_css_height.unwrap_or(0),
         )
     };
+    // Re-attach detached positioned children (they occupy no flex space; the
+    // post-layout pass resolves their final rectangles).
+    child_boxes.extend(positioned_boxes);
 
     let mut outer_height = match preallocated_height {
         Some(height) => height,

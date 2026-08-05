@@ -11,10 +11,14 @@
 //!   registry, so per-element `LayoutFn`s never re-claim them.
 
 use crate::{
+    html::css_parse::Position,
     layout::{
         BoxConstraint, Cursor, FormattingContext, LayoutBox, LayoutContext, PaintStyle, Rect,
         ReplacedContent,
-        layoutbox::generation::{GeneratedBox, GeneratedBoxKind, GeneratedPayload},
+        layoutbox::{
+            apply_relative_offset,
+            generation::{GeneratedBox, GeneratedBoxKind, GeneratedPayload},
+        },
     },
     tdom::node::{NodeArena, NodeId},
     tui::graph_api::{
@@ -47,53 +51,73 @@ pub fn layout_generated_box(
     context: LayoutContext,
     pre_allocated_rect: Option<Rect>,
 ) -> Option<LayoutBox> {
-    match (
+    // Positioned boxes are detached from the surrounding flow *before* the
+    // classification dispatch: absolute / fixed lay out against a local
+    // cursor (occupying no flow rows) and are repositioned by the
+    // post-layout pass; relative keeps its flow slot and is offset in place.
+    let positioning = arena[generated.node_id]
+        .css_attr
+        .get_positioning(containing.width, context.font, context.viewport);
+    let detached = matches!(positioning.position, Position::Absolute | Position::Fixed);
+    let mut local_cursor = Cursor { y: 0 };
+    let working_cursor: &mut Cursor = if detached { &mut local_cursor } else { cursor };
+
+    let mut lb = match (
         generated.kind,
         generated.outer_display,
         generated.inner_formatting_context,
     ) {
-        (GeneratedBoxKind::Replaced, _, _) => {
-            layout_replaced(arena, generated, containing, cursor, pre_allocated_rect)
-        }
+        (GeneratedBoxKind::Replaced, _, _) => layout_replaced(
+            arena,
+            generated,
+            containing,
+            working_cursor,
+            pre_allocated_rect,
+        )?,
         (GeneratedBoxKind::Normal, _, FormattingContext::Flex) => {
             crate::layout::layoutbox::inner_formatting_context::flex::layout_flex_dispatch(
                 arena,
                 generated.node_id,
                 containing,
-                cursor,
+                working_cursor,
                 context,
                 pre_allocated_rect,
-            )
+            )?
         }
         (GeneratedBoxKind::Normal, _, FormattingContext::Table) => {
             crate::layout::inner_formatting_context::flow::layout_table(
                 arena,
                 generated.node_id,
                 containing,
-                cursor,
+                working_cursor,
                 context,
                 pre_allocated_rect,
-            )
+            )?
         }
         (GeneratedBoxKind::Normal, _, FormattingContext::Flow) => {
             crate::layout::layoutbox::inner_formatting_context::flow::dispatch_flow_geometry(
                 arena,
                 generated.node_id,
                 containing,
-                cursor,
+                working_cursor,
                 context,
                 pre_allocated_rect,
-            )
+            )?
         }
         (GeneratedBoxKind::Normal, _, FormattingContext::Grid) => {
             log::debug!(
                 "Grid geometry is not implemented for node {}",
                 generated.node_id
             );
-            None
+            return None;
         }
-        (GeneratedBoxKind::Text | GeneratedBoxKind::Anonymous, _, _) => None,
+        (GeneratedBoxKind::Text | GeneratedBoxKind::Anonymous, _, _) => return None,
+    };
+    if positioning.position == Position::Relative {
+        apply_relative_offset(&mut lb, positioning.inset);
     }
+    lb.positioning = positioning;
+    Some(lb)
 }
 
 /// Layout a single DOM node by generating its box and dispatching its

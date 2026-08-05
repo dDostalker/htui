@@ -86,26 +86,7 @@ pub fn bindings() -> EventBindings {
                 .memory
                 .map(|(u, t)| format!("{} / {}", gb(u), gb(t)))
                 .unwrap_or_default();
-            let disks = if snap.disks.is_empty() {
-                "n/a".to_string()
-            } else {
-                snap.disks
-                    .iter()
-                    .enumerate()
-                    .map(|(i, (label, total))| {
-                        let total = *total;
-                        let free = snap.disk_free.get(i).copied().unwrap_or(0);
-                        let used = total.saturating_sub(free);
-                        format!(
-                            "{label} {} {} / {}",
-                            bar(used as f32 / total.max(1) as f32, 10),
-                            gb(used),
-                            gb(total)
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            };
+            let disks = format_disks(&snap.disks, &snap.disk_free);
             Ok(htui::js_obj!(call.context,
                 "host"    => snap.host.clone(),
                 "os"      => snap.os.clone(),
@@ -122,6 +103,13 @@ pub fn bindings() -> EventBindings {
             ))
         }),
     );
+    // Pure-formatting helpers exposed as JS-callable commands (tauri-style
+    // `#[htui::command]` bindings): the page may call them directly, and the
+    // `sample()` host function below reuses the same Rust functions.
+    bindings.command("bar", bar_command());
+    bindings.command("gb", gb_command());
+    bindings.command("formatDateTime", format_datetime_command());
+
     bindings.auto = Some(AutoRefresh {
         every: Duration::from_millis(200),
         action: "refresh".to_string(),
@@ -436,6 +424,7 @@ fn escape_html(s: &str) -> String {
 /// Any positive ratio keeps at least one filled cell — `round()` would blank
 /// the whole bar below ~3% load, which reads as "nothing is displayed" on a
 /// lightly loaded machine.
+#[htui::command]
 fn bar(ratio: f32, width: usize) -> String {
     let ratio = ratio.clamp(0.0, 1.0);
     let filled = if ratio > 0.0 {
@@ -446,11 +435,38 @@ fn bar(ratio: f32, width: usize) -> String {
     format!("[{}{}]", "#".repeat(filled), "-".repeat(width - filled))
 }
 
+/// Human-readable byte count (`GiB` → `GB`).
+#[htui::command]
 fn gb(bytes: u64) -> String {
     format!("{:.1} GB", bytes as f32 / 1_073_741_824.0)
 }
 
+/// Format the per-disk usage lines (`label` + bar + used/total) for the
+/// page's `disks` field; `disk_free` is aligned with `disks` by index.
+fn format_disks(disks: &[(String, u64)], disk_free: &[u64]) -> String {
+    if disks.is_empty() {
+        return "n/a".to_string();
+    }
+    disks
+        .iter()
+        .enumerate()
+        .map(|(i, (label, total))| {
+            let total = *total;
+            let free = disk_free.get(i).copied().unwrap_or(0);
+            let used = total.saturating_sub(free);
+            format!(
+                "{label} {} {} / {}",
+                bar(used as f32 / total.max(1) as f32, 10),
+                gb(used),
+                gb(total)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Format a UNIX timestamp as `YYYY-MM-DD HH:MM:SS` without external crates.
+#[htui::command]
 fn format_datetime(secs: u64) -> String {
     let days = (secs / 86_400) as i64;
     let day_secs = secs % 86_400;

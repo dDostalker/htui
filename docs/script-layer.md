@@ -192,6 +192,10 @@ bindings.command("set_threshold", set_threshold_command());
   `#[derive(FromJs)]` 结构体（同样支持 `#[js_name]` 属性名映射，如
   `{ maxCpu: 80 }` → `max_cpu` 字段）。
 - **适用于无捕获的纯函数**。需要外部状态（锁、Arc）时用 5.2 的手写闭包。
+  两种形态可以混用：`visual_test/src/sysmon.rs` 把纯格式化函数（`bar` /
+  `gb` / `format_datetime`）做成 `#[htui::command]` 注册为 JS 全局函数，
+  `sample()` 闭包内部直接复用这些纯函数（Rust 侧调用，不走 JS 层），页面
+  脚本也可直接 `bar(0.5, 14)` / `formatDateTime(...)` 调用。
 
 ### 5.2 手写闭包（有状态 / 高级场景）
 
