@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { background-color: #1a1b26; color: #c0caf5; }
+  h2 { margin: 1; }
+  .card {
+    width: 48;
+    border: 1px solid #565f89;
+    padding: 1;
+    margin: 1;
+  }
+  .row { margin: 1; }
+  label { margin: 1; }
+  input { margin: 1; }
+  #log { background-color: #24283b; padding: 1; margin: 1; }
+</style>
+</head>
+<body>
+  <h2>Input field demo</h2>
+
+  <div class="card">
+    <div class="row">Click a field, then type. Esc / Enter commit.</div>
+    <div class="row"><label>Name:</label><input id="name" value="Ada"></div>
+    <div class="row"><label>City:</label><input id="city" value="Tokyo"></div>
+    <div class="row"><label>Empty:</label><input id="empty"></div>
+  </div>
+
+  <div id="log">—</div>
+
+  <script>
+    // Browser-aligned field events: focus / blur / input / change fire along
+    // the DOM chain; `el.value` reads & writes the committed DOM value.
+    var log = document.getElementById('log');
+    function show(v) { log.textContent = v; }
+    var name = document.getElementById('name');
+    name.addEventListener('focus', function () { show('focus: Name'); });
+    name.addEventListener('input', function () { show('input: ' + name.value); });
+    name.addEventListener('change', function () { show('change: ' + name.value); });
+    name.addEventListener('blur', function () { show('blur: Name = ' + name.value); });
+  </script>
+</body>
+</html>

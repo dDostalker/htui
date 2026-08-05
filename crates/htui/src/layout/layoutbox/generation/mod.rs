@@ -60,6 +60,9 @@ pub enum GeneratedPayload {
     None,
     /// `<img>` — the resource path the geometry pass will resolve.
     Image { src: String },
+    /// `<input>` — a single-line text field; the geometry pass sizes it from
+    /// the `value` attribute (and the active edit state).
+    Input,
     /// Marker produced by [`generate_node`] for a `display: contents`
     /// element. The [`generate_children`] walker detects it and
     /// substitutes the contents element's own children in its place; the
@@ -128,9 +131,9 @@ pub fn generate_node(arena: &NodeArena, node_id: NodeId) -> Option<GeneratedBox>
     }
 
     // Replaced-element payload is determined by the element's HTML
-    // semantics, not by the `display` value. `<img>` is the only replaced
-    // element we render today; new tags (e.g. `<video>`) follow the same
-    // pattern. The UA `display: inline-block` is what makes the geometry
+    // semantics, not by the `display` value. `<img>` and `<input>` are the
+    // replaced elements we render today; new tags (e.g. `<video>`) follow the
+    // same pattern. The UA `display: inline-block` is what makes the geometry
     // dispatcher route through the replaced path — the dispatch never
     // inspects `NodeType`.
     let (kind, payload) = if matches!(node.node_type, NodeType::Img) {
@@ -140,6 +143,8 @@ pub fn generate_node(arena: &NodeArena, node_id: NodeId) -> Option<GeneratedBox>
                 src: node.get_src().cloned().unwrap_or_default(),
             },
         )
+    } else if matches!(node.node_type, NodeType::Input) {
+        (GeneratedBoxKind::Replaced, GeneratedPayload::Input)
     } else {
         (GeneratedBoxKind::Normal, GeneratedPayload::None)
     };

@@ -143,6 +143,7 @@ htui/
 │   │   │   ├── layout_wrap_tests.rs
 │   │   │   ├── layout_events_tests.rs # 事件系统测试（命中 / 冒泡 / hover / click，纯内存）
 │   │   │   ├── layout_position_tests.rs # CSS 定位测试（relative / absolute / fixed + z-index）
+│   │   │   ├── layout_input_tests.rs # <input> 输入框测试（渲染 / 编辑逻辑 / 光标状态）
 │   │   │   ├── render_diff_tests.rs # 帧差增量渲染（不变零输出 / 滚动 diff / 全帧对比）
 │   │   │   └── logging_tests.rs
 │   │   └── benches/               # criterion 基准（parse / cascade / paint / render_to_bytes / full_redraw）
@@ -179,6 +180,7 @@ htui/
 │       ├── showcase/
 │       ├── table/
 │       ├── position/     # CSS 定位演示（relative / absolute / fixed / z-index）
+│       ├── input/        # <input> 输入框演示（点击聚焦 + 键盘编辑 + focus/blur/input/change 事件）
 │       └── viewport_units/
 ```
 
@@ -375,7 +377,7 @@ Geometry，**无需重新解析 HTML**。`RenderCmd::RenderHtml` 仍保留用于
 | `TextDecoration`   | `html::css_parse::values` | `text-decoration` 枚举（`None` / `Underline` / `LineThrough` / `UnderlineLineThrough`） |
 | `LayoutBox`        | `layout::layoutbox`     | 布局树中的单个矩形节点（`BoxKind` × `OuterDisplay` × `FormattingContext` 三轴分类） |
 | `BoxKind`          | `layout::layoutbox::box_kind` | 盒子内容形状（`Normal` / `Replaced` / `Anonymous`） |
-| `ReplacedContent`  | `layout::layoutbox::box_kind` | `BoxKind::Replaced` 的内容负载（当前只有 `<img>`） |
+| `ReplacedContent`  | `layout::layoutbox::box_kind` | `BoxKind::Replaced` 的内容负载（`<img>` 栅格 / `<input>` 标记） |
 | `Rect`             | `layout::layoutbox::rect` | 列/行空间内的矩形 |
 | `PaintStyle`       | `layout::layoutbox::paint_style` | 视觉 chrome（padding/border/margin + inline runs + 背景/间距标志） |
 | `InlineRun`        | `layout::layoutbox::inline_run` | 单个 inline 文本段 |
@@ -390,7 +392,8 @@ Geometry，**无需重新解析 HTML**。`RenderCmd::RenderHtml` 仍保留用于
 | `FontStyle`        | `tui::graph_api`        | `Block` 的聚合样式位掩码（`BOLD` / `ITALIC` / `UNDERLINED` / `CROSSED_OUT`） |
 | `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举（Rerender / Redraw / RenderArena / RenderHtml / Hover / Quit） |
 | `DirtyInfo`        | `tui::graph_api`        | `RenderArena` 携带的脏节点集合（`nodes: Vec<NodeId>`，JS 本轮改动的节点） |
-| `InputState`       | `tui::graph_api::input` | 输入循环状态（scroll_y / zoom / pressed / hover）          |
+| `InputState`       | `tui::graph_api::input` | 输入循环状态（scroll_y / zoom / pressed / hover / 焦点输入框） |
+| `InputRenderState` | `tui::graph_api::canvas`| `<input>` 渲染状态（value / cursor / focused），`TermLayout.input_states` |
 | `EventType`        | `events`                | DOM 事件类型（Click / MouseOver / MouseOut）               |
 | `HtmlEvent`        | `events`                | 事件对象（event_type / target / current_target / x / y / bubbles）|
 | `ElementRef`       | `events`                | 冒泡路径上的单个元素（id + node_id）                |

@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use super::{cell::Block, image::ImageCache};
+use crate::tdom::node::NodeId;
 
 /// Upper bound (in screens) the canvas may grow to for scrollable content.
 ///
@@ -7,6 +10,23 @@ use super::{cell::Block, image::ImageCache};
 /// short document keeps a small buffer; this limit only caps how far tall
 /// documents can extend so an unbounded page cannot exhaust memory.
 pub(crate) const MAX_SCROLL_MULTIPLIER: usize = 20;
+
+/// Render-time state of one `<input>` field.
+///
+/// The input loop updates this through [`RenderCmd::RenderInput`]
+/// (crate::tui::graph_api::RenderCmd); the paint phase reads it to draw the
+/// field's value and caret. An absent entry falls back to the DOM `value`
+/// attribute and an unfocused look, so an untouched document renders without
+/// any engine-side state.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct InputRenderState {
+    /// Current field value (the DOM `value` attribute is the initial value).
+    pub value: String,
+    /// Caret position in `value` (byte index into the displayed string).
+    pub cursor: usize,
+    /// Whether the field currently holds keyboard focus.
+    pub focused: bool,
+}
 
 #[derive(Debug)]
 pub struct TermLayout {
@@ -24,6 +44,10 @@ pub struct TermLayout {
     /// Rasterized-image cache shared across redraws so `<img>` sources are
     /// decoded from disk once per (path, size) instead of once per frame.
     pub(crate) image_cache: ImageCache,
+    /// `<input>` edit state keyed by node id, written by
+    /// [`RenderCmd::RenderInput`](crate::tui::graph_api::RenderCmd) and read by
+    /// the input painter.
+    pub input_states: HashMap<NodeId, InputRenderState>,
 }
 
 impl TermLayout {

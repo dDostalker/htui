@@ -115,6 +115,8 @@ fn make_element_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsVa
     let set_id = js_fn(context, NativeFunction::from_fn_ptr(native_set_id));
     let get_parent = js_fn(context, NativeFunction::from_fn_ptr(native_get_parent));
     let get_style = js_fn(context, NativeFunction::from_fn_ptr(native_get_style));
+    let get_value = js_fn(context, NativeFunction::from_fn_ptr(native_get_value));
+    let set_value = js_fn(context, NativeFunction::from_fn_ptr(native_set_value));
 
     let mut init = ObjectInitializer::new(context);
     init.property(js_string!("_nodeId"), node_key, hidden);
@@ -162,6 +164,7 @@ fn make_element_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsVa
     init.accessor(js_string!("id"), Some(get_id), Some(set_id), Attribute::all());
     init.accessor(js_string!("parentNode"), Some(get_parent), None, Attribute::all());
     init.accessor(js_string!("style"), Some(get_style), None, Attribute::all());
+    init.accessor(js_string!("value"), Some(get_value), Some(set_value), Attribute::all());
     let obj = init.build();
     Ok(obj.into())
 }
@@ -235,6 +238,53 @@ fn native_remove_attribute(
     let mut st = rc.borrow_mut();
     if let Some(node) = st.arena.get_mut(node_id) {
         node.attributes.remove(&name);
+        mark_dirty(&mut st, node_id);
+    }
+    Ok(JsValue::undefined())
+}
+
+/// `el.value` getter — the DOM `value` attribute (the field's committed
+/// content; the active edit buffer while focused is engine-side state).
+fn native_get_value(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(js_string!().into());
+    };
+    let st = rc.borrow();
+    let value = st
+        .arena
+        .get(node_id)
+        .and_then(|n| n.attributes.get("value"))
+        .cloned()
+        .unwrap_or_default();
+    Ok(js_string!(value).into())
+}
+
+/// `el.value` setter — write the DOM `value` attribute, marking the node dirty
+/// so the next frame re-renders it. Equal values short-circuit (no re-render),
+/// mirroring the `textContent` fast path.
+fn native_set_value(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let value = args
+        .get(0)
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?
+        .unwrap_or_default();
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let mut st = rc.borrow_mut();
+    let existing = st
+        .arena
+        .get(node_id)
+        .and_then(|n| n.attributes.get("value"))
+        .cloned()
+        .unwrap_or_default();
+    if existing == value {
+        return Ok(JsValue::undefined());
+    }
+    if let Some(node) = st.arena.get_mut(node_id) {
+        node.attributes.insert("value".to_string(), value);
         mark_dirty(&mut st, node_id);
     }
     Ok(JsValue::undefined())
@@ -632,6 +682,10 @@ fn event_type_str(et: EventType) -> &'static str {
         EventType::Click => "click",
         EventType::MouseOver => "mouseover",
         EventType::MouseOut => "mouseout",
+        EventType::Focus => "focus",
+        EventType::Blur => "blur",
+        EventType::Input => "input",
+        EventType::Change => "change",
     }
 }
 
@@ -647,6 +701,10 @@ pub(crate) fn parse_event_type(
         "click" => Ok(EventType::Click),
         "mouseover" => Ok(EventType::MouseOver),
         "mouseout" => Ok(EventType::MouseOut),
+        "focus" => Ok(EventType::Focus),
+        "blur" => Ok(EventType::Blur),
+        "input" => Ok(EventType::Input),
+        "change" => Ok(EventType::Change),
         other => Err(JsNativeError::typ()
             .with_message(format!("unsupported event type `{other}`"))
             .into()),

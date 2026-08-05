@@ -26,7 +26,7 @@ use crate::{
     layout::layout::TermMap,
     script::ScriptEngine,
     tdom::node::{NodeArena, NodeId, NodeType},
-    tui::graph_api::{DirtyInfo, InputState, RenderCmd, TermLayout, trigger_refresh},
+    tui::graph_api::{DirtyInfo, InputRenderState, InputState, RenderCmd, TermLayout, trigger_refresh},
 };
 
 fn parse_and_apply(html: &str, css_rules: &CssRule) -> (NodeId, NodeArena) {
@@ -129,6 +129,43 @@ struct RenderState {
 }
 
 impl RenderState {
+    /// Repaint one `<input>` field's rectangle with fresh edit state. The
+    /// field's layout is width-fixed, so value / caret / focus never change
+    /// geometry — only the field's cells are repainted.
+    fn handle_input<W: Write>(
+        &mut self,
+        out: &mut BufWriter<W>,
+        node_id: NodeId,
+        value: String,
+        cursor: usize,
+        focused: bool,
+    ) {
+        let Some(tl) = self.term_layout.as_mut() else {
+            return;
+        };
+        let Some(geo) = self.geometry.as_ref() else {
+            return;
+        };
+        tl.input_states.insert(
+            node_id,
+            InputRenderState {
+                value,
+                cursor,
+                focused,
+            },
+        );
+        let rect = collect_box_rects(&geo.boxes)
+            .into_iter()
+            .find(|(id, _)| *id == node_id)
+            .map(|(_, r)| r);
+        match rect {
+            Some(r) => tl.repaint_region(&geo.arena, &geo.boxes, r),
+            None => tl.repaint_from(&geo.arena, &geo.boxes),
+        }
+        tl.render(out);
+        flush_frame(out);
+    }
+
     /// Parse the current session document and cascade its styles.
     fn parse_and_apply(&self) -> (NodeId, NodeArena) {
         parse_and_apply(&self.html, &self.css_rules)
@@ -465,11 +502,28 @@ fn render_thread(
                 break;
             }
         };
+        // `try_recv` coalescing keeps only the last command — but input
+        // repaints must all run (a focus switch queues blur + focus for two
+        // different fields, and dropping either leaves a stale caret).
+        let mut pending_inputs: Vec<(NodeId, String, usize, bool)> = Vec::new();
         while let Ok(next) = rx.try_recv() {
-            cmd = next;
-            if matches!(cmd, RenderCmd::Quit) {
-                break;
+            match next {
+                RenderCmd::RenderInput {
+                    node_id,
+                    value,
+                    cursor,
+                    focused,
+                } => pending_inputs.push((node_id, value, cursor, focused)),
+                other => {
+                    cmd = other;
+                    if matches!(cmd, RenderCmd::Quit) {
+                        break;
+                    }
+                }
             }
+        }
+        for (node_id, value, cursor, focused) in pending_inputs {
+            state.handle_input(&mut out, node_id, value, cursor, focused);
         }
 
         match cmd {
@@ -596,6 +650,15 @@ fn render_thread(
                 }
                 tl.render(&mut out);
                 flush_frame(&mut out);
+            }
+
+            RenderCmd::RenderInput {
+                node_id,
+                value,
+                cursor,
+                focused,
+            } => {
+                state.handle_input(&mut out, node_id, value, cursor, focused);
             }
         }
     }

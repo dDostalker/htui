@@ -72,6 +72,17 @@ pub enum EventType {
     MouseOver,
     /// Fired when the pointer leaves an interactive element (`onmouseout`).
     MouseOut,
+    /// Fired when an element gains keyboard focus (`onfocus`). Only `<input>`
+    /// fields are focusable today.
+    Focus,
+    /// Fired when an element loses keyboard focus (`onblur`).
+    Blur,
+    /// Fired whenever an `<input>` field's value changes while editing
+    /// (`oninput`).
+    Input,
+    /// Fired when a field's value is committed (on blur / Enter) and differs
+    /// from the value it had when it gained focus (`onchange`).
+    Change,
 }
 
 /// One element on a bubbling path (target first, then its ancestors).

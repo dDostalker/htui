@@ -6,9 +6,10 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseButton, MouseEve
 use crate::{
     events::interaction,
     script::ScriptEngine,
-    tdom::node::NodeId,
+    tdom::node::{NodeArena, NodeId, NodeType},
 };
-use crate::events::HitMap;
+use crate::events::{ElementRef, EventType, HitMap, HitRegion};
+use crate::layout::Rect;
 
 const SCROLL_LINES_PER_TICK: u32 = 3;
 const ZOOM_STEP: f32 = 0.1;
@@ -63,13 +64,23 @@ pub enum RenderCmd {
     /// given session-local node (`None` clears any hover), then repaint. With
     /// no `:hover` rules in the stylesheet this repaints to the same pixels.
     Hover { node_id: Option<NodeId> },
+    /// Repaint one `<input>` field with fresh edit state (value / caret /
+    /// focus). The layout is unchanged — the field's rectangle is fixed — so
+    /// only that rectangle is repainted.
+    RenderInput {
+        node_id: NodeId,
+        value: String,
+        cursor: usize,
+        focused: bool,
+    },
     Quit,
 }
 
 /// Input-loop state that persists between events.
 ///
 /// Groups the variables the input loop mutates (`scroll_y`, `zoom`) with the
-/// mouse-tracking state (press position, hover target) so the loop only
+/// mouse-tracking state (press position, hover target) and the active
+/// `<input>` edit session (focused node, value, caret) so the loop only
 /// passes one state value around.
 #[derive(Debug)]
 pub struct InputState {
@@ -80,6 +91,13 @@ pub struct InputState {
     pressed: Option<(u16, u16)>,
     /// Hover tracking state for mouse enter / leave detection.
     pub hover: interaction::HoverState,
+    /// The `<input>` node currently focused (receives typed characters).
+    pub focused_input: Option<NodeId>,
+    /// Edit buffer of the focused input; the DOM `value` attribute is the
+    /// initial content.
+    pub input_value: String,
+    /// Caret position in [`InputState::input_value`] (character index).
+    pub input_cursor: usize,
 }
 
 impl InputState {
@@ -89,6 +107,9 @@ impl InputState {
             zoom: 1.0,
             pressed: None,
             hover: interaction::HoverState::new(),
+            focused_input: None,
+            input_value: String::new(),
+            input_cursor: 0,
         }
     }
 }
@@ -97,6 +118,197 @@ impl Default for InputState {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Apply one text-editing key to an input field's value and caret.
+///
+/// `cursor` is a character index into `value`. Returns `true` when the value
+/// or caret changed (the caller should repaint the field); `false` for keys
+/// the field does not consume (`Esc` / `Enter` are handled by the caller).
+pub fn apply_input_key(value: &mut String, cursor: &mut usize, key: KeyCode) -> bool {
+    match key {
+        KeyCode::Char(c) => {
+            if c == '\r' || c == '\n' {
+                return false;
+            }
+            let byte = char_to_byte(value, *cursor);
+            value.insert(byte, c);
+            *cursor = cursor.saturating_add(1);
+            true
+        }
+        KeyCode::Backspace => {
+            if *cursor == 0 {
+                return false;
+            }
+            let new_cursor = cursor.saturating_sub(1);
+            let byte = char_to_byte(value, new_cursor);
+            value.remove(byte);
+            *cursor = new_cursor;
+            true
+        }
+        KeyCode::Delete => {
+            let len = value.chars().count();
+            if *cursor >= len {
+                return false;
+            }
+            let byte = char_to_byte(value, *cursor);
+            value.remove(byte);
+            true
+        }
+        KeyCode::Left => {
+            if *cursor > 0 {
+                *cursor -= 1;
+                true
+            } else {
+                false
+            }
+        }
+        KeyCode::Right => {
+            if *cursor < value.chars().count() {
+                *cursor += 1;
+                true
+            } else {
+                false
+            }
+        }
+        KeyCode::Home => {
+            if *cursor != 0 {
+                *cursor = 0;
+                true
+            } else {
+                false
+            }
+        }
+        KeyCode::End => {
+            let len = value.chars().count();
+            if *cursor != len {
+                *cursor = len;
+                true
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Byte offset of the `char_idx`-th character (clamped to the end).
+fn char_to_byte(s: &str, char_idx: usize) -> usize {
+    s.char_indices()
+        .nth(char_idx)
+        .map(|(byte, _)| byte)
+        .unwrap_or(s.len())
+}
+
+/// Build a minimal hit region for `node_id` (no geometry) so the input loop
+/// can fire focus / blur / input / change events along the DOM ancestor chain,
+/// exactly like a pointer-driven region from the hit map.
+fn region_for(arena: &NodeArena, node_id: NodeId) -> HitRegion {
+    let mut path = Vec::new();
+    let mut current = Some(node_id);
+    while let Some(id) = current {
+        let node = &arena[id];
+        path.push(ElementRef {
+            id: node.get_id().cloned(),
+            node_id: id,
+        });
+        current = node.parent;
+    }
+    HitRegion {
+        node_id,
+        rect: Rect::new(0, 0, 0, 0),
+        path,
+    }
+}
+
+/// Fire `blur` (+ `change` when the edited value differs from the committed
+/// DOM value) for `node_id`, committing `new_value` into the DOM first.
+/// Returns any render commands pushed by handlers.
+fn fire_blur_and_change(
+    engine: &mut ScriptEngine,
+    node_id: NodeId,
+    new_value: &str,
+) -> Vec<RenderCmd> {
+    let arena = engine.arena();
+    let old = arena
+        .get(node_id)
+        .and_then(|n| n.attributes.get("value"))
+        .cloned()
+        .unwrap_or_default();
+    engine.set_value(node_id, new_value);
+    let region = region_for(&arena, node_id);
+    let mut cmds = engine.fire(&region, EventType::Blur, 0, 0);
+    if old != new_value {
+        cmds.extend(engine.fire(&region, EventType::Change, 0, 0));
+    }
+    cmds
+}
+
+/// Focus `node_id` (an `<input>`), seeding the edit buffer from the DOM
+/// `value` attribute and repainting the previously focused field (if any).
+/// Fires `focus` on the newly focused field and `blur` / `change` on the
+/// previously focused one.
+fn focus_input(
+    state: &mut InputState,
+    node_id: NodeId,
+    engine: &mut ScriptEngine,
+    cmds: &mut Vec<RenderCmd>,
+) {
+    if state.focused_input == Some(node_id) {
+        return;
+    }
+    if let Some(prev) = state.focused_input.replace(node_id) {
+        // Commit the previous field's edits back to the DOM before switching
+        // focus, firing `blur` (+ `change` when the value differs).
+        cmds.extend(fire_blur_and_change(engine, prev, &state.input_value));
+        cmds.push(RenderCmd::RenderInput {
+            node_id: prev,
+            value: std::mem::take(&mut state.input_value),
+            cursor: std::mem::take(&mut state.input_cursor),
+            focused: false,
+        });
+    }
+    let value = engine
+        .arena()
+        .get(node_id)
+        .and_then(|n| n.attributes.get("value"))
+        .cloned()
+        .unwrap_or_default();
+    let cursor = value.chars().count();
+    state.input_value = value;
+    state.input_cursor = cursor;
+    cmds.push(RenderCmd::RenderInput {
+        node_id,
+        value: state.input_value.clone(),
+        cursor,
+        focused: true,
+    });
+    // Fire `focus` on the newly focused field.
+    let region = region_for(&engine.arena(), node_id);
+    cmds.extend(engine.fire(&region, EventType::Focus, 0, 0));
+}
+
+/// Blur the focused `<input>`: repaint it unfocused, commit the edited value
+/// back into the DOM (so a later focus or re-render sees it), and clear the
+/// edit session. `engine` is `None` in the no-event mode, where there is no
+/// live DOM to write back to.
+fn blur_input(
+    state: &mut InputState,
+    engine: Option<&mut ScriptEngine>,
+    cmds: &mut Vec<RenderCmd>,
+) {
+    let Some(focused) = state.focused_input.take() else {
+        return;
+    };
+    if let Some(engine) = engine {
+        cmds.extend(fire_blur_and_change(engine, focused, &state.input_value));
+    }
+    cmds.push(RenderCmd::RenderInput {
+        node_id: focused,
+        value: std::mem::take(&mut state.input_value),
+        cursor: std::mem::take(&mut state.input_cursor),
+        focused: false,
+    });
 }
 
 /// Wait for the next input event and translate it into render commands.
@@ -146,6 +358,33 @@ pub fn trigger_refresh(
     match event::read() {
         Ok(Event::Key(key)) => {
             if key.kind == KeyEventKind::Release {
+                return cmds;
+            }
+
+            // A focused `<input>` consumes text-editing keys; `Esc` blurs it
+            // and `Enter` confirms (blur + commit) — both write the value back
+            // to the DOM. Either returns control to scrolling / quitting.
+            if state.focused_input.is_some() {
+                if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
+                    blur_input(state, engine, &mut cmds);
+                    return cmds;
+                }
+                if let Some(focused) = state.focused_input {
+                    if apply_input_key(&mut state.input_value, &mut state.input_cursor, key.code)
+                    {
+                        cmds.push(RenderCmd::RenderInput {
+                            node_id: focused,
+                            value: state.input_value.clone(),
+                            cursor: state.input_cursor,
+                            focused: true,
+                        });
+                        // Fire `input` after every edit.
+                        if let Some(engine) = engine {
+                            let region = region_for(&engine.arena(), focused);
+                            cmds.extend(engine.fire(&region, EventType::Input, 0, 0));
+                        }
+                    }
+                }
                 return cmds;
             }
 
@@ -301,6 +540,21 @@ pub fn trigger_refresh(
                                 x,
                                 y,
                             ));
+                            // Clicking an `<input>` focuses it; any other
+                            // click blurs the previously focused field.
+                            let clicked = hit_map.hit_test(x, y);
+                            let clicked_input = clicked.is_some_and(|r| {
+                                engine.arena().get(r.node_id).is_some_and(|n| {
+                                    n.node_type == NodeType::Input
+                                })
+                            });
+                            if clicked_input {
+                                if let Some(node_id) = clicked.map(|r| r.node_id) {
+                                    focus_input(state, node_id, engine, &mut cmds);
+                                }
+                            } else if state.focused_input.is_some() {
+                                blur_input(state, Some(engine), &mut cmds);
+                            }
                         }
                     } else {
                         state.pressed = None;

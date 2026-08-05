@@ -154,12 +154,72 @@ fn layout_replaced(
     cursor: &mut Cursor,
     pre_allocated_rect: Option<Rect>,
 ) -> Option<LayoutBox> {
-    let src = match &generated.payload {
-        GeneratedPayload::Image { src } if !src.is_empty() => src.clone(),
-        GeneratedPayload::Transparent => return None,
-        _ => return None,
-    };
+    match &generated.payload {
+        GeneratedPayload::Input => {
+            layout_input(arena, generated, containing, cursor, pre_allocated_rect)
+        }
+        GeneratedPayload::Image { src } if !src.is_empty() => layout_image(
+            arena,
+            generated,
+            containing,
+            cursor,
+            pre_allocated_rect,
+            src,
+        ),
+        _ => None,
+    }
+}
 
+/// Geometry for `<input>`: a single-line field sized from the HTML `width`
+/// attribute (cells) or a fixed default width when absent.
+///
+/// The width is deliberately *independent of the value* (mirroring a browser
+/// `size` attribute): typing never changes the layout, so the edit path only
+/// repaints the field's rectangle instead of re-running layout.
+fn layout_input(
+    arena: &NodeArena,
+    generated: &GeneratedBox,
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+    pre_allocated_rect: Option<Rect>,
+) -> Option<LayoutBox> {
+    let (x, y, block_width, height) = match pre_allocated_rect {
+        Some(rect) => (rect.x, rect.y, rect.width.max(1), rect.height.max(1)),
+        None => {
+            let node = &arena[generated.node_id];
+            // Default field width in cells (browser `<input size>` default is
+            // ~20 chars; 8 keeps compact layouts tidy while staying tappable).
+            let block_width = match node.get_width() {
+                Some(w) => (w as usize).min(containing.width).max(1),
+                None => 8usize.min(containing.width.max(1)),
+            };
+            let x = containing.x;
+            let y = cursor.allocate(1);
+            (x, y, block_width, 1)
+        }
+    };
+    Some(LayoutBox::new_replaced(
+        generated.node_id,
+        Rect::new(x, y, block_width, height),
+        ReplacedContent::Input,
+        PaintStyle::default(),
+    ))
+}
+
+/// Geometry for `<img>`, driven solely by the payload attached at generation
+/// time. Tag-specific data (the resource path and intrinsic `width` /
+/// `height` attributes) is read from the DOM only when the payload indicates
+/// an image; the dispatch never inspects `NodeType` to decide which geometry
+/// algorithm to run.
+fn layout_image(
+    arena: &NodeArena,
+    generated: &GeneratedBox,
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+    pre_allocated_rect: Option<Rect>,
+    src: &str,
+) -> Option<LayoutBox> {
+    let src = src.to_string();
     let (x, y, block_width, img_rows) = match pre_allocated_rect {
         Some(rect) => {
             let width = rect.width.max(1);

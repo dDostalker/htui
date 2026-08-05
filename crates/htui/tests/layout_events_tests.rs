@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use boa_engine::JsValue;
 use crossterm::style::Color;
 use htui::events::{
-    EventBindings, Geometry, HitMap,
+    ElementRef, EventBindings, EventType, Geometry, HitMap, HitRegion,
     interaction::{HoverState, on_click, on_move},
 };
 use htui::html::css_parse::{
@@ -70,6 +70,71 @@ fn clamp(value: f64, config: Threshold) -> Result<f64, String> {
         return Err(format!("{}: maxCpu must be positive", config.label));
     }
     Ok(value.min(config.max_cpu))
+}
+
+// ============================================================
+// `<input>` field events (focus / blur / input / change) + `el.value`
+// ============================================================
+
+#[test]
+fn input_events_dispatch_via_listeners_and_onstar_attributes() {
+    // The four input events must fire along the DOM ancestor chain for both
+    // `addEventListener` listeners and compiled `on*` attributes.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var seen = [];
+          var el = document.getElementById('f');
+          el.addEventListener('focus', function () { seen.push('a-focus'); });
+          el.addEventListener('blur', function () { seen.push('a-blur'); });
+          el.addEventListener('input', function () { seen.push('a-input'); });
+          el.addEventListener('change', function () { seen.push('a-change'); });
+          globalThis.__seen = seen;
+        </script>
+        <div onfocus="seen.push('p-focus')" onblur="seen.push('p-blur')">
+          <input id="f" value="a" oninput="seen.push('i-input')" onchange="seen.push('i-change')">
+        </div>"#,
+        EventBindings::default(),
+    );
+    let arena = engine.arena();
+    let input_id = find_node_by_id(&arena, "f");
+    let region = region_of(&arena, input_id);
+
+    engine.fire(&region, EventType::Focus, 0, 0);
+    engine.fire(&region, EventType::Input, 0, 0);
+    engine.fire(&region, EventType::Change, 0, 0);
+    engine.fire(&region, EventType::Blur, 0, 0);
+
+    let seen = eval_str(&mut engine, "String(globalThis.__seen.join(','))");
+    assert_eq!(
+        seen,
+        "a-focus,p-focus,i-input,a-input,i-change,a-change,a-blur,p-blur",
+        "on* attributes fire before addEventListener on the same element; target before ancestors"
+    );
+}
+
+#[test]
+fn input_value_property_reads_and_writes_the_dom() {
+    // `el.value` reads the DOM attribute; writing it marks the node dirty so
+    // the next frame re-renders (equal writes short-circuit).
+    let (mut engine, _geo) = build_geometry(
+        r#"<script>
+          var el = document.getElementById('f');
+          globalThis.__before = el.value;
+          el.value = 'typed';
+          globalThis.__after = el.value;
+          el.value = 'typed';
+        </script>
+        <input id="f" value="init">"#,
+        EventBindings::default(),
+    );
+    assert_eq!(eval_str(&mut engine, "globalThis.__before"), "init");
+    assert_eq!(eval_str(&mut engine, "globalThis.__after"), "typed");
+    let arena = engine.arena();
+    let stored = arena
+        .get(find_node_by_id(&arena, "f"))
+        .and_then(|n| n.attributes.get("value"))
+        .cloned();
+    assert_eq!(stored.as_deref(), Some("typed"));
 }
 
 #[test]
@@ -227,6 +292,26 @@ fn counting_host(counter: Arc<Mutex<usize>>) -> EventBindings {
         *counter.lock().unwrap() += 1;
         JsValue::undefined()
     })
+}
+
+/// Minimal hit region for `node_id` (no geometry) to fire non-pointer events
+/// (focus / blur / input / change) along the DOM ancestor chain.
+fn region_of(arena: &NodeArena, node_id: NodeId) -> HitRegion {
+    let mut path = Vec::new();
+    let mut current = Some(node_id);
+    while let Some(id) = current {
+        let node = &arena[id];
+        path.push(ElementRef {
+            id: node.get_id().cloned(),
+            node_id: id,
+        });
+        current = node.parent;
+    }
+    HitRegion {
+        node_id,
+        rect: Rect::new(0, 0, 0, 0),
+        path,
+    }
 }
 
 // ============================================================

@@ -28,6 +28,13 @@ pub enum ReplacedContent {
         cols: usize,
         rows: usize,
     },
+    /// `<input>` — a single-line text field.
+    ///
+    /// The visible value / cursor / focus state live in
+    /// [`TermLayout::input_states`](crate::tui::graph_api::TermLayout::input_states),
+    /// keyed by node id; the box only marks this as an input leaf so the
+    /// paint phase knows to draw a field.
+    Input,
 }
 
 /// Distinguishes the rendering shape of a layout box.

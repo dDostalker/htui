@@ -19,19 +19,23 @@
 mod block;
 mod border;
 mod image;
+mod input;
 mod text;
+
+use std::collections::HashMap;
 
 use crossterm::style::Color;
 
 use crate::{
     html::css_parse::Position,
     layout::{BoxKind, LayoutBox, Rect, ReplacedContent},
-    tdom::node::NodeArena,
-    tui::graph_api::{Block, ImageCache, TermLayout},
+    tdom::node::{NodeArena, NodeId},
+    tui::graph_api::{Block, ImageCache, InputRenderState, TermLayout},
 };
 
 use self::block::paint_block;
 use self::image::paint_image;
+use self::input::paint_input;
 
 /// A borrow of the canvas that the painters actually need.
 ///
@@ -50,6 +54,9 @@ pub(super) struct PaintCanvas<'a> {
     /// where every write outside it is dropped so the rest of the canvas
     /// keeps the previous frame's pixels.
     pub(super) region: Option<Rect>,
+    /// `<input>` edit state read by the input painter (caret / value /
+    /// focus). Immutable during a paint pass.
+    pub input_states: &'a HashMap<NodeId, InputRenderState>,
 }
 
 impl<'a> PaintCanvas<'a> {
@@ -112,6 +119,7 @@ pub fn paint_layout_tree(boxes: &[LayoutBox], arena: &NodeArena, term_layout: &m
         columns,
         image_cache: &mut term_layout.image_cache,
         region: None,
+        input_states: &term_layout.input_states,
     };
     for b in boxes {
         paint_box(b, arena, &mut canvas, None, None);
@@ -152,6 +160,7 @@ pub fn paint_layout_tree_region(
         columns,
         image_cache: &mut term_layout.image_cache,
         region: Some(region),
+        input_states: &term_layout.input_states,
     };
     for b in boxes {
         if intersect_rects(b.rect, region).is_some() {
@@ -223,6 +232,9 @@ fn paint_box(
         }
         BoxKind::Replaced(ReplacedContent::Image { cols, rows, .. }) => {
             paint_image(lb, canvas, *cols, *rows, own_clip);
+        }
+        BoxKind::Replaced(ReplacedContent::Input) => {
+            paint_input(lb, arena, canvas, own_clip);
         }
         BoxKind::Anonymous => {
             // Anonymous boxes have no chrome of their own; their visible

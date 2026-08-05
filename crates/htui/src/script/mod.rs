@@ -172,6 +172,21 @@ impl ScriptEngine {
         std::mem::take(&mut self.state.borrow_mut().dirty)
     }
 
+    /// Commit an `<input>` field's edited value into the DOM `value`
+    /// attribute.
+    ///
+    /// The DOM is the single source of truth for a field's content: editing
+    /// while focused repaints through the lightweight `input_states` path, and
+    /// this writes the result back on blur / Enter / focus-switch so the next
+    /// focus (or any later re-render) sees the edited value. It does *not*
+    /// mark the node dirty — the field's layout is width-fixed, so the visible
+    /// repaint is driven by `RenderCmd::RenderInput` instead of a re-layout.
+    pub fn set_value(&mut self, node_id: NodeId, value: &str) {
+        if let Some(node) = self.state.borrow_mut().arena.get_mut(node_id) {
+            node.attributes.insert("value".to_string(), value.to_string());
+        }
+    }
+
     /// Dispatch a DOM event along the hit region's ancestor path.
     ///
     /// Builds a JS `Event` object, walks `region.path` target-first and fires
@@ -306,6 +321,10 @@ impl ScriptEngine {
             EventType::Click => "click",
             EventType::MouseOver => "mouseover",
             EventType::MouseOut => "mouseout",
+            EventType::Focus => "focus",
+            EventType::Blur => "blur",
+            EventType::Input => "input",
+            EventType::Change => "change",
         };
 
         let mut init = ObjectInitializer::new(&mut self.context);
@@ -389,8 +408,8 @@ fn dispatch_host(name: &str, args: &[JsValue], context: &mut Context) -> JsResul
     f(&mut call)
 }
 
-/// Walk the arena and compile every `onclick` / `onmouseover` / `onmouseout`
-/// attribute body into a listener, exactly like a browser does.
+/// Walk the arena and compile every `on*` attribute body into a listener,
+/// exactly like a browser does.
 fn compile_attribute_listeners(
     context: &mut Context,
     state: &Rc<RefCell<ScriptState>>,
@@ -404,6 +423,10 @@ fn compile_attribute_listeners(
                     ("onclick", EventType::Click),
                     ("onmouseover", EventType::MouseOver),
                     ("onmouseout", EventType::MouseOut),
+                    ("onfocus", EventType::Focus),
+                    ("onblur", EventType::Blur),
+                    ("oninput", EventType::Input),
+                    ("onchange", EventType::Change),
                 ]
                 .iter()
                 .filter_map(|(attr, et)| n.attributes.get(*attr).cloned().map(|b| (b, *et)))

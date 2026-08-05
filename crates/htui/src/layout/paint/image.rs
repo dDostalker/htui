@@ -12,8 +12,8 @@ pub(crate) fn paint_image(
     rows: usize,
     clip: Rect,
 ) {
-    let ReplacedContent::Image { path, .. } = match &lb.kind {
-        crate::layout::BoxKind::Replaced(content) => content,
+    let path = match &lb.kind {
+        crate::layout::BoxKind::Replaced(ReplacedContent::Image { path, .. }) => path,
         _ => return,
     };
     let r = lb.rect;

@@ -188,6 +188,7 @@ fn main() -> Result<()> {
         "sysmon" => test_case!(sysmon),
         "viewport_units" => test_case!(viewport_units, no_css),
         "position" => test_case!(position, no_css),
+        "input" => test_case!(input, no_css),
         "showcase" => test_case!(showcase, no_css),
         _ => {
             let available = [
@@ -216,6 +217,7 @@ fn main() -> Result<()> {
                 "sysmon",
                 "viewport_units",
                 "position",
+                "input",
                 "showcase",
             ];
             eprintln!(
@@ -272,6 +274,19 @@ fn main() -> Result<()> {
     // functions are needed, so bindings stay empty. `--dump` falls back to
     // the static preview (interaction needs a real terminal).
     if test_name == "events" {
+        if dump_mode {
+            dump(html, css, cols, rows, bg_map);
+        } else {
+            render_with_events(html, css, EventBindings::default());
+        }
+        info!("Test '{test_name}' completed");
+        return Ok(());
+    }
+
+    // The `input` case runs through `render_with_events` so click-to-focus
+    // and keyboard editing are active (interaction needs a real terminal).
+    // `--dump` falls back to the static preview.
+    if test_name == "input" {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {

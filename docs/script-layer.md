@@ -123,6 +123,15 @@ fn main() {
 | 点击 | `onclick` | `"click"` |
 | 指针进入 | `onmouseover` | `"mouseover"` |
 | 指针离开 | `onmouseout` | `"mouseout"` |
+| 聚焦（`<input>` 获得键盘焦点） | `onfocus` | `"focus"` |
+| 失焦（`<input>` 失去焦点） | `onblur` | `"blur"` |
+| 输入（编辑中每次值变化） | `oninput` | `"input"` |
+| 提交（失焦/Enter 且值变化） | `onchange` | `"change"` |
+
+`focus` / `blur` / `input` / `change` 目前仅由 `<input>` 字段产生：点击聚焦触发
+`focus`，编辑每键触发 `input`，Esc / Enter / 点击别处 / 焦点切换提交时触发
+`blur`（值有变化时额外触发 `change`）。这些事件沿 DOM 祖先链冒泡，与鼠标事件
+同一套分发机制。
 
 ---
 
@@ -135,7 +144,8 @@ fn main() {
 - `document.createElement(tag)` → 新元素（尚未挂到文档）
 
 **Element 包装对象**（`getElementById` / `event.target` 返回）
-- 属性访问器：`textContent`、`className`、`id`、`parentNode`
+- 属性访问器：`textContent`、`className`、`id`、`parentNode`、`value`
+  （`<input>` 字段的已提交值，可读写；写值会标记重渲染）
 - 方法：`getAttribute(name)` / `setAttribute(name, value)` / `removeAttribute(name)`
 - `addEventListener(type, fn)` / `removeEventListener(type, fn)`
 - `appendChild(child)` / `removeChild(child)`
