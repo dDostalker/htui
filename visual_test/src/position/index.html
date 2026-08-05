@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { background-color: #1a1b26; color: #c0caf5; }
+  h2 { margin: 1; }
+  .frame {
+    position: relative;
+    width: 60;
+    border: 1px solid #565f89;
+    padding: 1;
+    margin: 1;
+  }
+  .row { margin: 1; }
+  .static { background-color: #24283b; }
+  .abs-tl { position: absolute; top: 1; left: 1; background-color: #7aa2f7; }
+  .abs-br { position: absolute; right: 0; bottom: 0; background-color: #e0af68; }
+  .rel-off { position: relative; top: 2; left: 4; background-color: #444b6a; }
+  .z-a { position: absolute; top: 5; left: 8; background-color: #9ece6a; z-index: 1; }
+  .z-b { position: absolute; top: 6; left: 9; background-color: #f7768e; z-index: 2; }
+  .statusbar {
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    width: 104;
+    background-color: #2ac3de;
+    color: #1a1b26;
+  }
+</style>
+</head>
+<body>
+  <h2>Positioned layout demo</h2>
+
+  <div class="frame">
+    <div class="row static">static content line one</div>
+    <div class="row static">static content line two</div>
+    <div class="abs-tl">absolute top:1 left:1</div>
+    <div class="abs-br">absolute right:0 bottom:0</div>
+  </div>
+
+  <div class="frame">
+    <div class="row static">relative offset demo:</div>
+    <div class="row rel-off">this line shifts down 2 / right 4</div>
+    <div class="row static">this line stays in place</div>
+  </div>
+
+  <div class="frame">
+    <div class="row static">z-index stacking:</div>
+    <div class="z-a">lower z</div>
+    <div class="z-b">upper z</div>
+  </div>
+
+  <div class="statusbar">fixed bottom status bar — anchored to the viewport</div>
+</body>
+</html>
