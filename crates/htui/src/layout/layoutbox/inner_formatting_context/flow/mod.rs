@@ -38,35 +38,25 @@
 //! is shared with the flex layout (see the flex submodule).
 
 mod a;
-mod aside;
-mod body;
-mod div;
+mod elements;
 mod generic;
 mod head;
-mod header_footer;
-mod html;
 mod img;
 mod layout_block;
 mod list;
-mod p;
 mod table;
 mod tree;
 
 pub use a::layout_a;
-pub use aside::layout_aside;
-pub use body::layout_body;
-pub use div::layout_div;
+pub use elements::layout_standard_block;
 pub use generic::layout_generic;
 pub use head::{layout_hn, layout_meta, layout_title};
-pub use header_footer::{layout_footer, layout_header};
-pub use html::layout_html;
 pub use img::{layout_img, layout_img_with_rect};
 pub use layout_block::{
     LayoutBlockOptions, OuterGeometry, block_left, build_border_rect, compute_outer_geometry,
     constrained_block_width, layout_block, reserve_border_box, resolve_block_width,
 };
 pub use list::{layout_li, layout_ol, layout_ul};
-pub use p::layout_p;
 pub use table::{layout_row_group, layout_table, layout_td, layout_th, layout_tr};
 pub use crate::html::css_parse::FontContext;
 pub(crate) use tree::dispatch_flow_geometry;

@@ -1,6 +1,6 @@
 use crossterm::style::Color;
 use htui::{
-    html::{css_parse, css_parse::{css_into_node_with_hover, reset_css_attr}, html_parse},
+    html::{css_parse, html_parse},
     layout::layout::TermMap,
     tdom::node::{Node, NodeArena, NodeId, NodeType},
     tui::graph_api::TermLayout,

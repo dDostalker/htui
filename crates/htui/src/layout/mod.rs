@@ -111,21 +111,21 @@ pub type LayoutFn = fn(
 /// The geometry dispatcher handles replaced, flex, and table boxes before this
 /// registry is reached. This registry therefore contains only normal-flow
 /// element adapters retained for behavior and public-API compatibility.
+///
+/// Plain block elements (`<div>` / `<p>` / `<aside>` / …) are folded into
+/// [`layout_standard_block`](inner_formatting_context::flow::layout_standard_block)
+/// and its `NodeType → LayoutBlockOptions` table; the remaining entries are
+/// the dynamically-optioned adapters (headings, lists, anchors) and the
+/// table-element pass-throughs kept for API compatibility.
 pub static DEFAULT_LAYOUT: &[LayoutFn] = &[
-    inner_formatting_context::flow::layout_aside,
-    inner_formatting_context::flow::layout_body,
-    inner_formatting_context::flow::layout_div,
+    inner_formatting_context::flow::layout_standard_block,
     inner_formatting_context::flow::layout_hn,
     inner_formatting_context::flow::layout_title,
     inner_formatting_context::flow::layout_meta,
-    inner_formatting_context::flow::layout_footer,
-    inner_formatting_context::flow::layout_header,
-    inner_formatting_context::flow::layout_html,
+    inner_formatting_context::flow::layout_a,
     inner_formatting_context::flow::layout_li,
     inner_formatting_context::flow::layout_ol,
     inner_formatting_context::flow::layout_ul,
-    inner_formatting_context::flow::layout_p,
-    inner_formatting_context::flow::layout_a,
     inner_formatting_context::flow::layout_row_group,
     inner_formatting_context::flow::layout_td,
     inner_formatting_context::flow::layout_th,

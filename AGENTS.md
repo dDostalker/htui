@@ -18,7 +18,7 @@ htui/
 │   ├── htui/               # 主库 crate：终端 HTML/CSS 渲染引擎（独立发布单元）
 │   │   ├── Cargo.toml
 │   │   ├── src/
-│   │   │   ├── lib.rs              # 入口：render() / render_with_events() 主循环 + 渲染线程 + 命中线程
+│   │   │   ├── lib.rs              # 入口：render() / render_with_events()（主循环在 tui/run.rs）
 │   │   │   ├── logging.rs          # 文件 logger 初始化
 │   │   │   ├── events/             # JS 风格事件系统（旁路，不参与渲染管线）
 │   │   │   │   ├── mod.rs          # EventType / HtmlEvent / ElementRef / EventBindings（宿主函数注册表）
@@ -40,7 +40,10 @@ htui/
 │   │   │   │       ├── matcher.rs  # selector_chain_matches(+with_hover)
 │   │   │   │       ├── selector.rs # CssSelector
 │   │   │   │       ├── stylesheet.rs # StyleSheet parsing 入口
-│   │   │   │       ├── values.rs   # CSS 值枚举 + 解析函数（Length / TextAlign / ...）
+│   │   │   │       ├── values/     # CSS 值枚举 + 解析函数
+│   │   │   │       │   ├── mod.rs  # 枚举 + 解析 + re-exports（Length / TextAlign / ...）
+│   │   │   │       │   ├── color.rs# 颜色解析（hex / rgb / 命名色）
+│   │   │   │       │   └── length.rs # 长度体系（Length / FontContext / 简写解析）
 │   │   │   │       └── properties/ # CssAttr + AlignSelf
 │   │   │   │           ├── mod.rs              # CssAttr（IndexMap + 30+ 个 getter）
 │   │   │   │           └── align_self.rs       # AlignSelf
@@ -72,15 +75,14 @@ htui/
 │   │   │   │   │       ├── flow/           # Block/Inline Formatting Context 实现
 │   │   │   │   │       │   ├── mod.rs              # FlowExt + impl FormattingContext::Flow
 │   │   │   │   │       │   ├── tree.rs             # FontContext + layout_tree() 编排 + dispatch + layout_children
-│   │   │   │   │       │   ├── layout_block/       # 共享 layout_block() + OuterGeometry + LayoutBlockOptions
-│   │   │   │   │       │   │   ├── mod.rs          #   re-exports
-│   │   │   │   │       │   │   ├── geometry.rs     #   OuterGeometry + outer-geometry helpers
-│   │   │   │   │       │   │   ├── options.rs      #   LayoutBlockOptions
-│   │   │   │   │       │   │   └── core.rs         #   layout_block() main pipeline
-│   │   │   │   │       │   ├── a.rs / aside.rs / body.rs / div.rs / generic.rs / head.rs
-│   │   │   │   │       │   ├── header_footer.rs / html.rs / list.rs / p.rs
-│   │   │   │   │       │   ├── img.rs
-│   │   │   │   │       │   └── table/              # <table> 布局（拆 6 个文件）
+│   │   │   │       │   ├── layout_block/       # 共享 layout_block() + OuterGeometry + LayoutBlockOptions
+│   │   │   │       │   │   ├── mod.rs          #   re-exports
+│   │   │   │       │   │   ├── geometry.rs     #   OuterGeometry + outer-geometry helpers
+│   │   │   │       │   │   ├── options.rs      #   LayoutBlockOptions
+│   │   │   │       │   │   └── core.rs         #   layout_block() main pipeline
+│   │   │   │       │   ├── elements.rs # 标准块元素配置表（div/p/aside/header/footer → LayoutBlockOptions）
+│   │   │   │       │   ├── a.rs / generic.rs / head.rs / list.rs / img.rs
+│   │   │   │       │   └── table/              # <table> 布局（拆 6 个文件）
 │   │   │   │   │       │       ├── mod.rs          #   re-exports
 │   │   │   │   │       │       ├── table.rs        #   layout_table orchestrator
 │   │   │   │   │       │       ├── row_group.rs    #   layout_row_group pass-through
@@ -107,6 +109,7 @@ htui/
 │   │   │   │       └── text.rs     # paint_runs
 │   │   │   └── tui/
 │   │   │       ├── mod.rs
+│   │   │       ├── run.rs          # 引擎驱动：渲染/命中线程 + 输入循环 + 增量重绘辅助
 │   │   │       └── graph_api.rs    # 模块入口：re-exports（TermLayout / Block / RenderCmd / Img / ...）
 │   │   │           └── graph_api/  # 子模块目录（与 graph_api.rs 同模块）
 │   │   │               ├── canvas.rs   # TermLayout 画布

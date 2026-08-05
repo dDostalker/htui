@@ -75,7 +75,7 @@ pub fn layout_generated_box(
             pre_allocated_rect,
         )?,
         (GeneratedBoxKind::Normal, _, FormattingContext::Flex) => {
-            crate::layout::layoutbox::inner_formatting_context::flex::layout_flex_dispatch(
+            crate::layout::inner_formatting_context::flex::layout_flex_dispatch(
                 arena,
                 generated.node_id,
                 containing,
@@ -95,7 +95,7 @@ pub fn layout_generated_box(
             )?
         }
         (GeneratedBoxKind::Normal, _, FormattingContext::Flow) => {
-            crate::layout::layoutbox::inner_formatting_context::flow::dispatch_flow_geometry(
+            crate::layout::inner_formatting_context::flow::dispatch_flow_geometry(
                 arena,
                 generated.node_id,
                 containing,
