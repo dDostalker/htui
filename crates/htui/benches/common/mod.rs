@@ -23,11 +23,11 @@ use htui::tdom::node::{NodeArena, NodeId};
 // ----------------------------------------------------------
 
 /// Small HTML fixture (~22 lines, single heading + paragraph).
-pub const HTML_SMALL: &str = include_str!("../../visual_test/src/helloworld/index.html");
+pub const HTML_SMALL: &str = include_str!("../../../visual_test/src/helloworld/index.html");
 
 /// Medium HTML fixture (~132 lines, covers headings, paragraphs, lists,
 /// table, box model, colors — the canonical `all_in_one` stress test).
-pub const HTML_MEDIUM: &str = include_str!("../../visual_test/src/all_in_one/index.html");
+pub const HTML_MEDIUM: &str = include_str!("../../../visual_test/src/all_in_one/index.html");
 
 // ----------------------------------------------------------
 // Parsing helpers

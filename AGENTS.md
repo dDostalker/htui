@@ -13,109 +13,138 @@
 以下是项目的结构，如果不是特殊要求不得修改项目结构，仅当提示词要求需要时修改，修改前进行询问，并**必须**对项目结构进行同步
 ```
 htui/
-├── src/
-│   ├── lib.rs              # 入口：render() / render_with_events() 主循环 + 渲染线程 + 命中线程
-│   ├── logging.rs          # 文件 logger 初始化
-│   ├── events/             # JS 风格事件系统（旁路，不参与渲染管线）
-│   │   ├── mod.rs          # EventType / HtmlEvent / ElementRef / EventBindings（宿主函数注册表）
-│   │   ├── geometry.rs     # Geometry（arena + boxes 快照，Arc 共享）
-│   │   ├── hit_map.rs      # HitRegion / HitMap / build / hit_test / resolve_by_id
-│   │   └── interaction.rs  # 纯逻辑鼠标交互（HoverState / on_move / on_click，调 ScriptEngine::fire）
-│   ├── script/             # JS 脚本层（旁路：Boa 引擎 + live DOM + 宿主函数）
-│   │   ├── mod.rs          # ScriptEngine：Context + ScriptState(thread_local) + 引导脚本 + fire/invoke_action + on* 属性编译
-│   │   ├── host.rs         # HostFn / HostCall（Rust 回调 → JS 可调用）+ arg/arg_required/ret 便捷方法
-│   │   ├── convert.rs      # IntoJs/FromJs 转换层 + js_obj! 宏 + JsObjectBuilder（Rust ↔ JS 值）
-│   │   └── dom.rs          # DOM 绑定：document / element 包装 / style / addEventListener / console / alert / quit
-│   ├── html/
-│   │   ├── mod.rs
-│   │   ├── html_parse.rs   # HTML → tdom 树（html5ever）
-│   │   ├── box_edges.rs    # BoxEdges / Border / padding / margin / width
-│   │   └── css_parse/      # CSS 解析
-│   │       ├── mod.rs
-│   │       ├── cascade.rs  # INHERITED_PROPS / SUPPORTED_PROPERTIES / css_into_node()
-│   │       ├── matcher.rs  # selector_chain_matches(+with_hover)
-│   │       ├── selector.rs # CssSelector
-│   │       ├── stylesheet.rs # StyleSheet parsing 入口
-│   │       ├── values.rs   # CSS 值枚举 + 解析函数（Length / TextAlign / ...）
-│   │       └── properties/ # CssAttr + AlignSelf
-│   │           ├── mod.rs              # CssAttr（IndexMap + 30+ 个 getter）
-│   │           └── align_self.rs       # AlignSelf
-│   ├── tdom/
-│   │   ├── mod.rs
-│   │   ├── node.rs         # NodeType / Node / NodeArena / NodeId
-│   │   └── attribute.rs    # Attr（HTML 属性解析与查询）
-│   ├── layout/
-│   │   ├── mod.rs          # DEFAULT_LAYOUT 注册表 + LayoutFn + BoxConstraint
-│   │   ├── layout.rs       # TermMap / TermLayout::draw()（返回 boxes）
-│   │   ├── layoutbox/      # LayoutBox 数据结构（镜像浏览器 CSS Display 三轴分类）
-│   │   │   ├── mod.rs      # LayoutBox struct + 三个轴分类 re-exports
-│   │   │   ├── rect.rs, paint_style.rs, inline_run.rs, cursor.rs, inline.rs, wrap.rs
-│   │   │   ├── generation/  # styled DOM → geometry-free GeneratedBox tree
-│   │   │   │   └── mod.rs  # normal/text/anonymous/replaced + display classification
-│   │   │   ├── geometry/    # GeneratedBox → positioned LayoutBox tree
-│   │   │   │   └── mod.rs  # BoxKind × OuterDisplay × FormattingContext dispatch
-│   │   │   ├── box_kind/   # BoxKind { Normal, Replaced, Anonymous } + ReplacedContent
-│   │   │   │   ├── mod.rs          # enum + ReplacedContent
-│   │   │   │   ├── normal.rs       # NormalExt trait
-│   │   │   │   ├── replaced.rs     # ReplacedExt trait
-│   │   │   │   └── anonymous.rs    # AnonymousExt trait
-│   │   │   ├── outer_display/    # OuterDisplay { Block, Inline }
-│   │   │   │   ├── mod.rs          # enum
-│   │   │   │   ├── block.rs        # BlockExt trait
-│   │   │   │   └── inline.rs       # InlineExt trait
-│   │   │   └── inner_formatting_context/  # FormattingContext { Flow, Flex, Table, Grid }
-│   │   │       ├── mod.rs          # enum + FlowExt/FlexExt/GridExt re-exports
-│   │   │       ├── flow/           # Block/Inline Formatting Context 实现
-│   │   │       │   ├── mod.rs              # FlowExt + impl FormattingContext::Flow
-│   │   │       │   ├── tree.rs             # FontContext + layout_tree() 编排 + dispatch + layout_children
-│   │   │       │   ├── layout_block/       # 共享 layout_block() + OuterGeometry + LayoutBlockOptions
-│   │   │       │   │   ├── mod.rs          #   re-exports
-│   │   │       │   │   ├── geometry.rs     #   OuterGeometry + outer-geometry helpers
-│   │   │       │   │   ├── options.rs      #   LayoutBlockOptions
-│   │   │       │   │   └── core.rs         #   layout_block() main pipeline
-│   │   │       │   ├── a.rs / aside.rs / body.rs / div.rs / generic.rs / head.rs
-│   │   │       │   ├── header_footer.rs / html.rs / list.rs / p.rs
-│   │   │       │   ├── img.rs
-│   │   │       │   └── table/              # <table> 布局（拆 6 个文件）
-│   │   │       │       ├── mod.rs          #   re-exports
-│   │   │       │       ├── table.rs        #   layout_table orchestrator
-│   │   │       │       ├── row_group.rs    #   layout_row_group pass-through
-│   │   │       │       ├── tr.rs           #   layout_tr pass-through
-│   │   │       │       ├── td.rs           #   layout_td + layout_th pass-through
-│   │   │       │       ├── cell.rs         #   CellInfo + layout_cell
-│   │   │       │       └── measure.rs      #   collect_rows + collect_cells + cell_text_width + compute_column_widths
-│   │   │       ├── flex/           # Flex Formatting Context 实现
-│   │   │       │   ├── mod.rs              # FlexExt + impl FormattingContext::Flex
-│   │   │       │   └── tree/               # 拆 6 个文件
-│   │   │       │       ├── mod.rs          #   re-exports + tree 入口
-│   │   │       │       ├── dispatch.rs     #   layout_flex_dispatch + is_flex_capable_node + is_block_child_node
-│   │   │       │       ├── container.rs    #   layout_flex_container + FlexItemPrep + FLEX_ITEM_MIN_CROSS
-│   │   │       │       ├── items.rs        #   layout_flex_items
-│   │   │       │       ├── prepare.rs      #   prepare_flex_item + measure_text_content_width + natural_cross_axis_size + resolve_item_cross_size
-│   │   │       │       └── algorithm.rs    #   effective_align + wrap_into_lines + distribute_main_axis + justify_spacing + align_content_spacing + align_on_cross_axis
-│   │   │       └── grid/           # Grid Formatting Context（预留）
-│   │   │           └── mod.rs              # GridExt + impl FormattingContext::Grid
-│   │   └── paint/                # 绘制编排（与布局解耦，独立阶段）
-│   │       ├── mod.rs      # paint_layout_tree() 编排器 + PaintCanvas + paint_box()
-│   │       ├── block.rs    # paint_block
-│   │       ├── border.rs   # paint_borders
-│   │       ├── image.rs    # paint_image
-│   │       └── text.rs     # paint_runs
-│   └── tui/
-│       ├── mod.rs
-│       └── graph_api.rs    # 模块入口：re-exports（TermLayout / Block / RenderCmd / Img / ...）
-│           └── graph_api/  # 子模块目录（与 graph_api.rs 同模块）
-│               ├── canvas.rs   # TermLayout 画布
-│               ├── cell.rs     # Block / FontStyle
-│               ├── image.rs    # Img / 图像加载
-│   │   ├── input.rs    # RenderCmd（含 RenderArena） / InputState / trigger_refresh / 鼠标点击与 hover 跟踪
-│               ├── render.rs   # TermLayout::render（增量） / render_diff_to_bytes / render_to_bytes
-│               ├── style.rs    # block_style
-│               └── text.rs     # char_width / grapheme_width
-├── benches/               # criterion 基准（parse / cascade / paint / render_to_bytes / full_redraw）
-├── Cargo.toml
-├── htui_macros/           # 过程宏 crate：#[htui::command] + #[derive(IntoJs/FromJs)]
-│   └── src/lib.rs         # proc-macro：命令包装 / 结构体 ↔ JS 对象 derive
+├── Cargo.toml              # workspace 根（members: crates/htui, crates/htui-macros, visual_test）
+├── crates/
+│   ├── htui/               # 主库 crate：终端 HTML/CSS 渲染引擎（独立发布单元）
+│   │   ├── Cargo.toml
+│   │   ├── src/
+│   │   │   ├── lib.rs              # 入口：render() / render_with_events() 主循环 + 渲染线程 + 命中线程
+│   │   │   ├── logging.rs          # 文件 logger 初始化
+│   │   │   ├── events/             # JS 风格事件系统（旁路，不参与渲染管线）
+│   │   │   │   ├── mod.rs          # EventType / HtmlEvent / ElementRef / EventBindings（宿主函数注册表）
+│   │   │   │   ├── geometry.rs     # Geometry（arena + boxes 快照，Arc 共享）
+│   │   │   │   ├── hit_map.rs      # HitRegion / HitMap / build / hit_test / resolve_by_id
+│   │   │   │   └── interaction.rs  # 纯逻辑鼠标交互（HoverState / on_move / on_click，调 ScriptEngine::fire）
+│   │   │   ├── script/             # JS 脚本层（旁路：Boa 引擎 + live DOM + 宿主函数）
+│   │   │   │   ├── mod.rs          # ScriptEngine：Context + ScriptState(thread_local) + 引导脚本 + fire/invoke_action + on* 属性编译
+│   │   │   │   ├── host.rs         # HostFn / HostCall（Rust 回调 → JS 可调用）+ arg/arg_required/ret 便捷方法
+│   │   │   │   ├── convert.rs      # IntoJs/FromJs 转换层 + js_obj! 宏 + JsObjectBuilder（Rust ↔ JS 值）
+│   │   │   │   └── dom.rs          # DOM 绑定：document / element 包装 / style / addEventListener / console / alert / quit
+│   │   │   ├── html/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── html_parse.rs   # HTML → tdom 树（html5ever）
+│   │   │   │   ├── box_edges.rs    # BoxEdges / Border / padding / margin / width
+│   │   │   │   └── css_parse/      # CSS 解析
+│   │   │   │       ├── mod.rs
+│   │   │   │       ├── cascade.rs  # INHERITED_PROPS / SUPPORTED_PROPERTIES / css_into_node()
+│   │   │   │       ├── matcher.rs  # selector_chain_matches(+with_hover)
+│   │   │   │       ├── selector.rs # CssSelector
+│   │   │   │       ├── stylesheet.rs # StyleSheet parsing 入口
+│   │   │   │       ├── values.rs   # CSS 值枚举 + 解析函数（Length / TextAlign / ...）
+│   │   │   │       └── properties/ # CssAttr + AlignSelf
+│   │   │   │           ├── mod.rs              # CssAttr（IndexMap + 30+ 个 getter）
+│   │   │   │           └── align_self.rs       # AlignSelf
+│   │   │   ├── tdom/
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── node.rs         # NodeType / Node / NodeArena / NodeId
+│   │   │   │   └── attribute.rs    # Attr（HTML 属性解析与查询）
+│   │   │   ├── layout/
+│   │   │   │   ├── mod.rs          # DEFAULT_LAYOUT 注册表 + LayoutFn + BoxConstraint
+│   │   │   │   ├── layout.rs       # TermMap / TermLayout::draw()（返回 boxes）
+│   │   │   │   ├── layoutbox/      # LayoutBox 数据结构（镜像浏览器 CSS Display 三轴分类）
+│   │   │   │   │   ├── mod.rs      # LayoutBox struct + 三个轴分类 re-exports
+│   │   │   │   │   ├── rect.rs, paint_style.rs, inline_run.rs, cursor.rs, inline.rs, wrap.rs
+│   │   │   │   │   ├── generation/  # styled DOM → geometry-free GeneratedBox tree
+│   │   │   │   │   │   └── mod.rs  # normal/text/anonymous/replaced + display classification
+│   │   │   │   │   ├── geometry/    # GeneratedBox → positioned LayoutBox tree
+│   │   │   │   │   │   └── mod.rs  # BoxKind × OuterDisplay × FormattingContext dispatch
+│   │   │   │   │   ├── box_kind/   # BoxKind { Normal, Replaced, Anonymous } + ReplacedContent
+│   │   │   │   │   │   ├── mod.rs          # enum + ReplacedContent
+│   │   │   │   │   │   ├── normal.rs       # NormalExt trait
+│   │   │   │   │   │   ├── replaced.rs     # ReplacedExt trait
+│   │   │   │   │   │   └── anonymous.rs    # AnonymousExt trait
+│   │   │   │   │   ├── outer_display/    # OuterDisplay { Block, Inline }
+│   │   │   │   │   │   ├── mod.rs          # enum
+│   │   │   │   │   │   ├── block.rs        # BlockExt trait
+│   │   │   │   │   │   └── inline.rs       # InlineExt trait
+│   │   │   │   │   └── inner_formatting_context/  # FormattingContext { Flow, Flex, Table, Grid }
+│   │   │   │   │       ├── mod.rs          # enum + FlowExt/FlexExt/GridExt re-exports
+│   │   │   │   │       ├── flow/           # Block/Inline Formatting Context 实现
+│   │   │   │   │       │   ├── mod.rs              # FlowExt + impl FormattingContext::Flow
+│   │   │   │   │       │   ├── tree.rs             # FontContext + layout_tree() 编排 + dispatch + layout_children
+│   │   │   │   │       │   ├── layout_block/       # 共享 layout_block() + OuterGeometry + LayoutBlockOptions
+│   │   │   │   │       │   │   ├── mod.rs          #   re-exports
+│   │   │   │   │       │   │   ├── geometry.rs     #   OuterGeometry + outer-geometry helpers
+│   │   │   │   │       │   │   ├── options.rs      #   LayoutBlockOptions
+│   │   │   │   │       │   │   └── core.rs         #   layout_block() main pipeline
+│   │   │   │   │       │   ├── a.rs / aside.rs / body.rs / div.rs / generic.rs / head.rs
+│   │   │   │   │       │   ├── header_footer.rs / html.rs / list.rs / p.rs
+│   │   │   │   │       │   ├── img.rs
+│   │   │   │   │       │   └── table/              # <table> 布局（拆 6 个文件）
+│   │   │   │   │       │       ├── mod.rs          #   re-exports
+│   │   │   │   │       │       ├── table.rs        #   layout_table orchestrator
+│   │   │   │   │       │       ├── row_group.rs    #   layout_row_group pass-through
+│   │   │   │   │       │       ├── tr.rs           #   layout_tr pass-through
+│   │   │   │   │       │       ├── td.rs           #   layout_td + layout_th pass-through
+│   │   │   │   │       │       ├── cell.rs         #   CellInfo + layout_cell
+│   │   │   │   │       │       └── measure.rs      #   collect_rows + collect_cells + cell_text_width + compute_column_widths
+│   │   │   │   │       ├── flex/           # Flex Formatting Context 实现
+│   │   │   │   │       │   ├── mod.rs              # FlexExt + impl FormattingContext::Flex
+│   │   │   │   │       │   └── tree/               # 拆 6 个文件
+│   │   │   │   │       │       ├── mod.rs          #   re-exports + tree 入口
+│   │   │   │   │       │       ├── dispatch.rs     #   layout_flex_dispatch + is_flex_capable_node + is_block_child_node
+│   │   │   │   │       │       ├── container.rs    #   layout_flex_container + FlexItemPrep + FLEX_ITEM_MIN_CROSS
+│   │   │   │   │       │       ├── items.rs        #   layout_flex_items
+│   │   │   │   │       │       ├── prepare.rs      #   prepare_flex_item + measure_text_content_width + natural_cross_axis_size + resolve_item_cross_size
+│   │   │   │   │       │       └── algorithm.rs    #   effective_align + wrap_into_lines + distribute_main_axis + justify_spacing + align_content_spacing + align_on_cross_axis
+│   │   │   │   │       └── grid/           # Grid Formatting Context（预留）
+│   │   │   │   │           └── mod.rs              # GridExt + impl FormattingContext::Grid
+│   │   │   │   └── paint/                # 绘制编排（与布局解耦，独立阶段）
+│   │   │   │       ├── mod.rs      # paint_layout_tree() 编排器 + PaintCanvas + paint_box()
+│   │   │   │       ├── block.rs    # paint_block
+│   │   │   │       ├── border.rs   # paint_borders
+│   │   │   │       ├── image.rs    # paint_image
+│   │   │   │       └── text.rs     # paint_runs
+│   │   │   └── tui/
+│   │   │       ├── mod.rs
+│   │   │       └── graph_api.rs    # 模块入口：re-exports（TermLayout / Block / RenderCmd / Img / ...）
+│   │   │           └── graph_api/  # 子模块目录（与 graph_api.rs 同模块）
+│   │   │               ├── canvas.rs   # TermLayout 画布
+│   │   │               ├── cell.rs     # Block / FontStyle
+│   │   │               ├── image.rs    # Img / 图像加载
+│   │   │               ├── input.rs    # RenderCmd（含 RenderArena） / InputState / trigger_refresh / 鼠标点击与 hover 跟踪
+│   │   │               ├── render.rs   # TermLayout::render（增量） / render_diff_to_bytes / render_to_bytes
+│   │   │               ├── style.rs    # block_style
+│   │   │               └── text.rs     # char_width / grapheme_width
+│   │   ├── tests/               # 集成测试（跟随主库）
+│   │   │   ├── html_parse_tests.rs
+│   │   │   ├── css_parse_tests.rs
+│   │   │   ├── layout_tests.rs
+│   │   │   ├── layout_div_tests.rs
+│   │   │   ├── layout_span_tests.rs
+│   │   │   ├── layout_list_tests.rs
+│   │   │   ├── layout_img_tests.rs
+│   │   │   ├── layout_aside_tests.rs
+│   │   │   ├── layout_header_footer_tests.rs
+│   │   │   ├── layout_box_model_tests.rs
+│   │   │   ├── layout_font_size_tests.rs
+│   │   │   ├── layout_tree_tests.rs
+│   │   │   ├── layout_html_body_tests.rs
+│   │   │   ├── layout_flex_tests.rs   # CSS flexbox (display: flex) 布局测试
+│   │   │   ├── layout_pipeline_tests.rs # box generation + geometry + mixed end-to-end regression
+│   │   │   ├── layout_a_tests.rs
+│   │   │   ├── layout_display_tests.rs
+│   │   │   ├── layout_em_tests.rs
+│   │   │   ├── layout_emoji_tests.rs
+│   │   │   ├── layout_table_tests.rs
+│   │   │   ├── layout_wrap_tests.rs
+│   │   │   ├── layout_events_tests.rs # 事件系统测试（命中 / 冒泡 / hover / click，纯内存）
+│   │   │   ├── render_diff_tests.rs # 帧差增量渲染（不变零输出 / 滚动 diff / 全帧对比）
+│   │   │   └── logging_tests.rs
+│   │   └── benches/               # criterion 基准（parse / cascade / paint / render_to_bytes / full_redraw）
+│   └── htui-macros/             # 过程宏 crate：#[htui::command] + #[derive(IntoJs/FromJs)]
+│       ├── Cargo.toml
+│       └── src/lib.rs           # proc-macro：命令包装 / 结构体 ↔ JS 对象 derive
 ├── docs/
 │   └── script-layer.md    # 脚本层完整使用与架构文档（脚本 / on* / 宿主函数 / RenderArena）
 ├── visual_test/          # 可视化测试工具（cargo run -p visual_test）
@@ -146,31 +175,6 @@ htui/
 │       ├── showcase/
 │       ├── table/
 │       └── viewport_units/
-├── tests/
-│   ├── html_parse_tests.rs
-│   ├── css_parse_tests.rs
-│   ├── layout_tests.rs
-│   ├── layout_div_tests.rs
-│   ├── layout_span_tests.rs
-│   ├── layout_list_tests.rs
-│   ├── layout_img_tests.rs
-│   ├── layout_aside_tests.rs
-│   ├── layout_header_footer_tests.rs
-│   ├── layout_box_model_tests.rs
-│   ├── layout_font_size_tests.rs
-│   ├── layout_tree_tests.rs
-│   ├── layout_html_body_tests.rs
-│   ├── layout_flex_tests.rs   # CSS flexbox (display: flex) 布局测试
-│   ├── layout_pipeline_tests.rs # box generation + geometry + mixed end-to-end regression
-│   ├── layout_a_tests.rs
-│   ├── layout_display_tests.rs
-│   ├── layout_em_tests.rs
-│   ├── layout_emoji_tests.rs
-│   ├── layout_table_tests.rs
-│   ├── layout_wrap_tests.rs
-│   ├── layout_events_tests.rs # 事件系统测试（命中 / 冒泡 / hover / click，纯内存）
-│   ├── render_diff_tests.rs # 帧差增量渲染（不变零输出 / 滚动 diff / 全帧对比）
-│   └── logging_tests.rs
 ```
 
 ## 架构

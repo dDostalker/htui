@@ -1053,7 +1053,7 @@ dependencies = [
  "cssparser",
  "env_logger",
  "html5ever",
- "htui_macros",
+ "htui-macros",
  "image",
  "indexmap",
  "log",
@@ -1066,7 +1066,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "htui_macros"
+name = "htui-macros"
 version = "0.1.0"
 dependencies = [
  "proc-macro2",

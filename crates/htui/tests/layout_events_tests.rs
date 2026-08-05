@@ -534,7 +534,7 @@ fn unknown_action_is_ignored_without_error() {
 fn visual_test_events_document_initializes() {
     // Smoke test: the events demo page's `<script>` block must initialize in
     // the engine (functions defined, listeners registered) without error.
-    let html = include_str!("../visual_test/src/events/index.html");
+    let html = include_str!("../../../visual_test/src/events/index.html");
     let engine = ScriptEngine::new(html, EventBindings::default()).expect("engine");
     let arena = engine.arena();
     let ids: Vec<&str> = arena
@@ -552,7 +552,7 @@ fn visual_test_sysmon_document_initializes() {
     // Smoke test: sysmon page initializes; its script references the host
     // `sample` function which is only defined at runtime, so init must not
     // fail on the unresolved reference (the refresh action resolves it later).
-    let html = include_str!("../visual_test/src/sysmon/index.html");
+    let html = include_str!("../../../visual_test/src/sysmon/index.html");
     let mut bindings = EventBindings::default();
     bindings.host.insert(
         "sample".to_string(),
@@ -592,7 +592,7 @@ fn sysmon_page_refresh_populates_all_cards() {
     // End-to-end over the real demo page: the host `sample()` returns the full
     // field set and the page's own `refresh()` writes every card. Any typo in
     // the page's element ids fails here.
-    let html = include_str!("../visual_test/src/sysmon/index.html");
+    let html = include_str!("../../../visual_test/src/sysmon/index.html");
     let mut bindings = EventBindings::default();
     bindings.host.insert(
         "sample".to_string(),

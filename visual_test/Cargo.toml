@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-htui = { path = ".." }
+htui = { path = "../crates/htui" }
 anyhow = "1.0.101"
 log = "0.4.29"
 boa_engine = "0.21.1"

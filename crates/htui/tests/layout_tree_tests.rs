@@ -261,7 +261,7 @@ fn scroll_limits_match_layout_depth() {
     );
 }
 
-const IMAGE_TEST_HTML: &str = include_str!("../visual_test/src/image/index.html");
+const IMAGE_TEST_HTML: &str = include_str!("../../../visual_test/src/image/index.html");
 
 #[test]
 fn layout_buffer_holds_full_document() {
