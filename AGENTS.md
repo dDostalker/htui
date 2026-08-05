@@ -181,7 +181,7 @@ htui/
 │       ├── table/
 │       ├── position/     # CSS 定位演示（relative / absolute / fixed / z-index）
 │       ├── input/        # <input> 输入框演示（点击聚焦 + 键盘编辑 + focus/blur/input/change 事件）
-│       ├── configurator/ # 配置器设置表单演示（input + JS 自建开关/单选 + 实时预览 + 保存/重置）
+│       ├── configurator/ # 配置器设置表单演示（input + 原生 select 下拉 + JS 开关 + 实时预览 + 保存/重置）
 │       └── viewport_units/
 ```
 

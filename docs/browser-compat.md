@@ -84,7 +84,7 @@
 | `input` | ✅ | ✅ | 唯一完整控件（见 §8 专项） |
 | `input type=password/number/...` | ✅ | ✗ | 一律按文本框渲染 |
 | `textarea` | ✅ | ◐ | 注册，按通用块，**不可编辑** |
-| `select` `option` | ✅ | ◐ | 注册，**无下拉行为** |
+| `select` `option` | ✅ | ◐ | 原生下拉（选项浮层/键盘导航/change）✅；`option` 仅为数据 |
 | `button` | ✅ | ◐ | 注册，可挂 `onclick`，无默认提交 |
 | `form` | ✅ | ◐ | 注册，无 `submit` 事件 |
 | `label` | ✅ | ◐ | 注册，点击不关联聚焦 |

@@ -20,9 +20,9 @@ use crate::{
             generation::{GeneratedBox, GeneratedBoxKind, GeneratedPayload},
         },
     },
-    tdom::node::{NodeArena, NodeId},
+    tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{
-        IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, image_intrinsic_size,
+        IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, char_width, image_intrinsic_size,
     },
 };
 
@@ -158,6 +158,9 @@ fn layout_replaced(
         GeneratedPayload::Input => {
             layout_input(arena, generated, containing, cursor, pre_allocated_rect)
         }
+        GeneratedPayload::Select => {
+            layout_select(arena, generated, containing, cursor, pre_allocated_rect)
+        }
         GeneratedPayload::Image { src } if !src.is_empty() => layout_image(
             arena,
             generated,
@@ -168,6 +171,56 @@ fn layout_replaced(
         ),
         _ => None,
     }
+}
+
+/// Read a `<select>`'s options as `(value, label)` pairs from its
+/// `<option>` children. The `value` falls back to the option's text when the
+/// `value` attribute is absent. Empty `value` attributes are treated as the
+/// empty string (a browser option with `value=""`).
+pub(crate) fn select_options(arena: &NodeArena, node_id: NodeId) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let Some(node) = arena.get(node_id) else {
+        return out;
+    };
+    for &child_id in &node.children {
+        let child = &arena[child_id];
+        if child.node_type != NodeType::HtmlOption {
+            continue;
+        }
+        let label: String = child
+            .children
+            .iter()
+            .filter_map(|&c| match &arena[c].node_type {
+                NodeType::Text(s) => Some(s.as_str()),
+                _ => None,
+            })
+            .collect();
+        let value = child
+            .attributes
+            .get("value")
+            .cloned()
+            .unwrap_or_else(|| label.clone());
+        out.push((value, label));
+    }
+    out
+}
+
+/// Dropdown overlay rectangle for an open `<select>`: directly below the
+/// field, wide enough for the longest option label (plus the selection
+/// marker), at least as wide as the field itself.
+pub(crate) fn select_overlay_rect(options: &[(String, String)], select_rect: Rect) -> Rect {
+    let text_w: usize = options
+        .iter()
+        .map(|(_, label)| label.chars().map(char_width).sum::<usize>())
+        .max()
+        .unwrap_or(0);
+    let width = select_rect.width.max(text_w.saturating_add(2)).max(1);
+    Rect::new(
+        select_rect.x,
+        select_rect.y.saturating_add(1),
+        width,
+        options.len().max(1),
+    )
 }
 
 /// Geometry for `<input>`: a single-line field sized from the HTML `width`
@@ -202,6 +255,44 @@ fn layout_input(
         generated.node_id,
         Rect::new(x, y, block_width, height),
         ReplacedContent::Input,
+        PaintStyle::default(),
+    ))
+}
+
+/// Geometry for `<select>`: a single-line dropdown field.
+///
+/// Width is the longest option label plus the frame / chevron, or the HTML
+/// `width` attribute when set. The dropdown overlay is painted by the render
+/// thread, so the box itself is always one row.
+fn layout_select(
+    arena: &NodeArena,
+    generated: &GeneratedBox,
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+    pre_allocated_rect: Option<Rect>,
+) -> Option<LayoutBox> {
+    let (x, y, block_width, height) = match pre_allocated_rect {
+        Some(rect) => (rect.x, rect.y, rect.width.max(1), rect.height.max(1)),
+        None => {
+            let node = &arena[generated.node_id];
+            let text_w: usize = select_options(arena, generated.node_id)
+                .iter()
+                .map(|(_, label)| label.chars().map(char_width).sum::<usize>())
+                .max()
+                .unwrap_or(0);
+            let block_width = match node.get_width() {
+                Some(w) => (w as usize).min(containing.width).max(1),
+                None => (text_w.saturating_add(4)).min(containing.width).max(4),
+            };
+            let x = containing.x;
+            let y = cursor.allocate(1);
+            (x, y, block_width, 1)
+        }
+    };
+    Some(LayoutBox::new_replaced(
+        generated.node_id,
+        Rect::new(x, y, block_width, height),
+        ReplacedContent::Select,
         PaintStyle::default(),
     ))
 }

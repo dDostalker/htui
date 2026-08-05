@@ -10,6 +10,7 @@ use crate::{
     tui::graph_api::char_width,
 };
 use crate::events::{ElementRef, EventType, HitMap, HitRegion};
+use crate::layout::layoutbox::geometry::{select_options, select_overlay_rect};
 use crate::layout::paint::value_window;
 use crate::layout::Rect;
 
@@ -86,6 +87,19 @@ pub enum RenderCmd {
         focused: bool,
         selection: Option<(usize, usize)>,
     },
+    /// Open the `<select>` dropdown overlay for `node_id`: the render thread
+    /// reads the options from the DOM, paints the overlay below the field and
+    /// recolours the field's frame.
+    SelectOpen { node_id: NodeId },
+    /// Close the dropdown overlay for `node_id` (clears the painted overlay
+    /// and restores the field's frame).
+    SelectClose { node_id: NodeId },
+    /// Move the dropdown's highlighted row to `highlight` (keyboard
+    /// navigation) and repaint only the overlay.
+    SelectMove {
+        node_id: NodeId,
+        highlight: usize,
+    },
     /// Update the page text selection (canvas-space anchor and current
     /// endpoint; either `None` clears it). The render thread repaints the
     /// affected region with the selection highlight (flow or block shape) and
@@ -97,6 +111,23 @@ pub enum RenderCmd {
         mode: SelectionMode,
     },
     Quit,
+}
+
+/// Canvas-space state of an open `<select>` dropdown, held by the input loop
+/// so clicks and keyboard navigation can be resolved without asking the
+/// render thread.
+#[derive(Debug, Clone)]
+pub struct SelectOpenState {
+    /// The `<select>` node id.
+    pub node_id: NodeId,
+    /// Overlay rectangle (canvas coordinates, directly below the field).
+    pub rect: crate::layout::Rect,
+    /// `(value, label)` pairs of the options.
+    pub options: Vec<(String, String)>,
+    /// Index of the currently selected option.
+    pub selected: usize,
+    /// Index highlighted in the overlay (keyboard / hover cursor).
+    pub highlight: usize,
 }
 
 /// Input-loop state that persists between events.
@@ -144,6 +175,10 @@ pub struct InputState {
     /// on every `TextSelection` command; read on `Ctrl+C` to copy. Shared
     /// with the render thread through `Arc<Mutex<_>>`.
     pub selection_text: Arc<Mutex<String>>,
+    /// The `<select>` dropdown currently open (`None` = closed). While set,
+    /// clicks inside the overlay pick an option and clicks outside close it;
+    /// `↑` / `↓` / `Enter` / `Esc` navigate it.
+    pub open_select: Option<SelectOpenState>,
 }
 
 impl InputState {
@@ -163,6 +198,7 @@ impl InputState {
             text_sel_end: None,
             text_sel_mode: SelectionMode::Flow,
             selection_text: Arc::new(Mutex::new(String::new())),
+            open_select: None,
         }
     }
 }
@@ -553,6 +589,89 @@ fn clear_text_selection(state: &mut InputState, cmds: &mut Vec<RenderCmd>) {
     }
 }
 
+/// The overlay option row containing the canvas point `(x, y)`, if any.
+fn hit_select_option(open: &SelectOpenState, x: u32, y: u32) -> Option<usize> {
+    if y >= open.rect.y as u32
+        && y < open.rect.y as u32 + open.rect.height as u32
+        && x >= open.rect.x as u32
+        && x < open.rect.x as u32 + open.rect.width as u32
+    {
+        Some((y - open.rect.y as u32) as usize)
+    } else {
+        None
+    }
+}
+
+/// Open the `<select>` dropdown for `node_id`: resolve the options and
+/// overlay geometry from the DOM, remember them on the input loop, and ask
+/// the render thread to paint the overlay.
+fn open_select(
+    state: &mut InputState,
+    hit_map: &HitMap,
+    engine: &ScriptEngine,
+    node_id: NodeId,
+    cmds: &mut Vec<RenderCmd>,
+) {
+    let Some(region) = hit_map.iter().find(|r| r.node_id == node_id) else {
+        return;
+    };
+    let arena = engine.arena();
+    let options = select_options(&arena, node_id);
+    let value = arena
+        .get(node_id)
+        .and_then(|n| n.attributes.get("value"))
+        .cloned()
+        .unwrap_or_default();
+    let selected = options
+        .iter()
+        .position(|(v, _)| *v == value)
+        .unwrap_or(0);
+    let rect = select_overlay_rect(&options, region.rect);
+    state.open_select = Some(SelectOpenState {
+        node_id,
+        rect,
+        options,
+        selected,
+        highlight: selected,
+    });
+    cmds.push(RenderCmd::SelectOpen { node_id });
+}
+
+/// Close the open `<select>` dropdown. When `pick` is `Some`, the option is
+/// selected: its value is committed to the DOM (`set_value_dirty`), a
+/// `change` event fires when the value actually changed, and a re-render
+/// repaints the new label. `pick: None` just closes without changing the
+/// value.
+fn close_select(
+    state: &mut InputState,
+    engine: &mut ScriptEngine,
+    pick: Option<usize>,
+    cmds: &mut Vec<RenderCmd>,
+) {
+    let Some(open) = state.open_select.take() else {
+        return;
+    };
+    cmds.push(RenderCmd::SelectClose {
+        node_id: open.node_id,
+    });
+    if let Some(idx) = pick {
+        if idx < open.options.len() {
+            let value = open.options[idx].0.clone();
+            let old = engine
+                .arena()
+                .get(open.node_id)
+                .and_then(|n| n.attributes.get("value"))
+                .cloned()
+                .unwrap_or_default();
+            if value != old {
+                engine.set_value_dirty(open.node_id, &value);
+                let region = region_for(&engine.arena(), open.node_id);
+                cmds.extend(engine.fire(&region, EventType::Change, 0, 0));
+            }
+        }
+    }
+}
+
 /// Handle a left-button press at canvas coordinates `(x, y)`.
 ///
 /// Browser-aligned mousedown behaviour: a press on an `<input>` focuses it
@@ -571,6 +690,22 @@ pub fn handle_mouse_down(
     cmds: &mut Vec<RenderCmd>,
 ) {
     let clicked = hit_map.hit_test(x, y);
+
+    // An open dropdown takes priority: a press on an option row picks it,
+    // a press on the field toggles it closed, any other press closes it and
+    // then falls through to the normal dispatch.
+    if let Some(open) = state.open_select.clone() {
+        if let Some(idx) = hit_select_option(&open, x, y) {
+            close_select(state, engine, Some(idx), cmds);
+            return;
+        }
+        let clicked_self = clicked.is_some_and(|r| r.node_id == open.node_id);
+        close_select(state, engine, None, cmds);
+        if clicked_self {
+            return;
+        }
+    }
+
     let clicked_input = clicked.is_some_and(|r| {
         engine
             .arena()
@@ -621,6 +756,21 @@ pub fn handle_mouse_down(
         }
         _ => {}
     }
+
+    // A left press on a closed `<select>` opens its dropdown (blurring any
+    // focused field, like a browser mousedown on a control).
+    if button == MouseButton::Left
+        && let Some(region) = clicked
+        && engine
+            .arena()
+            .get(region.node_id)
+            .is_some_and(|n| n.node_type == NodeType::Select)
+    {
+        if state.focused_input.is_some() {
+            blur_input(state, Some(engine), cmds);
+        }
+        open_select(state, hit_map, engine, region.node_id, cmds);
+    }
 }
 
 /// Handle a pointer move at canvas coordinates `(x, y)`.
@@ -638,6 +788,25 @@ pub fn handle_mouse_move(
     y: u32,
     cmds: &mut Vec<RenderCmd>,
 ) {
+    // An open `<select>` dropdown follows the pointer: hovering an option row
+    // moves the highlight (and repaints only the overlay). This runs even
+    // while the button is held (browser select: press-drag over the options)
+    // and short-circuits when the highlight is unchanged.
+    if let Some(idx) = state
+        .open_select
+        .as_ref()
+        .and_then(|open| hit_select_option(open, x, y))
+        .filter(|&idx| state.open_select.as_ref().is_some_and(|o| o.highlight != idx))
+    {
+        if let Some(open) = &mut state.open_select {
+            open.highlight = idx;
+            cmds.push(RenderCmd::SelectMove {
+                node_id: open.node_id,
+                highlight: idx,
+            });
+        }
+    }
+
     if state.pressed.is_some() {
         // Dragging: the pointer is inside the field it started in, so the
         // selection stays within that field's rectangle.
@@ -722,6 +891,62 @@ pub fn trigger_refresh(
         Ok(Event::Key(key)) => {
             if key.kind == KeyEventKind::Release {
                 return cmds;
+            }
+
+            // An open `<select>` dropdown consumes navigation keys: ↑ / ↓
+            // move the highlight, `Enter` picks the highlighted option, `Esc`
+            // closes. Any other key closes the dropdown and is swallowed
+            // (the dropdown owns the keyboard while open).
+            if state.open_select.is_some() {
+                let Some(engine) = engine else {
+                    return cmds;
+                };
+                let node_id = state
+                    .open_select
+                    .as_ref()
+                    .map(|o| o.node_id)
+                    .unwrap();
+                match key.code {
+                    KeyCode::Up => {
+                        if let Some(open) = &mut state.open_select {
+                            let n = open.options.len().max(1);
+                            open.highlight = if open.highlight == 0 {
+                                n - 1
+                            } else {
+                                open.highlight - 1
+                            };
+                            cmds.push(RenderCmd::SelectMove {
+                                node_id,
+                                highlight: open.highlight,
+                            });
+                        }
+                        return cmds;
+                    }
+                    KeyCode::Down => {
+                        if let Some(open) = &mut state.open_select {
+                            let n = open.options.len().max(1);
+                            open.highlight = (open.highlight + 1).min(n - 1);
+                            cmds.push(RenderCmd::SelectMove {
+                                node_id,
+                                highlight: open.highlight,
+                            });
+                        }
+                        return cmds;
+                    }
+                    KeyCode::Enter => {
+                        let pick = state.open_select.as_ref().map(|o| o.highlight);
+                        close_select(state, engine, pick, &mut cmds);
+                        return cmds;
+                    }
+                    KeyCode::Esc => {
+                        close_select(state, engine, None, &mut cmds);
+                        return cmds;
+                    }
+                    _ => {
+                        close_select(state, engine, None, &mut cmds);
+                        return cmds;
+                    }
+                }
             }
 
             // A focused `<input>` consumes text-editing keys; `Esc` blurs it
@@ -886,6 +1111,12 @@ pub fn trigger_refresh(
             let ctrl = mouse.modifiers.contains(event::KeyModifiers::CONTROL);
             match mouse.kind {
                 MouseEventKind::ScrollUp => {
+                    // Scrolling dismisses an open dropdown (focus loss).
+                    if state.open_select.is_some()
+                        && let Some(engine) = engine
+                    {
+                        close_select(state, engine, None, &mut cmds);
+                    }
                     if ctrl {
                         state.zoom = (state.zoom - ZOOM_STEP).max(ZOOM_MIN);
                         return vec![RenderCmd::Redraw {
@@ -902,6 +1133,12 @@ pub fn trigger_refresh(
                     });
                 }
                 MouseEventKind::ScrollDown => {
+                    // Scrolling dismisses an open dropdown (focus loss).
+                    if state.open_select.is_some()
+                        && let Some(engine) = engine
+                    {
+                        close_select(state, engine, None, &mut cmds);
+                    }
                     if ctrl {
                         state.zoom = (state.zoom + ZOOM_STEP).min(ZOOM_MAX);
                         return vec![RenderCmd::Redraw {
@@ -930,8 +1167,17 @@ pub fn trigger_refresh(
                     {
                         state.pressed = None;
                         state.drag_selecting = false;
+                        let (x, y) = canvas_pos(state, mouse.column, mouse.row);
+                        // Press-drag-release over a dropdown option picks it
+                        // (the browser's native `<select>` interaction), even
+                        // when the release lands off the press cell.
+                        if let Some(open) = state.open_select.clone() {
+                            if let Some(idx) = hit_select_option(&open, x, y) {
+                                close_select(state, engine, Some(idx), &mut cmds);
+                                return cmds;
+                            }
+                        }
                         if px == mouse.column && py == mouse.row {
-                            let (x, y) = canvas_pos(state, mouse.column, mouse.row);
                             handle_click(state, hit_map, engine, x, y, &mut cmds);
                         }
                         // A drag ended on a different cell: the selection

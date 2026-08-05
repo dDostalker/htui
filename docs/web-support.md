@@ -40,13 +40,17 @@
 - 支持列宽按内容测量、跨行/跨列（`rowspan`/`colspan`）按实现现状
 - 与浏览器表格语义的差异以 `layoutbox/inner_formatting_context/flow/table/` 为准
 
-### 1.4 表单控件（◐ 已注册，仅按通用规则渲染）
+### 1.4 表单控件（◐ 部分控件化）
 
-`form` `button` `select` `option` `label` `textarea`
+`form` `button` `option` `label` `textarea`
 
-- 这些标签**可解析、可设样式、可挂事件**（`onclick` 等照常触发），但**没有**
-  浏览器控件语义：`select` 不弹出选项、`textarea` 不可编辑、`button` 无默认
-  提交行为。唯一完整实现的控件是 `input`。
+- ✅ **`select`**：原生下拉选择框——点击展开浮层（覆盖下层内容）、**指针悬停
+  或按住拖动时高亮跟随选项行**、点击/松开选中、`↑/↓/Enter/Esc` 键盘导航、
+  选中写回 `value` 属性并触发 `change`、`el.value` 读写选中值。点击外部/
+  滚动/按非导航键自动关闭。宽度按最长选项自适应，可用 `width` 属性限定。
+- ◐ `form` `button` `option` `label` `textarea`：可解析、可设样式、可挂事件，
+  但无浏览器控件语义（`textarea` 不可编辑、`button` 无默认提交、
+  `form` 无 `submit`）。唯一完整实现的编辑控件是 `input`。
 
 ## 2. CSS
 

@@ -14,8 +14,8 @@ pub use image::{
     render_image_at, render_image_at_slice,
 };
 pub use input::{
-    DirtyInfo, InputState, RenderCmd, SelectionMode, apply_input_key, handle_click,
-    handle_mouse_down, handle_mouse_move, selection_range, trigger_refresh,
+    DirtyInfo, InputState, RenderCmd, SelectionMode, SelectOpenState, apply_input_key,
+    handle_click, handle_mouse_down, handle_mouse_move, selection_range, trigger_refresh,
 };
 pub use render::is_rendered_as_bare_space;
 pub use style::block_style;

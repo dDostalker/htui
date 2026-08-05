@@ -46,6 +46,7 @@ impl TermLayout {
             zoom,
             image_cache: ImageCache::new(),
             input_states: std::collections::HashMap::new(),
+            open_select: None,
         }
     }
 }

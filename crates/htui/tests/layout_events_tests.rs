@@ -20,8 +20,8 @@ use htui::layout::{BoxConstraint, Cursor, Rect, layout_tree};
 use htui::script::ScriptEngine;
 use htui::tdom::node::{NodeArena, NodeId};
 use htui::tui::graph_api::{
-    InputState, RenderCmd, SelectionMode, apply_input_key, handle_click, handle_mouse_down,
-    handle_mouse_move,
+    InputState, RenderCmd, SelectionMode, TermLayout, apply_input_key, handle_click,
+    handle_mouse_down, handle_mouse_move,
 };
 
 use crossterm::event::{KeyCode, MouseButton};
@@ -461,6 +461,205 @@ fn right_drag_emits_a_block_selection() {
     );
 }
 
+#[test]
+fn click_select_opens_the_dropdown() {
+    // Clicking a `<select>` opens its dropdown: the input loop remembers the
+    // options and overlay geometry, and queues a `SelectOpen` repaint.
+    let (mut engine, geo) = build_geometry(
+        r#"<div><select id="s"><option value="a">Alpha</option><option value="b">Beta</option></select></div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("s").expect("select region");
+    let (sx, sy) = center(region.rect);
+
+    let mut state = InputState::new();
+    let mut cmds = Vec::new();
+    handle_mouse_down(&mut state, &map, &mut engine, sx, sy, MouseButton::Left, &mut cmds);
+    assert!(
+        state.open_select.is_some(),
+        "clicking a select must open its dropdown"
+    );
+    let open = state.open_select.clone().unwrap();
+    assert_eq!(open.node_id, region.node_id);
+    assert_eq!(open.options.len(), 2);
+    assert_eq!(open.highlight, 0, "first option highlighted when nothing selected");
+    assert!(
+        cmds.iter().any(|c| matches!(c, RenderCmd::SelectOpen { .. })),
+        "opening must queue a SelectOpen repaint"
+    );
+}
+
+#[test]
+fn picking_a_select_option_commits_the_value_and_fires_change() {
+    // Clicking an option row picks it: the dropdown closes, the value is
+    // committed to the DOM, and a `change` event fires along the DOM path.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var seen = [];
+          var s = document.getElementById('s');
+          s.addEventListener('change', function () { seen.push(s.value); });
+          globalThis.__seen = seen;
+        </script>
+        <div><select id="s"><option value="a">Alpha</option><option value="b">Beta</option></select></div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("s").expect("select region");
+    let (sx, sy) = center(region.rect);
+
+    let mut state = InputState::new();
+    let mut cmds = Vec::new();
+    handle_mouse_down(&mut state, &map, &mut engine, sx, sy, MouseButton::Left, &mut cmds);
+    let open = state.open_select.clone().unwrap();
+    // Click the second option row (one row below the field).
+    let mut cmds = Vec::new();
+    handle_mouse_down(
+        &mut state,
+        &map,
+        &mut engine,
+        open.rect.x as u32,
+        open.rect.y as u32 + 1,
+        MouseButton::Left,
+        &mut cmds,
+    );
+    assert!(state.open_select.is_none(), "picking an option closes the dropdown");
+    assert!(
+        cmds.iter().any(|c| matches!(c, RenderCmd::SelectClose { .. })),
+        "closing must queue a SelectClose repaint"
+    );
+    let arena = engine.arena();
+    let value = arena
+        .get(region.node_id)
+        .and_then(|n| n.attributes.get("value"))
+        .cloned();
+    assert_eq!(value.as_deref(), Some("b"), "chosen option value must be committed");
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.__seen.join(','))"),
+        "b",
+        "change must fire with the new value"
+    );
+}
+
+#[test]
+fn hovering_a_select_option_moves_the_highlight() {
+    // While the dropdown is open, a button-free pointer move over an option
+    // row moves the highlight (browser hover) and queues a `SelectMove`.
+    let (mut engine, geo) = build_geometry(
+        r#"<div><select id="s"><option value="a">Alpha</option><option value="b">Beta</option></select></div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("s").expect("select region");
+    let (sx, sy) = center(region.rect);
+
+    let mut state = InputState::new();
+    let mut cmds = Vec::new();
+    handle_mouse_down(&mut state, &map, &mut engine, sx, sy, MouseButton::Left, &mut cmds);
+    let open = state.open_select.clone().unwrap();
+
+    let mut cmds = Vec::new();
+    handle_mouse_move(
+        &mut state,
+        &map,
+        &mut engine,
+        open.rect.x as u32,
+        open.rect.y as u32 + 1,
+        &mut cmds,
+    );
+    assert_eq!(
+        state.open_select.as_ref().unwrap().highlight,
+        1,
+        "hovering the second row must move the highlight"
+    );
+    assert!(
+        cmds.iter().any(|c| matches!(c, RenderCmd::SelectMove { highlight: 1, .. })),
+        "a hover move must queue a SelectMove repaint"
+    );
+
+    // Hovering the same row again emits nothing (highlight unchanged).
+    let mut cmds = Vec::new();
+    handle_mouse_move(
+        &mut state,
+        &map,
+        &mut engine,
+        open.rect.x as u32,
+        open.rect.y as u32 + 1,
+        &mut cmds,
+    );
+    assert!(
+        cmds.iter().all(|c| !matches!(c, RenderCmd::SelectMove { .. })),
+        "an unchanged highlight must not repaint"
+    );
+}
+
+#[test]
+fn dragging_over_select_options_moves_the_highlight() {
+    // The browser's native interaction: press the select, drag over the
+    // options (button held) — the highlight must follow the pointer, even on
+    // the bottommost option row.
+    let (mut engine, geo) = build_geometry(
+        r#"<div><select id="s"><option value="a">Alpha</option><option value="b">Beta</option><option value="c">Gamma</option></select></div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("s").expect("select region");
+    let (sx, sy) = center(region.rect);
+
+    let mut state = InputState::new();
+    let mut cmds = Vec::new();
+    handle_mouse_down(&mut state, &map, &mut engine, sx, sy, MouseButton::Left, &mut cmds);
+    let open = state.open_select.clone().unwrap();
+
+    // Button held while dragging to the bottommost row.
+    state.pressed = Some((0, 0));
+    let mut cmds = Vec::new();
+    handle_mouse_move(
+        &mut state,
+        &map,
+        &mut engine,
+        open.rect.x as u32,
+        open.rect.y as u32 + 2,
+        &mut cmds,
+    );
+    assert_eq!(
+        state.open_select.as_ref().unwrap().highlight,
+        2,
+        "dragging must highlight the bottommost option too"
+    );
+    assert!(
+        cmds.iter().any(|c| matches!(c, RenderCmd::SelectMove { highlight: 2, .. })),
+        "drag hover must queue a SelectMove"
+    );
+}
+
+#[test]
+fn clicking_outside_a_select_closes_it_without_changing_the_value() {
+    let (mut engine, geo) = build_geometry(
+        r#"<div><select id="s" value="a"><option value="a">A</option><option value="b">B</option></select><div id="other">text</div></div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("s").expect("select region");
+    let (sx, sy) = center(region.rect);
+
+    let mut state = InputState::new();
+    let mut cmds = Vec::new();
+    handle_mouse_down(&mut state, &map, &mut engine, sx, sy, MouseButton::Left, &mut cmds);
+    assert!(state.open_select.is_some());
+
+    // Click far away (below the document): closes, value untouched.
+    let mut cmds = Vec::new();
+    handle_mouse_down(&mut state, &map, &mut engine, 0, 1000, MouseButton::Left, &mut cmds);
+    assert!(state.open_select.is_none());
+    let arena = engine.arena();
+    let value = arena
+        .get(region.node_id)
+        .and_then(|n| n.attributes.get("value"))
+        .cloned();
+    assert_eq!(value.as_deref(), Some("a"), "dismissing must not change the value");
+}
+
 // ============================================================
 // Flow-selection text extraction (`layout::extract_flow_text`)
 // ============================================================
@@ -663,6 +862,19 @@ fn find_node_by_id(arena: &NodeArena, id: &str) -> NodeId {
         .find(|(_, n)| n.attributes.get("id").map(String::as_str) == Some(id))
         .map(|(nid, _)| nid)
         .expect("element with id exists")
+}
+
+/// Depth-first search for the first box belonging to `node_id`.
+fn find_box<'a>(boxes: &'a [htui::layout::LayoutBox], node_id: NodeId) -> Option<&'a htui::layout::LayoutBox> {
+    for b in boxes {
+        if b.node_id == node_id {
+            return Some(b);
+        }
+        if let Some(found) = find_box(&b.children, node_id) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 /// A canvas point inside `rect` (its centre).
@@ -1278,5 +1490,68 @@ fn hover_cascade_paints_the_highlight_onto_the_canvas() {
     assert_eq!(
         arena[hovered].css_attr.get_bg_color(),
         Some(Color::Rgb { r: 0, g: 255, b: 0 })
+    );
+}
+
+#[test]
+fn hover_background_fills_padding_cells_not_just_the_text_run() {
+    // A `:hover` background introduced by the render thread's re-cascade (the
+    // element had no background when its boxes were laid out) must fill the
+    // whole padding-box, not only the text columns. Without this, the padding
+    // cells of a bordered/padded `.btn:hover` keep the page background and the
+    // highlight reads as a hollow frame (the configurator save/reset bug).
+    let html = r#"<div id="save" class="btn">Save</div>"#;
+    let css = ".btn { padding-left: 1; padding-right: 1; border: 1px solid #7aa2f7; }\n\
+               .btn:hover { background-color: #28304d; }";
+    let (root_id, mut arena) = setup(html);
+    let mut css_parser = CssParser::new(css);
+    let rules = css_parser.parse();
+    let save = find_node_by_id(&arena, "save");
+
+    // Layout with the base cascade: `.btn` carries no background, so the
+    // box's layout-time `fill_bg` is false — exactly what the `Hover` render
+    // command sees when it re-paints without re-laying-out.
+    reset_css_attr(&mut arena, root_id);
+    css_into_node(&mut arena, root_id, &rules);
+    let term_map = TermMap { columns: COLS, rows: ROWS };
+    let containing = BoxConstraint::root(&term_map);
+    let mut cursor = Cursor::new();
+    let boxes = layout_tree(
+        &arena,
+        root_id,
+        containing,
+        &mut cursor,
+        COLS as usize,
+        ROWS as usize,
+    );
+    let r = find_box(&boxes, save).expect("btn box").rect;
+    assert_eq!(r.height, 3, "border-top + content + border-bottom");
+
+    // Re-cascade with the button hovered (no re-layout) and paint from the
+    // cached layout, like the render thread's `Hover` handler.
+    reset_css_attr(&mut arena, root_id);
+    css_into_node_with_hover(&mut arena, root_id, &rules, Some(save));
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.repaint_from(&arena, &boxes);
+
+    let hover_bg = Some(Color::Rgb { r: 0x28, g: 0x30, b: 0x4d });
+    let cols = COLS as usize;
+    let content_row = (r.y + 1) as usize; // directly below the top border
+    let left_padding = (r.x + 1) as usize; // after the left border
+    let right_padding = (r.x + r.width - 2) as usize; // before the right border
+    assert_eq!(
+        tl.layout[content_row * cols + left_padding].bcolor,
+        hover_bg,
+        "left padding cell must be filled by the hover background"
+    );
+    assert_eq!(
+        tl.layout[content_row * cols + right_padding].bcolor,
+        hover_bg,
+        "right padding cell must be filled by the hover background"
+    );
+    assert_eq!(
+        tl.layout[content_row * cols + left_padding + 1].bcolor,
+        hover_bg,
+        "text run cell must keep the hover background"
     );
 }

@@ -45,12 +45,14 @@
     <div class="row"><div class="label">Refresh</div><input id="refresh" width="6" value="200"><div class="muted">ms</div></div>
   </div>
 
-  <!-- Custom controls built with JS (no native select / checkbox) -->
+  <!-- Custom controls built with JS (toggle switches); native <select> dropdown -->
   <div class="card">
     <div class="row"><div class="label">Theme</div>
-      <div id="theme-tn" class="opt sel" onclick="pickTheme('tn')">● Tokyo Night</div>
-      <div id="theme-light" class="opt" onclick="pickTheme('light')">○ Light</div>
-      <div id="theme-custom" class="opt" onclick="pickTheme('custom')">○ Custom</div>
+      <select id="theme">
+        <option value="tn">Tokyo Night</option>
+        <option value="light">Light</option>
+        <option value="custom">Custom</option>
+      </select>
     </div>
     <div class="row"><div class="label">CPU alarm</div>
       <div id="cpu-alarm" class="toggle off" onclick="toggleAlarm('cpu')">[ OFF ]</div>
@@ -76,25 +78,16 @@
   </div>
 
   <script>
-    // ---- State ----
+    // ---- Theme (native <select> dropdown) ----
     var THEME_NAMES = { tn: 'Tokyo Night', light: 'Light', custom: 'Custom' };
-    var THEMES = ['tn', 'light', 'custom'];
     var theme = 'tn';
-    var cpuOn = false, diskOn = false, logOn = true;
-
-    // ---- Theme radio group ----
-    function pickTheme(t) {
-      theme = t;
-      for (var i = 0; i < THEMES.length; i++) {
-        var k = THEMES[i];
-        var el = document.getElementById('theme-' + k);
-        el.textContent = (k === t ? '● ' : '○ ') + THEME_NAMES[k];
-        el.setAttribute('class', k === t ? 'opt sel' : 'opt');
-      }
+    document.getElementById('theme').addEventListener('change', function () {
+      theme = document.getElementById('theme').value;
       updatePreview();
-    }
+    });
 
     // ---- Toggle switches ----
+    var cpuOn = false, diskOn = false, logOn = true;
     function paintToggle(id, on) {
       var el = document.getElementById(id);
       el.textContent = on ? '[ ON ]' : '[ OFF ]';
@@ -152,7 +145,8 @@
       document.getElementById('host').value = 'localhost';
       document.getElementById('port').value = '8080';
       document.getElementById('refresh').value = '200';
-      pickTheme('tn');
+      document.getElementById('theme').value = 'tn';
+      theme = 'tn';
       cpuOn = false; diskOn = false; logOn = true;
       paintToggle('cpu-alarm', false);
       paintToggle('disk-alarm', false);
@@ -163,7 +157,6 @@
       updatePreview();
     }
 
-    pickTheme('tn');
     updatePreview();
   </script>
 </body>

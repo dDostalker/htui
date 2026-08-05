@@ -22,14 +22,18 @@ use crossterm::{
 
 use crate::{
     events::{AutoRefresh, EventBindings, Geometry, HitMap},
-    html::css_parse::{self, CssRule, PseudoClass, Selector, css_into_node_with_hover, reset_css_attr},
+    html::css_parse::{
+        self, CssRule, PseudoClass, Selector, css_into_node_with_hover, reset_css_attr,
+        selector_chain_matches_with_hover,
+    },
+    layout::layoutbox::geometry::{select_options, select_overlay_rect},
     layout::{LayoutBox, Rect},
     layout::layout::TermMap,
     script::ScriptEngine,
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{
-        DirtyInfo, InputRenderState, InputState, RenderCmd, SelectionMode, TermLayout,
-        trigger_refresh,
+        Block, DirtyInfo, FontStyle, InputRenderState, InputState, RenderCmd, SelectionMode,
+        TermLayout, char_width, trigger_refresh,
     },
 };
 
@@ -117,6 +121,20 @@ const SELECTION_BG: Color = Color::Rgb {
     b: 0x61,
 };
 
+/// Dropdown overlay background (Tokyo Night panel).
+const OVERLAY_BG: Color = Color::Rgb {
+    r: 0x24,
+    g: 0x28,
+    b: 0x3b,
+};
+
+/// Overlay text colour (Tokyo Night foreground).
+const OVERLAY_FG: Color = Color::Rgb {
+    r: 0xc0,
+    g: 0xca,
+    b: 0xf5,
+};
+
 /// An active page text selection: the two canvas-space endpoints and the
 /// shape connecting them (`Flow` follows reading order, `Block` is a
 /// rectangle). The highlight and the extractable text are both derived from
@@ -127,6 +145,19 @@ struct TextSel {
     mode: SelectionMode,
     anchor: (u32, u32),
     end: (u32, u32),
+}
+
+/// An open `<select>` dropdown overlay: the field rect, the option list and
+/// the highlighted row. Painted after every repaint (like the text
+/// selection) so it survives layout / hover passes.
+struct OpenSelect {
+    node_id: NodeId,
+    /// Overlay rectangle (canvas coordinates, directly below the field).
+    rect: Rect,
+    /// `(value, label)` pairs of the options.
+    options: Vec<(String, String)>,
+    /// Row highlighted by the keyboard cursor.
+    highlight: usize,
 }
 
 struct RenderState {
@@ -154,6 +185,8 @@ struct RenderState {
     /// Text inside the current selection, refreshed whenever the selection
     /// moves; the input loop reads it on `Ctrl+C` to copy.
     selection_text: Arc<Mutex<String>>,
+    /// The `<select>` dropdown overlay currently painted (`None` = none).
+    open_select: Option<OpenSelect>,
     max_scroll: Arc<AtomicU32>,
 }
 
@@ -195,6 +228,115 @@ impl RenderState {
         }
         tl.render(out);
         flush_frame(out);
+    }
+
+    /// Handle one `<select>` dropdown command (open / close / move).
+    ///
+    /// Runs both from the coalescing `match` (a lone command) and from the
+    /// pending pass, so `SelectClose` cannot be swallowed by a following
+    /// `RenderArena` (which would re-draw the closed overlay on its full
+    /// repaint) and `SelectMove` cannot be swallowed by a `Hover`.
+    fn handle_select<W: Write>(&mut self, out: &mut BufWriter<W>, cmd: RenderCmd) {
+        match cmd {
+            RenderCmd::SelectOpen { node_id } => {
+                let Some(geo) = self.geometry.as_ref() else {
+                    return;
+                };
+                // A previous dropdown may still be painted (its `SelectClose`
+                // could have been coalesced away when opening another select):
+                // clear the old overlay before painting the new one.
+                if let Some(prev) = self.open_select.take()
+                    && prev.node_id != node_id
+                    && let Some(tl) = self.term_layout.as_mut()
+                {
+                    tl.open_select = None;
+                    let prev_select = collect_box_rects(&geo.boxes)
+                        .into_iter()
+                        .find(|(id, _)| *id == prev.node_id)
+                        .map(|(_, r)| r)
+                        .unwrap_or(prev.rect);
+                    tl.repaint_region(&geo.arena, &geo.boxes, union_rect(prev_select, prev.rect));
+                }
+                let options = select_options(&geo.arena, node_id);
+                let value = geo
+                    .arena
+                    .get(node_id)
+                    .and_then(|n| n.attributes.get("value"))
+                    .cloned()
+                    .unwrap_or_default();
+                let selected = options
+                    .iter()
+                    .position(|(v, _)| *v == value)
+                    .unwrap_or(0);
+                let Some(select_rect) = collect_box_rects(&geo.boxes)
+                    .into_iter()
+                    .find(|(id, _)| *id == node_id)
+                    .map(|(_, r)| r)
+                else {
+                    return;
+                };
+                let rect = select_overlay_rect(&options, select_rect);
+                self.open_select = Some(OpenSelect {
+                    node_id,
+                    rect,
+                    options,
+                    highlight: selected,
+                });
+                let Some(tl) = self.term_layout.as_mut() else {
+                    return;
+                };
+                tl.open_select = Some(node_id);
+                tl.repaint_region(&geo.arena, &geo.boxes, union_rect(select_rect, rect));
+                if let Some(open) = &self.open_select {
+                    apply_select_overlay(tl, open);
+                }
+                tl.render(out);
+                flush_frame(out);
+            }
+
+            RenderCmd::SelectClose { .. } => {
+                let Some(open) = self.open_select.take() else {
+                    return;
+                };
+                let Some(tl) = self.term_layout.as_mut() else {
+                    return;
+                };
+                tl.open_select = None;
+                let Some(geo) = self.geometry.as_ref() else {
+                    return;
+                };
+                let select_rect = collect_box_rects(&geo.boxes)
+                    .into_iter()
+                    .find(|(id, _)| *id == open.node_id)
+                    .map(|(_, r)| r)
+                    .unwrap_or(open.rect);
+                tl.repaint_region(&geo.arena, &geo.boxes, union_rect(select_rect, open.rect));
+                tl.render(out);
+                flush_frame(out);
+            }
+
+            RenderCmd::SelectMove { node_id, highlight } => {
+                let Some(open) = self.open_select.as_mut() else {
+                    return;
+                };
+                if open.node_id != node_id {
+                    return;
+                }
+                open.highlight = highlight.min(open.options.len().saturating_sub(1));
+                let Some(tl) = self.term_layout.as_mut() else {
+                    return;
+                };
+                let Some(geo) = self.geometry.as_ref() else {
+                    return;
+                };
+                tl.repaint_region(&geo.arena, &geo.boxes, open.rect);
+                apply_select_overlay(tl, open);
+                tl.render(out);
+                flush_frame(out);
+            }
+
+            _ => {}
+        }
     }
 
     /// Parse the current session document and cascade its styles.
@@ -330,6 +472,10 @@ impl RenderState {
         if let Some(sel) = &self.text_selection {
             let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
             apply_selection_lines(tl, &lines);
+        }
+        // Re-apply an open dropdown overlay (a repaint would clear it).
+        if let Some(open) = &self.open_select {
+            apply_select_overlay(tl, open);
         }
 
         // The incremental renderer emits only the changed cells (and a
@@ -520,10 +666,73 @@ fn lines_bounds(lines: &[(u32, u32, u32)]) -> Option<Rect> {
     ))
 }
 
-/// The line bands a selection actually highlights: flow selections are
-/// clipped to the columns the text occupies (so the highlight never washes
-/// over a block's border, padding, indentation or trailing whitespace), while
-/// block selections keep the dragged rectangle.
+/// Paint an open `<select>` dropdown overlay onto the canvas: clear every
+/// row of the overlay rectangle, then write each option label with the
+/// highlighted row on the selection background and the rest on the overlay
+/// background. Overlays cover whatever the layout painted underneath.
+fn apply_select_overlay(tl: &mut TermLayout, open: &OpenSelect) {
+    let cols = tl.columns as usize;
+    let max = tl.layout.len();
+    // The overlay may extend below the layout's content (a `<select>` near
+    // the bottom of a short document): grow the canvas buffer so every
+    // option row is paintable. This does not touch `rendered_rows`, so the
+    // overlay never affects the scroll range.
+    let needed = open
+        .rect
+        .y
+        .saturating_add(open.rect.height)
+        .saturating_mul(cols);
+    if needed > max {
+        tl.layout.resize(needed, Block::default());
+    }
+    let max = tl.layout.len();
+    let x_end = open
+        .rect
+        .x
+        .saturating_add(open.rect.width)
+        .min(cols);
+    for (i, (_, label)) in open.options.iter().enumerate() {
+        let row_start = (open.rect.y.saturating_add(i) as usize).saturating_mul(cols);
+        if row_start >= max {
+            break;
+        }
+        let bg = if i == open.highlight {
+            Some(SELECTION_BG)
+        } else {
+            Some(OVERLAY_BG)
+        };
+        // Clear the whole row, then write the label.
+        for x in open.rect.x..x_end {
+            let idx = row_start.saturating_add(x);
+            if idx >= max {
+                break;
+            }
+            let cell = &mut tl.layout[idx];
+            cell.word.clear();
+            cell.word.push(' ');
+            cell.fcolor = Some(OVERLAY_FG);
+            cell.bcolor = bg;
+            cell.style = FontStyle::empty();
+        }
+        let mut col = open.rect.x;
+        for ch in label.chars() {
+            let w = char_width(ch).max(1);
+            if col >= x_end {
+                break;
+            }
+            let idx = row_start.saturating_add(col);
+            if idx < max {
+                let cell = &mut tl.layout[idx];
+                cell.word.clear();
+                cell.word.push(ch);
+                cell.fcolor = Some(OVERLAY_FG);
+                cell.bcolor = bg;
+                cell.style = FontStyle::empty();
+            }
+            col = col.saturating_add(w);
+        }
+    }
+}
 fn highlight_lines(arena: &NodeArena, boxes: &[LayoutBox], sel: &TextSel, cols: u32) -> Vec<(u32, u32, u32)> {
     let raw = selection_lines(sel, cols);
     match sel.mode {
@@ -601,31 +810,45 @@ fn collect_box_rects(boxes: &[LayoutBox]) -> Vec<(NodeId, Rect)> {
     out
 }
 
-/// Union of every box rect belonging to `node_id` or any of its ancestors
-/// that has a box.
+/// Union of every box rect that the pointer being over `hovered` can change:
+/// the hovered element itself plus each ancestor that matches a `:hover` rule
+/// (`:hover` applies to any element on the hovered node's ancestor chain, e.g.
+/// `#panel:hover` matches while a descendant is hovered). Ancestors that match
+/// no `:hover` selector are skipped — otherwise hovering a bottom-of-page
+/// button would repaint the whole document through its `body` ancestor.
 ///
-/// `:hover` rules may match any element on the hovered node's ancestor chain
-/// (`#panel:hover` matches while a descendant is hovered), so repainting this
-/// union covers every cell the hover state can change. Used by the `Hover`
-/// command to repaint only the affected region instead of the whole canvas.
+/// Used by the `Hover` command to repaint only the affected region instead of
+/// the whole canvas.
 fn hover_affected_region(
     boxes: &[LayoutBox],
     arena: &NodeArena,
-    node_id: Option<NodeId>,
+    rules: &CssRule,
+    hovered: Option<NodeId>,
 ) -> Option<Rect> {
     let mut region: Option<Rect> = None;
-    let mut cur = node_id;
+    let mut cur = hovered;
     while let Some(id) = cur {
-        let mut stack = vec![boxes];
-        while let Some(list) = stack.pop() {
-            for b in list {
-                if b.node_id == id {
-                    region = Some(match region {
-                        Some(r) => union_rect(r, b.rect),
-                        None => b.rect,
-                    });
+        // Only a selector that contains `:hover` and matches `id` while
+        // `hovered` is the pointer target can repaint `id`'s boxes.
+        let affected = rules.0.keys().any(|sel| {
+            sel.compounds.iter().any(|compound| {
+                compound
+                    .iter()
+                    .any(|s| matches!(s, Selector::PseudoClass(PseudoClass::Hover)))
+            }) && selector_chain_matches_with_hover(arena, id, sel, hovered)
+        });
+        if affected {
+            let mut stack = vec![boxes];
+            while let Some(list) = stack.pop() {
+                for b in list {
+                    if b.node_id == id {
+                        region = Some(match region {
+                            Some(r) => union_rect(r, b.rect),
+                            None => b.rect,
+                        });
+                    }
+                    stack.push(&b.children);
                 }
-                stack.push(&b.children);
             }
         }
         cur = arena.get(id).and_then(|n| n.parent);
@@ -668,6 +891,7 @@ fn render_thread(
         hovered: None,
         text_selection: None,
         selection_text,
+        open_select: None,
         max_scroll,
     };
 
@@ -690,6 +914,13 @@ fn render_thread(
         // caret even though the input loop already blurred it.
         let mut pending_inputs: Vec<(NodeId, String, usize, bool, Option<(usize, usize)>)> =
             Vec::new();
+        // `Select*` commands mutate the render thread's dropdown state, so
+        // they must run in arrival order too: a `SelectClose` followed by a
+        // `RenderArena` (the `change` handler's DOM write) would otherwise be
+        // coalesced away, and the full repaint would re-draw the closed
+        // overlay; a `SelectMove` swallowed by a `Hover` would freeze the
+        // highlight instead of following the pointer.
+        let mut pending_selects: Vec<RenderCmd> = Vec::new();
         while let Ok(next) = rx.try_recv() {
             match next {
                 RenderCmd::RenderInput {
@@ -699,19 +930,30 @@ fn render_thread(
                     focused,
                     selection,
                 } => pending_inputs.push((node_id, value, cursor, focused, selection)),
+                RenderCmd::SelectOpen { .. }
+                | RenderCmd::SelectClose { .. }
+                | RenderCmd::SelectMove { .. } => pending_selects.push(next),
                 other => {
                     // The command being coalesced away may itself be an input
-                    // repaint — rescue it into the pending pass (it arrived
-                    // first, so it goes to the front of the queue).
-                    if let RenderCmd::RenderInput {
-                        node_id,
-                        value,
-                        cursor,
-                        focused,
-                        selection,
-                    } = std::mem::replace(&mut cmd, other)
-                    {
-                        pending_inputs.insert(0, (node_id, value, cursor, focused, selection));
+                    // repaint or a select command — rescue it into the
+                    // pending pass (it arrived first, so it goes to the front
+                    // of the queue).
+                    match std::mem::replace(&mut cmd, other) {
+                        RenderCmd::RenderInput {
+                            node_id,
+                            value,
+                            cursor,
+                            focused,
+                            selection,
+                        } => {
+                            pending_inputs.insert(0, (node_id, value, cursor, focused, selection));
+                        }
+                        sel @ (RenderCmd::SelectOpen { .. }
+                        | RenderCmd::SelectClose { .. }
+                        | RenderCmd::SelectMove { .. }) => {
+                            pending_selects.insert(0, sel);
+                        }
+                        _ => {}
                     }
                     if matches!(cmd, RenderCmd::Quit) {
                         break;
@@ -721,6 +963,9 @@ fn render_thread(
         }
         for (node_id, value, cursor, focused, selection) in pending_inputs {
             state.handle_input(&mut out, node_id, value, cursor, focused, selection);
+        }
+        for sel_cmd in pending_selects {
+            state.handle_select(&mut out, sel_cmd);
         }
 
         match cmd {
@@ -831,28 +1076,42 @@ fn render_thread(
                 // regions can differ from the previous frame (the old
                 // highlight is cleared, the new one painted). Repainting this
                 // small region instead of resetting the whole canvas keeps
-                // hover tracking responsive while the pointer moves.
+                // hover tracking responsive while the pointer moves. When
+                // neither the old nor the new target matches any `:hover`
+                // rule the cascade paints identically, so there is nothing to
+                // repaint at all.
                 let region = match (
-                    hover_affected_region(&geo.boxes, &arena, prev),
-                    hover_affected_region(&geo.boxes, &arena, node_id),
+                    hover_affected_region(&geo.boxes, &arena, &state.css_rules, prev),
+                    hover_affected_region(&geo.boxes, &arena, &state.css_rules, node_id),
                 ) {
                     (Some(a), Some(b)) => Some(union_rect(a, b)),
                     (Some(a), None) => Some(a),
                     (None, Some(b)) => Some(b),
                     (None, None) => None,
                 };
-                match region {
-                    Some(r) => tl.repaint_region(&arena, &geo.boxes, r),
-                    None => tl.repaint_from(&arena, &geo.boxes),
-                }
+                let Some(r) = region else {
+                    continue;
+                };
+                tl.repaint_region(&arena, &geo.boxes, r);
                 // The repaint reset the canvas (or part of it); the active
                 // selection highlight must be overlaid again.
                 if let Some(sel) = &state.text_selection {
                     let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
                     apply_selection_lines(tl, &lines);
                 }
+                if let Some(open) = &state.open_select {
+                    apply_select_overlay(tl, open);
+                }
                 tl.render(&mut out);
                 flush_frame(&mut out);
+            }
+
+            // Select dropdown commands share one handler so the pending pass
+            // can also run them (see `pending_selects` above).
+            RenderCmd::SelectOpen { .. }
+            | RenderCmd::SelectClose { .. }
+            | RenderCmd::SelectMove { .. } => {
+                state.handle_select(&mut out, cmd);
             }
 
             RenderCmd::TextSelection { anchor, end, mode } => {

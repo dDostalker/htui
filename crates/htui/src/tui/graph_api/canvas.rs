@@ -51,6 +51,9 @@ pub struct TermLayout {
     /// [`RenderCmd::RenderInput`](crate::tui::graph_api::RenderCmd) and read by
     /// the input painter.
     pub input_states: HashMap<NodeId, InputRenderState>,
+    /// The `<select>` node whose dropdown is open (rendered as an overlay),
+    /// set by the render thread while a dropdown is expanded.
+    pub open_select: Option<NodeId>,
 }
 
 impl TermLayout {

@@ -63,6 +63,9 @@ pub enum GeneratedPayload {
     /// `<input>` — a single-line text field; the geometry pass sizes it from
     /// the `value` attribute (and the active edit state).
     Input,
+    /// `<select>` — a single-line dropdown; options come from `<option>`
+    /// children, the geometry pass sizes it from the longest label.
+    Select,
     /// Marker produced by [`generate_node`] for a `display: contents`
     /// element. The [`generate_children`] walker detects it and
     /// substitutes the contents element's own children in its place; the
@@ -145,6 +148,8 @@ pub fn generate_node(arena: &NodeArena, node_id: NodeId) -> Option<GeneratedBox>
         )
     } else if matches!(node.node_type, NodeType::Input) {
         (GeneratedBoxKind::Replaced, GeneratedPayload::Input)
+    } else if matches!(node.node_type, NodeType::Select) {
+        (GeneratedBoxKind::Replaced, GeneratedPayload::Select)
     } else {
         (GeneratedBoxKind::Normal, GeneratedPayload::None)
     };

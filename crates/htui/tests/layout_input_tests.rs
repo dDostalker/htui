@@ -53,6 +53,29 @@ fn render_rows(html: &str) -> (Vec<String>, TermLayout) {
     (rows, tl)
 }
 
+#[test]
+fn select_renders_as_frame_with_current_label() {
+    init();
+    // A `<select>` draws a bracketed field showing the option that matches
+    // the `value` attribute (falling back to the first option).
+    let (rows, _) = render_rows(
+        r#"<div><select value="b"><option>A</option><option value="b">BB</option></select></div>"#,
+    );
+    let r = &rows[0];
+    assert!(r.contains("[BB"), "select must show the selected option; row={r:?}");
+}
+
+#[test]
+fn select_renders_first_option_without_value() {
+    init();
+    // No `value` attribute → the first option is shown.
+    let (rows, _) = render_rows(
+        r#"<div><select><option>Alpha</option><option>Beta</option></select></div>"#,
+    );
+    let r = &rows[0];
+    assert!(r.contains("[Alpha"), "select must fall back to the first option; row={r:?}");
+}
+
 /// Find the first node with `node_type == NodeType::Input`.
 fn find_input(arena: &NodeArena, root: NodeId) -> NodeId {
     let mut stack = vec![root];

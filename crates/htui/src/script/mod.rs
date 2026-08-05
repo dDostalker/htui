@@ -187,6 +187,20 @@ impl ScriptEngine {
         }
     }
 
+    /// Commit a new `value` attribute and mark the node dirty.
+    ///
+    /// Unlike [`set_value`](Self::set_value) (whose field layout is
+    /// width-fixed), this is for controls whose rendered size can change with
+    /// the value — a `<select>` selection swaps the shown label, so the next
+    /// frame must re-cascade and re-render.
+    pub fn set_value_dirty(&mut self, node_id: NodeId, value: &str) {
+        let mut st = self.state.borrow_mut();
+        if let Some(node) = st.arena.get_mut(node_id) {
+            node.attributes.insert("value".to_string(), value.to_string());
+        }
+        st.dirty.nodes.push(node_id);
+    }
+
     /// Dispatch a DOM event along the hit region's ancestor path.
     ///
     /// Builds a JS `Event` object, walks `region.path` target-first and fires

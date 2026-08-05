@@ -8,9 +8,10 @@ use crate::{
     layout::{
         LayoutContext,
         layoutbox::generation::{GeneratedBoxKind, generate_node},
+        layoutbox::geometry::select_options,
     },
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
-    tui::graph_api::grapheme_width,
+    tui::graph_api::{char_width, grapheme_width},
 };
 
 use super::container::{FLEX_ITEM_MIN_CROSS, FlexItemPrep};
@@ -196,10 +197,26 @@ fn natural_intrinsic_size(
 
     // Replaced elements have an intrinsic box independent of their (empty)
     // children. `<input>` takes its HTML `width` attribute (default 8 cells)
-    // and one row — without this, flex measurement reports the 1x1 floor and
-    // a field inside a flex row collapses to a single-cell sliver.
+    // and one row; `<select>` sizes to the longest option label plus the
+    // frame / chevron — without these, flex measurement reports the 1x1
+    // floor and a control inside a flex row collapses to a sliver.
     if matches!(node.node_type, NodeType::Input) {
         let w = node.get_width().map(|w| w as usize).unwrap_or(8);
+        return NaturalIntrinsicSize {
+            width: w.max(FLEX_ITEM_MIN_CROSS),
+            height: FLEX_ITEM_MIN_CROSS,
+        };
+    }
+    if matches!(node.node_type, NodeType::Select) {
+        let text_w: usize = select_options(arena, node_id)
+            .iter()
+            .map(|(_, label)| label.chars().map(char_width).sum::<usize>())
+            .max()
+            .unwrap_or(0);
+        let w = node
+            .get_width()
+            .map(|w| w as usize)
+            .unwrap_or(text_w.saturating_add(4));
         return NaturalIntrinsicSize {
             width: w.max(FLEX_ITEM_MIN_CROSS),
             height: FLEX_ITEM_MIN_CROSS,

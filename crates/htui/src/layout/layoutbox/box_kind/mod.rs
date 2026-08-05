@@ -35,6 +35,10 @@ pub enum ReplacedContent {
     /// keyed by node id; the box only marks this as an input leaf so the
     /// paint phase knows to draw a field.
     Input,
+    /// `<select>` — a single-line dropdown field. The options are read from
+    /// the node's `<option>` children (see `select_options`); the currently
+    /// selected value lives in the `value` attribute.
+    Select,
 }
 
 /// Distinguishes the rendering shape of a layout box.

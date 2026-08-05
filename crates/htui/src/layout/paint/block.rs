@@ -49,7 +49,13 @@ pub(crate) fn paint_block(
     };
     let cell_start = canvas.cell_index(r.x, r.y);
 
-    let fill_bg = lb.paint_style.fill_bg;
+    // `fill_bg` is a layout-time flag: whether the base cascade gave the
+    // element a background. A `:hover` re-cascade (the render thread's `Hover`
+    // path) can add a background to an element that had none at layout time
+    // without re-laying-out, so the fill must also run when the *current*
+    // cascade carries one — otherwise the padding cells of e.g. a bordered
+    // `.btn:hover` keep the parent background and the highlight looks hollow.
+    let fill_bg = lb.paint_style.fill_bg || my_bg.is_some();
     let chrome = lb.paint_style.chrome;
     let spacing_after = lb.paint_style.spacing_after;
     let box_edges = &lb.paint_style.box_edges;

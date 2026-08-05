@@ -20,6 +20,7 @@ mod block;
 mod border;
 mod image;
 mod input;
+mod select;
 mod text;
 
 use std::collections::HashMap;
@@ -36,6 +37,7 @@ use crate::{
 use self::block::paint_block;
 use self::image::paint_image;
 use self::input::paint_input;
+use self::select::paint_select;
 
 /// Shared caret-centred value-window computation for `<input>` fields, used by
 /// both the painter and the input loop's column→character mapping.
@@ -61,6 +63,9 @@ pub(super) struct PaintCanvas<'a> {
     /// `<input>` edit state read by the input painter (caret / value /
     /// focus). Immutable during a paint pass.
     pub input_states: &'a HashMap<NodeId, InputRenderState>,
+    /// The `<select>` node whose dropdown is currently open (`None` = none).
+    /// Read by the select painter for the open-frame colour.
+    pub open_select: Option<NodeId>,
 }
 
 impl<'a> PaintCanvas<'a> {
@@ -124,6 +129,7 @@ pub fn paint_layout_tree(boxes: &[LayoutBox], arena: &NodeArena, term_layout: &m
         image_cache: &mut term_layout.image_cache,
         region: None,
         input_states: &term_layout.input_states,
+        open_select: term_layout.open_select,
     };
     for b in boxes {
         paint_box(b, arena, &mut canvas, None, None);
@@ -165,6 +171,7 @@ pub fn paint_layout_tree_region(
         image_cache: &mut term_layout.image_cache,
         region: Some(region),
         input_states: &term_layout.input_states,
+        open_select: term_layout.open_select,
     };
     for b in boxes {
         if intersect_rects(b.rect, region).is_some() {
@@ -239,6 +246,9 @@ fn paint_box(
         }
         BoxKind::Replaced(ReplacedContent::Input) => {
             paint_input(lb, arena, canvas, own_clip);
+        }
+        BoxKind::Replaced(ReplacedContent::Select) => {
+            paint_select(lb, arena, canvas, own_clip);
         }
         BoxKind::Anonymous => {
             // Anonymous boxes have no chrome of their own; their visible
