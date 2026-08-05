@@ -19,9 +19,12 @@
 //!   the registry of layout functions consulted by the flow orchestrator.
 
 use crate::{
+    html::css_parse::TextAlign,
     layout::layout::TermMap,
     tdom::node::{NodeArena, NodeId},
+    tui::graph_api::grapheme_width,
 };
+use unicode_segmentation::UnicodeSegmentation;
 
 pub mod layout;
 pub mod layoutbox;
@@ -54,6 +57,208 @@ impl LayoutContext {
             viewport: self.viewport,
         }
     }
+}
+
+/// Rebuild the text of a flow selection from the laid-out inline runs.
+///
+/// `lines` is the set of per-row column bands the selection covers
+/// (`(row, col_start, col_end_exclusive)` in canvas coordinates), as produced
+/// by the render thread's selection tracking. Unlike a per-cell canvas
+/// extraction (which would insert a newline at every wrap point), this follows
+/// the document's block structure: lines belonging to the same DOM block are
+/// concatenated directly — a wrapped paragraph copies as one continuous
+/// string, like a browser — and a newline is inserted only when the selection
+/// crosses into another block.
+///
+/// Inline children (`<span>` / text nodes) are folded into an anonymous box
+/// carrying the parent block's node id during generation and never produce a
+/// `LayoutBox` of their own, so the `node_id` of every box carrying inline
+/// runs is exactly its owning DOM block.
+pub fn extract_flow_text(arena: &NodeArena, boxes: &[LayoutBox], lines: &[(u32, u32, u32)]) -> String {
+    let mut text_lines: Vec<FlowTextLine> = Vec::new();
+    collect_flow_lines(arena, boxes, &mut text_lines);
+
+    // Fragments: (row, first selected column, owning block, text).
+    let mut frags: Vec<(u32, u32, NodeId, String)> = Vec::new();
+    for &(sel_row, sel_cs, sel_ce) in lines {
+        for tl in &text_lines {
+            if tl.row != sel_row {
+                continue;
+            }
+            let line_width: u32 = tl.runs.iter().map(|r| r.width_at(tl.font) as u32).sum();
+            let line_end = tl.col_start.saturating_add(line_width);
+            let lo = sel_cs.max(tl.col_start);
+            let hi = sel_ce.min(line_end);
+            if lo >= hi {
+                continue;
+            }
+            let text = extract_line_text(tl.runs, tl.font, lo, hi, tl.col_start);
+            if !text.is_empty() {
+                frags.push((tl.row, lo, tl.node_id, text));
+            }
+        }
+    }
+
+    // Assemble in visual order: same block → concatenate, new block → newline.
+    frags.sort_by_key(|&(row, col, _, _)| (row, col));
+    let mut out = String::new();
+    let mut prev_block: Option<NodeId> = None;
+    for (_, _, node_id, text) in frags {
+        if !out.is_empty() && prev_block != Some(node_id) {
+            out.push('\n');
+        }
+        out.push_str(&text);
+        prev_block = Some(node_id);
+    }
+    out
+}
+
+/// Clip a flow selection's row bands down to the columns each row actually
+/// covers with text.
+///
+/// The selection tracking works in whole rows (`col_start..canvas_width` for
+/// full rows), but painting the highlight over an entire row would wash the
+/// block's border, padding, indentation and trailing whitespace with the
+/// selection background. This maps every input band onto the text columns of
+/// the matching visual line (each overlapping text fragment becomes its own
+/// band), so the highlight covers exactly the cells whose glyphs the copy
+/// would yield — and nothing beyond the block's own text.
+///
+/// Block selections (right-drag rectangles) are *not* passed through this:
+/// their highlight intentionally follows the dragged rectangle.
+pub fn selection_text_lines(arena: &NodeArena, boxes: &[LayoutBox], lines: &[(u32, u32, u32)]) -> Vec<(u32, u32, u32)> {
+    let mut text_lines: Vec<FlowTextLine> = Vec::new();
+    collect_flow_lines(arena, boxes, &mut text_lines);
+    let mut out: Vec<(u32, u32, u32)> = Vec::new();
+    for &(sel_row, sel_cs, sel_ce) in lines {
+        for tl in &text_lines {
+            if tl.row != sel_row {
+                continue;
+            }
+            let line_width: u32 = tl.runs.iter().map(|r| r.width_at(tl.font) as u32).sum();
+            let text_end = tl.col_start.saturating_add(line_width);
+            let lo = sel_cs.max(tl.col_start);
+            let hi = sel_ce.min(text_end);
+            if lo < hi {
+                out.push((sel_row, lo, hi));
+            }
+        }
+    }
+    out
+}
+
+/// One laid-out visual line of text, positioned exactly as the paint phase
+/// draws it (same border / padding / glyph-row / wrap math).
+struct FlowTextLine<'a> {
+    node_id: NodeId,
+    row: u32,
+    col_start: u32,
+    runs: &'a [InlineRun],
+    font: usize,
+}
+
+/// Collect every visual text line of the layout with the paint phase's exact
+/// geometry, so extraction sees the same cells the user sees.
+fn collect_flow_lines<'a>(arena: &'a NodeArena, boxes: &'a [LayoutBox], out: &mut Vec<FlowTextLine<'a>>) {
+    for lb in boxes {
+        collect_box_lines(arena, lb, out);
+        collect_flow_lines(arena, &lb.children, out);
+    }
+}
+
+fn collect_box_lines<'a>(arena: &'a NodeArena, lb: &'a LayoutBox, out: &mut Vec<FlowTextLine<'a>>) {
+    let Some(runs) = &lb.paint_style.runs else {
+        return;
+    };
+    if runs.is_empty() {
+        return;
+    }
+    let be = &lb.paint_style.box_edges;
+    let font = lb.paint_style.font_size_cells.max(1);
+    let line_h = lb.paint_style.line_height_cells.max(1);
+    let align = arena[lb.node_id].css_attr.get_text_align();
+    let glyph_row = if line_h > font {
+        (line_h - font) / 2
+    } else {
+        font.saturating_sub(1) / 2
+    };
+    let content_x = lb
+        .rect
+        .x
+        .saturating_add(be.border.left.thickness())
+        .saturating_add(be.padding.left);
+    let content_width = lb.rect.width.saturating_sub(be.inner_horizontal()).max(1);
+    let first_row = lb
+        .rect
+        .y
+        .saturating_add(be.border.top.thickness())
+        .saturating_add(be.padding.top)
+        .saturating_add(glyph_row);
+    for (i, line_runs) in runs.iter().enumerate() {
+        // Forced-break blank rows (`<br>`, `<pre>` newlines) carry no glyphs.
+        if line_runs.is_empty() {
+            continue;
+        }
+        let line_width: usize = line_runs.iter().map(|r| r.width_at(font)).sum();
+        let line_width = line_width.min(content_width);
+        let offset = match align {
+            TextAlign::Left => 0,
+            TextAlign::Center => content_width.saturating_sub(line_width) / 2,
+            TextAlign::Right => content_width.saturating_sub(line_width),
+        };
+        out.push(FlowTextLine {
+            node_id: lb.node_id,
+            row: (first_row.saturating_add(i.saturating_mul(line_h))) as u32,
+            col_start: (content_x.saturating_add(offset)) as u32,
+            runs: line_runs,
+            font,
+        });
+    }
+}
+
+/// Extract the column slice `[lo, hi)` of one visual line's runs, where the
+/// columns are absolute canvas columns starting at `line_start`.
+fn extract_line_text(runs: &[InlineRun], font: usize, lo: u32, hi: u32, line_start: u32) -> String {
+    let font = font.max(1);
+    let mut out = String::new();
+    let mut col = line_start;
+    for run in runs {
+        let run_w = run.width_at(font) as u32;
+        let run_lo = col.max(lo);
+        let run_hi = col.saturating_add(run_w).min(hi);
+        if run_lo < run_hi {
+            out.push_str(&run_text_between(
+                run,
+                font,
+                (run_lo - col) as usize,
+                (run_hi - col) as usize,
+            ));
+        }
+        col = col.saturating_add(run_w);
+        if col >= hi {
+            break;
+        }
+    }
+    out
+}
+
+/// The graphemes of `run` occupying columns `[lo, hi)` (relative to the run's
+/// own start), using the same per-grapheme slot width the paint phase applies.
+fn run_text_between(run: &InlineRun, font: usize, lo: usize, hi: usize) -> String {
+    let font = font.max(1);
+    let mut out = String::new();
+    let mut col = 0usize;
+    for g in run.text.graphemes(true) {
+        let slot = grapheme_width(g).max(font);
+        if col >= hi {
+            break;
+        }
+        if col.saturating_add(slot) > lo {
+            out.push_str(g);
+        }
+        col += slot;
+    }
+    out
 }
 
 ///

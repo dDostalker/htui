@@ -37,6 +37,10 @@ use self::block::paint_block;
 use self::image::paint_image;
 use self::input::paint_input;
 
+/// Shared caret-centred value-window computation for `<input>` fields, used by
+/// both the painter and the input loop's column→character mapping.
+pub(crate) use self::input::value_window;
+
 /// A borrow of the canvas that the painters actually need.
 ///
 /// `paint_layout_tree` builds a single canvas over the whole

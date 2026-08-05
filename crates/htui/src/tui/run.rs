@@ -16,6 +16,7 @@ use crossterm::{
     cursor::{Hide, Show},
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
+    style::Color,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 
@@ -26,7 +27,10 @@ use crate::{
     layout::layout::TermMap,
     script::ScriptEngine,
     tdom::node::{NodeArena, NodeId, NodeType},
-    tui::graph_api::{DirtyInfo, InputRenderState, InputState, RenderCmd, TermLayout, trigger_refresh},
+    tui::graph_api::{
+        DirtyInfo, InputRenderState, InputState, RenderCmd, SelectionMode, TermLayout,
+        trigger_refresh,
+    },
 };
 
 fn parse_and_apply(html: &str, css_rules: &CssRule) -> (NodeId, NodeArena) {
@@ -106,6 +110,25 @@ fn extract_title(arena: &NodeArena, root_id: NodeId) -> Option<String> {
 /// Holds everything that outlives a single frame: the session document, the
 /// stylesheet, the reused canvas, the cached geometry and the scroll bound
 /// shared with the input loop.
+/// Highlight colour for the page text selection (Tokyo Night selection).
+const SELECTION_BG: Color = Color::Rgb {
+    r: 0x3b,
+    g: 0x42,
+    b: 0x61,
+};
+
+/// An active page text selection: the two canvas-space endpoints and the
+/// shape connecting them (`Flow` follows reading order, `Block` is a
+/// rectangle). The highlight and the extractable text are both derived from
+/// the same per-row column bands, so what is highlighted is exactly what gets
+/// copied.
+#[derive(Debug, Clone, Copy)]
+struct TextSel {
+    mode: SelectionMode,
+    anchor: (u32, u32),
+    end: (u32, u32),
+}
+
 struct RenderState {
     html: Arc<str>,
     css_rules: Arc<CssRule>,
@@ -125,6 +148,12 @@ struct RenderState {
     /// The node currently under the pointer (for CSS `:hover` cascade on
     /// `RenderArena` re-renders).
     hovered: Option<NodeId>,
+    /// Active page text selection (canvas-space endpoints + shape); `None`
+    /// while no selection exists.
+    text_selection: Option<TextSel>,
+    /// Text inside the current selection, refreshed whenever the selection
+    /// moves; the input loop reads it on `Ctrl+C` to copy.
+    selection_text: Arc<Mutex<String>>,
     max_scroll: Arc<AtomicU32>,
 }
 
@@ -294,6 +323,15 @@ impl RenderState {
             None => tl.repaint_from(&geo.arena, &geo.boxes),
         }
 
+        // Re-apply the active page selection: the paint pass has no knowledge
+        // of it, so any freshly painted canvas needs the highlight overlaid.
+        // Flow selections are clipped to the text columns so the highlight
+        // never spills over borders / padding / trailing whitespace.
+        if let Some(sel) = &self.text_selection {
+            let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
+            apply_selection_lines(tl, &lines);
+        }
+
         // The incremental renderer emits only the changed cells (and a
         // one-time full clear on the first frame / after resize), so redraws
         // need no per-frame Clear. `flush_frame` is the single I/O per frame,
@@ -416,6 +454,140 @@ fn union_rect(a: Rect, b: Rect) -> Rect {
     Rect::new(left, top, right - left, bottom - top)
 }
 
+/// The per-row column bands a selection covers — the single source of truth
+/// for both the highlight and the extracted text. Each entry is
+/// `(row, col_start, col_end_exclusive)`.
+///
+/// Flow (left-drag) follows reading order: the anchor row runs from the
+/// anchor column to the right edge, the end row from the left edge to the end
+/// column, and every row in between is full-width. Block (right-drag) is a
+/// plain rectangle.
+fn selection_lines(sel: &TextSel, cols: u32) -> Vec<(u32, u32, u32)> {
+    let (ax, ay) = sel.anchor;
+    let (ex, ey) = sel.end;
+    match sel.mode {
+        SelectionMode::Block => {
+            let x1 = ax.min(ex);
+            let x2 = ax.max(ex).saturating_add(1);
+            let y1 = ay.min(ey);
+            let y2 = ay.max(ey).saturating_add(1);
+            (y1..y2).map(|y| (y, x1, x2)).collect()
+        }
+        SelectionMode::Flow => {
+            if ay == ey {
+                vec![(ay, ax.min(ex), ax.max(ex).saturating_add(1))]
+            } else if ay < ey {
+                let mut lines = vec![(ay, ax, cols)];
+                for y in ay.saturating_add(1)..ey {
+                    lines.push((y, 0, cols));
+                }
+                lines.push((ey, 0, ex.saturating_add(1)));
+                lines
+            } else {
+                // Dragged upward: the end point sits above the anchor.
+                let mut lines = vec![(ey, ex, cols)];
+                for y in ey.saturating_add(1)..ay {
+                    lines.push((y, 0, cols));
+                }
+                lines.push((ay, 0, ax.saturating_add(1)));
+                lines
+            }
+        }
+    }
+}
+
+/// Bounding rectangle of a set of line bands (used to pick the repaint
+/// region; the bands themselves drive the actual highlighting).
+fn lines_bounds(lines: &[(u32, u32, u32)]) -> Option<Rect> {
+    let mut min_x = u32::MAX;
+    let mut min_y = u32::MAX;
+    let mut max_x = 0u32;
+    let mut max_y = 0u32;
+    for &(y, xs, xe) in lines {
+        min_y = min_y.min(y);
+        min_x = min_x.min(xs);
+        max_y = max_y.max(y);
+        max_x = max_x.max(xe);
+    }
+    if max_y < min_y {
+        return None;
+    }
+    Some(Rect::new(
+        min_x as usize,
+        min_y as usize,
+        (max_x - min_x) as usize,
+        (max_y - min_y + 1) as usize,
+    ))
+}
+
+/// The line bands a selection actually highlights: flow selections are
+/// clipped to the columns the text occupies (so the highlight never washes
+/// over a block's border, padding, indentation or trailing whitespace), while
+/// block selections keep the dragged rectangle.
+fn highlight_lines(arena: &NodeArena, boxes: &[LayoutBox], sel: &TextSel, cols: u32) -> Vec<(u32, u32, u32)> {
+    let raw = selection_lines(sel, cols);
+    match sel.mode {
+        SelectionMode::Flow => {
+            crate::layout::selection_text_lines(arena, boxes, &raw)
+        }
+        SelectionMode::Block => raw,
+    }
+}
+
+/// Overlay the page-selection highlight on every cell inside the line bands.
+///
+/// The paint phase knows nothing about the selection, so this is applied after
+/// each repaint. Filler cells (empty word, the second half of a wide glyph)
+/// get the background too so the highlight reads as a continuous band; the
+/// diff renderer skips them, so only glyph-bearing cells change the output.
+fn apply_selection_lines(tl: &mut TermLayout, lines: &[(u32, u32, u32)]) {
+    let cols = tl.columns as usize;
+    let max = tl.layout.len();
+    for &(y, xs, xe) in lines {
+        let row_start = (y as usize).saturating_mul(cols);
+        if row_start >= max {
+            continue;
+        }
+        let xe = (xe as usize).min(cols);
+        for x in (xs as usize)..xe {
+            let idx = row_start.saturating_add(x);
+            if idx >= max {
+                break;
+            }
+            tl.layout[idx].bcolor = Some(SELECTION_BG);
+        }
+    }
+}
+
+/// Extract the text covered by the selection's line bands, row by row.
+///
+/// Filler cells of wide glyphs are skipped (their glyph lives in the first
+/// column), and trailing spaces are trimmed per row so a flow selection of a
+/// paragraph does not copy its right-edge padding.
+fn extract_selection(tl: &TermLayout, lines: &[(u32, u32, u32)]) -> String {
+    let cols = tl.columns as usize;
+    let max = tl.layout.len();
+    let mut out = String::new();
+    for &(y, xs, xe) in lines {
+        let row_start = (y as usize).saturating_mul(cols);
+        let xe = (xe as usize).min(cols);
+        let mut line = String::new();
+        for x in (xs as usize)..xe {
+            let idx = row_start.saturating_add(x);
+            if idx >= max {
+                break;
+            }
+            let word = &tl.layout[idx].word;
+            if !word.is_empty() {
+                line.push_str(word);
+            }
+        }
+        out.push_str(line.trim_end());
+        out.push('\n');
+    }
+    out
+}
+
 /// Flatten the box forest into `(node_id, rect)` pairs.
 fn collect_box_rects(boxes: &[LayoutBox]) -> Vec<(NodeId, Rect)> {
     fn walk(boxes: &[LayoutBox], out: &mut Vec<(NodeId, Rect)>) {
@@ -479,6 +651,7 @@ fn render_thread(
     css_rules: Arc<CssRule>,
     max_scroll: Arc<AtomicU32>,
     geo_tx: Option<mpsc::Sender<Arc<Geometry>>>,
+    selection_text: Arc<Mutex<String>>,
 ) {
     // One persistent write buffer for the whole session: every frame writes
     // into it and is flushed exactly once, so a frame costs a single write
@@ -493,6 +666,8 @@ fn render_thread(
         title_set: false,
         geometry: None,
         hovered: None,
+        text_selection: None,
+        selection_text,
         max_scroll,
     };
 
@@ -670,8 +845,77 @@ fn render_thread(
                     Some(r) => tl.repaint_region(&arena, &geo.boxes, r),
                     None => tl.repaint_from(&arena, &geo.boxes),
                 }
+                // The repaint reset the canvas (or part of it); the active
+                // selection highlight must be overlaid again.
+                if let Some(sel) = &state.text_selection {
+                    let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
+                    apply_selection_lines(tl, &lines);
+                }
                 tl.render(&mut out);
                 flush_frame(&mut out);
+            }
+
+            RenderCmd::TextSelection { anchor, end, mode } => {
+                let new_sel = match (anchor, end) {
+                    (Some(a), Some(b)) => Some(TextSel {
+                        mode,
+                        anchor: a,
+                        end: b,
+                    }),
+                    _ => None,
+                };
+                let prev = state.text_selection;
+                state.text_selection = new_sel;
+                let Some(tl) = state.term_layout.as_mut() else {
+                    continue;
+                };
+                let Some(geo) = state.geometry.as_ref() else {
+                    continue;
+                };
+                let cols = tl.columns as u32;
+                // Highlight bands are the actual cells the selection covers:
+                // flow selections clip to the text columns, block selections
+                // keep the rectangle.
+                let prev_lines = match &prev {
+                    Some(n) => highlight_lines(&geo.arena, &geo.boxes, n, cols),
+                    None => Vec::new(),
+                };
+                let new_lines = match &new_sel {
+                    Some(n) => highlight_lines(&geo.arena, &geo.boxes, n, cols),
+                    None => Vec::new(),
+                };
+                // Repaint the union of the old and new selection bounds: the
+                // old highlight must be cleared, the new one painted.
+                let region = match (lines_bounds(&prev_lines), lines_bounds(&new_lines)) {
+                    (Some(a), Some(b)) => Some(union_rect(a, b)),
+                    (Some(a), None) => Some(a),
+                    (None, Some(b)) => Some(b),
+                    (None, None) => None,
+                };
+                if let Some(r) = region {
+                    tl.repaint_region(&geo.arena, &geo.boxes, r);
+                    apply_selection_lines(tl, &new_lines);
+                }
+                tl.render(&mut out);
+                flush_frame(&mut out);
+                // Refresh the copyable text of the selection (or clear it).
+                // Flow selections are rebuilt from the layout's inline runs so
+                // wrapped lines inside one block stay continuous (browser
+                // behaviour); block selections keep the canvas extraction.
+                let raw_lines = match &new_sel {
+                    Some(n) => selection_lines(n, cols),
+                    None => Vec::new(),
+                };
+                let text = match &new_sel {
+                    Some(n) if n.mode == SelectionMode::Flow => {
+                        crate::layout::extract_flow_text(&geo.arena, &geo.boxes, &raw_lines)
+                    }
+                    Some(_) => extract_selection(tl, &new_lines),
+                    None => String::new(),
+                };
+                if let Ok(mut guard) = state.selection_text.lock() {
+                    *guard = text;
+                }
             }
 
             RenderCmd::RenderInput {
@@ -754,18 +998,31 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
         std::thread::spawn(move || hit_test_thread(geo_rx, hit_map_thread));
     }
 
+    // Text of the current page selection, refreshed by the render thread and
+    // read by the input loop on `Ctrl+C` (shared through `Arc<Mutex<_>>`).
+    let selection_text: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+
     let (tx, rx) = mpsc::channel::<RenderCmd>();
     let render_handle = std::thread::spawn({
         let html_clone = Arc::clone(&html);
         let css_clone = Arc::clone(&css_rules);
         let max_scroll_clone = Arc::clone(&max_scroll);
+        let selection_text_clone = Arc::clone(&selection_text);
         let geo_tx = engine.is_some().then_some(geo_tx);
         move || {
-            render_thread(rx, html_clone, css_clone, max_scroll_clone, geo_tx);
+            render_thread(
+                rx,
+                html_clone,
+                css_clone,
+                max_scroll_clone,
+                geo_tx,
+                selection_text_clone,
+            );
         }
     });
 
     let mut state = InputState::new();
+    state.selection_text = Arc::clone(&selection_text);
     let mut rows: u16 = match TermMap::get_ter_map() {
         Ok(m) => m.rows,
         Err(e) => {

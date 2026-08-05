@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind};
@@ -7,14 +7,26 @@ use crate::{
     events::interaction,
     script::ScriptEngine,
     tdom::node::{NodeArena, NodeId, NodeType},
+    tui::graph_api::char_width,
 };
 use crate::events::{ElementRef, EventType, HitMap, HitRegion};
+use crate::layout::paint::value_window;
 use crate::layout::Rect;
 
 const SCROLL_LINES_PER_TICK: u32 = 3;
 const ZOOM_STEP: f32 = 0.1;
 const ZOOM_MIN: f32 = 0.2;
 const ZOOM_MAX: f32 = 5.0;
+
+/// Shape of the page text selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectionMode {
+    /// Left-drag: continuous text between the anchor and the current point,
+    /// spanning whole lines in between (browser-like reading order).
+    Flow,
+    /// Right-drag: rectangular column selection (vim `Ctrl+V` style).
+    Block,
+}
 
 /// DOM mutations to repaint on the next `RenderArena` frame.
 ///
@@ -74,22 +86,33 @@ pub enum RenderCmd {
         focused: bool,
         selection: Option<(usize, usize)>,
     },
+    /// Update the page text selection (canvas-space anchor and current
+    /// endpoint; either `None` clears it). The render thread repaints the
+    /// affected region with the selection highlight (flow or block shape) and
+    /// refreshes the text extractable from it (read on `Ctrl+C` to copy).
+    TextSelection {
+        anchor: Option<(u32, u32)>,
+        end: Option<(u32, u32)>,
+        /// Selection shape; ignored when `anchor` / `end` are `None`.
+        mode: SelectionMode,
+    },
     Quit,
 }
 
 /// Input-loop state that persists between events.
 ///
 /// Groups the variables the input loop mutates (`scroll_y`, `zoom`) with the
-/// mouse-tracking state (press position, hover target) and the active
-/// `<input>` edit session (focused node, value, caret) so the loop only
-/// passes one state value around.
+/// mouse-tracking state (press position, hover target), the active
+/// `<input>` edit session (focused node, value, caret) and the page text
+/// selection (drag selection over normal content), so the loop only passes one
+/// state value around.
 #[derive(Debug)]
 pub struct InputState {
     pub scroll_y: u32,
     pub zoom: f32,
     /// Screen coordinates of the last left-button press; a click is only
     /// recognised when the release lands on the same cell.
-    pressed: Option<(u16, u16)>,
+    pub pressed: Option<(u16, u16)>,
     /// Hover tracking state for mouse enter / leave detection.
     pub hover: interaction::HoverState,
     /// The `<input>` node currently focused (receives typed characters).
@@ -106,6 +129,21 @@ pub struct InputState {
     /// Session clipboard used by `Ctrl+C` / `Ctrl+X` / `Ctrl+V`. Terminal-
     /// local only (no OSC 52 / system clipboard integration).
     pub input_clipboard: String,
+    /// Whether the pointer is mid-drag inside a focused `<input>` (mouse
+    /// selection as opposed to a plain click).
+    pub drag_selecting: bool,
+    /// Canvas-space anchor of the page text selection (start point; `None`
+    /// when no text selection is active).
+    pub text_sel_anchor: Option<(u32, u32)>,
+    /// Canvas-space current endpoint of the page text selection.
+    pub text_sel_end: Option<(u32, u32)>,
+    /// Shape of the active page text selection: left-drag is flow (reading
+    /// order), right-drag is a block rectangle.
+    pub text_sel_mode: SelectionMode,
+    /// Text inside the current page selection, refreshed by the render thread
+    /// on every `TextSelection` command; read on `Ctrl+C` to copy. Shared
+    /// with the render thread through `Arc<Mutex<_>>`.
+    pub selection_text: Arc<Mutex<String>>,
 }
 
 impl InputState {
@@ -120,6 +158,11 @@ impl InputState {
             input_cursor: 0,
             input_sel_anchor: None,
             input_clipboard: String::new(),
+            drag_selecting: false,
+            text_sel_anchor: None,
+            text_sel_end: None,
+            text_sel_mode: SelectionMode::Flow,
+            selection_text: Arc::new(Mutex::new(String::new())),
         }
     }
 }
@@ -472,6 +515,161 @@ pub fn handle_click(
     }
 }
 
+/// Map a field-inner column offset (0-based, relative to the first content
+/// column after `[`) to a character index, using the same caret-centred
+/// window the painter draws. Pointer positions outside the visible window
+/// clamp to the nearest reachable character so the caret never leaves the
+/// visible slice.
+fn char_index_at_x(value: &str, cursor: usize, inner_width: usize, x: usize) -> usize {
+    let (start, end) = value_window(value, cursor, inner_width);
+    let v: Vec<char> = value.chars().collect();
+    let mut col = 0usize;
+    for i in start..end {
+        let w = char_width(v[i]).max(1);
+        if x < col + w {
+            return i;
+        }
+        col += w;
+    }
+    // Past the visible window's right edge: the window's end is the nearest
+    // reachable caret (the caret itself is always inside the window).
+    if end < v.len() {
+        end
+    } else {
+        v.len()
+    }
+}
+
+/// Clear the page text selection, queueing a repaint only when one existed.
+fn clear_text_selection(state: &mut InputState, cmds: &mut Vec<RenderCmd>) {
+    if state.text_sel_anchor.is_some() || state.text_sel_end.is_some() {
+        state.text_sel_anchor = None;
+        state.text_sel_end = None;
+        cmds.push(RenderCmd::TextSelection {
+            anchor: None,
+            end: None,
+            mode: state.text_sel_mode,
+        });
+    }
+}
+
+/// Handle a left-button press at canvas coordinates `(x, y)`.
+///
+/// Browser-aligned mousedown behaviour: a press on an `<input>` focuses it
+/// (blurring any previously focused field) and positions the caret at the
+/// press point, entering drag-selection mode; a press anywhere else blurs the
+/// focused field and starts a page text selection (the anchor for the drag).
+/// Any prior page selection is cleared. Render commands are appended to `cmds`
+/// in dispatch order.
+pub fn handle_mouse_down(
+    state: &mut InputState,
+    hit_map: &HitMap,
+    engine: &mut ScriptEngine,
+    x: u32,
+    y: u32,
+    button: MouseButton,
+    cmds: &mut Vec<RenderCmd>,
+) {
+    let clicked = hit_map.hit_test(x, y);
+    let clicked_input = clicked.is_some_and(|r| {
+        engine
+            .arena()
+            .get(r.node_id)
+            .is_some_and(|n| n.node_type == NodeType::Input)
+    });
+    match button {
+        MouseButton::Left => {
+            if clicked_input {
+                if let Some(node_id) = clicked.map(|r| r.node_id) {
+                    focus_input(state, node_id, engine, cmds);
+                    state.drag_selecting = true;
+                    // Position the caret (and the selection anchor) at the press
+                    // point within the field.
+                    if let Some(region) = clicked {
+                        let inner_x = region.rect.x.saturating_add(1) as usize;
+                        let inner_w = region.rect.width.saturating_sub(2) as usize;
+                        let idx = char_index_at_x(
+                            &state.input_value,
+                            state.input_cursor,
+                            inner_w,
+                            (x as usize).saturating_sub(inner_x),
+                        );
+                        state.input_sel_anchor = Some(idx);
+                        state.input_cursor = idx;
+                        push_input_render(state, node_id, cmds);
+                    }
+                }
+            } else {
+                // Mousedown outside a field blurs it (browser timing), then
+                // starts a flow text selection anchored at the press point.
+                if state.focused_input.is_some() {
+                    blur_input(state, Some(engine), cmds);
+                }
+                clear_text_selection(state, cmds);
+                state.text_sel_anchor = Some((x, y));
+                state.text_sel_end = Some((x, y));
+                state.text_sel_mode = SelectionMode::Flow;
+            }
+        }
+        // Right-drag starts a rectangular (block) selection; the focused field
+        // and its caret stay untouched.
+        MouseButton::Right => {
+            clear_text_selection(state, cmds);
+            state.text_sel_anchor = Some((x, y));
+            state.text_sel_end = Some((x, y));
+            state.text_sel_mode = SelectionMode::Block;
+        }
+        _ => {}
+    }
+}
+
+/// Handle a pointer move at canvas coordinates `(x, y)`.
+///
+/// While the left button is held this drives the active drag: inside a
+/// focused `<input>` the caret (and with it the character selection) follows
+/// the pointer; over page content the text selection rectangle tracks the
+/// pointer. Without a press it is a plain pointer move, dispatched to the
+/// hover machinery as usual.
+pub fn handle_mouse_move(
+    state: &mut InputState,
+    hit_map: &HitMap,
+    engine: &mut ScriptEngine,
+    x: u32,
+    y: u32,
+    cmds: &mut Vec<RenderCmd>,
+) {
+    if state.pressed.is_some() {
+        // Dragging: the pointer is inside the field it started in, so the
+        // selection stays within that field's rectangle.
+        if state.drag_selecting {
+            if let Some(focused) = state.focused_input
+                && let Some(region) = hit_map.iter().find(|r| r.node_id == focused)
+            {
+                let inner_x = region.rect.x.saturating_add(1) as usize;
+                let inner_w = region.rect.width.saturating_sub(2) as usize;
+                let idx = char_index_at_x(
+                    &state.input_value,
+                    state.input_cursor,
+                    inner_w,
+                    (x as usize).saturating_sub(inner_x),
+                );
+                state.input_cursor = idx;
+                push_input_render(state, focused, cmds);
+            }
+        } else if let Some(anchor) = state.text_sel_anchor {
+            state.text_sel_end = Some((x, y));
+            cmds.push(RenderCmd::TextSelection {
+                anchor: Some(anchor),
+                end: Some((x, y)),
+                mode: state.text_sel_mode,
+            });
+        }
+        return;
+    }
+    // No button held: ordinary pointer movement → hover tracking.
+    cmds.extend(interaction::on_move(&mut state.hover, hit_map, engine, x, y));
+}
+
 /// Wait for the next input event and translate it into render commands.
 ///
 /// `timeout` controls how long to block on `event::poll`:
@@ -492,13 +690,17 @@ pub fn handle_click(
 ///
 /// `hit_map` and `engine` activate mouse interaction (pass both together,
 /// or neither):
-/// - left `Down` records the press position; left `Up` on the same cell is
-///   dispatched as a bubbling `Click` via
-///   [`interaction::on_click`](crate::events::interaction::on_click);
-/// - `Moved` detects pointer enter / leave and dispatches `MouseOver` /
-///   `MouseOut` via [`interaction::on_move`](crate::events::interaction::on_move).
-///   Like a browser without CSS `:hover`, moving the pointer never changes
-///   what is painted.
+/// - left `Down` records the press position and (browser-aligned) focuses an
+///   `<input>` / blurs the focused field / starts a drag selection;
+/// - `Moved` while the button is held drives the active drag (field-internal
+///   character selection or the page text selection); without a press it
+///   detects pointer enter / leave and dispatches `MouseOver` / `MouseOut`
+///   via [`interaction::on_move`](crate::events::interaction::on_move). Like
+///   a browser without CSS `:hover`, moving the pointer never changes what is
+///   painted;
+/// - left `Up` on the same cell is dispatched as a bubbling `Click` via
+///   [`interaction::on_click`](crate::events::interaction::on_click); a drag
+///   that ends elsewhere keeps the selection.
 pub fn trigger_refresh(
     state: &mut InputState,
     rows: u16,
@@ -591,8 +793,22 @@ pub fn trigger_refresh(
                             zoom: state.zoom,
                         }];
                     }
+                    // Copy a page text selection (inside an `<input>` the
+                    // Ctrl shortcuts are handled earlier). `Ctrl+X` on read-
+                    // only page text degrades to a copy, like a browser.
+                    KeyCode::Char('c') | KeyCode::Char('x') => {
+                        if state.focused_input.is_none() && state.text_sel_anchor.is_some() {
+                            if let Ok(guard) = state.selection_text.lock() {
+                                state.input_clipboard = guard.clone();
+                            }
+                        }
+                    }
                     _ => {}
                 }
+            } else if state.text_sel_anchor.is_some() {
+                // A non-Ctrl key abandons the page text selection (the
+                // selection is a pointer-driven, transient visual state).
+                clear_text_selection(state, &mut cmds);
             }
 
             match key.code {
@@ -701,9 +917,11 @@ pub fn trigger_refresh(
                         scroll_y: state.scroll_y,
                     });
                 }
-                MouseEventKind::Down(MouseButton::Left) => {
-                    if hit_map.is_some() && engine.is_some() {
+                MouseEventKind::Down(button) => {
+                    if let (Some(hit_map), Some(engine)) = (hit_map, engine) {
                         state.pressed = Some((mouse.column, mouse.row));
+                        let (x, y) = canvas_pos(state, mouse.column, mouse.row);
+                        handle_mouse_down(state, hit_map, engine, x, y, button, &mut cmds);
                     }
                 }
                 MouseEventKind::Up(MouseButton::Left) => {
@@ -711,24 +929,30 @@ pub fn trigger_refresh(
                         (state.pressed, hit_map, engine)
                     {
                         state.pressed = None;
+                        state.drag_selecting = false;
                         if px == mouse.column && py == mouse.row {
                             let (x, y) = canvas_pos(state, mouse.column, mouse.row);
                             handle_click(state, hit_map, engine, x, y, &mut cmds);
                         }
+                        // A drag ended on a different cell: the selection
+                        // (field-internal or page text) is kept as-is.
                     } else {
                         state.pressed = None;
                     }
                 }
-                MouseEventKind::Moved => {
+                MouseEventKind::Up(MouseButton::Right) | MouseEventKind::Up(MouseButton::Middle) => {
+                    // Block selection (right button) ends here; the selection
+                    // itself is kept. No click is dispatched for these buttons.
+                    state.pressed = None;
+                    state.drag_selecting = false;
+                }
+                // crossterm reports button-held motion as `Drag` (SGR code
+                // 32..34) and button-free motion as `Moved` (SGR 64) — both
+                // must reach the drag / hover handler.
+                MouseEventKind::Drag(_) | MouseEventKind::Moved => {
                     if let (Some(hit_map), Some(engine)) = (hit_map, engine) {
                         let (x, y) = canvas_pos(state, mouse.column, mouse.row);
-                        cmds.extend(interaction::on_move(
-                            &mut state.hover,
-                            hit_map,
-                            engine,
-                            x,
-                            y,
-                        ));
+                        handle_mouse_move(state, hit_map, engine, x, y, &mut cmds);
                     }
                 }
                 _ => {}

@@ -19,9 +19,12 @@ use htui::layout::layout::TermMap;
 use htui::layout::{BoxConstraint, Cursor, Rect, layout_tree};
 use htui::script::ScriptEngine;
 use htui::tdom::node::{NodeArena, NodeId};
-use htui::tui::graph_api::{InputState, RenderCmd, apply_input_key, handle_click};
+use htui::tui::graph_api::{
+    InputState, RenderCmd, SelectionMode, apply_input_key, handle_click, handle_mouse_down,
+    handle_mouse_move,
+};
 
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, MouseButton};
 
 // ---------------------------------------------------------------------------
 // `#[htui::command]` / `#[derive(IntoJs)]` — tauri-style host bindings.
@@ -246,6 +249,289 @@ fn click_another_input_commits_the_previous_field() {
         .and_then(|n| n.attributes.get("value"))
         .cloned();
     assert_eq!(committed.as_deref(), Some("Ada!"));
+}
+
+#[test]
+fn mouse_down_on_input_focuses_and_positions_caret() {
+    // Pressing inside a field focuses it (blurring any previous field) and
+    // enters drag-selection mode with the caret at the press point.
+    let (mut engine, geo) = build_geometry(
+        r#"<div><input id="name" value="hello" width="20"></div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("name").expect("input region");
+    let (x, y) = center(region.rect);
+
+    let mut state = InputState::new();
+    let mut cmds = Vec::new();
+    handle_mouse_down(&mut state, &map, &mut engine, x, y, MouseButton::Left, &mut cmds);
+    assert!(
+        state.drag_selecting,
+        "press on a field starts drag-selection mode"
+    );
+    assert_eq!(state.focused_input, Some(region.node_id));
+    assert_eq!(state.input_sel_anchor, Some(state.input_cursor));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            RenderCmd::RenderInput {
+                node_id,
+                focused: true,
+                ..
+            } if *node_id == region.node_id
+        )),
+        "the field must be repainted focused with the caret in place"
+    );
+}
+
+#[test]
+fn drag_on_input_selects_a_character_range() {
+    // Press at the first content column (caret at char 0), drag right two
+    // columns: the selection (0, 2) must be carried by the repaint command.
+    let (mut engine, geo) = build_geometry(
+        r#"<div><input id="name" value="hello" width="20"></div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("name").expect("input region");
+    let rx = region.rect.x as u32;
+    let ry = region.rect.y as u32;
+
+    let mut state = InputState::new();
+    let mut cmds = Vec::new();
+    handle_mouse_down(
+        &mut state,
+        &map,
+        &mut engine,
+        rx + 1,
+        ry,
+        MouseButton::Left,
+        &mut cmds,
+    );
+    assert_eq!(state.input_cursor, 0, "press on the first column → char 0");
+
+    // The input loop tracks the press position; a plain move is a drag.
+    state.pressed = Some((0, 0));
+    let mut cmds = Vec::new();
+    handle_mouse_move(&mut state, &map, &mut engine, rx + 3, ry, &mut cmds);
+    assert_eq!(state.input_cursor, 2, "drag to the third column → char 2");
+    let sel = cmds.iter().find_map(|c| match c {
+        RenderCmd::RenderInput {
+            selection: Some(s),
+            ..
+        } => Some(*s),
+        _ => None,
+    });
+    assert_eq!(sel, Some((0, 2)), "drag must select chars 0..2");
+}
+
+#[test]
+fn drag_on_page_text_emits_text_selection() {
+    // Pressing over normal content starts a page text selection; dragging
+    // updates its endpoint and queues a `TextSelection` repaint.
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="a">some text</div><div id="b">more text</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+
+    let mut state = InputState::new();
+    let mut cmds = Vec::new();
+    handle_mouse_down(
+        &mut state,
+        &map,
+        &mut engine,
+        0,
+        0,
+        MouseButton::Left,
+        &mut cmds,
+    );
+    assert_eq!(state.text_sel_anchor, Some((0, 0)));
+    assert_eq!(state.text_sel_end, Some((0, 0)));
+    assert_eq!(state.text_sel_mode, SelectionMode::Flow);
+
+    state.pressed = Some((0, 0));
+    let mut cmds = Vec::new();
+    handle_mouse_move(&mut state, &map, &mut engine, 4, 0, &mut cmds);
+    assert_eq!(state.text_sel_end, Some((4, 0)));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            RenderCmd::TextSelection {
+                anchor: Some((0, 0)),
+                end: Some((4, 0)),
+                mode: SelectionMode::Flow
+            }
+        )),
+        "a left-drag over page text must queue a flow TextSelection repaint"
+    );
+}
+
+#[test]
+fn pressing_elsewhere_replaces_the_page_selection() {
+    // A second press clears the previous selection (rendering it away) before
+    // anchoring the new one — the render thread needs the explicit clear.
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="a">some text</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+
+    let mut state = InputState::new();
+    let mut cmds = Vec::new();
+    handle_mouse_down(
+        &mut state,
+        &map,
+        &mut engine,
+        5,
+        5,
+        MouseButton::Left,
+        &mut cmds,
+    );
+    state.pressed = Some((0, 0));
+    handle_mouse_move(&mut state, &map, &mut engine, 8, 5, &mut cmds);
+    assert!(state.text_sel_anchor.is_some(), "a selection now exists");
+
+    let mut cmds = Vec::new();
+    handle_mouse_down(
+        &mut state,
+        &map,
+        &mut engine,
+        2,
+        2,
+        MouseButton::Left,
+        &mut cmds,
+    );
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            RenderCmd::TextSelection {
+                anchor: None,
+                end: None,
+                ..
+            }
+        )),
+        "the previous selection must be cleared on a new press"
+    );
+    assert_eq!(state.text_sel_anchor, Some((2, 2)));
+}
+
+#[test]
+fn right_drag_emits_a_block_selection() {
+    // Right-drag is the rectangle (block) selection: the command must carry
+    // `SelectionMode::Block` so the render thread highlights a rectangle.
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="a">some text</div><div id="b">more text</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+
+    let mut state = InputState::new();
+    let mut cmds = Vec::new();
+    handle_mouse_down(
+        &mut state,
+        &map,
+        &mut engine,
+        2,
+        0,
+        MouseButton::Right,
+        &mut cmds,
+    );
+    assert_eq!(state.text_sel_mode, SelectionMode::Block);
+    assert_eq!(state.text_sel_anchor, Some((2, 0)));
+
+    state.pressed = Some((0, 0));
+    let mut cmds = Vec::new();
+    handle_mouse_move(&mut state, &map, &mut engine, 5, 2, &mut cmds);
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            RenderCmd::TextSelection {
+                anchor: Some((2, 0)),
+                end: Some((5, 2)),
+                mode: SelectionMode::Block
+            }
+        )),
+        "a right-drag must queue a block TextSelection repaint"
+    );
+    assert!(
+        !state.drag_selecting,
+        "right-drag never enters the field-internal drag mode"
+    );
+}
+
+// ============================================================
+// Flow-selection text extraction (`layout::extract_flow_text`)
+// ============================================================
+
+#[test]
+fn flow_extraction_joins_wrapped_lines_within_a_block() {
+    // A long paragraph wraps across several visual rows; copying the whole
+    // block must yield one continuous string — no newline at the wrap points
+    // — exactly like a browser. Inline spaces are preserved by the wrap phase
+    // (only the hanging space at a break is dropped), so the concatenation
+    // restores the original text.
+    let text = "alpha beta gamma delta epsilon zeta eta theta iota kappa";
+    let (_, geo) = build_geometry(&format!("<div>{text}</div>"), EventBindings::default());
+    let lines: Vec<(u32, u32, u32)> = (0..10).map(|y| (y, 0, 200)).collect();
+    let copied = htui::layout::extract_flow_text(&geo.arena, &geo.boxes, &lines);
+    assert_eq!(copied, text, "wrapped lines of one block must concatenate");
+}
+
+#[test]
+fn flow_extraction_breaks_between_blocks() {
+    // Two sibling blocks: the selection crosses a block boundary, so a
+    // newline must be inserted between them.
+    let (_, geo) = build_geometry(
+        r#"<div>alpha</div><div>beta</div>"#,
+        EventBindings::default(),
+    );
+    let lines = vec![(0u32, 0u32, 200u32), (1u32, 0u32, 200u32)];
+    let copied = htui::layout::extract_flow_text(&geo.arena, &geo.boxes, &lines);
+    assert_eq!(copied, "alpha\nbeta", "blocks must be separated by a newline");
+}
+
+#[test]
+fn flow_extraction_breaks_between_nested_blocks() {
+    // Blocks nested inside a container still count as distinct blocks: the
+    // paragraphs are separated even though a common ancestor wraps them.
+    let (_, geo) = build_geometry(
+        r#"<div><p>one</p><p>two</p></div>"#,
+        EventBindings::default(),
+    );
+    let lines = vec![(0u32, 0u32, 200u32), (1u32, 0u32, 200u32)];
+    let copied = htui::layout::extract_flow_text(&geo.arena, &geo.boxes, &lines);
+    assert_eq!(copied, "one\ntwo");
+}
+
+#[test]
+fn flow_extraction_slices_selected_columns() {
+    // A partial-column selection takes only the covered characters of a line.
+    let (_, geo) = build_geometry(r#"<div>alpha</div>"#, EventBindings::default());
+    let copied = htui::layout::extract_flow_text(&geo.arena, &geo.boxes, &[(0, 0, 3)]);
+    assert_eq!(copied, "alp");
+}
+
+#[test]
+fn selection_text_lines_clip_to_actual_text() {
+    // Full-row bands must be clipped down to the columns the text actually
+    // covers, so the highlight never spills over borders / padding / trailing
+    // whitespace.
+    let (_, geo) = build_geometry(r#"<div>alpha</div>"#, EventBindings::default());
+    let lines = htui::layout::selection_text_lines(&geo.arena, &geo.boxes, &[(0, 0, 200)]);
+    assert_eq!(lines, vec![(0, 0, 5)], "highlight must stop at the last glyph");
+}
+
+#[test]
+fn selection_text_lines_keep_partial_columns() {
+    // A selection that starts inside the text keeps the intersection, and a
+    // band past the text yields nothing.
+    let (_, geo) = build_geometry(r#"<div>alpha</div>"#, EventBindings::default());
+    let lines = htui::layout::selection_text_lines(&geo.arena, &geo.boxes, &[(0, 2, 200)]);
+    assert_eq!(lines, vec![(0, 2, 5)]);
+    let past = htui::layout::selection_text_lines(&geo.arena, &geo.boxes, &[(0, 10, 200)]);
+    assert!(past.is_empty(), "a band past the text must highlight nothing");
 }
 
 #[test]

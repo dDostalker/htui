@@ -18,6 +18,36 @@ const FOCUS_FRAME: &str = "#2ac3de";
 /// Highlight colour for the selected character range (Tokyo Night selection).
 const SELECTION_BG: &str = "#3b4261";
 
+/// Visible window of `value` for a field with `inner_width` content columns,
+/// centred on the caret (the window always contains the caret, extending left
+/// then right). Shared by the painter — draw exactly the visible slice — and
+/// the input loop — map a pointer column back to a character index — so both
+/// must agree on which characters are visible.
+pub(crate) fn value_window(value: &str, caret: usize, inner_width: usize) -> (usize, usize) {
+    let v: Vec<char> = value.chars().collect();
+    let total = v.len();
+    let caret = caret.min(total);
+    let widths: Vec<usize> = v.iter().map(|&c| char_width(c).max(1)).collect();
+    let caret_w: usize = widths.get(caret).copied().unwrap_or(1);
+
+    let mut start = caret;
+    let mut before_w = 0usize;
+    while start > 0
+        && before_w.saturating_add(widths[start - 1]).saturating_add(caret_w) <= inner_width
+    {
+        before_w += widths[start - 1];
+        start -= 1;
+    }
+
+    let mut end = caret.saturating_add(1).min(total);
+    let mut used = before_w.saturating_add(caret_w);
+    while end < total && used.saturating_add(widths[end]) <= inner_width {
+        used += widths[end];
+        end += 1;
+    }
+    (start, end)
+}
+
 pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintCanvas<'_>, clip: Rect) {
     let r = lb.rect;
     let canvas_cols = canvas.columns as usize;
@@ -69,27 +99,12 @@ pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintC
     let v: Vec<char> = value.chars().collect();
     let total = v.len();
     let cursor = cursor.min(total);
-    let widths: Vec<usize> = v.iter().map(|&c| char_width(c).max(1)).collect();
-    let caret_w: usize = widths.get(cursor).copied().unwrap_or(1);
-
-    let mut start = cursor;
-    let mut before_w = 0usize;
-    while start > 0 && before_w.saturating_add(widths[start - 1]).saturating_add(caret_w) <= inner_width {
-        before_w += widths[start - 1];
-        start -= 1;
-    }
-
-    let mut end = cursor.saturating_add(1).min(total);
-    let mut used = before_w.saturating_add(caret_w);
-    while end < total && used.saturating_add(widths[end]) <= inner_width {
-        used += widths[end];
-        end += 1;
-    }
+    let (start, end) = value_window(&value, cursor, inner_width);
 
     let mut col = 0usize;
     for i in start..end {
         let ch = v[i];
-        let w = widths[i];
+        let w = char_width(ch).max(1);
         let inverted = focused && i == cursor;
         for sub in 0..w {
             let abs_col = inner_x.saturating_add(col).saturating_add(sub);
