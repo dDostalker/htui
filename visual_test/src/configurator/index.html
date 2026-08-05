@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { background-color: #1a1b26; color: #c0caf5; }
+  h2 { margin: 1; }
+  .card {
+    width: 76;
+    border: 1px solid #565f89;
+    padding: 1;
+    margin: 1;
+  }
+  .row { display: flex; gap: 1; margin: 1; }
+  .label { width: 12; color: #a9b1d6; }
+  input { margin: 0; }
+  .muted { color: #565f89; }
+
+  /* Radio-style option (click to select; no native <select>) */
+  .opt { padding-left: 1; padding-right: 1; }
+  .opt:hover { background-color: #28304d; }
+  .opt.sel { background-color: #3b4261; }
+
+  /* Toggle switch (click to flip; no native <checkbox>). Single-row
+     pill: the ON state gets an accent background, OFF a muted one. */
+  .toggle { width: 9; text-align: center; }
+  .toggle.on { background-color: #2ac3de; color: #1a1b26; }
+  .toggle.off { background-color: #24283b; color: #7aa2f7; }
+
+  /* Buttons */
+  .btn { padding-left: 1; padding-right: 1; border: 1px solid #7aa2f7; color: #7aa2f7; }
+  .btn:hover { background-color: #28304d; }
+
+  .preview { background-color: #24283b; padding: 1; white-space: pre-line; }
+  #status { color: #c0caf5; }
+</style>
+</head>
+<body>
+  <h2>System Monitor — Settings</h2>
+
+  <!-- Text / numeric fields -->
+  <div class="card">
+    <div class="row"><div class="label">Profile</div><input id="profile" width="20" value="My Monitor"></div>
+    <div class="row"><div class="label">Host</div><input id="host" width="16" value="localhost"></div>
+    <div class="row"><div class="label">Port</div><input id="port" width="6" value="8080"><div class="muted">1–65535</div></div>
+    <div class="row"><div class="label">Refresh</div><input id="refresh" width="6" value="200"><div class="muted">ms</div></div>
+  </div>
+
+  <!-- Custom controls built with JS (no native select / checkbox) -->
+  <div class="card">
+    <div class="row"><div class="label">Theme</div>
+      <div id="theme-tn" class="opt sel" onclick="pickTheme('tn')">● Tokyo Night</div>
+      <div id="theme-light" class="opt" onclick="pickTheme('light')">○ Light</div>
+      <div id="theme-custom" class="opt" onclick="pickTheme('custom')">○ Custom</div>
+    </div>
+    <div class="row"><div class="label">CPU alarm</div>
+      <div id="cpu-alarm" class="toggle off" onclick="toggleAlarm('cpu')">[ OFF ]</div>
+    </div>
+    <div class="row"><div class="label">Disk alarm</div>
+      <div id="disk-alarm" class="toggle off" onclick="toggleAlarm('disk')">[ OFF ]</div>
+    </div>
+    <div class="row"><div class="label">Logging</div>
+      <div id="logging" class="toggle on" onclick="toggleLog()">[ ON ]</div>
+    </div>
+  </div>
+
+  <!-- Live preview, updated on every input / change -->
+  <div class="card">
+    <div class="row"><div class="label">Preview</div></div>
+    <div id="preview" class="preview">—</div>
+  </div>
+
+  <div class="row">
+    <div id="save" class="btn" onclick="save()">[ Save ]</div>
+    <div id="reset" class="btn" onclick="resetForm()">[ Reset ]</div>
+    <div id="status">Ready</div>
+  </div>
+
+  <script>
+    // ---- State ----
+    var THEME_NAMES = { tn: 'Tokyo Night', light: 'Light', custom: 'Custom' };
+    var THEMES = ['tn', 'light', 'custom'];
+    var theme = 'tn';
+    var cpuOn = false, diskOn = false, logOn = true;
+
+    // ---- Theme radio group ----
+    function pickTheme(t) {
+      theme = t;
+      for (var i = 0; i < THEMES.length; i++) {
+        var k = THEMES[i];
+        var el = document.getElementById('theme-' + k);
+        el.textContent = (k === t ? '● ' : '○ ') + THEME_NAMES[k];
+        el.setAttribute('class', k === t ? 'opt sel' : 'opt');
+      }
+      updatePreview();
+    }
+
+    // ---- Toggle switches ----
+    function paintToggle(id, on) {
+      var el = document.getElementById(id);
+      el.textContent = on ? '[ ON ]' : '[ OFF ]';
+      el.setAttribute('class', on ? 'toggle on' : 'toggle off');
+    }
+    function toggleAlarm(key) {
+      if (key === 'cpu') { cpuOn = !cpuOn; paintToggle('cpu-alarm', cpuOn); }
+      else { diskOn = !diskOn; paintToggle('disk-alarm', diskOn); }
+      updatePreview();
+    }
+    function toggleLog() { logOn = !logOn; paintToggle('logging', logOn); updatePreview(); }
+
+    // ---- Live preview ----
+    function updatePreview() {
+      var profile = document.getElementById('profile').value;
+      var host = document.getElementById('host').value;
+      var port = document.getElementById('port').value;
+      var refresh = document.getElementById('refresh').value;
+      var portOk = !isNaN(parseInt(port, 10)) && port >= 1 && port <= 65535;
+      var refreshOk = !isNaN(parseInt(refresh, 10)) && refresh >= 50;
+      var preview = document.getElementById('preview');
+      var base = 'Profile: ' + profile + '\n' +
+        'Sampling http://' + host + ':' + port + ' every ' + refresh + 'ms\n' +
+        'Theme: ' + THEME_NAMES[theme] + ' | CPU: ' + (cpuOn ? 'ON' : 'OFF') +
+        ' | Disk: ' + (diskOn ? 'ON' : 'OFF') + ' | Log: ' + (logOn ? 'ON' : 'OFF');
+      preview.textContent = (portOk && refreshOk)
+        ? base
+        : base + '\n⚠ Port / refresh invalid — numbers only.';
+    }
+
+    document.getElementById('profile').addEventListener('input', updatePreview);
+    document.getElementById('host').addEventListener('input', updatePreview);
+    document.getElementById('port').addEventListener('input', updatePreview);
+    document.getElementById('refresh').addEventListener('input', updatePreview);
+
+    // ---- Save / Reset ----
+    function save() {
+      var cfg = {
+        profile: document.getElementById('profile').value,
+        host: document.getElementById('host').value,
+        port: document.getElementById('port').value,
+        refresh: document.getElementById('refresh').value,
+        theme: theme,
+        cpuAlarm: cpuOn,
+        diskAlarm: diskOn,
+        logEnabled: logOn
+      };
+      console.log('config saved: ' + JSON.stringify(cfg));
+      var s = document.getElementById('status');
+      s.textContent = 'Saved ✓ (see log)';
+      s.style.color = '#9ece6a';
+    }
+    function resetForm() {
+      document.getElementById('profile').value = 'My Monitor';
+      document.getElementById('host').value = 'localhost';
+      document.getElementById('port').value = '8080';
+      document.getElementById('refresh').value = '200';
+      pickTheme('tn');
+      cpuOn = false; diskOn = false; logOn = true;
+      paintToggle('cpu-alarm', false);
+      paintToggle('disk-alarm', false);
+      paintToggle('logging', true);
+      var s = document.getElementById('status');
+      s.textContent = 'Defaults restored';
+      s.style.color = '#c0caf5';
+      updatePreview();
+    }
+
+    pickTheme('tn');
+    updatePreview();
+  </script>
+</body>
+</html>

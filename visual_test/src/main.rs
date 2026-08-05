@@ -189,6 +189,7 @@ fn main() -> Result<()> {
         "viewport_units" => test_case!(viewport_units, no_css),
         "position" => test_case!(position, no_css),
         "input" => test_case!(input, no_css),
+        "configurator" => test_case!(configurator, no_css),
         "showcase" => test_case!(showcase, no_css),
         _ => {
             let available = [
@@ -218,6 +219,7 @@ fn main() -> Result<()> {
                 "viewport_units",
                 "position",
                 "input",
+                "configurator",
                 "showcase",
             ];
             eprintln!(
@@ -287,6 +289,19 @@ fn main() -> Result<()> {
     // and keyboard editing are active (interaction needs a real terminal).
     // `--dump` falls back to the static preview.
     if test_name == "input" {
+        if dump_mode {
+            dump(html, css, cols, rows, bg_map);
+        } else {
+            render_with_events(html, css, EventBindings::default());
+        }
+        info!("Test '{test_name}' completed");
+        return Ok(());
+    }
+
+    // The `configurator` case runs through `render_with_events` (interactive
+    // settings form: text inputs + JS-built toggle / radio controls, live
+    // preview, save/reset). `--dump` falls back to the static preview.
+    if test_name == "configurator" {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {

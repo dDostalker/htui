@@ -70,6 +70,32 @@ fn render_rows(html: &str, css: &str) -> (Vec<String>, TermLayout) {
 }
 
 #[test]
+fn flex_row_with_input_renders_the_field() {
+    init();
+    // An `<input>` as a flex item must render its bracketed field at the
+    // measured intrinsic width (HTML `width` attribute or the 8-cell
+    // default), not collapse to a single cell.
+    let html = r#"<div class="container"><input id="f" width="10" value="abc"></div>"#;
+    let css = ".container { display: flex; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    let cols = term_map.columns as usize;
+    let rows: Vec<String> = tl
+        .layout
+        .chunks(cols)
+        .map(|chunk| chunk.iter().map(|b| b.word.as_str()).collect())
+        .collect();
+    let joined = rows.join("\n");
+    assert!(
+        joined.contains("[abc"),
+        "flex input must render its field; rows:\n{}",
+        rows.iter().filter(|r| !r.trim().is_empty()).map(|s| s.as_str()).collect::<Vec<_>>().join("\n")
+    );
+}
+
+#[test]
 fn test_flex_row_lays_out_children_side_by_side() {
     init();
     let html = r#"

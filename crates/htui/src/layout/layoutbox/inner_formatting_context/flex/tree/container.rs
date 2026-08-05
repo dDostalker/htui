@@ -177,10 +177,16 @@ pub(super) fn layout_flex_container(
                 .map(|generated| {
                     // Only block-level children become flex items. Inline
                     // children (`<span>` / `<a>` / `<em>`) are folded into
-                    // the container's own runs by `collect_runs`.
-                    if generated.kind != GeneratedBoxKind::Normal
-                        || generated.outer_display.is_inline()
-                    {
+                    // the container's own runs by `collect_runs`. Replaced
+                    // elements (`<img>` / `<input>`) blockify into flex
+                    // items, mirroring how browsers treat every flex child
+                    // as a block-level box.
+                    let is_block_item = match generated.kind {
+                        GeneratedBoxKind::Normal => !generated.outer_display.is_inline(),
+                        GeneratedBoxKind::Replaced => true,
+                        _ => false,
+                    };
+                    if !is_block_item {
                         return false;
                     }
                     let positioning = arena[id].css_attr.get_positioning(

@@ -193,6 +193,19 @@ fn natural_intrinsic_size(
     let own_font_size_cells =
         effective_font_size_cells(arena, node_id, context.font, context.viewport);
     let child_context = context.child(own_font_size_cells);
+
+    // Replaced elements have an intrinsic box independent of their (empty)
+    // children. `<input>` takes its HTML `width` attribute (default 8 cells)
+    // and one row — without this, flex measurement reports the 1x1 floor and
+    // a field inside a flex row collapses to a single-cell sliver.
+    if matches!(node.node_type, NodeType::Input) {
+        let w = node.get_width().map(|w| w as usize).unwrap_or(8);
+        return NaturalIntrinsicSize {
+            width: w.max(FLEX_ITEM_MIN_CROSS),
+            height: FLEX_ITEM_MIN_CROSS,
+        };
+    }
+
     // We pass `usize::MAX` as the containing width so percentage-based
     // edges resolve to their full length. We only read padding /
     // border thicknesses, which are unaffected by the containing width
