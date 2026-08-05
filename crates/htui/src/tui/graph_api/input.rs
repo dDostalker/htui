@@ -72,6 +72,7 @@ pub enum RenderCmd {
         value: String,
         cursor: usize,
         focused: bool,
+        selection: Option<(usize, usize)>,
     },
     Quit,
 }
@@ -98,6 +99,13 @@ pub struct InputState {
     pub input_value: String,
     /// Caret position in [`InputState::input_value`] (character index).
     pub input_cursor: usize,
+    /// Selection anchor (character index). `Some(a)` selects the character
+    /// range between `a` and [`InputState::input_cursor`]; `None` means no
+    /// selection.
+    pub input_sel_anchor: Option<usize>,
+    /// Session clipboard used by `Ctrl+C` / `Ctrl+X` / `Ctrl+V`. Terminal-
+    /// local only (no OSC 52 / system clipboard integration).
+    pub input_clipboard: String,
 }
 
 impl InputState {
@@ -110,6 +118,8 @@ impl InputState {
             focused_input: None,
             input_value: String::new(),
             input_cursor: 0,
+            input_sel_anchor: None,
+            input_clipboard: String::new(),
         }
     }
 }
@@ -200,6 +210,104 @@ fn char_to_byte(s: &str, char_idx: usize) -> usize {
         .unwrap_or(s.len())
 }
 
+/// Ordered `(start, end)` character range between a selection anchor and the
+/// caret (`start <= end`).
+pub fn selection_range(anchor: usize, cursor: usize) -> (usize, usize) {
+    (anchor.min(cursor), anchor.max(cursor))
+}
+
+/// The selected substring of `value` for character range `(start, end)`.
+fn selected_substring(value: &str, sel: (usize, usize)) -> String {
+    let (s, e) = sel;
+    let sb = char_to_byte(value, s);
+    let eb = char_to_byte(value, e);
+    value[sb..eb].to_string()
+}
+
+/// Apply a `Ctrl` shortcut to the focused field's edit state.
+///
+/// `Ctrl+A` selects all, `Ctrl+C` copies the selection to the session
+/// clipboard, `Ctrl+X` cuts it, `Ctrl+V` pastes. Returns `true` when the
+/// value / caret / selection changed and the field must repaint (copy alone
+/// does not).
+fn apply_ctrl_shortcut(state: &mut InputState, key: KeyCode) -> bool {
+    match key {
+        KeyCode::Char('a') => {
+            let len = state.input_value.chars().count();
+            state.input_sel_anchor = Some(0);
+            state.input_cursor = len;
+            true
+        }
+        KeyCode::Char('c') => {
+            let Some(anchor) = state.input_sel_anchor else {
+                return false;
+            };
+            let (s, e) = selection_range(anchor, state.input_cursor);
+            if s == e {
+                return false;
+            }
+            state.input_clipboard = selected_substring(&state.input_value, (s, e));
+            false
+        }
+        KeyCode::Char('x') => {
+            let Some(anchor) = state.input_sel_anchor else {
+                return false;
+            };
+            let (s, e) = selection_range(anchor, state.input_cursor);
+            if s == e {
+                return false;
+            }
+            state.input_clipboard = selected_substring(&state.input_value, (s, e));
+            let sb = char_to_byte(&state.input_value, s);
+            let eb = char_to_byte(&state.input_value, e);
+            state.input_value.drain(sb..eb);
+            state.input_cursor = s;
+            state.input_sel_anchor = None;
+            true
+        }
+        KeyCode::Char('v') => {
+            let text = state.input_clipboard.clone();
+            if text.is_empty() {
+                return false;
+            }
+            let byte = char_to_byte(&state.input_value, state.input_cursor);
+            state.input_value.insert_str(byte, &text);
+            state.input_cursor = state
+                .input_cursor
+                .saturating_add(text.chars().count());
+            state.input_sel_anchor = None;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Extend / shrink the selection with `Shift` + navigation, remembering the
+/// anchor when the selection starts. Returns `true` when the caret moved.
+fn apply_shift_navigation(state: &mut InputState, key: KeyCode) -> bool {
+    let total = state.input_value.chars().count();
+    let anchor = state.input_sel_anchor.get_or_insert(state.input_cursor);
+    let anchor = *anchor;
+    let before = state.input_cursor;
+    match key {
+        KeyCode::Left => {
+            if state.input_cursor > 0 {
+                state.input_cursor -= 1;
+            }
+        }
+        KeyCode::Right => {
+            if state.input_cursor < total {
+                state.input_cursor += 1;
+            }
+        }
+        KeyCode::Home => state.input_cursor = 0,
+        KeyCode::End => state.input_cursor = total,
+        _ => return false,
+    }
+    state.input_sel_anchor = Some(anchor);
+    state.input_cursor != before
+}
+
 /// Build a minimal hit region for `node_id` (no geometry) so the input loop
 /// can fire focus / blur / input / change events along the DOM ancestor chain,
 /// exactly like a pointer-driven region from the hit map.
@@ -261,11 +369,13 @@ fn focus_input(
         // Commit the previous field's edits back to the DOM before switching
         // focus, firing `blur` (+ `change` when the value differs).
         cmds.extend(fire_blur_and_change(engine, prev, &state.input_value));
+        state.input_sel_anchor = None;
         cmds.push(RenderCmd::RenderInput {
             node_id: prev,
             value: std::mem::take(&mut state.input_value),
             cursor: std::mem::take(&mut state.input_cursor),
             focused: false,
+            selection: None,
         });
     }
     let value = engine
@@ -277,11 +387,13 @@ fn focus_input(
     let cursor = value.chars().count();
     state.input_value = value;
     state.input_cursor = cursor;
+    state.input_sel_anchor = None;
     cmds.push(RenderCmd::RenderInput {
         node_id,
         value: state.input_value.clone(),
         cursor,
         focused: true,
+        selection: None,
     });
     // Fire `focus` on the newly focused field.
     let region = region_for(&engine.arena(), node_id);
@@ -300,6 +412,7 @@ fn blur_input(
     let Some(focused) = state.focused_input.take() else {
         return;
     };
+    state.input_sel_anchor = None;
     if let Some(engine) = engine {
         cmds.extend(fire_blur_and_change(engine, focused, &state.input_value));
     }
@@ -308,7 +421,55 @@ fn blur_input(
         value: std::mem::take(&mut state.input_value),
         cursor: std::mem::take(&mut state.input_cursor),
         focused: false,
+        selection: None,
     });
+}
+
+/// Queue a repaint of the focused field with its current edit state.
+fn push_input_render(state: &InputState, focused: NodeId, cmds: &mut Vec<RenderCmd>) {
+    cmds.push(RenderCmd::RenderInput {
+        node_id: focused,
+        value: state.input_value.clone(),
+        cursor: state.input_cursor,
+        focused: true,
+        selection: state
+            .input_sel_anchor
+            .map(|anchor| selection_range(anchor, state.input_cursor)),
+    });
+}
+
+/// Handle a completed left-button click at canvas coordinates `(x, y)`.
+///
+/// Dispatches the `Click` event (via [`interaction::on_click`], which also
+/// syncs the hover state) and then applies the field-focus rule used by the
+/// input loop: a click on an `<input>` focuses it (blurring the previously
+/// focused field), any other click blurs the focused field. Render commands
+/// are appended to `cmds` in dispatch order.
+pub fn handle_click(
+    state: &mut InputState,
+    hit_map: &HitMap,
+    engine: &mut ScriptEngine,
+    x: u32,
+    y: u32,
+    cmds: &mut Vec<RenderCmd>,
+) {
+    cmds.extend(interaction::on_click(&mut state.hover, hit_map, engine, x, y));
+    // Clicking an `<input>` focuses it; any other click blurs the previously
+    // focused field.
+    let clicked = hit_map.hit_test(x, y);
+    let clicked_input = clicked.is_some_and(|r| {
+        engine
+            .arena()
+            .get(r.node_id)
+            .is_some_and(|n| n.node_type == NodeType::Input)
+    });
+    if clicked_input {
+        if let Some(node_id) = clicked.map(|r| r.node_id) {
+            focus_input(state, node_id, engine, cmds);
+        }
+    } else if state.focused_input.is_some() {
+        blur_input(state, Some(engine), cmds);
+    }
 }
 
 /// Wait for the next input event and translate it into render commands.
@@ -369,20 +530,39 @@ pub fn trigger_refresh(
                     blur_input(state, engine, &mut cmds);
                     return cmds;
                 }
-                if let Some(focused) = state.focused_input {
-                    if apply_input_key(&mut state.input_value, &mut state.input_cursor, key.code)
-                    {
-                        cmds.push(RenderCmd::RenderInput {
-                            node_id: focused,
-                            value: state.input_value.clone(),
-                            cursor: state.input_cursor,
-                            focused: true,
-                        });
-                        // Fire `input` after every edit.
+                let Some(focused) = state.focused_input else {
+                    return cmds;
+                };
+
+                // Ctrl shortcuts: select-all / copy / cut / paste. Other Ctrl
+                // combos are ignored (not inserted as characters — browser
+                // behaviour).
+                if key.modifiers.contains(event::KeyModifiers::CONTROL) {
+                    if apply_ctrl_shortcut(state, key.code) {
+                        push_input_render(state, focused, &mut cmds);
                         if let Some(engine) = engine {
                             let region = region_for(&engine.arena(), focused);
                             cmds.extend(engine.fire(&region, EventType::Input, 0, 0));
                         }
+                    }
+                    return cmds;
+                }
+
+                // Shift + navigation extends / shrinks the selection.
+                if key.modifiers.contains(event::KeyModifiers::SHIFT) {
+                    if apply_shift_navigation(state, key.code) {
+                        push_input_render(state, focused, &mut cmds);
+                    }
+                    return cmds;
+                }
+
+                // Plain editing keys clear the selection.
+                if apply_input_key(&mut state.input_value, &mut state.input_cursor, key.code) {
+                    state.input_sel_anchor = None;
+                    push_input_render(state, focused, &mut cmds);
+                    if let Some(engine) = engine {
+                        let region = region_for(&engine.arena(), focused);
+                        cmds.extend(engine.fire(&region, EventType::Input, 0, 0));
                     }
                 }
                 return cmds;
@@ -533,28 +713,7 @@ pub fn trigger_refresh(
                         state.pressed = None;
                         if px == mouse.column && py == mouse.row {
                             let (x, y) = canvas_pos(state, mouse.column, mouse.row);
-                            cmds.extend(interaction::on_click(
-                                &mut state.hover,
-                                hit_map,
-                                engine,
-                                x,
-                                y,
-                            ));
-                            // Clicking an `<input>` focuses it; any other
-                            // click blurs the previously focused field.
-                            let clicked = hit_map.hit_test(x, y);
-                            let clicked_input = clicked.is_some_and(|r| {
-                                engine.arena().get(r.node_id).is_some_and(|n| {
-                                    n.node_type == NodeType::Input
-                                })
-                            });
-                            if clicked_input {
-                                if let Some(node_id) = clicked.map(|r| r.node_id) {
-                                    focus_input(state, node_id, engine, &mut cmds);
-                                }
-                            } else if state.focused_input.is_some() {
-                                blur_input(state, Some(engine), &mut cmds);
-                            }
+                            handle_click(state, hit_map, engine, x, y, &mut cmds);
                         }
                     } else {
                         state.pressed = None;

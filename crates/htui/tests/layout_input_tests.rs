@@ -10,7 +10,7 @@ use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
 use htui::script::ScriptEngine;
 use htui::tdom::node::{NodeArena, NodeId, NodeType};
-use htui::tui::graph_api::{InputRenderState, TermLayout, apply_input_key};
+use htui::tui::graph_api::{InputRenderState, TermLayout, apply_input_key, selection_range};
 use htui::tui::graph_api::Block;
 
 fn init() {
@@ -81,6 +81,54 @@ fn find_input_in_arena(arena: &NodeArena, root: NodeId) -> NodeId {
 }
 
 #[test]
+fn selection_range_orders_anchor_and_caret() {
+    // Anchor may sit on either side of the caret; the range is always ordered.
+    assert_eq!(selection_range(1, 4), (1, 4));
+    assert_eq!(selection_range(4, 1), (1, 4));
+    assert_eq!(selection_range(2, 2), (2, 2));
+}
+
+#[test]
+fn input_renders_selection_highlight() {
+    init();
+    let (root_id, arena) = setup(r#"<div><input></div>"#);
+    let input_id = find_input(&arena, root_id);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.input_states.insert(
+        input_id,
+        InputRenderState {
+            value: "hello".to_string(),
+            cursor: 4,
+            focused: true,
+            selection: Some((1, 4)),
+        },
+    );
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    // Cells: `[h e l l o · ]`. Selection (1..4) = `ell` (cols 2-4) get the
+    // Tokyo Night selection blue; the caret sits on `o` (inverted) and the
+    // unselected `h` keeps the field's (none) colours.
+    let cell = |x: usize| -> &Block { &tl.layout[x] };
+    assert_eq!(cell(1).word, "h");
+    assert_eq!(cell(1).bcolor, None, "unselected char keeps default bg");
+    assert_eq!(
+        cell(2).bcolor,
+        Some(crossterm::style::Color::Rgb {
+            r: 0x3b,
+            g: 0x42,
+            b: 0x61,
+        }),
+        "selected char gets the highlight bg"
+    );
+    assert_eq!(cell(4).bcolor, cell(2).bcolor, "selection is contiguous");
+    assert_eq!(
+        cell(5).bcolor,
+        Some(crossterm::style::Color::White),
+        "caret cell stays inverted"
+    );
+}
+
+#[test]
 fn input_renders_empty_field_without_panicking() {
     init();
     // An `<input>` with no `value` renders an empty bracketed field — the
@@ -107,6 +155,7 @@ fn input_long_value_windows_around_the_caret() {
             value: "abcdefghijkl".to_string(),
             cursor: 12,
             focused: true,
+            selection: None,
         },
     );
     tl.draw(&arena, root_id, &term_map).unwrap();
@@ -261,6 +310,7 @@ fn engine_input_state_renders_value_and_caret() {
             value: "abc".to_string(),
             cursor: 1,
             focused: true,
+            selection: None,
         },
     );
     tl.draw(&arena, root_id, &term_map).unwrap();

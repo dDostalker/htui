@@ -26,6 +26,9 @@ pub struct InputRenderState {
     pub cursor: usize,
     /// Whether the field currently holds keyboard focus.
     pub focused: bool,
+    /// Selected character range `(start, end)` (character indices, `start <=
+    /// end`), painted with a highlight. `None` when nothing is selected.
+    pub selection: Option<(usize, usize)>,
 }
 
 #[derive(Debug)]

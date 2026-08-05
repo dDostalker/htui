@@ -139,6 +139,7 @@ impl RenderState {
         value: String,
         cursor: usize,
         focused: bool,
+        selection: Option<(usize, usize)>,
     ) {
         let Some(tl) = self.term_layout.as_mut() else {
             return;
@@ -152,6 +153,7 @@ impl RenderState {
                 value,
                 cursor,
                 focused,
+                selection,
             },
         );
         let rect = collect_box_rects(&geo.boxes)
@@ -504,8 +506,15 @@ fn render_thread(
         };
         // `try_recv` coalescing keeps only the last command — but input
         // repaints must all run (a focus switch queues blur + focus for two
-        // different fields, and dropping either leaves a stale caret).
-        let mut pending_inputs: Vec<(NodeId, String, usize, bool)> = Vec::new();
+        // different fields, and dropping either leaves a stale caret). The
+        // first command of the batch is no exception: when it is a
+        // `RenderInput` (e.g. a blur repaint) and a later non-input command
+        // arrives (typically the `RenderArena` triggered by the blur
+        // handler's DOM write), the replacement below would silently drop it
+        // — `input_states` never updates and the field keeps its focused
+        // caret even though the input loop already blurred it.
+        let mut pending_inputs: Vec<(NodeId, String, usize, bool, Option<(usize, usize)>)> =
+            Vec::new();
         while let Ok(next) = rx.try_recv() {
             match next {
                 RenderCmd::RenderInput {
@@ -513,17 +522,30 @@ fn render_thread(
                     value,
                     cursor,
                     focused,
-                } => pending_inputs.push((node_id, value, cursor, focused)),
+                    selection,
+                } => pending_inputs.push((node_id, value, cursor, focused, selection)),
                 other => {
-                    cmd = other;
+                    // The command being coalesced away may itself be an input
+                    // repaint — rescue it into the pending pass (it arrived
+                    // first, so it goes to the front of the queue).
+                    if let RenderCmd::RenderInput {
+                        node_id,
+                        value,
+                        cursor,
+                        focused,
+                        selection,
+                    } = std::mem::replace(&mut cmd, other)
+                    {
+                        pending_inputs.insert(0, (node_id, value, cursor, focused, selection));
+                    }
                     if matches!(cmd, RenderCmd::Quit) {
                         break;
                     }
                 }
             }
         }
-        for (node_id, value, cursor, focused) in pending_inputs {
-            state.handle_input(&mut out, node_id, value, cursor, focused);
+        for (node_id, value, cursor, focused, selection) in pending_inputs {
+            state.handle_input(&mut out, node_id, value, cursor, focused, selection);
         }
 
         match cmd {
@@ -657,8 +679,9 @@ fn render_thread(
                 value,
                 cursor,
                 focused,
+                selection,
             } => {
-                state.handle_input(&mut out, node_id, value, cursor, focused);
+                state.handle_input(&mut out, node_id, value, cursor, focused, selection);
             }
         }
     }

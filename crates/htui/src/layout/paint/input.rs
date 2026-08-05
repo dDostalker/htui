@@ -15,6 +15,9 @@ use super::{PaintCanvas, intersect_rects};
 /// Frame colour for a focused field (Tokyo Night accent cyan).
 const FOCUS_FRAME: &str = "#2ac3de";
 
+/// Highlight colour for the selected character range (Tokyo Night selection).
+const SELECTION_BG: &str = "#3b4261";
+
 pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintCanvas<'_>, clip: Rect) {
     let r = lb.rect;
     let canvas_cols = canvas.columns as usize;
@@ -28,12 +31,13 @@ pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintC
     let node = &arena[lb.node_id];
     // Engine edit state (typed while focused) wins over the DOM `value`
     // attribute (the initial content of an untouched field).
-    let (value, cursor, focused) = match canvas.input_states.get(&lb.node_id) {
-        Some(st) => (st.value.clone(), st.cursor, st.focused),
+    let (value, cursor, focused, selection) = match canvas.input_states.get(&lb.node_id) {
+        Some(st) => (st.value.clone(), st.cursor, st.focused, st.selection),
         None => (
             node.attributes.get("value").cloned().unwrap_or_default(),
             0,
             false,
+            None,
         ),
     };
 
@@ -101,6 +105,13 @@ pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintC
                 (
                     Some(bg.unwrap_or(Color::Black)),
                     Some(fg.unwrap_or(Color::White)),
+                )
+            } else if selection.is_some_and(|(s, e)| i >= s && i < e) {
+                // Selected characters are highlighted (Tokyo Night selection
+                // blue) over the field's own colours.
+                (
+                    Some(Color::White),
+                    parse_color_str(SELECTION_BG),
                 )
             } else {
                 (fg, bg)

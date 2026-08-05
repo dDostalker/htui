@@ -19,7 +19,9 @@ use htui::layout::layout::TermMap;
 use htui::layout::{BoxConstraint, Cursor, Rect, layout_tree};
 use htui::script::ScriptEngine;
 use htui::tdom::node::{NodeArena, NodeId};
-use htui::tui::graph_api::RenderCmd;
+use htui::tui::graph_api::{InputState, RenderCmd, apply_input_key, handle_click};
+
+use crossterm::event::KeyCode;
 
 // ---------------------------------------------------------------------------
 // `#[htui::command]` / `#[derive(IntoJs)]` — tauri-style host bindings.
@@ -135,6 +137,115 @@ fn input_value_property_reads_and_writes_the_dom() {
         .and_then(|n| n.attributes.get("value"))
         .cloned();
     assert_eq!(stored.as_deref(), Some("typed"));
+}
+
+#[test]
+fn click_input_focuses_and_click_elsewhere_blurs() {
+    // The input loop's click rule: clicking an `<input>` focuses it, and any
+    // other click (blank space here) blurs it — both repainting via
+    // `RenderInput` so the field's caret / focus frame disappear.
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="a"><input id="name" value="Ada"></div><div id="b">blank</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let input_region = map.resolve_by_id("name").expect("input region");
+    let (ix, iy) = center(input_region.rect);
+
+    let mut state = InputState::new();
+    let mut cmds = Vec::new();
+    handle_click(&mut state, &map, &mut engine, ix, iy, &mut cmds);
+    assert_eq!(state.focused_input, Some(input_region.node_id));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            RenderCmd::RenderInput {
+                node_id,
+                focused: true,
+                ..
+            } if *node_id == input_region.node_id
+        )),
+        "clicking the field must queue a focused repaint"
+    );
+
+    // Click far below the document (blank space) → the field must blur.
+    let mut cmds = Vec::new();
+    handle_click(&mut state, &map, &mut engine, 0, 1000, &mut cmds);
+    assert!(state.focused_input.is_none(), "click outside must blur");
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            RenderCmd::RenderInput {
+                node_id,
+                focused: false,
+                selection: None,
+                ..
+            } if *node_id == input_region.node_id
+        )),
+        "blur must queue an unfocused repaint with the selection cleared"
+    );
+}
+
+#[test]
+fn click_another_input_commits_the_previous_field() {
+    // Clicking a second field switches focus: the previous field is repainted
+    // unfocused and its edited value is committed into the DOM (single source
+    // of truth), while the new field focuses with its own value.
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="a"><input id="name" value="Ada"></div>
+        <div id="b"><input id="city" value="Tokyo"></div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let name = map.resolve_by_id("name").expect("name region");
+    let city = map.resolve_by_id("city").expect("city region");
+    let (nx, ny) = center(name.rect);
+    let (cx, cy) = center(city.rect);
+
+    let mut state = InputState::new();
+    let mut cmds = Vec::new();
+    handle_click(&mut state, &map, &mut engine, nx, ny, &mut cmds);
+    // Type into the focused field.
+    assert!(apply_input_key(
+        &mut state.input_value,
+        &mut state.input_cursor,
+        KeyCode::Char('!'),
+    ));
+
+    // Click the other field.
+    let mut cmds = Vec::new();
+    handle_click(&mut state, &map, &mut engine, cx, cy, &mut cmds);
+    assert_eq!(state.focused_input, Some(city.node_id));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            RenderCmd::RenderInput {
+                node_id,
+                focused: false,
+                ..
+            } if *node_id == name.node_id
+        )),
+        "the previous field must be repainted unfocused"
+    );
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            RenderCmd::RenderInput {
+                node_id,
+                focused: true,
+                ..
+            } if *node_id == city.node_id
+        )),
+        "the new field must be repainted focused"
+    );
+
+    // The edited value was committed to the DOM on blur.
+    let arena = engine.arena();
+    let committed = arena
+        .get(name.node_id)
+        .and_then(|n| n.attributes.get("value"))
+        .cloned();
+    assert_eq!(committed.as_deref(), Some("Ada!"));
 }
 
 #[test]
