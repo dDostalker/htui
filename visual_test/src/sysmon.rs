@@ -15,9 +15,6 @@
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use boa_engine::{JsValue, js_string};
-use boa_engine::object::ObjectInitializer;
-use boa_engine::property::Attribute;
 use htui::events::{AutoRefresh, EventBindings};
 use htui::script::HostCall;
 use sysinfo::{Disks, System};
@@ -73,7 +70,56 @@ pub fn bindings() -> EventBindings {
                 .map(|d| d.as_secs())
                 .unwrap_or(snap.now_secs);
             let session_secs = start.elapsed().as_secs();
-            sample_to_js(call, &snap, now_secs, session_secs)
+            let cpu_bar = snap
+                .cpu_load
+                .map(|l| bar(l / 100.0, 14))
+                .unwrap_or_else(|| "n/a".to_string());
+            let cpu_pct = snap
+                .cpu_load
+                .map(|l| format!("{l:.0}%"))
+                .unwrap_or_default();
+            let mem_bar = snap
+                .memory
+                .map(|(u, t)| bar(u as f32 / t.max(1) as f32, 14))
+                .unwrap_or_else(|| "n/a".to_string());
+            let mem_text = snap
+                .memory
+                .map(|(u, t)| format!("{} / {}", gb(u), gb(t)))
+                .unwrap_or_default();
+            let disks = if snap.disks.is_empty() {
+                "n/a".to_string()
+            } else {
+                snap.disks
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (label, total))| {
+                        let total = *total;
+                        let free = snap.disk_free.get(i).copied().unwrap_or(0);
+                        let used = total.saturating_sub(free);
+                        format!(
+                            "{label} {} {} / {}",
+                            bar(used as f32 / total.max(1) as f32, 10),
+                            gb(used),
+                            gb(total)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            Ok(htui::js_obj!(call.context,
+                "host"    => snap.host.clone(),
+                "os"      => snap.os.clone(),
+                "cores"   => snap.cores.clone(),
+                "cpuName" => snap.cpu_name.clone(),
+                "cpuBar"  => cpu_bar,
+                "cpuPct"  => cpu_pct,
+                "memBar"  => mem_bar,
+                "memText" => mem_text,
+                "disks"   => disks,
+                "proc"    => snap.process_count,
+                "now"     => format_datetime(now_secs),
+                "session" => format!("{:02}:{:02}", session_secs / 60, session_secs % 60),
+            ))
         }),
     );
     bindings.auto = Some(AutoRefresh {
@@ -368,65 +414,6 @@ fn collect_static(system: &System, disks: &Disks) -> StaticInfo {
 /// Bars and numeric readouts are split into separate fields so the page can
 /// style the percentage with its accent colour next to the bar. `now_secs` /
 /// `session_secs` are the wall-clock readouts the caller computed at read
-/// time; they override the snapshot's frozen values so the clock ticks every
-/// second independently of the sampling cadence.
-fn sample_to_js(call: &mut HostCall, snap: &Snapshot, now_secs: u64, session_secs: u64) -> JsValue {
-    let cpu_bar = snap
-        .cpu_load
-        .map(|load| bar(load / 100.0, 14))
-        .unwrap_or_else(|| "n/a".to_string());
-    let cpu_pct = snap
-        .cpu_load
-        .map(|load| format!("{load:.0}%"))
-        .unwrap_or_default();
-    let mem_bar = snap
-        .memory
-        .map(|(used, total)| bar(used as f32 / total.max(1) as f32, 14))
-        .unwrap_or_else(|| "n/a".to_string());
-    let mem_text = snap
-        .memory
-        .map(|(used, total)| format!("{} / {}", gb(used), gb(total)))
-        .unwrap_or_default();
-    let disks_text = if snap.disks.is_empty() {
-        "n/a".to_string()
-    } else {
-        snap.disks
-            .iter()
-            .enumerate()
-            .map(|(i, (label, total))| {
-                let total = *total;
-                let free = snap.disk_free.get(i).copied().unwrap_or(0);
-                let used = total.saturating_sub(free);
-                format!(
-                    "{label} {} {} / {}",
-                    bar(used as f32 / total.max(1) as f32, 10),
-                    gb(used),
-                    gb(total)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    let proc_text = snap.process_count.to_string();
-    let now_text = format_datetime(now_secs);
-    let session_text = format!("{:02}:{:02}", session_secs / 60, session_secs % 60);
-
-    let mut init = ObjectInitializer::new(call.context);
-    init.property(js_string!("host"), js_string!(snap.host.as_str()), Attribute::all())
-        .property(js_string!("os"), js_string!(snap.os.as_str()), Attribute::all())
-        .property(js_string!("cores"), js_string!(snap.cores.as_str()), Attribute::all())
-        .property(js_string!("cpuName"), js_string!(snap.cpu_name.as_str()), Attribute::all())
-        .property(js_string!("cpuBar"), js_string!(cpu_bar.as_str()), Attribute::all())
-        .property(js_string!("cpuPct"), js_string!(cpu_pct.as_str()), Attribute::all())
-        .property(js_string!("memBar"), js_string!(mem_bar.as_str()), Attribute::all())
-        .property(js_string!("memText"), js_string!(mem_text.as_str()), Attribute::all())
-        .property(js_string!("disks"), js_string!(disks_text.as_str()), Attribute::all())
-        .property(js_string!("proc"), js_string!(proc_text.as_str()), Attribute::all())
-        .property(js_string!("now"), js_string!(now_text.as_str()), Attribute::all())
-        .property(js_string!("session"), js_string!(session_text.as_str()), Attribute::all());
-    init.build().into()
-}
-
 /// Escape text inserted into generated HTML (`&`, `<`, `>`).
 fn escape_html(s: &str) -> String {
     s.replace('&', "&amp;")

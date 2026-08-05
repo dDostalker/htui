@@ -131,3 +131,17 @@ pub struct EventBindings {
     /// Optional periodic action (see [`AutoRefresh`]).
     pub auto: Option<AutoRefresh>,
 }
+
+impl EventBindings {
+    /// Register one host function under a JS global name.
+    ///
+    /// The value is usually produced by `#[htui::command]` (which generates
+    /// `<fn>_command()` returning a [`HostFn`]):
+    ///
+    /// ```ignore
+    /// bindings.command("sample", sample_command());
+    /// ```
+    pub fn command(&mut self, name: impl Into<String>, host: HostFn) {
+        self.host.insert(name.into(), host);
+    }
+}

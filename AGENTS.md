@@ -23,7 +23,8 @@ htui/
 │   │   └── interaction.rs  # 纯逻辑鼠标交互（HoverState / on_move / on_click，调 ScriptEngine::fire）
 │   ├── script/             # JS 脚本层（旁路：Boa 引擎 + live DOM + 宿主函数）
 │   │   ├── mod.rs          # ScriptEngine：Context + ScriptState(thread_local) + 引导脚本 + fire/invoke_action + on* 属性编译
-│   │   ├── host.rs         # HostFn / HostCall（Rust 回调 → JS 可调用）
+│   │   ├── host.rs         # HostFn / HostCall（Rust 回调 → JS 可调用）+ arg/arg_required/ret 便捷方法
+│   │   ├── convert.rs      # IntoJs/FromJs 转换层 + js_obj! 宏 + JsObjectBuilder（Rust ↔ JS 值）
 │   │   └── dom.rs          # DOM 绑定：document / element 包装 / style / addEventListener / console / alert / quit
 │   ├── html/
 │   │   ├── mod.rs
@@ -113,6 +114,8 @@ htui/
 │               └── text.rs     # char_width / grapheme_width
 ├── benches/               # criterion 基准（parse / cascade / paint / render_to_bytes / full_redraw）
 ├── Cargo.toml
+├── htui_macros/           # 过程宏 crate：#[htui::command] + #[derive(IntoJs/FromJs)]
+│   └── src/lib.rs         # proc-macro：命令包装 / 结构体 ↔ JS 对象 derive
 ├── docs/
 │   └── script-layer.md    # 脚本层完整使用与架构文档（脚本 / on* / 宿主函数 / RenderArena）
 ├── visual_test/          # 可视化测试工具（cargo run -p visual_test）
@@ -388,8 +391,12 @@ Geometry，**无需重新解析 HTML**。`RenderCmd::RenderHtml` 仍保留用于
 | `AutoRefresh`      | `events`                | 周期自动触发的 action（every + JS 全局函数名）            |
 | `HoverState`       | `events::interaction`   | 指针悬停跟踪（enter / leave 判定，不产生视觉）        |
 | `ScriptEngine`     | `script`                | Boa 引擎封装：live NodeArena + DOM 绑定 + fire/invoke_action + eval_source |
-| `HostCall`         | `script::host`          | 宿主函数调用上下文（args / event / render / context）     |
-| `HostFn`           | `script::host`          | 宿主函数类型：`Box<dyn FnMut(&mut HostCall) -> JsValue + Send>` |
+| `HostCall`         | `script::host`          | 宿主函数调用上下文（args / event / render / context）+ arg/arg_required/ret 便捷方法 |
+| `HostFn`           | `script::host`          | 宿主函数类型：`Box<dyn FnMut(&mut HostCall) -> JsResult<JsValue> + Send>`（Err → JS throw） |
+| `IntoJs` / `FromJs` | `script::convert`       | Rust ↔ JS 值转换 trait（基础类型 + Option/Vec/Result 实现） |
+| `js_obj!`          | `script::convert`       | JS 对象字面量宏（`js_obj!(ctx, "k" => v, …)`） |
+| `#[htui::command]` | `htui_macros`           | 把 `fn(… FromJs 参数) -> IntoJs 返回值` 包装成 `HostFn`（生成 `<fn>_command()`） |
+| `#[derive(IntoJs/FromJs)]` | `htui_macros`    | 结构体 ↔ JS 对象（`#[js_name = "…"]` 重命名属性） |
 | `EdgeSizes`        | `html::box_edges`       | 四边长度（top/right/bottom/left），用于 padding / margin |
 | `BorderStyle`      | `html::box_edges`       | `border-style` 枚举（`None` / `Solid`） |
 | `Border`           | `html::box_edges`       | 单边 border 的 width/style/color |

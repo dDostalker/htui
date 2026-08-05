@@ -44,6 +44,9 @@ use crate::{
 mod dom;
 mod host;
 
+pub mod convert;
+
+pub use convert::{FromJs, IntoJs, JsObjectBuilder};
 pub use host::{HostCall, HostFn};
 
 use dom::{add_listener, element_wrapper, get_listeners, install_builtins, with_state};
@@ -383,7 +386,7 @@ fn dispatch_host(name: &str, args: &[JsValue], context: &mut Context) -> JsResul
         render: render_cmds,
         context,
     };
-    Ok(f(&mut call))
+    f(&mut call)
 }
 
 /// Walk the arena and compile every `onclick` / `onmouseover` / `onmouseout`

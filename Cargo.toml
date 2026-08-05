@@ -20,6 +20,7 @@ rayon = "1.12.0"
 unicode-segmentation = "1.12"
 unicode-width = "0.2"
 boa_engine = "0.21.1"
+htui_macros = { path = "htui_macros" }
 
 [dev-dependencies]
 criterion = "0.8"
@@ -45,4 +46,4 @@ name = "full_redraw"
 harness = false
 
 [workspace]
-members = ["visual_test"]
+members = ["visual_test", "htui_macros"]

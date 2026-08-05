@@ -1,0 +1,12 @@
+[package]
+name = "htui_macros"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1.0.44"
+syn = { version = "3", features = ["full"] }

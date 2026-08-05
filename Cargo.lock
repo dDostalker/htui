@@ -1053,6 +1053,7 @@ dependencies = [
  "cssparser",
  "env_logger",
  "html5ever",
+ "htui_macros",
  "image",
  "indexmap",
  "log",
@@ -1062,6 +1063,15 @@ dependencies = [
  "tendril",
  "unicode-segmentation",
  "unicode-width",
+]
+
+[[package]]
+name = "htui_macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
 ]
 
 [[package]]

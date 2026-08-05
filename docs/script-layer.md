@@ -155,19 +155,61 @@ fn main() {
 宿主函数是"JS ↔ Rust 之间的桥"：页面脚本调用它们完成 Rust 侧的工作（系统采样、
 IO、复杂计算），并把结果返回给 JS。
 
+### 5.1 推荐写法：`#[htui::command]`（tauri 式，不碰 Boa）
+
+写一个普通 Rust 函数 + derive，注册后 JS 里直接调用：
+
 ```rust
-pub type HostFn = Box<dyn FnMut(&mut HostCall) -> JsValue + Send>;
+use htui::{command, IntoJs, events::EventBindings};
+
+/// 返回给 JS 的结构体：字段自动映射成 JS 对象属性
+#[derive(IntoJs)]
+struct SampleData {
+    host: String,
+    #[js_name = "cpuBar"]   // Rust 字段名 ↔ JS 属性名映射
+    cpu_bar: String,
+    proc: u64,
+}
+
+/// 注册为 JS 全局函数 `sample()`；参数 FromJs，返回值 IntoJs
+#[htui::command]
+fn sample() -> SampleData { /* … */ }
+
+/// 带参数 + 错误：`Err` 变成 JS throw，页面 `try/catch` 可捕获
+#[htui::command]
+fn set_threshold(value: f64) -> Result<(), String> { /* … */ }
+
+let mut bindings = EventBindings::default();
+bindings.command("sample", sample_command());      // 宏生成 `<fn>_command()`
+bindings.command("set_threshold", set_threshold_command());
+```
+
+页面侧：`var d = sample(); d.cpuBar`；出错时 `try { set_threshold(120) } catch (e) { … }`。
+
+- 返回值 `IntoJs` 支持：`String`/`&str`/数值/`bool`/`()`/`Option<T>`/`Vec<T>`/`Result<T, E>`
+  （`E: String/&str/JsNativeError`，`Err` 抛异常）以及 `#[derive(IntoJs)]` 结构体。
+- 参数 `FromJs` 支持：`String`/`f64`/整数/`bool`/`Option<T>`/`Vec<T>`，以及
+  `#[derive(FromJs)]` 结构体（同样支持 `#[js_name]` 属性名映射，如
+  `{ maxCpu: 80 }` → `max_cpu` 字段）。
+- **适用于无捕获的纯函数**。需要外部状态（锁、Arc）时用 5.2 的手写闭包。
+
+### 5.2 手写闭包（有状态 / 高级场景）
+
+```rust
+pub type HostFn = Box<dyn FnMut(&mut HostCall) -> JsResult<JsValue> + Send>;
 
 pub struct HostCall<'a> {
-    pub args: &'a [JsValue],      // JS 传入的参数
+    pub args: &'a [JsValue],        // JS 传入的参数
     pub event: Option<&'a HtmlEvent>, // 当前派发中的事件（如有）
     pub render: &'a mut Vec<RenderCmd>, // push 渲染命令（如 Quit）
-    pub context: &'a mut Context,  // Boa Context，可构造返回对象
+    pub context: &'a mut Context,   // Boa Context，可构造返回对象
 }
 ```
 
 - 注册：`bindings.host.insert("name".into(), Box::new(|call: &mut HostCall| …))`
-- 返回值直接成为 JS 调用结果（可用 `ObjectInitializer` 构造对象、数组）。
+- `HostFn` 返回 `JsResult<JsValue>`：`Err` 抛 JS 异常，`Ok` 是调用结果。
+- 便捷方法：`call.arg::<T>(i)` / `call.arg_required::<T>(i)`（`FromJs` 转换）、
+  `call.ret(value)`（`IntoJs` 转换）；构造对象用 `htui::js_obj!(call.context, "k" => v, …)`。
 - 需要触发重渲染时 push `RenderCmd`（例如 `RenderCmd::Quit`）。
 - **不要在宿主函数里做长时间阻塞操作**：宿主函数在输入循环的线程上执行。
   建议重活放后台线程 + `Arc<Mutex<Snapshot>>`，宿主函数只读快照
@@ -279,7 +321,9 @@ html → tdom → layout → tui    （不可破坏的既有四层）
 
 - `tests/layout_events_tests.rs`：命中区域、`on*`/`addEventListener` 分发、
   冒泡与 `stopPropagation`、hover、宿主函数、`invoke_action`、`textContent`
-  变更标记 dirty、CSS `:hover` 级联（纯内存，不依赖终端）。
+  变更标记 dirty、CSS `:hover` 级联，以及 `#[htui::command]` /
+  `#[derive(IntoJs / FromJs)]` 端到端（含 `#[js_name]` 重命名与
+  `Result::Err` → JS throw，纯内存，不依赖终端）。
 - `visual_test/src/events/`：事件演示页（`<script>` + on* + addEventListener +
   DOM 变更计数器）。
 - `visual_test/src/sysmon/`：系统监控器——后台采样线程 + 宿主 `sample()`

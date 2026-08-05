@@ -21,6 +21,135 @@ use htui::script::ScriptEngine;
 use htui::tdom::node::{NodeArena, NodeId};
 use htui::tui::graph_api::RenderCmd;
 
+// ---------------------------------------------------------------------------
+// `#[htui::command]` / `#[derive(IntoJs)]` — tauri-style host bindings.
+// ---------------------------------------------------------------------------
+
+/// Command return type: struct → JS object with `#[js_name]` renames.
+#[derive(htui::IntoJs)]
+struct Greeting {
+    name: String,
+    #[js_name = "loudName"]
+    loud_name: String,
+    times: u64,
+}
+
+/// No-capture command: args `FromJs`, return `IntoJs`.
+#[htui::command]
+fn greet(name: String, times: u64) -> Greeting {
+    Greeting {
+        name: name.clone(),
+        loud_name: format!("{name}!!"),
+        times,
+    }
+}
+
+/// Command returning `Result`: `Err` must surface as a JS throw.
+#[htui::command]
+fn divide(a: f64, b: f64) -> Result<f64, String> {
+    if b == 0.0 {
+        Err("division by zero".to_string())
+    } else {
+        Ok(a / b)
+    }
+}
+
+/// Command argument type: struct read back from a JS object, with
+/// `#[js_name]` mapping the JS property name to the Rust field.
+#[derive(htui::FromJs)]
+struct Threshold {
+    #[js_name = "maxCpu"]
+    max_cpu: f64,
+    label: String,
+}
+
+/// Command taking a `#[derive(FromJs)]` struct argument.
+#[htui::command]
+fn clamp(value: f64, config: Threshold) -> Result<f64, String> {
+    if config.max_cpu <= 0.0 {
+        return Err(format!("{}: maxCpu must be positive", config.label));
+    }
+    Ok(value.min(config.max_cpu))
+}
+
+#[test]
+fn command_macro_exposes_rust_functions_to_js() {
+    let mut bindings = EventBindings::default();
+    bindings.command("greet", greet_command());
+    bindings.command("divide", divide_command());
+    bindings.command("clamp", clamp_command());
+
+    let mut engine = ScriptEngine::new(
+        r#"
+        <script>
+          var g = greet("Ada", 3);
+          globalThis.__greetName = g.name;
+          globalThis.__greetLoud = g.loudName;
+          globalThis.__greetTimes = g.times;
+          try {
+            globalThis.__bad = divide(1, 0);
+          } catch (e) {
+            globalThis.__bad = 'threw: ' + e.message;
+          }
+          globalThis.__good = divide(10, 4);
+          globalThis.__clamped = clamp(95, { maxCpu: 80, label: "cpu" });
+          globalThis.__clamped2 = clamp(95, { maxCpu: 99, label: "cpu" });
+          try {
+            globalThis.__badClamp = clamp(95, { maxCpu: -1, label: "cpu" });
+          } catch (e) {
+            globalThis.__badClamp = 'threw: ' + e.message;
+          }
+        </script>
+        <p>ok</p>
+        "#,
+        bindings,
+    )
+    .expect("engine");
+
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__greetName"),
+        "Ada",
+        "struct field must map to the JS property"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__greetLoud"),
+        "Ada!!",
+        "#[js_name] must rename the property"
+    );
+    assert_eq!(eval_str(&mut engine, "globalThis.__greetTimes"), "3");
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__bad"),
+        "threw: division by zero",
+        "Result::Err must throw a catchable JS error"
+    );
+    assert_eq!(eval_str(&mut engine, "globalThis.__good"), "2.5");
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__clamped"),
+        "80",
+        "#[derive(FromJs)] must read a struct arg, #[js_name] maps maxCpu → max_cpu"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__clamped2"),
+        "95",
+        "struct arg with a value below the clamp must pass through"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__badClamp"),
+        "threw: cpu: maxCpu must be positive",
+        "command Err must throw a catchable JS error"
+    );
+}
+
+/// Evaluate `String(<expr>)` and return the stringified result.
+fn eval_str(engine: &mut ScriptEngine, expr: &str) -> String {
+    let v = engine
+        .eval_source(&format!("String({expr})"))
+        .expect("eval must succeed");
+    v.as_string()
+        .map(|s| s.to_std_string_lossy())
+        .unwrap_or_default()
+}
+
 const COLS: u16 = 80;
 const ROWS: u16 = 24;
 
@@ -85,10 +214,10 @@ fn center(rect: Rect) -> (u32, u32) {
 /// Build bindings with a single host function.
 fn host_bindings(
     name: &str,
-    f: impl FnMut(&mut htui::script::HostCall) -> JsValue + Send + 'static,
+    mut f: impl FnMut(&mut htui::script::HostCall) -> JsValue + Send + 'static,
 ) -> EventBindings {
     let mut bindings = EventBindings::default();
-    bindings.host.insert(name.to_string(), Box::new(f));
+    bindings.host.insert(name.to_string(), Box::new(move |call| Ok(f(call))));
     bindings
 }
 
@@ -427,7 +556,7 @@ fn visual_test_sysmon_document_initializes() {
     let mut bindings = EventBindings::default();
     bindings.host.insert(
         "sample".to_string(),
-        Box::new(|_| JsValue::undefined()),
+        Box::new(|_| Ok(JsValue::undefined())),
     );
     let engine = ScriptEngine::new(html, bindings).expect("engine");
     let arena = engine.arena();
@@ -481,7 +610,7 @@ fn sysmon_page_refresh_populates_all_cards() {
                 .property(boa_engine::js_string!("proc"), boa_engine::js_string!("42"), boa_engine::property::Attribute::all())
                 .property(boa_engine::js_string!("now"), boa_engine::js_string!("2026-01-01 00:00:00"), boa_engine::property::Attribute::all())
                 .property(boa_engine::js_string!("session"), boa_engine::js_string!("00:01"), boa_engine::property::Attribute::all());
-            init.build().into()
+            Ok(init.build().into())
         }),
     );
     let mut engine = ScriptEngine::new(html, bindings).expect("engine");
@@ -527,7 +656,7 @@ fn sysmon_refresh_pipeline_updates_the_dom() {
                     boa_engine::property::Attribute::all(),
                 )
                 .build();
-            obj.into()
+            Ok(obj.into())
         }),
     );
     let mut engine = ScriptEngine::new(html, bindings).expect("engine");
@@ -569,14 +698,14 @@ fn sysmon_refresh_renders_the_progress_bar() {
     bindings.host.insert(
         "sample".to_string(),
         Box::new(|call: &mut htui::script::HostCall| {
-            boa_engine::object::ObjectInitializer::new(call.context)
+            Ok(boa_engine::object::ObjectInitializer::new(call.context)
                 .property(
                     boa_engine::js_string!("cpu"),
                     boa_engine::js_string!("[########--------] 45%"),
                     boa_engine::property::Attribute::all(),
                 )
                 .build()
-                .into()
+                .into())
         }),
     );
     let mut engine = ScriptEngine::new(html, bindings).expect("engine");
