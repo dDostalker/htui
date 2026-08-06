@@ -294,17 +294,19 @@ InputKeystroke / SelectPick）发给脚本线程，后者经 `apply_message` 统
 解耦）；`handle_click` 等输入处理函数只读 DOM 快照、产出 `ScriptMsg`，不碰引擎
 （测试用 `apply_message` 在引擎上回放这些消息）。
 
-**已知限制**：① 输入循环的 DOM 读基于快照，在"JS 改 DOM → `dirty` 响应被消费"
+**已知限制**：输入循环的 DOM 读基于快照，在"JS 改 DOM → `dirty` 响应被消费"
 之间有 read-behind 窗口（`focus_input` 种子、blur 提交、node_type 判断可能读到旧
-文档，窗口约 0–100ms）；② 宿主函数 push `RenderCmd::RenderHtml` 时渲染线程独立
-重新解析，脚本引擎 live arena 不同步，直至下次 DOM 写。两者均记录于
-`docs/browser-compat.md` §6.4.11/6.4.12。
+文档，窗口约 0–100ms），记录于 `docs/browser-compat.md` §6.4.11。整文档替换
+（宿主函数 push `RenderCmd::RenderHtml`）已由脚本引擎的 `ScriptEngine::reload`
+在引擎内完成（单一真源，见 §6.4.12），不再有渲染线程独立解析。
 
 ### 动态内容：JS 修改 live DOM 后引擎把被改动的 `NodeId` 记入 `dirty`，脚本线程回
 `ScriptResponse::Event`，输入循环据其发送
 `RenderCmd::RenderArena { arena, root_id, scroll_y, zoom, hovered, dirty }`——渲染线程
 重新级联（保留当前 `:hover`）→ 重排 → 重绘（**仅 dirty 区域，见下**）→ 发布新
-Geometry，**无需重新解析 HTML**。`RenderCmd::RenderHtml` 仍保留用于整文档替换。
+Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `RenderCmd::RenderHtml`）
+由脚本引擎在内部执行 `ScriptEngine::reload`（重新解析 + 跑脚本 + mark root dirty），
+随 `RenderArena` 同步——渲染线程不再独立解析。
 定时任务：`EventBindings::auto`（`AutoRefresh`）由脚本线程在消息间隙经
 `ScriptEngine::invoke_action` 自动触发 JS 全局函数（监控器/时钟/动画用）。宿主函数在
 脚本线程执行，重活应放后台线程（参考 `visual_test/src/sysmon.rs` 后台采样 +

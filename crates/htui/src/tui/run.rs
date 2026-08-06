@@ -516,9 +516,11 @@ impl RenderState {
     /// Replace the session document and fully re-render it, keeping the
     /// current scroll position / zoom.
     ///
-    /// Backs `RenderCmd::RenderHtml` — the dynamic-content entry point that
-    /// lets event handlers rebuild the document (e.g. a counter that
-    /// re-renders on every click).
+    /// Backs `RenderCmd::RenderHtml`. Script-side replacements are intercepted
+    /// by `ScriptEngine::reload` (the engine stays the document's single
+    /// source of truth, see `docs/browser-compat.md` §6.4.12); this
+    /// render-thread path remains only for direct API use and as a fallback
+    /// when an in-engine reload fails.
     fn render_html<W: Write>(
         &mut self,
         out: &mut BufWriter<W>,
@@ -896,31 +898,47 @@ fn render_thread(
     };
 
     loop {
-        let mut cmd = match rx.recv() {
+        let first = match rx.recv() {
             Ok(c) => c,
             Err(e) => {
                 log::error!("Render channel disconnected: {}", e);
                 break;
             }
         };
-        // `try_recv` coalescing keeps only the last command — but input
-        // repaints must all run (a focus switch queues blur + focus for two
-        // different fields, and dropping either leaves a stale caret). The
-        // first command of the batch is no exception: when it is a
-        // `RenderInput` (e.g. a blur repaint) and a later non-input command
-        // arrives (typically the `RenderArena` triggered by the blur
-        // handler's DOM write), the replacement below would silently drop it
-        // — `input_states` never updates and the field keeps its focused
-        // caret even though the input loop already blurred it.
+        // Commands split into two classes with different merge semantics:
+        //
+        // - Stateful, must-run-in-order commands — `RenderInput` (a focus
+        //   switch queues blur + focus for two fields; dropping either leaves
+        //   a stale caret) and `Select*` (they mutate the render thread's
+        //   dropdown state, so a `SelectClose` must not be dropped in favour
+        //   of the `RenderArena` its `change` handler triggers). They are
+        //   collected in arrival order and all run.
+        // - Snapshot commands (`Rerender` / `Redraw` / `RenderArena` /
+        //   `RenderHtml` / `Hover` / `Quit`) — each carries a complete final
+        //   state, so a later one safely supersedes an earlier one; only the
+        //   last of the batch is kept.
         let mut pending_inputs: Vec<(NodeId, String, usize, bool, Option<(usize, usize)>)> =
             Vec::new();
-        // `Select*` commands mutate the render thread's dropdown state, so
-        // they must run in arrival order too: a `SelectClose` followed by a
-        // `RenderArena` (the `change` handler's DOM write) would otherwise be
-        // coalesced away, and the full repaint would re-draw the closed
-        // overlay; a `SelectMove` swallowed by a `Hover` would freeze the
-        // highlight instead of following the pointer.
         let mut pending_selects: Vec<RenderCmd> = Vec::new();
+        let mut cmd = match first {
+            RenderCmd::RenderInput {
+                node_id,
+                value,
+                cursor,
+                focused,
+                selection,
+            } => {
+                pending_inputs.push((node_id, value, cursor, focused, selection));
+                None
+            }
+            sel @ (RenderCmd::SelectOpen { .. }
+            | RenderCmd::SelectClose { .. }
+            | RenderCmd::SelectMove { .. }) => {
+                pending_selects.push(sel);
+                None
+            }
+            other => Some(other),
+        };
         while let Ok(next) = rx.try_recv() {
             match next {
                 RenderCmd::RenderInput {
@@ -930,32 +948,13 @@ fn render_thread(
                     focused,
                     selection,
                 } => pending_inputs.push((node_id, value, cursor, focused, selection)),
-                RenderCmd::SelectOpen { .. }
+                sel @ (RenderCmd::SelectOpen { .. }
                 | RenderCmd::SelectClose { .. }
-                | RenderCmd::SelectMove { .. } => pending_selects.push(next),
+                | RenderCmd::SelectMove { .. }) => pending_selects.push(sel),
                 other => {
-                    // The command being coalesced away may itself be an input
-                    // repaint or a select command — rescue it into the
-                    // pending pass (it arrived first, so it goes to the front
-                    // of the queue).
-                    match std::mem::replace(&mut cmd, other) {
-                        RenderCmd::RenderInput {
-                            node_id,
-                            value,
-                            cursor,
-                            focused,
-                            selection,
-                        } => {
-                            pending_inputs.insert(0, (node_id, value, cursor, focused, selection));
-                        }
-                        sel @ (RenderCmd::SelectOpen { .. }
-                        | RenderCmd::SelectClose { .. }
-                        | RenderCmd::SelectMove { .. }) => {
-                            pending_selects.insert(0, sel);
-                        }
-                        _ => {}
-                    }
-                    if matches!(cmd, RenderCmd::Quit) {
+                    cmd = Some(other);
+                    // Quit supersedes anything still queued in the batch.
+                    if matches!(cmd, Some(RenderCmd::Quit)) {
                         break;
                     }
                 }
@@ -968,6 +967,7 @@ fn render_thread(
             state.handle_select(&mut out, sel_cmd);
         }
 
+        let Some(cmd) = cmd else { continue };
         match cmd {
             RenderCmd::Quit => break,
 

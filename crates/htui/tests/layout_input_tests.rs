@@ -10,7 +10,9 @@ use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
 use htui::script::ScriptEngine;
 use htui::tdom::node::{NodeArena, NodeId, NodeType};
-use htui::tui::graph_api::{InputRenderState, TermLayout, apply_input_key, selection_range};
+use htui::tui::graph_api::{
+    InputRenderState, TermLayout, apply_input_key, is_input_field_key, selection_range,
+};
 use htui::tui::graph_api::Block;
 
 fn init() {
@@ -308,6 +310,27 @@ fn input_respects_width_attribute() {
     assert_eq!(rows[0].chars().nth(1), Some('a'));
     assert_eq!(rows[0].chars().nth(2), Some('b'));
     assert_eq!(rows[0].chars().nth(3), Some(']'), "close at width-1");
+}
+
+#[test]
+fn input_field_key_classifies_editing_keys() {
+    // A focused `<input>` owns the editing / caret keys — even when they are
+    // boundary no-ops (Home at the start) — but not page navigation (↓ / ↑ /
+    // PageDown / PageUp), which must fall through to scrolling while the
+    // field stays focused.
+    assert!(is_input_field_key(KeyCode::Char('a')));
+    assert!(is_input_field_key(KeyCode::Backspace));
+    assert!(is_input_field_key(KeyCode::Delete));
+    assert!(is_input_field_key(KeyCode::Left));
+    assert!(is_input_field_key(KeyCode::Right));
+    assert!(is_input_field_key(KeyCode::Home));
+    assert!(is_input_field_key(KeyCode::End));
+    assert!(!is_input_field_key(KeyCode::Down));
+    assert!(!is_input_field_key(KeyCode::Up));
+    assert!(!is_input_field_key(KeyCode::PageDown));
+    assert!(!is_input_field_key(KeyCode::PageUp));
+    assert!(!is_input_field_key(KeyCode::Enter));
+    assert!(!is_input_field_key(KeyCode::F(1)));
 }
 
 #[test]

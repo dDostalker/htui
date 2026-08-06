@@ -30,7 +30,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use boa_engine::{Context, JsResult, JsValue, NativeFunction, Source, js_string};
+use boa_engine::{Context, JsError, JsResult, JsValue, NativeFunction, Source, js_string};
 use boa_engine::object::ObjectInitializer;
 use boa_engine::property::Attribute;
 
@@ -110,33 +110,92 @@ impl ScriptEngine {
     /// listeners, then runs every `<script>` block. Errors are returned as
     /// Boa errors; individual script failures log a warning and continue.
     pub fn new(html: &str, bindings: EventBindings) -> JsResult<Self> {
-        let doc = Parser::new(html).parse_with_scripts();
+        let (context, state) = match Self::build_engine(html, bindings.host) {
+            Ok(v) => v,
+            Err((e, _)) => return Err(e),
+        };
+        Ok(ScriptEngine {
+            context,
+            state,
+            auto: bindings.auto,
+        })
+    }
 
+    /// Replace the live document with a freshly parsed one and re-run its
+    /// scripts, keeping the session's host functions and auto-refresh config.
+    ///
+    /// The engine is the single source of truth for the document: a
+    /// whole-document replacement re-parses here and marks the root dirty, so
+    /// the change reaches the render thread as a `RenderArena` — never as an
+    /// independent re-parse on the render side. On failure the previous
+    /// document is left intact and the error is returned.
+    pub fn reload(&mut self, html: &str) -> JsResult<()> {
+        let host_fns = std::mem::take(&mut self.state.borrow_mut().host_fns);
+        let (context, state) = match Self::build_engine(html, host_fns) {
+            Ok(v) => v,
+            Err((e, host_fns)) => {
+                // Restore the previous session so a failed reload leaves it
+                // usable: put the host map back and re-point the thread-local
+                // state the DOM natives read through.
+                self.state.borrow_mut().host_fns = host_fns;
+                ENGINE_STATE.with(|s| *s.borrow_mut() = Some(Rc::clone(&self.state)));
+                return Err(e);
+            }
+        };
+        // The whole document changed: mark the root dirty so the next
+        // response carries the fresh arena to the render thread.
+        {
+            let mut st = state.borrow_mut();
+            let root_id = st.root_id;
+            st.dirty.nodes.push(root_id);
+        }
+        self.context = context;
+        self.state = state;
+        Ok(())
+    }
+
+    /// Build a fresh Boa context + DOM state for `html`, consuming `host_fns`.
+    ///
+    /// On failure the host map is returned inside the `Err` so a caller that
+    /// borrowed it (like [`reload`](Self::reload)) can restore the previous
+    /// session.
+    fn build_engine(
+        html: &str,
+        host_fns: HashMap<String, HostFn>,
+    ) -> Result<(Context, Rc<RefCell<ScriptState>>), (JsError, HashMap<String, HostFn>)> {
+        let doc = Parser::new(html).parse_with_scripts();
         let state = Rc::new(RefCell::new(ScriptState {
             arena: doc.arena,
             root_id: doc.root_id,
             render_cmds: Vec::new(),
             dirty: DirtyInfo::default(),
             current_event: None,
-            host_fns: bindings.host,
+            host_fns,
         }));
         ENGINE_STATE.with(|s| *s.borrow_mut() = Some(Rc::clone(&state)));
 
         let mut context = Context::default();
 
         // GC-rooted registries used by the DOM natives.
-        context.eval(Source::from_bytes(BOOTSTRAP.as_bytes()))?;
-
-        install_builtins(&mut context)?;
+        if let Err(e) = context.eval(Source::from_bytes(BOOTSTRAP.as_bytes())) {
+            return Err((e, std::mem::take(&mut state.borrow_mut().host_fns)));
+        }
+        if let Err(e) = install_builtins(&mut context) {
+            return Err((e, std::mem::take(&mut state.borrow_mut().host_fns)));
+        }
 
         // Expose host functions as JS globals.
         let host_names: Vec<String> = state.borrow().host_fns.keys().cloned().collect();
         for name in host_names {
-            register_host_global(&mut context, &name)?;
+            if let Err(e) = register_host_global(&mut context, &name) {
+                return Err((e, std::mem::take(&mut state.borrow_mut().host_fns)));
+            }
         }
 
         // Compile `on*` attribute bodies into listeners.
-        compile_attribute_listeners(&mut context, &state)?;
+        if let Err(e) = compile_attribute_listeners(&mut context, &state) {
+            return Err((e, std::mem::take(&mut state.borrow_mut().host_fns)));
+        }
 
         // Run the document's `<script>` blocks.
         for script in &doc.scripts {
@@ -144,12 +203,27 @@ impl ScriptEngine {
                 log::warn!("Script execution failed: {e}");
             }
         }
+        Ok((context, state))
+    }
 
-        Ok(ScriptEngine {
-            context,
-            state,
-            auto: bindings.auto,
-        })
+    /// Rewrite `RenderCmd::RenderHtml` pushed by host functions into an
+    /// in-engine document reload, so the script engine stays the single
+    /// source of truth for the document (see [`reload`](Self::reload)). A
+    /// failed reload keeps the command for the render thread's legacy path.
+    fn intercept_render_html(&mut self, cmds: Vec<RenderCmd>) -> Vec<RenderCmd> {
+        let mut out = Vec::with_capacity(cmds.len());
+        for cmd in cmds {
+            match cmd {
+                RenderCmd::RenderHtml { html } => {
+                    if let Err(e) = self.reload(&html) {
+                        log::error!("In-engine document reload failed: {e}");
+                        out.push(RenderCmd::RenderHtml { html });
+                    }
+                }
+                other => out.push(other),
+            }
+        }
+        out
     }
 
     /// The periodic auto-refresh configuration, if any.
@@ -290,7 +364,9 @@ impl ScriptEngine {
 
         let mut st = self.state.borrow_mut();
         st.current_event = None;
-        std::mem::take(&mut st.render_cmds)
+        let cmds = std::mem::take(&mut st.render_cmds);
+        drop(st);
+        self.intercept_render_html(cmds)
     }
 
     /// Evaluate a JS snippet in the engine's global scope.
@@ -327,7 +403,9 @@ impl ScriptEngine {
             log::warn!("Action `{name}` threw: {e}");
         }
         let mut st = self.state.borrow_mut();
-        std::mem::take(&mut st.render_cmds)
+        let cmds = std::mem::take(&mut st.render_cmds);
+        drop(st);
+        self.intercept_render_html(cmds)
     }
 
     /// Build a JS `Event` object for a dispatch.

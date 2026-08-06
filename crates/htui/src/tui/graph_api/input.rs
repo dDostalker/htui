@@ -67,9 +67,10 @@ pub enum RenderCmd {
         dirty: DirtyInfo,
     },
     /// Replace the session document with `html` and fully re-render it,
-    /// keeping the current scroll position / zoom. The render thread swaps
-    /// the document and diff-renders, so handlers can build dynamic content
-    /// (e.g. a counter that re-renders on every click).
+    /// keeping the current scroll position / zoom. Script-path uses are
+    /// intercepted by `ScriptEngine::reload` so the engine re-parses the
+    /// document (single source of truth); the render-thread branch only
+    /// handles direct API use / fallback.
     RenderHtml { html: Arc<str> },
     /// Re-style the cached document for the CSS `:hover` pseudo-class with the
     /// given session-local node (`None` clears any hover), then repaint. With
@@ -274,6 +275,23 @@ pub fn apply_input_key(value: &mut String, cursor: &mut usize, key: KeyCode) -> 
         }
         _ => false,
     }
+}
+
+/// Keys a focused `<input>` field owns. Editing / caret keys stay inside the
+/// field — even when they are boundary no-ops (Home at the start) — while
+/// everything else (page navigation like ↓ / ↑ / PageDown / PageUp, function
+/// keys) belongs to the page-level handler.
+pub fn is_input_field_key(code: KeyCode) -> bool {
+    matches!(
+        code,
+        KeyCode::Char(_)
+            | KeyCode::Backspace
+            | KeyCode::Delete
+            | KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::Home
+            | KeyCode::End
+    )
 }
 
 /// Byte offset of the `char_idx`-th character (clamped to the end).
@@ -917,9 +935,12 @@ pub fn trigger_refresh(
                 }
             }
 
-            // A focused `<input>` consumes text-editing keys; `Esc` blurs it
-            // and `Enter` confirms (blur + commit) — both write the value back
-            // to the DOM. Either returns control to scrolling / quitting.
+            // A focused `<input>` consumes the keys it owns: text editing and
+            // caret movement. `Esc` blurs it and `Enter` confirms (blur +
+            // commit) — both write the value back to the DOM. Keys the field
+            // does *not* own (page navigation such as ↓ / ↑ / PageDown /
+            // PageUp) fall through to the page-level handler below, matching
+            // a browser where an input only intercepts the keys it edits.
             if state.focused_input.is_some() {
                 if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
                     blur_input(state, msgs, &mut cmds);
@@ -950,15 +971,21 @@ pub fn trigger_refresh(
                     return cmds;
                 }
 
-                // Plain editing keys clear the selection.
-                if apply_input_key(&mut state.input_value, &mut state.input_cursor, key.code) {
-                    state.input_sel_anchor = None;
-                    push_input_render(state, focused, &mut cmds);
-                    if arena.is_some() {
-                        msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
+                // Field-owned keys stay in the field even when they are
+                // boundary no-ops (Home at the start must not scroll the
+                // page). Everything else belongs to the page-level handler.
+                if is_input_field_key(key.code) {
+                    // Plain editing keys clear the selection.
+                    if apply_input_key(&mut state.input_value, &mut state.input_cursor, key.code) {
+                        state.input_sel_anchor = None;
+                        push_input_render(state, focused, &mut cmds);
+                        if arena.is_some() {
+                            msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
+                        }
                     }
+                    return cmds;
                 }
-                return cmds;
+                // Fall through to the page-level key handling below.
             }
 
             if key.modifiers.contains(event::KeyModifiers::CONTROL) {

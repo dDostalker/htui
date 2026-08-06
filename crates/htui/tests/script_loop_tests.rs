@@ -14,6 +14,7 @@ use htui::layout::layout::TermMap;
 use htui::layout::{BoxConstraint, Cursor, layout_tree};
 use htui::script::{ScriptEngine, ScriptMsg, ScriptResponse, apply_message, run_script_thread};
 use htui::tdom::node::{NodeArena, NodeId};
+use htui::tui::graph_api::RenderCmd;
 
 const COLS: u16 = 120;
 const ROWS: u16 = 40;
@@ -73,6 +74,46 @@ fn apply_message_click_fires_the_matching_listener() {
     let ev = apply_message(&mut engine, &mut hover, &map, ScriptMsg::Click { x, y });
     assert_eq!(*calls.lock().unwrap(), 1, "click must call the host function");
     assert_eq!(ev.hovered, Some(region.node_id), "click syncs the hover target");
+}
+
+#[test]
+fn host_render_html_reloads_in_engine_instead_of_render_thread() {
+    // A host function that pushes `RenderHtml` must rebuild the document in
+    // the engine (the single source of truth): the fresh arena + a dirty root
+    // reach the render thread as a `RenderArena`, never as an independent
+    // re-parse on the render side (the former dual-source bug, browser-compat
+    // §6.4.12).
+    let bindings = host_bindings("rebuild", move |call| {
+        call.render.push(RenderCmd::RenderHtml {
+            html: Arc::from(r#"<div id="fresh">hello</div>"#),
+        });
+        boa_engine::JsValue::undefined()
+    });
+    let mut engine = ScriptEngine::new(r#"<div id="old">bye</div>"#, bindings).expect("engine");
+    find_node_by_id(&engine.arena(), "old"); // panics if absent
+
+    let cmds = engine.invoke_action("rebuild");
+    assert!(
+        cmds.iter().all(|c| !matches!(c, RenderCmd::RenderHtml { .. })),
+        "RenderHtml must be consumed in-engine, not forwarded to the render thread"
+    );
+    find_node_by_id(&engine.arena(), "fresh"); // panics if absent — must be live in the engine
+    assert!(
+        engine.arena().iter().all(|(_, n)| n.attributes.get("id").map(String::as_str) != Some("old")),
+        "the old document must be gone"
+    );
+    assert!(
+        !engine.take_dirty().is_empty(),
+        "reload must mark the root dirty so the response carries the fresh arena"
+    );
+
+    // The host map survives the reload: a second call works again.
+    let cmds2 = engine.invoke_action("rebuild");
+    assert!(cmds2.is_empty(), "second reload also consumes the command");
+    assert!(
+        !engine.take_dirty().is_empty(),
+        "each reload marks its root dirty"
+    );
 }
 
 #[test]

@@ -305,8 +305,10 @@ JS 修改 DOM 后，引擎把被改动的节点 id 记入 `dirty`（一组 `Node
 在渲染线程内完成，只有引擎持有的 arena 被克隆发送；且单个 `textContent` 变化
 不再触发整张画布的清空与重绘。
 
-> 注意：`RenderCmd::RenderHtml` 仍保留用于"整文档替换"场景——宿主函数 push 后由
-> 渲染线程重新解析并渲染（脚本引擎自身的 live arena 不变）。
+> 注意：`RenderCmd::RenderHtml` 用于"整文档替换"——宿主函数 push 后由**脚本引擎
+> `ScriptEngine::reload` 在引擎内**重新解析（保持引擎为文档单一真源），mark root
+> dirty 后随 `RenderArena` 同步到渲染线程；渲染线程的 `RenderHtml` 分支仅作外部
+> API 兜底。
 
 ### 脚本线程（引擎与输入解耦）
 
@@ -327,8 +329,8 @@ JS 修改 DOM 后，引擎把被改动的节点 id 记入 `dirty`（一组 `Node
 响应被输入循环消费"之间会看到旧文档。影响面：`focus_input` 用旧 `value` 种子编辑
 缓冲、blur 提交可能覆盖 JS 刚改的值、node_type / select 选项判断同理。窗口约
 0–100ms，通常只在"JS 改 `input.value` 后紧跟点击聚焦编辑提交"这类组合触发；需要
-严格一致性时可改走消息往返（代价是输入循环等待脚本线程）。`RenderCmd::RenderHtml`
-后引擎 live arena 不同步属同一族问题（见 §6 上文注意）。
+严格一致性时可改走消息往返（代价是输入循环等待脚本线程）。整文档替换已在引擎内
+完成（§6 上文注意），不再有渲染线程独立解析的双真源。
 
 ### 增量重绘（Region Repaint）
 

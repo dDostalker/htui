@@ -85,14 +85,14 @@
   验证：新增回归测试（`layout_drops_unfocused_input_state_but_keeps_focused` /
   `blur_handler_rewrite_reports_the_final_value_in_the_dirty_arena`），全部测试通过。
 
-### B.【未修复，记录】内容溢出视口时无法下滑到底部
+### B.【已修复】内容溢出视口时无法下滑到底部
 - **现象**：消息增多超出视口后，无法用 j / ↓ / PageDown 滚到最底部。
 - **已排除**：布局/滚动机制本身正常——headless 诊断验证 `rendered_rows` /
   `max_scroll` 正确、max_scroll 处最后一行（hint）可见。
 - **根因（交互层）**：聚焦的 `<input>` 在 `trigger_refresh` 里对**所有按键**直接
-  `return cmds`（编辑分支无条件返回），j / ↓ / PageDown 全部被吞。Codex 流程中
-  用户因问题 A 重新点击输入框（重新聚焦）→ 滚动键随即失效。
-- **连带缺口**：聊天流新增内容**不会自动滚到底部**（无自动滚底 API），手动滚动又
-  被聚焦输入框挡死，组合起来就是"无法下滑到底部"。
-- **修复方向（待办）**：① 聚焦输入框时放行未消费的滚动键（`apply_input_key` 返回
-  false 的键继续走滚动分支）；② 或新增 `keydown` 事件 + 自动滚底 API。
+  `return cmds`（编辑分支无条件返回），页面导航键被吞。
+- **修复（架构，非补丁）**：输入框只消费自有键（编辑 + 光标移动，
+  `is_input_field_key`）；未消费的键**回落页面级分支**（浏览器语义：input 不拦截它
+  不编辑的键）——聚焦时 ↓ / ↑ / PageDown / PageUp 仍可滚动，Esc 退出编辑后
+  j / k 恢复。验证：新增 `input_field_key_classifies_editing_keys` 测试。
+- **剩余缺口**：聊天流新增内容不会自动滚到底部（无自动滚底 API，非本次范围）。

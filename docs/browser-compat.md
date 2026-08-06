@@ -561,12 +561,14 @@
   "输入循环读旧快照去种子 / 判定"这类读路径，不再影响显示正确性。
 - **代码**：`tui/run.rs`（`live_dom`）+ `script/msg.rs`。
 
-#### 6.4.12 【已知】`RenderCmd::RenderHtml` 后引擎 live DOM 不同步
+#### 6.4.12 【已修复】`RenderCmd::RenderHtml` 后引擎 live DOM 不同步
 - **浏览器**：无对应概念。
-- **htui**：宿主函数 push `RenderHtml` 时渲染线程独立重新解析渲染，**脚本引擎的
-  live arena 保持旧文档**——之后 JS 读 `getElementById` 等读到旧内容，输入循环
-  快照同样陈旧，直到下一次 DOM 写触发 dirty。
-- **代码**：`tui/run.rs`（render thread `RenderHtml` 分支）。
+- **旧问题**：宿主函数 push `RenderHtml` 时渲染线程独立重新解析渲染，脚本引擎的
+  live arena 保持旧文档，JS 读 `getElementById` 等读到旧内容。
+- **修复**：脚本路径的 `RenderHtml` 由 **`ScriptEngine::reload` 在引擎内**重建文档
+  （重新解析 + 跑脚本 + 保留宿主函数），mark root dirty 后随 `RenderArena` 同步——
+  引擎保持文档单一真源；渲染线程的 `RenderHtml` 分支仅作外部 API 兜底。
+- **代码**：`script/mod.rs`（`reload` / `intercept_render_html`）。
 
 ### 6.5 交互与输入
 
