@@ -114,7 +114,51 @@ fn apply_message_blur_commits_the_value_and_fires_blur_then_change() {
         .and_then(|n| n.attributes.get("value"))
         .cloned();
     assert_eq!(committed.as_deref(), Some("new"), "value must be committed");
-    assert!(ev.dirty.is_none(), "set_value (width-fixed path) is not a repaint");
+    let dirty = ev.dirty.expect("blur commit must report a repaint");
+    assert!(
+        dirty.dirty.nodes.contains(&node_id),
+        "the committed node must be in the dirty set"
+    );
+}
+
+#[test]
+fn blur_handler_rewrite_reports_the_final_value_in_the_dirty_arena() {
+    // The Codex scenario: a blur handler rewrites `el.value` after the blur
+    // commit. Because the commit itself marks the node dirty, the resulting
+    // `RenderArena` carries the *handler's* value — the field clears on screen
+    // instead of keeping the stale edited text.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var el = document.getElementById('f');
+          el.addEventListener('blur', function(){ el.value = ''; });
+        </script>
+        <input id="f" value="old">"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let node_id = find_node_by_id(&engine.arena(), "f");
+
+    let mut hover = HoverState::new();
+    let ev = apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::BlurInput {
+            node_id,
+            value: "new".to_string(),
+        },
+    );
+    let dirty = ev.dirty.expect("blur commit must report a repaint");
+    let shown = dirty
+        .arena
+        .get(node_id)
+        .and_then(|n| n.attributes.get("value"))
+        .cloned();
+    assert_eq!(
+        shown.as_deref(),
+        Some(""),
+        "the repaint arena must carry the handler-cleared value"
+    );
 }
 
 #[test]

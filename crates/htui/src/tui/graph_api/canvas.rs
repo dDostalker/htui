@@ -49,7 +49,10 @@ pub struct TermLayout {
     pub(crate) image_cache: ImageCache,
     /// `<input>` edit state keyed by node id, written by
     /// [`RenderCmd::RenderInput`](crate::tui::graph_api::RenderCmd) and read by
-    /// the input painter.
+    /// the input painter. Transient: focused entries hold the live edit
+    /// buffer, and an unfocused entry bridges the single blur repaint — every
+    /// fresh layout (see `TermLayout::layout_only`) drops unfocused entries,
+    /// after which the painter reads the DOM `value` attribute.
     pub input_states: HashMap<NodeId, InputRenderState>,
     /// The `<select>` node whose dropdown is open (rendered as an overlay),
     /// set by the render thread while a dropdown is expanded.

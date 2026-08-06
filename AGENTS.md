@@ -33,7 +33,7 @@ htui/
 │   │   │   │   └── msg.rs          # 脚本线程桥：ScriptMsg/ScriptResponse + apply_message + run_script_thread（引擎独占线程）
 │   │   │   ├── html/
 │   │   │   │   ├── mod.rs
-│   │   │   │   ├── html_parse.rs   # HTML → tdom 树（html5ever）
+│   │   │   │   ├── html_parse.rs   # HTML → tdom 树（html5ever）；提取 <style> CSS / <script> JS（含 <link rel=stylesheet> 与 <script src> 本地文件加载）
 │   │   │   │   ├── box_edges.rs    # BoxEdges / Border / padding / margin / width
 │   │   │   │   └── css_parse/      # CSS 解析
 │   │   │   │       ├── mod.rs
@@ -154,11 +154,14 @@ htui/
 │       ├── Cargo.toml
 │       └── src/lib.rs           # proc-macro：命令包装（纯 fn + 返回 HostFn）/ 模块自动注册 / 结构体 ↔ JS 对象 derive
 ├── docs/
-│   └── script-layer.md    # 脚本层完整使用与架构文档（脚本 / on* / 宿主函数 / RenderArena）
+│   ├── script-layer.md    # 脚本层完整使用与架构文档（脚本 / on* / 宿主函数 / RenderArena）
+│   └── examples-notes.md  # 交互示例（codex/yazi/snake）与遇到的问题记录（键盘事件/input 值滞后等）
 ├── visual_test/          # 可视化测试工具（cargo run -p visual_test）
 │   └── src/
 │       ├── main.rs
 │       ├── sysmon.rs     # 系统监控器示例逻辑（sysinfo 采样 + 页面重建）
+│       ├── yazi.rs       # yazi 文件管理器宿主命令（listDir 读真实目录）
+│       ├── snake.rs      # snake 游戏 auto-refresh 绑定（150ms 驱动 JS tick）
 │       ├── all_in_one/   # index.html: 可直接浏览器打开，内部 <style> 内联 CSS
 │       ├── headings/
 │       ├── image/        # includes pic.png
@@ -185,6 +188,9 @@ htui/
 │       ├── position/     # CSS 定位演示（relative / absolute / fixed / z-index）
 │       ├── input/        # <input> 输入框演示（点击聚焦 + 键盘编辑 + focus/blur/input/change 事件）
 │       ├── configurator/ # 配置器设置表单演示（input + 原生 select 下拉 + JS 开关 + 实时预览 + 保存/重置）
+│       ├── codex/        # Codex CLI 风格聊天界面（input + change 提交，无执行）
+│       ├── yazi/         # Yazi 风格文件管理器（点击导航目录/文件 + [ .. ] 返回）
+│       ├── snake/        # 贪吃蛇（JS 游戏 + auto 驱动 tick + 点击方向按钮）
 │       └── viewport_units/
 ```
 
@@ -287,6 +293,12 @@ InputKeystroke / SelectPick）发给脚本线程，后者经 `apply_message` 统
 脚本线程。**宿主函数阻塞只拖住脚本线程**——滚动、退出、鼠标拖选照常（Tauri 式 UI
 解耦）；`handle_click` 等输入处理函数只读 DOM 快照、产出 `ScriptMsg`，不碰引擎
 （测试用 `apply_message` 在引擎上回放这些消息）。
+
+**已知限制**：① 输入循环的 DOM 读基于快照，在"JS 改 DOM → `dirty` 响应被消费"
+之间有 read-behind 窗口（`focus_input` 种子、blur 提交、node_type 判断可能读到旧
+文档，窗口约 0–100ms）；② 宿主函数 push `RenderCmd::RenderHtml` 时渲染线程独立
+重新解析，脚本引擎 live arena 不同步，直至下次 DOM 写。两者均记录于
+`docs/browser-compat.md` §6.4.11/6.4.12。
 
 ### 动态内容：JS 修改 live DOM 后引擎把被改动的 `NodeId` 记入 `dirty`，脚本线程回
 `ScriptResponse::Event`，输入循环据其发送

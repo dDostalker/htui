@@ -30,10 +30,10 @@ pub enum ReplacedContent {
     },
     /// `<input>` — a single-line text field.
     ///
-    /// The visible value / cursor / focus state live in
-    /// [`TermLayout::input_states`](crate::tui::graph_api::TermLayout::input_states),
-    /// keyed by node id; the box only marks this as an input leaf so the
-    /// paint phase knows to draw a field.
+    /// Focused editing state lives in
+    /// [`TermLayout::input_states`](crate::tui::graph_api::TermLayout::input_states);
+    /// unfocused fields render from the DOM `value` attribute. The box only
+    /// marks this as an input leaf so the paint phase knows to draw a field.
     Input,
     /// `<select>` — a single-line dropdown field. The options are read from
     /// the node's `<option>` children (see `select_options`); the currently

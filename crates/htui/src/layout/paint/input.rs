@@ -59,8 +59,12 @@ pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintC
     };
 
     let node = &arena[lb.node_id];
-    // Engine edit state (typed while focused) wins over the DOM `value`
-    // attribute (the initial content of an untouched field).
+    // Live edit state wins while focused, and an unfocused entry covers only
+    // the single repaint right after a blur (so the committed text doesn't
+    // flash back to the pre-commit DOM value). Every fresh layout drops
+    // unfocused entries (see `TermLayout::layout_only`), so an unfocused
+    // field otherwise renders from the DOM `value` attribute — the display
+    // source of truth.
     let (value, cursor, focused, selection) = match canvas.input_states.get(&lb.node_id) {
         Some(st) => (st.value.clone(), st.cursor, st.focused, st.selection),
         None => (

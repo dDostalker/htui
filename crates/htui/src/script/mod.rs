@@ -175,32 +175,41 @@ impl ScriptEngine {
     }
 
     /// Commit an `<input>` field's edited value into the DOM `value`
-    /// attribute.
+    /// attribute and mark the node dirty.
     ///
     /// The DOM is the single source of truth for a field's content: editing
     /// while focused repaints through the lightweight `input_states` path, and
     /// this writes the result back on blur / Enter / focus-switch so the next
-    /// focus (or any later re-render) sees the edited value. It does *not*
-    /// mark the node dirty — the field's layout is width-fixed, so the visible
-    /// repaint is driven by `RenderCmd::RenderInput` instead of a re-layout.
+    /// focus (or any later re-render) sees the edited value. Marking the node
+    /// dirty guarantees the commit reaches the render thread as a
+    /// `RenderArena`, so a JS blur handler that rewrites the value (e.g.
+    /// clearing a submitted box) is what ends up on screen. Committing an
+    /// unchanged value is a no-op (no dirty marker), mirroring the `el.value`
+    /// JS setter's fast path.
     pub fn set_value(&mut self, node_id: NodeId, value: &str) {
-        if let Some(node) = self.state.borrow_mut().arena.get_mut(node_id) {
-            node.attributes.insert("value".to_string(), value.to_string());
-        }
-    }
-
-    /// Commit a new `value` attribute and mark the node dirty.
-    ///
-    /// Unlike [`set_value`](Self::set_value) (whose field layout is
-    /// width-fixed), this is for controls whose rendered size can change with
-    /// the value — a `<select>` selection swaps the shown label, so the next
-    /// frame must re-cascade and re-render.
-    pub fn set_value_dirty(&mut self, node_id: NodeId, value: &str) {
         let mut st = self.state.borrow_mut();
+        let existing = st
+            .arena
+            .get(node_id)
+            .and_then(|n| n.attributes.get("value"))
+            .cloned()
+            .unwrap_or_default();
+        if existing == value {
+            return;
+        }
         if let Some(node) = st.arena.get_mut(node_id) {
             node.attributes.insert("value".to_string(), value.to_string());
         }
         st.dirty.nodes.push(node_id);
+    }
+
+    /// Commit a new `value` attribute and mark the node dirty.
+    ///
+    /// A convenience alias of [`set_value`](Self::set_value) for callers that
+    /// always change the value (e.g. a `<select>` selection swapping the shown
+    /// label), so the next frame re-cascades and re-renders.
+    pub fn set_value_dirty(&mut self, node_id: NodeId, value: &str) {
+        self.set_value(node_id, value);
     }
 
     /// Dispatch a DOM event along the hit region's ancestor path.

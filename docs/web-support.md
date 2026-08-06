@@ -16,7 +16,9 @@
 
 ### 1.1 文档结构（不渲染为可视内容）
 
-`html` `head` `title` `meta` `link` `style`（`<style>` 内的 CSS 会级联）
+`html` `head` `title` `meta` `link` `style`（`<style>` 内的 CSS 会级联）；
+`<link rel="stylesheet">` / `<script src="...">` 支持本地文件加载（`href`/`src`
+相对进程 CWD，无 URL/网络，失败仅 warn 静默跳过）
 
 ### 1.2 块级与文本（✅ 专用布局/渲染）
 
@@ -110,7 +112,7 @@
 
 - ✅ 继承属性表（`INHERITED_PROPS`）、内联 `style` 属性 > 选择器规则、
   相同优先级按出现顺序
-- ✅ 支持 `<style>` 标签内联 CSS（外部 `<link>` 不加载）
+- ✅ 支持 `<style>` 标签内联 CSS；也支持 `<link rel="stylesheet">`（`href` 按本地文件路径读取，相对进程 CWD，失败静默跳过）
 
 ## 3. JavaScript / DOM
 

@@ -205,11 +205,12 @@ fn input_renders_multibyte_values_at_display_width() {
 }
 
 #[test]
-fn set_value_commits_edited_value_to_the_dom() {
+fn set_value_commits_edited_value_to_the_dom_and_marks_dirty() {
     // The blur path writes the edited value back into the DOM `value`
-    // attribute (single source of truth) so a later focus reads it back. It
-    // does not mark the node dirty — the visible repaint is driven by
-    // `RenderCmd::RenderInput` (the field's layout is width-fixed).
+    // attribute (single source of truth) and marks the node dirty, so the
+    // commit always reaches the render thread as a `RenderArena` — a JS blur
+    // handler that rewrites the value (e.g. clearing a submitted box) is what
+    // ends up on screen. Committing an unchanged value is a no-op.
     init();
     let mut engine = ScriptEngine::new(
         r#"<div><input value="initial"></div>"#,
@@ -220,13 +221,69 @@ fn set_value_commits_edited_value_to_the_dom() {
 
     engine.set_value(input_id, "edited");
 
-    assert!(engine.take_dirty().is_empty(), "set_value must not mark dirty");
+    assert!(
+        engine.take_dirty().nodes.contains(&input_id),
+        "set_value must mark the node dirty"
+    );
     let stored = engine
         .arena()
         .get(input_id)
         .and_then(|n| n.attributes.get("value"))
         .cloned();
     assert_eq!(stored.as_deref(), Some("edited"));
+
+    engine.set_value(input_id, "edited");
+    assert!(
+        engine.take_dirty().is_empty(),
+        "committing the same value again must not mark dirty"
+    );
+}
+
+#[test]
+fn layout_drops_unfocused_input_state_but_keeps_focused() {
+    init();
+    let (root_id, arena) = setup(r#"<div><input value="hi"></div>"#);
+    let input_id = find_input(&arena, root_id);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+
+    // A stale unfocused cache entry (the transient blur repaint) must not
+    // survive a fresh layout: the arena's `value` attribute is the display
+    // truth for unfocused fields.
+    tl.input_states.insert(
+        input_id,
+        InputRenderState {
+            value: "stale".to_string(),
+            cursor: 0,
+            focused: false,
+            selection: None,
+        },
+    );
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    assert!(
+        !tl.input_states.contains_key(&input_id),
+        "layout must drop stale unfocused entries"
+    );
+    let row: String = tl.layout.iter().take(8).map(|b| b.word.as_str()).collect();
+    assert_eq!(row, "[hi    ]", "unfocused field paints the DOM value");
+
+    // A focused entry holds the live edit buffer and must survive layout.
+    tl.input_states.insert(
+        input_id,
+        InputRenderState {
+            value: "typing".to_string(),
+            cursor: 5,
+            focused: true,
+            selection: None,
+        },
+    );
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    assert!(
+        tl.input_states.contains_key(&input_id),
+        "focused edit state must survive layout"
+    );
+    let row: String = tl.layout.iter().take(8).map(|b| b.word.as_str()).collect();
+    assert_eq!(row, "[typing]", "focused field paints the live edit buffer");
 }
 
 #[test]

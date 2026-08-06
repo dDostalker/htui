@@ -89,13 +89,22 @@ impl TermLayout {
     ///
     /// The shared first half of [`draw`](Self::draw): incremental renders run
     /// it and then decide how much of the canvas to repaint, so a small DOM
-    /// mutation does not have to clear and re-paint the whole buffer.
+    /// mutation does not have to clear and re-paint the whole buffer. The pass
+    /// also drops stale unfocused [`input_states`](Self::input_states) entries
+    /// — a fresh layout re-establishes the arena as the display source of
+    /// truth for unfocused `<input>` fields.
     pub fn layout_only(
-        &self,
+        &mut self,
         arena: &NodeArena,
         root_id: NodeId,
         term_map: &TermMap,
     ) -> Result<Vec<LayoutBox>> {
+        // Unfocused `input_states` entries only bridge the single repaint
+        // right after a blur (so the field doesn't flash its pre-commit DOM
+        // value); once a fresh layout runs, the arena's `value` attribute is
+        // the display truth and stale cache entries must not survive. Focused
+        // entries keep the live edit buffer.
+        self.input_states.retain(|_, st| st.focused);
         let root = &arena[root_id];
         assert_eq!(root.node_type, NodeType::Global);
         let containing = BoxConstraint::root(term_map);

@@ -9,8 +9,9 @@ use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
 use crate::tdom::node::{Node, NodeArena, NodeId, NodeType};
 
-/// Parsed HTML document: the DOM arena plus the embedded `<style>` CSS and
-/// `<script>` JS sources extracted during parsing.
+/// Parsed HTML document: the DOM arena plus the `<style>` CSS and `<script>`
+/// JS sources extracted during parsing (inline, or external files loaded via
+/// `<link rel="stylesheet">` / `<script src="...">`).
 #[derive(Debug)]
 pub struct ParsedDocument {
     pub root_id: NodeId,
@@ -93,6 +94,27 @@ fn convert_children(
                 // becoming a DOM node: the script layer evaluates its source
                 // against the rendered document.
                 if tag.eq_ignore_ascii_case("script") {
+                    // `<script src="...">` loads an external JS file (local
+                    // filesystem path relative to the process CWD, like
+                    // `<link rel="stylesheet">`). A `src` attribute wins over
+                    // any inline content, mirroring the browser's rule that an
+                    // external script's body is ignored.
+                    let script_attrs = {
+                        let ar = attrs.borrow();
+                        convert_attributes(&ar)
+                    };
+                    if let Some(src) = script_attrs.get("src") {
+                        info!("外部脚本: {}", src);
+                        match fs::read_to_string(Path::new(src)) {
+                            Ok(js) if !js.trim().is_empty() => scripts.push(js),
+                            Ok(_) => warn!("外部脚本 {} 为空", src),
+                            Err(e) => warn!("读取 {} 失败: {}", src, e),
+                        }
+                        continue;
+                    }
+                    // `<script>` is extracted verbatim (like `<style>`) rather than
+                    // becoming a DOM node: the script layer evaluates its source
+                    // against the rendered document.
                     let js = extract_text_content(child_handle);
                     if !js.trim().is_empty() {
                         info!("提取 <script> JS: {} 字节", js.len());

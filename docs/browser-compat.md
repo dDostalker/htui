@@ -22,10 +22,10 @@
 | `html` `head` `body` | ✅ | ✅ | 结构骨架 |
 | `title` | ✅ | ✅ | 写入终端窗口标题 |
 | `meta` | ✅ | ✅ | 解析但忽略属性 |
-| `link` | ✅ | ✗ | 不加载外部 CSS/图标 |
+| `link` | ✅ | ◐ | 仅 `rel="stylesheet"`：`href` 按**本地文件路径**读取（相对进程 CWD，无 URL/网络），失败仅 warn 静默跳过 |
 | `style` | ✅ | ✅ | `<style>` 内 CSS 参与级联 |
 | `script` | ✅ | ✅ | 执行内嵌脚本（Boa） |
-| `script src=...` | ✅ | ✗ | 不加载外部脚本 |
+| `script src=...` | ✅ | ◐ | `src` 按**本地文件路径**读取（相对进程 CWD，无 URL/网络），失败仅 warn 静默跳过；有 `src` 时内联内容被忽略（对齐浏览器） |
 | `noscript` | ✅ | ✗ | 无 |
 
 ### 1.2 块级与文本
@@ -549,6 +549,24 @@
 - **浏览器**：`value` 还适用于 `<textarea>`/`<select>`/`<option>`。
 - **htui**：非 input 元素读写 `value` 无效果。
 - **代码**：`script/dom.rs`（`native_get_value`）。
+
+#### 6.4.11 【已知】输入循环读 DOM 快照（read-behind 窗口）
+- **浏览器**：交互线程与脚本共享同一 DOM，读取总是最新。
+- **htui**：输入循环读的是脚本线程发布的 arena **快照**（仅 JS 改 DOM 后经
+  `ScriptResponse::Event.dirty` 更新）。在"JS 改动 → 响应被消费"之间输入循环看到
+  旧文档：`focus_input` 用旧 `value` 种子编辑缓冲，编辑期间 JS 改 `value` 后 blur
+  提交可能覆盖新值；node_type 判断与 `<select>` 选项读取同理。窗口约 0–100ms。
+  **已缓解**：blur 提交（`set_value`）现在必 mark dirty（等值短路），提交随 JS blur
+  处理器的改写一起以 `RenderArena` 发布，显示侧不再停留旧值——read-behind 只剩
+  "输入循环读旧快照去种子 / 判定"这类读路径，不再影响显示正确性。
+- **代码**：`tui/run.rs`（`live_dom`）+ `script/msg.rs`。
+
+#### 6.4.12 【已知】`RenderCmd::RenderHtml` 后引擎 live DOM 不同步
+- **浏览器**：无对应概念。
+- **htui**：宿主函数 push `RenderHtml` 时渲染线程独立重新解析渲染，**脚本引擎的
+  live arena 保持旧文档**——之后 JS 读 `getElementById` 等读到旧内容，输入循环
+  快照同样陈旧，直到下一次 DOM 写触发 dirty。
+- **代码**：`tui/run.rs`（render thread `RenderHtml` 分支）。
 
 ### 6.5 交互与输入
 

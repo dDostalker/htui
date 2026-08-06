@@ -21,7 +21,9 @@ use htui::render;
 use htui::render_with_events;
 use log::info;
 
+mod snake;
 mod sysmon;
+mod yazi;
 
 /// Headless preview: parse the document, run the full layout pipeline into a
 /// [`TermLayout`] canvas, and print each non-empty row as plain text so the
@@ -190,6 +192,9 @@ fn main() -> Result<()> {
         "position" => test_case!(position, no_css),
         "input" => test_case!(input, no_css),
         "configurator" => test_case!(configurator, no_css),
+        "codex" => test_case!(codex, no_css),
+        "yazi" => test_case!(yazi, no_css),
+        "snake" => test_case!(snake, no_css),
         "showcase" => test_case!(showcase, no_css),
         _ => {
             let available = [
@@ -220,6 +225,9 @@ fn main() -> Result<()> {
                 "position",
                 "input",
                 "configurator",
+                "codex",
+                "yazi",
+                "snake",
                 "showcase",
             ];
             eprintln!(
@@ -306,6 +314,45 @@ fn main() -> Result<()> {
             dump(html, css, cols, rows, bg_map);
         } else {
             render_with_events(html, css, EventBindings::default());
+        }
+        info!("Test '{test_name}' completed");
+        return Ok(());
+    }
+
+    // The `codex` case runs through `render_with_events`: a chat-style input
+    // box (`change` on Enter appends the message to the thread — execution is
+    // disabled by design). `--dump` falls back to the static preview.
+    if test_name == "codex" {
+        if dump_mode {
+            dump(html, css, cols, rows, bg_map);
+        } else {
+            render_with_events(html, css, EventBindings::default());
+        }
+        info!("Test '{test_name}' completed");
+        return Ok(());
+    }
+
+    // The `yazi` case runs through `render_with_events` with the `listDir`
+    // host command (see `yazi.rs`): a real directory listing navigable by
+    // click. `--dump` falls back to the static preview.
+    if test_name == "yazi" {
+        if dump_mode {
+            dump(html, css, cols, rows, bg_map);
+        } else {
+            render_with_events(html, css, yazi::bindings());
+        }
+        info!("Test '{test_name}' completed");
+        return Ok(());
+    }
+
+    // The `snake` case runs through `render_with_events`: the game runs in
+    // JS, driven by a 150 ms auto-refresh of `tick()` (see `snake.rs`), with
+    // click-to-steer buttons. `--dump` falls back to the static preview.
+    if test_name == "snake" {
+        if dump_mode {
+            dump(html, css, cols, rows, bg_map);
+        } else {
+            render_with_events(html, css, snake::bindings());
         }
         info!("Test '{test_name}' completed");
         return Ok(());
