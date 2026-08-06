@@ -37,7 +37,7 @@ use boa_engine::property::Attribute;
 use crate::{
     events::{AutoRefresh, EventBindings, EventType, HitRegion, HtmlEvent},
     html::html_parse::Parser,
-    tdom::node::{NodeArena, NodeId, NodeType},
+    tdom::node::{NodeArena, NodeId},
     tui::graph_api::RenderCmd,
 };
 
@@ -326,7 +326,11 @@ impl ScriptEngine {
             if let Ok(wrapper) = element_wrapper(&mut self.context, element.node_id)
                 && let Some(obj) = event.as_object()
             {
-                let _ = obj.set(js_string!("currentTarget"), wrapper, false, &mut self.context);
+                if let Err(e) =
+                    obj.set(js_string!("currentTarget"), wrapper, false, &mut self.context)
+                {
+                    log::warn!("Failed to set event.currentTarget: {e}");
+                }
             }
             if let Some(ev) = &mut self.state.borrow_mut().current_event {
                 ev.current_target = element.id.clone();
@@ -465,7 +469,9 @@ impl Drop for ScriptEngine {
 /// `event.stopPropagation()` — marks the event as stopped.
 fn stop_propagation(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     if let Some(obj) = this.to_object(context).ok() {
-        let _ = obj.set(js_string!("_stopped"), true, false, context);
+        if let Err(e) = obj.set(js_string!("_stopped"), true, false, context) {
+            log::warn!("Failed to mark event stopped: {e}");
+        }
     }
     Ok(JsValue::undefined())
 }
@@ -554,39 +560,4 @@ fn compile_attribute_listeners(
         }
     }
     Ok(())
-}
-
-/// `NodeType` variants that map back to a CSS selector string (for
-/// `document.createElement`).
-#[allow(dead_code)]
-fn node_type_str(t: &NodeType) -> Option<String> {
-    let s = match t {
-        NodeType::Div => "div",
-        NodeType::Span => "span",
-        NodeType::P => "p",
-        NodeType::Button => "button",
-        NodeType::A => "a",
-        NodeType::H1 => "h1",
-        NodeType::H2 => "h2",
-        NodeType::H3 => "h3",
-        NodeType::Li => "li",
-        NodeType::Ul => "ul",
-        NodeType::Ol => "ol",
-        NodeType::Pre => "pre",
-        NodeType::Header => "header",
-        NodeType::Footer => "footer",
-        NodeType::Section => "section",
-        NodeType::Article => "article",
-        NodeType::Aside => "aside",
-        NodeType::Main => "main",
-        NodeType::Nav => "nav",
-        NodeType::Table => "table",
-        NodeType::Tr => "tr",
-        NodeType::Td => "td",
-        NodeType::Th => "th",
-        NodeType::Input => "input",
-        NodeType::Img => "img",
-        _ => return None,
-    };
-    Some(s.to_string())
 }

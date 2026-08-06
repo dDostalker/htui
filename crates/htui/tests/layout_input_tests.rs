@@ -91,20 +91,6 @@ fn find_input(arena: &NodeArena, root: NodeId) -> NodeId {
     panic!("no <input> in document");
 }
 
-/// Find the first node with `node_type == NodeType::Input` in a live-engine
-/// arena (mirrors [`find_input`] for standalone arenas).
-fn find_input_in_arena(arena: &NodeArena, root: NodeId) -> NodeId {
-    let mut stack = vec![root];
-    while let Some(id) = stack.pop() {
-        let node = &arena[id];
-        if node.node_type == NodeType::Input {
-            return id;
-        }
-        stack.extend(node.children.iter().copied());
-    }
-    panic!("no <input> in document");
-}
-
 #[test]
 fn selection_range_orders_anchor_and_caret() {
     // Anchor may sit on either side of the caret; the range is always ordered.
@@ -219,7 +205,7 @@ fn set_value_commits_edited_value_to_the_dom_and_marks_dirty() {
         EventBindings::default(),
     )
     .expect("engine");
-    let input_id = find_input_in_arena(&engine.arena(), engine.root_id());
+    let input_id = find_input(&engine.arena(), engine.root_id());
 
     engine.set_value(input_id, "edited");
 

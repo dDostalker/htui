@@ -95,7 +95,7 @@ htui/
 │   │   │   │   │       │   ├── mod.rs              # FlexExt + impl FormattingContext::Flex
 │   │   │   │   │       │   └── tree/               # 拆 6 个文件
 │   │   │   │   │       │       ├── mod.rs          #   re-exports + tree 入口
-│   │   │   │   │       │       ├── dispatch.rs     #   layout_flex_dispatch + is_flex_capable_node + is_block_child_node
+│   │   │   │   │       │       ├── dispatch.rs     #   layout_flex_dispatch
 │   │   │   │   │       │       ├── container.rs    #   layout_flex_container + FlexItemPrep + FLEX_ITEM_MIN_CROSS
 │   │   │   │   │       │       ├── items.rs        #   layout_flex_items
 │   │   │   │   │       │       ├── prepare.rs      #   prepare_flex_item + measure_text_content_width + natural_cross_axis_size + resolve_item_cross_size
