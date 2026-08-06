@@ -313,7 +313,7 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
 定时任务：JS 侧 `setTimeout` / `setInterval`（标准 API）由脚本引擎登记到
 `ScriptState.timers`，脚本线程在消息间隙经 `recv_timeout` 调度
 `ScriptEngine::run_due_timers` 触发回调（监控器/时钟/动画用）。宿主函数在
-脚本线程执行，重活应放后台线程（参考 `visual_test/src/sysmon.rs` 后台采样 +
+脚本线程执行，重活应放后台线程（参考 `example/src/sysmon.rs` 后台采样 +
 快照模式）。
 
 ## 渲染合并优化（避免无意义的重排）

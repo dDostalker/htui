@@ -552,7 +552,7 @@
 - **浏览器**：无（浏览器脚本只能调 Web API）。
 - **htui**：宿主函数在**脚本线程**同步执行（引擎独占线程，阻塞只拖住脚本线程，
   不冻结输入/渲染）；重活仍建议放后台线程（sysmon 模式）以免排队阻塞后续 JS 派发。
-- **代码**：`script/msg.rs` + `visual_test/src/sysmon.rs`。
+- **代码**：`script/msg.rs` + `example/src/sysmon.rs`。
 
 #### 6.4.10 【简化】`el.value` 语义仅限 `<input>`
 - **浏览器**：`value` 还适用于 `<textarea>`/`<select>`/`<option>`。
