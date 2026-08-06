@@ -336,6 +336,18 @@ impl InputState {
             key_gate: None,
         }
     }
+
+    /// Mirror the render thread's scroll clamp: after a terminal grow / a
+    /// shorter document reload the content ceiling (`max_scroll`) can drop
+    /// below the current [`InputState::scroll_y`]. Keeping the two in sync
+    /// prevents the "wheel dead zone" where every scroll `Rerender` is clamped
+    /// to the same value in the render thread and dropped as a no-op, making
+    /// the mouse wheel and arrow keys appear dead after a resize.
+    pub fn clamp_scroll_to(&mut self, max_scroll: u32) {
+        if self.scroll_y > max_scroll {
+            self.scroll_y = max_scroll;
+        }
+    }
 }
 
 impl Default for InputState {
@@ -1435,10 +1447,23 @@ pub fn trigger_refresh(
             cmds
         }
 
-        Ok(Event::Resize(_, _new_rows)) => vec![RenderCmd::Redraw {
-            scroll_y: state.scroll_y,
-            zoom: state.zoom,
-        }],
+        Ok(Event::Resize(_, _new_rows)) => {
+            // A terminal resize on Windows can reset the console input mode
+            // (mouse capture off, keyboard line-buffered); re-apply it right
+            // away. The run loop also polls the size every iteration as a
+            // fallback for resize paths that emit no event.
+            reapply_console_modes();
+            // The render thread re-lays-out against the new size and clamps
+            // its own scroll position; mirror the clamp here (to the last
+            // known ceiling) so the scroll sent with the redraw matches, and
+            // the run loop re-syncs to the freshly computed ceiling on the
+            // next iteration.
+            state.clamp_scroll_to(max_scroll);
+            vec![RenderCmd::Redraw {
+                scroll_y: state.scroll_y,
+                zoom: state.zoom,
+            }]
+        }
 
         _ => cmds,
     }
@@ -1680,3 +1705,26 @@ fn page_level_builtins(
 fn canvas_pos(state: &InputState, column: u16, row: u16) -> (u32, u32) {
     (column as u32, row as u32 + state.scroll_y)
 }
+
+/// Re-apply the console input mode after a terminal resize.
+///
+/// On Windows, resizing the console / ConPTY buffer can reset the console's
+/// input mode: mouse capture is dropped (`ENABLE_MOUSE_INPUT` cleared, quick-
+/// edit selection re-engages) and the keyboard falls back to cooked mode, so
+/// input appears completely dead until the app re-issues raw mode + mouse
+/// capture. Both calls are idempotent, so this is safe to run on every resize
+/// event. On other platforms a resize never touches the terminal modes, so
+/// this is a no-op.
+#[cfg(windows)]
+pub(crate) fn reapply_console_modes() {
+    if let Err(e) = crossterm::terminal::enable_raw_mode() {
+        log::error!("Failed to re-enable raw mode after resize: {}", e);
+    }
+    if let Err(e) = crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture) {
+        log::error!("Failed to re-enable mouse capture after resize: {}", e);
+    }
+}
+
+/// Non-Windows resize does not touch the terminal modes; nothing to re-apply.
+#[cfg(not(windows))]
+pub(crate) fn reapply_console_modes() {}

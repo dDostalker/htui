@@ -66,7 +66,7 @@ fn test_a_renders_text_content() {
     let (root_id, arena) = setup("<p>click <a href=\"https://example.com\">here</a> now</p>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let canvas = canvas_string(&tl);
     assert!(canvas.contains("click"), "pre-link text must render");
     assert!(canvas.contains("here"), "link text must render");
@@ -80,7 +80,7 @@ fn test_a_default_underline_applies() {
     let (root_id, arena) = setup("<p><a href=\"x\">link</a></p>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let idx = first_cell_with(&tl, "l").expect("link text must render");
     let cell = &tl.layout[idx];
     assert!(
@@ -97,7 +97,7 @@ fn test_a_default_blue_color_applies() {
     let (root_id, arena) = setup("<p><a href=\"x\">link</a></p>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let idx = first_cell_with(&tl, "l").expect("link text must render");
     let cell = &tl.layout[idx];
     assert_eq!(
@@ -122,7 +122,7 @@ fn test_a_text_decoration_none_disables_underline() {
     );
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let idx = first_cell_with(&tl, "l").expect("link text must render");
     let cell = &tl.layout[idx];
     assert!(
@@ -141,7 +141,7 @@ fn test_a_color_override_disables_default_blue() {
     );
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let idx = first_cell_with(&tl, "l").expect("link text must render");
     let cell = &tl.layout[idx];
     assert_eq!(
@@ -173,7 +173,7 @@ fn test_a_inherits_parent_color_when_no_override() {
     );
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let idx = first_cell_with(&tl, "l").expect("link text must render");
     let cell = &tl.layout[idx];
     assert_eq!(
@@ -199,7 +199,7 @@ fn test_a_inside_div_with_padding_and_bg() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let canvas = canvas_string(&tl);
     assert!(canvas.contains("link"), "<a> inside <div> must render");
     let idx = first_cell_with(&tl, "l").expect("link cell exists");
@@ -221,7 +221,7 @@ fn test_a_nested_in_span_keeps_underline_default() {
     );
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let idx = first_cell_with(&tl, "l").expect("link text must render");
     let cell = &tl.layout[idx];
     assert!(
@@ -239,7 +239,7 @@ fn test_a_empty_link_does_not_paint() {
     let (root_id, arena) = setup("<p>before<a href=\"x\"></a>after</p>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let canvas = canvas_string(&tl);
     assert!(canvas.contains("before"));
     assert!(canvas.contains("after"));
@@ -262,7 +262,7 @@ fn test_a_preserves_text_decoration_line_through_instead_of_underline() {
     );
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let idx = first_cell_with(&tl, "l").expect("link text must render");
     let cell = &tl.layout[idx];
     assert!(
@@ -286,7 +286,7 @@ fn render_rows(html: &str, css: &str) -> (Vec<String>, TermLayout) {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let cols = term_map.columns as usize;
     let mut rows: Vec<String> = Vec::new();
     for chunk in tl.layout.chunks(cols) {
@@ -328,7 +328,7 @@ fn test_block_a_default_underline_applies() {
     let (root_id, arena) = setup(html, "a { display: block; }");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let idx = first_cell_with(&tl, "l").expect("link text must render");
     assert!(
         tl.layout[idx].style.contains(FontStyle::UNDERLINED),
@@ -345,7 +345,7 @@ fn test_block_a_default_blue_color_applies() {
     let (root_id, arena) = setup(html, "a { display: block; }");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let idx = first_cell_with(&tl, "l").expect("link text must render");
     assert_eq!(
         tl.layout[idx].fcolor,
@@ -370,7 +370,7 @@ fn test_block_a_text_decoration_none_disables_underline() {
     );
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let idx = first_cell_with(&tl, "l").expect("link text must render");
     assert!(
         !tl.layout[idx].style.contains(FontStyle::UNDERLINED),
@@ -385,7 +385,7 @@ fn test_block_a_color_override_disables_default_blue() {
     let (root_id, arena) = setup(html, "a { display: block; color: magenta; }");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let idx = first_cell_with(&tl, "l").expect("link text must render");
     assert_eq!(
         tl.layout[idx].fcolor,
@@ -412,7 +412,7 @@ fn test_block_a_inherits_parent_color_when_no_override() {
     let (root_id, arena) = setup(html, "aside { color: red; } a { display: block; }");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let idx = first_cell_with(&tl, "l").expect("link text must render");
     assert_eq!(
         tl.layout[idx].fcolor,

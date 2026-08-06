@@ -47,7 +47,7 @@ fn test_html_body_renders_body_content() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let canvas = canvas_string(&tl);
     assert!(
         canvas.contains("hello"),
@@ -65,7 +65,7 @@ fn test_html_body_with_head_title_not_rendered() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let canvas = canvas_string(&tl);
     assert!(canvas.contains("visible"), "body content must be rendered");
     assert!(
@@ -83,7 +83,7 @@ fn test_title_outside_head_not_rendered() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let canvas = canvas_string(&tl);
     assert!(canvas.contains("ok"), "body content must be rendered");
     assert!(
@@ -101,7 +101,7 @@ fn test_meta_in_head_does_not_render() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let canvas = canvas_string(&tl);
     assert!(canvas.contains("shown"), "body content must be rendered");
     assert!(
@@ -122,7 +122,7 @@ fn test_body_css_color_applies_to_descendants() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let has_color = tl
         .layout
         .iter()
@@ -142,7 +142,7 @@ fn test_body_css_background_color_fills_terminal() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let content_idx = tl
         .layout
@@ -170,7 +170,7 @@ fn test_html_css_color_applies_to_descendants() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let has_color = tl
         .layout
         .iter()
@@ -188,7 +188,7 @@ fn test_html_body_nested_div_renders() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let canvas = canvas_string(&tl);
     assert!(
         canvas.contains("nested"),

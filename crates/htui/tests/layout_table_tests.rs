@@ -88,7 +88,7 @@ fn test_table_renders_all_cell_text() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("Apple"), "missing 'Apple' cell");
@@ -104,7 +104,7 @@ fn test_table_renders_th_header_text() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("Name"), "header 'Name' missing");
@@ -123,7 +123,7 @@ fn test_table_th_text_marks_bold() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let bold_letters: String = tl
         .layout
@@ -146,7 +146,7 @@ fn test_table_cells_align_in_columns() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let cols = tl.columns as usize;
     let a_idx = cell_containing(&tl, "A").expect("missing 'A'").0;
@@ -180,7 +180,7 @@ fn test_table_cells_on_consecutive_rows() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let (_, row1_row, _) = cell_containing(&tl, "R").expect("missing 'R' of row1");
     let (_, row2_row, _) = tl
@@ -212,7 +212,7 @@ fn test_table_with_thead_section() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("Header"), "thead content missing");
@@ -226,7 +226,7 @@ fn test_table_with_tfoot_section() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("Item"), "thead content missing");
@@ -242,7 +242,7 @@ fn test_table_css_border_draws_box_glyphs() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(
@@ -266,7 +266,7 @@ fn test_table_cell_color_applies() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let has_red = tl
         .layout
@@ -283,7 +283,7 @@ fn test_table_cell_bg_color_applies() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let yellow_count = tl
         .layout
@@ -314,7 +314,7 @@ fn test_table_nth_child_even_stripes_td_bg() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let even_cells = tl
         .layout
@@ -344,7 +344,7 @@ fn test_table_caption_silently_dropped() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("Visible"), "td text should render");
@@ -363,7 +363,7 @@ fn test_table_colgroup_silently_dropped() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("A"), "cell A should render");
@@ -376,7 +376,7 @@ fn test_table_empty_renders_empty_box() {
     let (root_id, arena) = setup("<table></table>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     // No assertion needed; just verify draw doesn't fail.
 }
 
@@ -387,7 +387,7 @@ fn test_table_row_with_no_cells_keeps_row_geometry() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("Below"), "second-row content must render");
@@ -402,7 +402,7 @@ fn test_table_short_row_pads_with_empty_columns() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("Long"), "wide row cell 1 missing");
@@ -419,7 +419,7 @@ fn test_table_does_not_crash_on_text_between_rows() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("A"), "first row missing");
@@ -433,7 +433,7 @@ fn test_table_three_column_alignment() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let cols = tl.columns as usize;
     let a_col = cell_containing(&tl, "A").unwrap().0 % cols;
@@ -459,7 +459,7 @@ fn test_table_column_width_grows_to_widest_cell() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let a_idx = cell_containing(&tl, "A").unwrap().0;
     let v_idx = cell_containing(&tl, "v").unwrap().0;
@@ -486,7 +486,7 @@ fn test_table_row_grows_when_cell_text_wraps_on_narrow_terminals() {
         rows: 10,
     };
     let mut tl = TermLayout::new(&map, 1.0);
-    tl.draw(&arena, root_id, &map).unwrap();
+    tl.draw(&arena, root_id, &map);
     let cols = map.columns as usize;
     let rows: Vec<String> = tl
         .layout
@@ -523,7 +523,7 @@ fn test_table_text_align_center_in_cell() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     // Find the column of the 'X' cell. With a wide column (3 minimum +
     // padding), X should be offset from the left edge of the column.
@@ -544,7 +544,7 @@ fn test_table_outside_table_falls_back_to_block() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(

@@ -25,7 +25,7 @@ fn bench_paint_alloc_small(c: &mut Criterion) {
     c.bench_function("paint_alloc_small", |b| {
         b.iter(|| {
             let mut tl = TermLayout::new(&map, 1.0);
-            tl.draw(&arena, root_id, &map).unwrap();
+            tl.draw(&arena, root_id, &map);
         });
     });
 }
@@ -37,7 +37,7 @@ fn bench_paint_alloc_medium(c: &mut Criterion) {
     c.bench_function("paint_alloc_medium", |b| {
         b.iter(|| {
             let mut tl = TermLayout::new(&map, 1.0);
-            tl.draw(&arena, root_id, &map).unwrap();
+            tl.draw(&arena, root_id, &map);
         });
     });
 }
@@ -51,7 +51,7 @@ fn bench_paint_reuse_medium(c: &mut Criterion) {
 
     c.bench_function("paint_reuse_medium", |b| {
         b.iter(|| {
-            tl.draw(&arena, root_id, &map).unwrap();
+            tl.draw(&arena, root_id, &map);
         });
     });
 }

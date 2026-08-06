@@ -51,7 +51,7 @@ fn two_paragraphs_land_on_different_rows() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let first_idx = tl
         .layout
@@ -86,7 +86,7 @@ fn nested_paragraph_shares_aside_row_with_bg() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     // Find the aside row (the row that carries darkblue bg).
     let aside_row = tl
@@ -129,7 +129,7 @@ fn nested_paragraph_uses_parent_containing_block_for_text_align() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let text_idx = tl
         .layout
@@ -154,7 +154,7 @@ fn nested_div_in_div_stacks_below_outer_div() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let outer_idx = tl
         .layout
@@ -213,7 +213,7 @@ fn rendered_rows_walks_full_layout_tree() {
     let (root_id, arena) = setup("<div><p>A</p><div><p>B</p></div></div>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     // Sanity-check via the layout tree itself.
     use htui::layout::{BoxConstraint, Cursor};
@@ -250,7 +250,7 @@ fn scroll_limits_match_layout_depth() {
         rows: 10,
     };
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     assert!(
         tl.rendered_rows > term_map.rows as u32,
         "DOM is taller than the viewport"
@@ -277,7 +277,7 @@ fn layout_buffer_holds_full_document() {
         rows: 30,
     };
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let layout_rows = tl.layout.len() / term_map.columns as usize;
     assert!(
@@ -298,7 +298,7 @@ fn draw_is_reusable_across_redraws() {
         let (root_id, arena) = setup(html, "");
         let term_map = TermMap { columns: 80, rows: 24 };
         let mut tl = TermLayout::new(&term_map, 1.0);
-        tl.draw(&arena, root_id, &term_map).unwrap();
+        tl.draw(&arena, root_id, &term_map);
         tl.layout.iter().flat_map(|b| b.word.as_bytes().iter().copied()).collect()
     }
 
@@ -310,9 +310,9 @@ fn draw_is_reusable_across_redraws() {
     let term_map = TermMap { columns: 80, rows: 24 };
     let mut tl = TermLayout::new(&term_map, 1.0);
     let (root1, arena1) = setup(first_html, "");
-    tl.draw(&arena1, root1, &term_map).unwrap();
+    tl.draw(&arena1, root1, &term_map);
     let (root2, arena2) = setup(second_html, "");
-    tl.draw(&arena2, root2, &term_map).unwrap();
+    tl.draw(&arena2, root2, &term_map);
 
     let reused: Vec<u8> = tl.layout.iter()
         .flat_map(|b| b.word.as_bytes().iter().copied())

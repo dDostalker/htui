@@ -45,7 +45,7 @@ fn test_layout_p() {
         rows: 24,
     };
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root, &term_map).unwrap();
+    tl.draw(&arena, root, &term_map);
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("Hello"));
     assert!(canvas.contains("World"));
@@ -65,7 +65,7 @@ fn test_layout_p_text_align_center() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let text_idx = tl
         .layout
@@ -95,7 +95,7 @@ fn test_layout_p_text_align_right() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let text_idx = tl
         .layout
@@ -125,7 +125,7 @@ fn test_layout_p_text_align_inherited_from_div() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     // "centered" must not start at column 0 — it should be indented by the
     // center-padding because <p> inherited text-align from <div>.
@@ -153,7 +153,7 @@ fn test_layout_h1_text_align_center() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     // Rendered text is "# Title" (prefix included in alignment width).
     let text_idx = tl
@@ -179,7 +179,7 @@ fn test_layout_h2_text_align_right() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let text_idx = tl
         .layout
@@ -204,7 +204,7 @@ fn test_layout_heading_text_align_inherited_from_div() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let text_idx = tl
         .layout
@@ -229,7 +229,7 @@ fn test_layout_p_text_align_default_left() {
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let text_idx = tl
         .layout

@@ -54,7 +54,7 @@ fn draw(html: &str, css: &str) -> (TermMap, TermLayout) {
     let term_map = mock_term_map();
     let (root_id, arena) = setup(html, css);
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     (term_map, tl)
 }
 

@@ -63,7 +63,7 @@ fn test_aside_basic() {
     let (root_id, arena) = setup("<aside>Side note</aside>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     // Filter the inter-cell whitespace from the joined canvas so the
     // assertion compares against the rendered text content only —
@@ -86,7 +86,7 @@ fn test_aside_with_color() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let has_fg = tl
         .layout
         .iter()
@@ -106,7 +106,7 @@ fn test_aside_with_nested_div() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     // See `test_aside_basic` for why we filter whitespace: the canvas
     // is 80×24 of which most cells are default whitespace, and the
@@ -132,7 +132,7 @@ fn test_aside_width_50pct() {
     let cols = term_map.columns as usize;
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let block_left = 0;
     let block_width = cols / 2;
@@ -181,7 +181,7 @@ fn test_aside_width_fixed_px() {
     let term_map = mock_term_map();
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let row = tl
         .layout
@@ -220,7 +220,7 @@ fn test_aside_width_default_full() {
     let term_map = mock_term_map();
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let row = tl
         .layout
@@ -254,7 +254,7 @@ fn test_aside_text_align_center() {
     let cols = term_map.columns as usize;
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     // The block spans cols 0..40; text "Centered" (8 chars) is centered, so it
     // starts at col (40 - 8) / 2 = 16.
@@ -297,7 +297,7 @@ fn test_aside_text_align_right() {
     let cols = term_map.columns as usize;
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     // The block spans cols 0..40; text "Right" (5 chars) is right-aligned, so
     // it starts at col 40 - 5 = 35.
@@ -351,7 +351,7 @@ fn test_aside_bg_covers_nested_p_row() {
     let cols = term_map.columns as usize;
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let row0 = &tl.layout[0..cols];
     let row1 = &tl.layout[cols..2 * cols];
@@ -421,7 +421,7 @@ fn test_aside_bg_covers_two_nested_p_rows() {
     let cols = term_map.columns as usize;
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     // Rows 0..2 are the aside's rect. Each row carries bg on non-text
     // cells; rows 0 and 1 lose cells to "first"/"second" text.
@@ -461,7 +461,7 @@ fn test_header_spacing_rows_remain_bg_free() {
     let cols = term_map.columns as usize;
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     // Row 0: header content row — must be filled.
     let row0 = &tl.layout[0..cols];
@@ -495,7 +495,7 @@ fn test_footer_spacing_rows_remain_bg_free() {
     let cols = term_map.columns as usize;
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     // Layout: row 0 = <p>, row 1 = footer content, rows 2 & 3 = spacing.
     let footer_row_start = 1 * cols;
@@ -532,7 +532,7 @@ fn test_aside_with_nested_div_extends_bg_to_div_row() {
     let cols = term_map.columns as usize;
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let row0 = &tl.layout[0..cols];
     let row0_bg = row0
@@ -610,7 +610,7 @@ fn test_nested_p_text_inherits_aside_bg() {
     let term_map = mock_term_map();
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     for ch in ['3', '0', 'c', 'o', 'l'] {
         let cell = cell_containing(&tl, ch);
@@ -645,7 +645,7 @@ fn test_nested_p_text_bg_wins_over_parent() {
     let term_map = mock_term_map();
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     for ch in ['k', 'i', 'd'] {
         let cell = cell_containing(&tl, ch);
@@ -673,7 +673,7 @@ fn test_nested_p_inherits_through_intermediate_div() {
     let term_map = mock_term_map();
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let cell = cell_containing(&tl, 'X');
     assert_eq!(
@@ -706,7 +706,7 @@ fn test_nested_p_inherits_when_parent_has_no_bg() {
     let term_map = mock_term_map();
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     for ch in ['f', 'o'] {
         let cell = cell_containing(&tl, ch);
@@ -731,7 +731,7 @@ fn test_nested_p_in_aside_with_fixed_width_centered() {
     let cols = term_map.columns as usize;
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let aside_left = 0;
     // Find the first text cell of "30col".

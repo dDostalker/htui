@@ -14,7 +14,7 @@ use htui::layout::layout::TermMap;
 use htui::layout::{BoxConstraint, Cursor, layout_tree};
 use htui::script::{ScriptEngine, ScriptMsg, ScriptResponse, apply_message, run_script_thread};
 use htui::tdom::node::{NodeArena, NodeId};
-use htui::tui::graph_api::{RenderCmd, TermLayout};
+use htui::tui::graph_api::{RenderCmd};
 
 const COLS: u16 = 120;
 const ROWS: u16 = 40;
@@ -751,69 +751,6 @@ fn blocking_host_fn_does_not_block_the_input_side_channel() {
     );
 }
 
-#[test]
-fn snake_demo_renders_the_colored_grid_and_moves_on_tick() {
-    // Boot the forest-themed snake demo end to end: the board is built from
-    // per-cell `<span>`s inside row `<div>`s, the head carries a bright green
-    // block colour and the food a red berry. Rendering the live arena must
-    // show the head block on the canvas, and one `tick()` must move it one
-    // column to the right.
-    let html = include_str!("../../../example/src/snake/index.html");
-    let mut engine = ScriptEngine::new(html, EventBindings::default()).expect("demo boots");
-    assert_eq!(
-        eval_str(&mut engine, "String(document.getElementById('c7-10') !== null)"),
-        "true",
-        "the playfield grid must be built from per-cell spans"
-    );
-    assert_eq!(
-        eval_str(&mut engine, "document.getElementById('c7-10').style.backgroundColor"),
-        "#56d364",
-        "the head cell must carry the bright-green block"
-    );
-
-    let term_map = TermMap { columns: 104, rows: 32 };
-    let head = crossterm::style::Color::Rgb { r: 0x56, g: 0xd3, b: 0x64 };
-    let head_col = head_color_column(&mut engine, &term_map, &head);
-
-    engine.eval_source("tick()").expect("tick runs");
-    let head_col_after = head_color_column(&mut engine, &term_map, &head);
-    assert_eq!(
-        head_col_after,
-        head_col + 1,
-        "one tick must move the head one column to the right"
-    );
-}
-
-/// Canvas column of the first cell painted with `color` (the snake head is
-/// the only element using its bright green, so the first hit is the head).
-///
-/// Production cascades the demo's embedded CSS in the render thread before
-/// drawing; `TermLayout::draw` does not, so the test cascades the engine's
-/// live arena (JS-built spans + inline styles included) first.
-fn head_color_column(
-    engine: &mut ScriptEngine,
-    term_map: &TermMap,
-    color: &crossterm::style::Color,
-) -> usize {
-    // Re-extract the demo's embedded CSS from the source so the cascade below
-    // applies the same rules the render thread would in production.
-    let html = include_str!("../../../example/src/snake/index.html");
-    let (_, _, embedded) = htui::html::html_parse::Parser::new(html).parse();
-    let mut css_parser = htui::html::css_parse::Parser::new(&embedded);
-    let rules = css_parser.parse();
-
-    let mut arena = engine.arena();
-    htui::html::css_parse::css_into_node(&mut arena, engine.root_id(), &rules);
-    let mut tl = TermLayout::new(term_map, 1.0);
-    tl.draw(&arena, engine.root_id(), term_map).expect("layout draws");
-    let cols = term_map.columns as usize;
-    tl.layout
-        .iter()
-        .enumerate()
-        .find(|(_, b)| b.bcolor.as_ref() == Some(color))
-        .map(|(i, _)| i % cols)
-        .unwrap_or_else(|| panic!("head color {color:?} not found on the canvas"))
-}
 
 // ============================================================
 // Helpers

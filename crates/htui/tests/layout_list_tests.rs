@@ -70,7 +70,7 @@ fn test_ul_renders_bullet_markers() {
     let (root_id, arena) = setup("<ul><li>One</li><li>Two</li></ul>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(
@@ -87,7 +87,7 @@ fn test_ol_renders_sequential_markers() {
     let (root_id, arena) = setup("<ol><li>First</li><li>Second</li><li>Third</li></ol>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("1."), "ol must show ordinal '1.'");
@@ -105,7 +105,7 @@ fn test_ol_ordinal_skips_non_li_siblings() {
     let (root_id, arena) = setup("<ol><li>A</li>garbage<li>B</li></ol>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("1."), "first <li> should still be '1.'");
@@ -122,7 +122,7 @@ fn test_empty_li_still_renders_marker() {
     let (root_id, arena) = setup("<ul><li></li><li>Two</li></ul>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     let bullet_count = canvas.matches('•').count();
@@ -138,7 +138,7 @@ fn test_li_items_each_occupy_their_own_row() {
     let (root_id, arena) = setup("<ul><li>A</li><li>B</li></ul>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let (a_idx, a_row, _) = cell_containing(&tl, "A").expect("missing 'A'");
     let (b_idx, b_row, _) = cell_containing(&tl, "B").expect("missing 'B'");
@@ -153,7 +153,7 @@ fn test_ul_marker_sits_left_of_body() {
     let (root_id, arena) = setup("<ul><li>Hello</li></ul>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let (_bullet_idx, bullet_row, bullet_col) = cell_containing(&tl, "•").expect("bullet missing");
     let (h_idx, h_row, h_col) = cell_containing(&tl, "H").expect("missing 'H'");
@@ -173,7 +173,7 @@ fn test_nested_ul_indents_inner_items() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     // Find all bullet markers. The first one (row 0) belongs to the outer
     // 'Outer A' <li>, the third (or later) one to 'Inner A'.
@@ -224,7 +224,7 @@ fn test_nested_ol_in_ul_renders_mixed_markers() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("•"), "outer ul must emit bullet");
@@ -240,7 +240,7 @@ fn test_li_with_span_styling() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("plain"), "plain body text missing");
@@ -267,7 +267,7 @@ fn test_li_with_css_color() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let has_red = tl
         .layout
@@ -287,7 +287,7 @@ fn test_ul_with_bg_color_fills_list_rect() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let yellow_count = tl
         .layout
@@ -306,7 +306,7 @@ fn test_orphan_li_uses_dash_marker() {
     let (root_id, arena) = setup("<li>orphan</li>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     // Orphan <li> falls back to a dash marker so it's not blank.
@@ -326,7 +326,7 @@ fn test_ol_double_digit_ordinals() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("10."), "double-digit ordinal must render");
@@ -347,7 +347,7 @@ fn test_nested_ul_inside_li_stacks_below_parent_text() {
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let cols = term_map.columns as usize;
     let rows: Vec<String> = tl

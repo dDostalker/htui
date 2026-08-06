@@ -59,7 +59,7 @@ fn render_rows(html: &str, css: &str) -> (Vec<String>, TermLayout) {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let cols = term_map.columns as usize;
     let mut rows: Vec<String> = Vec::new();
     for chunk in tl.layout.chunks(cols) {
@@ -80,7 +80,7 @@ fn flex_row_with_input_renders_the_field() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let cols = term_map.columns as usize;
     let rows: Vec<String> = tl
         .layout
@@ -1175,7 +1175,7 @@ fn test_flex_overflow_is_clipped_not_wrapped_on_small_terminals() {
         rows: 10,
     };
     let mut tl = TermLayout::new(&map, 1.0);
-    tl.draw(&arena, root_id, &map).unwrap();
+    tl.draw(&arena, root_id, &map);
     let cols = map.columns as usize;
     let rows: Vec<String> = tl
         .layout

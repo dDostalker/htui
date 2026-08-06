@@ -17,7 +17,9 @@ use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
     style::Color,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+    terminal::{
+        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode, size,
+    },
 };
 
 use crate::{
@@ -33,7 +35,7 @@ use crate::{
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{
         Block, DirtyInfo, FontStyle, InputRenderState, InputState, KEY_GATE_TIMEOUT, RenderCmd,
-        SelectionMode, TermLayout, char_width, trigger_refresh,
+        SelectionMode, TermLayout, char_width, reapply_console_modes, trigger_refresh,
     },
 };
 
@@ -396,13 +398,7 @@ impl RenderState {
             .as_mut()
             .expect("TermLayout just allocated above or reused from prior render");
 
-        let boxes = match tl.layout_only(&arena, root_id, term_map) {
-            Ok(b) => b,
-            Err(e) => {
-                log::error!("Layout failed: {}", e);
-                return;
-            }
-        };
+        let boxes = tl.layout_only(&arena, root_id, term_map);
 
         // Install the document `<title>` as the terminal window title once
         // per session. The DOM is re-parsed on every `Redraw` but the title
@@ -1328,11 +1324,11 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
 
     let mut state = InputState::new();
     state.selection_text = Arc::clone(&selection_text);
-    let mut rows: u16 = match TermMap::get_ter_map() {
-        Ok(m) => m.rows,
+    let (mut columns, mut rows): (u16, u16) = match TermMap::get_ter_map() {
+        Ok(m) => (m.columns, m.rows),
         Err(e) => {
             log::error!("Failed to get terminal size: {}", e);
-            24
+            (80, 24)
         }
     };
 
@@ -1388,6 +1384,38 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
         }
 
         let mut msgs: Vec<ScriptMsg> = Vec::new();
+        // Detect terminal size changes ourselves instead of relying solely on
+        // `Event::Resize`: some resize paths never emit the event (a legacy
+        // Windows console can resize its window without changing the buffer),
+        // and after such a resize the render thread keeps drawing to a stale
+        // viewport while page-step keys use a stale `rows` — together this
+        // looks like input is frozen. Polling per iteration re-syncs both
+        // within one loop pass and (on Windows) re-applies the console input
+        // mode the resize may have reset. The size is normalized exactly like
+        // `TermMap::get_ter_map` so both sides always agree.
+        let mut size_changed = false;
+        match size() {
+            Ok((c, r)) => {
+                let c = if c == 0 { 80 } else { c };
+                let r = if r == 0 { 24 } else { r };
+                size_changed = c != columns || r != rows;
+                columns = c;
+                rows = r;
+            }
+            Err(e) => log::error!("Failed to get terminal size: {}", e),
+        }
+        if size_changed {
+            reapply_console_modes();
+        }
+
+        // Mirror the render thread's scroll clamp before computing any input:
+        // a terminal grow (or a document reload) can shrink the content below
+        // the current `scroll_y`. Without this the boundary checks below
+        // disagree with the on-screen position — every wheel / arrow `Rerender`
+        // gets clamped to the same value in the render thread and dropped as a
+        // no-op, so scrolling appears dead after a resize.
+        let max_scroll_val = max_scroll.load(Ordering::Relaxed);
+        state.clamp_scroll_to(max_scroll_val);
         let mut cmds = if events_active {
             let map = match hit_map.lock() {
                 Ok(guard) => Arc::clone(&guard),
@@ -1399,7 +1427,7 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
             trigger_refresh(
                 &mut state,
                 rows,
-                max_scroll.load(Ordering::Relaxed),
+                max_scroll_val,
                 Some(&map),
                 live_dom.as_ref().map(|(arena, _)| arena.as_ref()),
                 &mut msgs,
@@ -1409,13 +1437,24 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
             trigger_refresh(
                 &mut state,
                 rows,
-                max_scroll.load(Ordering::Relaxed),
+                max_scroll_val,
                 None,
                 None,
                 &mut msgs,
                 Some(Duration::from_millis(100)),
             )
         };
+
+        // Force a re-layout against the new viewport. When the script engine
+        // owns the document this is converted into a `RenderArena` below (so
+        // JS DOM mutations survive the re-layout); the render thread merges it
+        // with any event-driven `Redraw` from the same batch.
+        if size_changed {
+            cmds.push(RenderCmd::Redraw {
+                scroll_y: state.scroll_y,
+                zoom: state.zoom,
+            });
+        }
 
         // Hand the actions that need the engine to the script thread (the
         // channel is unbounded, so a busy script thread never blocks us).
@@ -1518,6 +1557,11 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
                 quit = true;
                 break;
             }
+            // Capture whether this was a resize / zoom `Redraw` *before* the
+            // events-active rewrite below turns it into a `RenderArena` — the
+            // terminal-height refresh must run in both paths or PageUp /
+            // PageDown keep stepping with the pre-resize row count.
+            let was_redraw = matches!(cmd, RenderCmd::Redraw { .. });
             // With the script engine active, the engine's live arena is the
             // source of truth: convert parse-based `Redraw` (zoom / resize)
             // into a `RenderArena` so JS DOM mutations survive re-renders.
@@ -1535,7 +1579,7 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
                 },
                 (other, _) => other,
             };
-            if let RenderCmd::Redraw { .. } = &cmd
+            if was_redraw
                 && let Ok(map) = TermMap::get_ter_map()
             {
                 rows = map.rows;

@@ -15,7 +15,7 @@ fn bench_render_to_bytes_small(c: &mut Criterion) {
     let (root_id, arena) = common::build_fixture(common::HTML_SMALL, "");
     let map = common::bench_term_map();
     let mut tl = TermLayout::new(&map, 1.0);
-    tl.draw(&arena, root_id, &map).unwrap();
+    tl.draw(&arena, root_id, &map);
 
     c.bench_function("render_to_bytes_small", |b| {
         b.iter(|| tl.render_to_bytes());
@@ -26,7 +26,7 @@ fn bench_render_to_bytes_medium(c: &mut Criterion) {
     let (root_id, arena) = common::build_fixture(common::HTML_MEDIUM, "");
     let map = common::bench_term_map();
     let mut tl = TermLayout::new(&map, 1.0);
-    tl.draw(&arena, root_id, &map).unwrap();
+    tl.draw(&arena, root_id, &map);
 
     c.bench_function("render_to_bytes_medium", |b| {
         b.iter(|| tl.render_to_bytes());
@@ -41,7 +41,7 @@ fn bench_render_to_bytes_medium_scrolled(c: &mut Criterion) {
     let (root_id, arena) = common::build_fixture(common::HTML_MEDIUM, "");
     let map = common::bench_term_map();
     let mut tl = TermLayout::new(&map, 1.0);
-    tl.draw(&arena, root_id, &map).unwrap();
+    tl.draw(&arena, root_id, &map);
     tl.scroll_y = (tl.rendered_rows / 2).min(u32::MAX);
 
     c.bench_function("render_to_bytes_medium_scrolled", |b| {

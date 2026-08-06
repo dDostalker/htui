@@ -7,10 +7,11 @@ mod style;
 mod text;
 
 pub(crate) use image::image_intrinsic_size;
+pub(crate) use input::reapply_console_modes;
 pub use canvas::{InputRenderState, TermLayout};
 pub use cell::{Block, FontStyle};
 pub use image::{
-    IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, ClipRect, ImageCache, Img,
+    IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, ClipRect, ImageCache, ImageError, Img,
     render_image_at, render_image_at_slice,
 };
 pub use input::{

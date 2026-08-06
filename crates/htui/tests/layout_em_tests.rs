@@ -67,7 +67,7 @@ fn test_em_renders_text_content() {
     let (root_id, arena) = setup("<p>plain <em>italic</em> tail</p>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let canvas = canvas_string(&tl);
     assert!(canvas.contains("plain"), "pre-em text must render");
     assert!(canvas.contains("italic"), "em text must render");
@@ -81,7 +81,7 @@ fn test_em_default_italic_applies() {
     let (root_id, arena) = setup("<p><em>word</em></p>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let idx = first_cell_with(&tl, "w").expect("em text must render");
     let cell = &tl.layout[idx];
     assert!(
@@ -100,7 +100,7 @@ fn test_em_default_italic_does_not_leak_outside_em() {
     let (root_id, arena) = setup("<p>xxx <em>foo</em> yyy</p>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let em_idx = first_cell_with(&tl, "f").expect("em text must render");
     let plain_idx = first_cell_with(&tl, "x").expect("pre-em text must render");
@@ -119,7 +119,7 @@ fn test_em_font_style_normal_disables_italic() {
     let (root_id, arena) = setup("<p><em>word</em></p>", "em { font-style: normal; }");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let idx = first_cell_with(&tl, "w").expect("em text must render");
     let cell = &tl.layout[idx];
     assert!(
@@ -137,7 +137,7 @@ fn test_em_color_override_applies() {
     let (root_id, arena) = setup("<p><em>word</em></p>", "em { color: magenta; }");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let idx = first_cell_with(&tl, "w").expect("em text must render");
     let cell = &tl.layout[idx];
     assert_eq!(
@@ -170,7 +170,7 @@ fn test_em_nested_in_p_renders_correctly() {
     );
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let canvas = canvas_string(&tl);
     assert!(
         canvas.contains("inline"),
@@ -192,7 +192,7 @@ fn test_em_inside_div_paint_layer() {
     let (root_id, arena) = setup("<div>before <em>italic-here</em> after</div>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let idx = first_cell_with(&tl, "i").expect("em text must render");
     assert!(
         tl.layout[idx].style.contains(FontStyle::ITALIC),

@@ -47,7 +47,7 @@ fn unchanged_frame_emits_zero_bytes() {
     let (root_id, arena) = setup("<div>hello world</div>");
     let map = term_map();
     let mut tl = TermLayout::new(&map, 1.0);
-    tl.draw(&arena, root_id, &map).unwrap();
+    tl.draw(&arena, root_id, &map);
 
     let first = tl.render_diff_to_bytes();
     assert!(!first.is_empty(), "first frame must emit content");
@@ -66,7 +66,7 @@ fn changed_content_emits_smaller_diff_than_full_frame() {
     let (root_id, arena) = setup("<div>first</div>");
     let map = term_map();
     let mut tl = TermLayout::new(&map, 1.0);
-    tl.draw(&arena, root_id, &map).unwrap();
+    tl.draw(&arena, root_id, &map);
 
     let full = tl.render_to_bytes();
     assert!(String::from_utf8_lossy(&full).contains("first"));
@@ -79,7 +79,7 @@ fn changed_content_emits_smaller_diff_than_full_frame() {
 
     // A new document with different text at the same position.
     let (root2, arena2) = setup("<div>second</div>");
-    tl.draw(&arena2, root2, &map).unwrap();
+    tl.draw(&arena2, root2, &map);
     let diff = tl.render_diff_to_bytes();
     assert!(!diff.is_empty(), "changed frame must emit something");
     assert!(diff.len() < full.len(), "diff must stay below full-frame size");
@@ -99,7 +99,7 @@ fn scrolling_emits_diff_and_stable_views_emit_nothing() {
     let (root_id, arena) = setup(&html);
     let map = term_map();
     let mut tl = TermLayout::new(&map, 1.0);
-    tl.draw(&arena, root_id, &map).unwrap();
+    tl.draw(&arena, root_id, &map);
 
     assert!(
         !tl.render_diff_to_bytes().is_empty(),
@@ -145,7 +145,7 @@ fn region_repaint_emits_only_the_changed_text() {
     let (root_id, mut arena) = setup("<div><p id=\"a\">hello</p><p id=\"b\">world</p></div>");
     let map = term_map();
     let mut tl = TermLayout::new(&map, 1.0);
-    tl.draw(&arena, root_id, &map).unwrap();
+    tl.draw(&arena, root_id, &map);
     let first = tl.render_diff_to_bytes();
     assert!(
         String::from_utf8_lossy(&first).contains("world"),
@@ -162,7 +162,7 @@ fn region_repaint_emits_only_the_changed_text() {
 
     // The incremental pipeline the render thread runs: re-layout, then
     // repaint only the changed box's rect.
-    let boxes = tl.layout_only(&arena, root_id, &map).unwrap();
+    let boxes = tl.layout_only(&arena, root_id, &map);
     let rect = find_box(&boxes, a_id).expect("a's layout box").rect;
     tl.repaint_region(&arena, &boxes, rect);
 
@@ -184,7 +184,7 @@ fn region_repaint_preserves_ancestor_background() {
     let (root_id, mut arena) = setup(html);
     let map = term_map();
     let mut tl = TermLayout::new(&map, 1.0);
-    tl.draw(&arena, root_id, &map).unwrap();
+    tl.draw(&arena, root_id, &map);
     let first = tl.render_diff_to_bytes();
     assert!(!first.is_empty());
 
@@ -194,7 +194,7 @@ fn region_repaint_preserves_ancestor_background() {
         *t = "uno".to_string();
     }
 
-    let boxes = tl.layout_only(&arena, root_id, &map).unwrap();
+    let boxes = tl.layout_only(&arena, root_id, &map);
     let rect = find_box(&boxes, a_id).expect("a's layout box").rect;
     tl.repaint_region(&arena, &boxes, rect);
     let diff = tl.render_diff_to_bytes();
@@ -225,7 +225,7 @@ fn region_repaint_clears_stale_cells_of_a_shorter_value() {
     let (root_id, mut arena) = setup(html);
     let map = term_map();
     let mut tl = TermLayout::new(&map, 1.0);
-    tl.draw(&arena, root_id, &map).unwrap();
+    tl.draw(&arena, root_id, &map);
     let first = tl.render_diff_to_bytes();
     assert!(String::from_utf8_lossy(&first).contains("longvalue"));
 
@@ -235,7 +235,7 @@ fn region_repaint_clears_stale_cells_of_a_shorter_value() {
         *t = "hi".to_string();
     }
 
-    let boxes = tl.layout_only(&arena, root_id, &map).unwrap();
+    let boxes = tl.layout_only(&arena, root_id, &map);
     let rect = find_box(&boxes, a_id).expect("a's layout box").rect;
     tl.repaint_region(&arena, &boxes, rect);
     let diff = tl.render_diff_to_bytes();
@@ -274,7 +274,7 @@ fn canvas_starts_at_one_viewport_and_grows_on_demand() {
 
     // A short document must not grow the buffer.
     let (root_id, arena) = setup("<div>hi</div>");
-    tl.draw(&arena, root_id, &map).unwrap();
+    tl.draw(&arena, root_id, &map);
     assert_eq!(
         tl.layout.len(),
         viewport,
@@ -289,7 +289,7 @@ fn canvas_starts_at_one_viewport_and_grows_on_demand() {
     }
     html.push_str("</div>");
     let (root_id, arena) = setup(&html);
-    tl.draw(&arena, root_id, &map).unwrap();
+    tl.draw(&arena, root_id, &map);
     assert!(
         tl.layout.len() >= 60 * map.columns as usize,
         "tall doc must grow the canvas to its content height"
@@ -334,8 +334,8 @@ fn incremental_repaint_matches_full_repaint_after_value_changes() {
     let map = term_map();
     let mut full = TermLayout::new(&map, 1.0);
     let mut incr = TermLayout::new(&map, 1.0);
-    full.draw(&arena0, root_id, &map).unwrap();
-    incr.draw(&arena0, root_id, &map).unwrap();
+    full.draw(&arena0, root_id, &map);
+    incr.draw(&arena0, root_id, &map);
     let _ = full.render_diff_to_bytes();
     let _ = incr.render_diff_to_bytes();
 
@@ -361,11 +361,11 @@ fn incremental_repaint_matches_full_repaint_after_value_changes() {
         arena = next;
 
         // Full path: reset + layout + paint everything.
-        full.draw(&arena, root_id, &map).unwrap();
+        full.draw(&arena, root_id, &map);
         let _ = full.render_diff_to_bytes();
 
         // Incremental path: layout only, repaint just the touched box rect.
-        let boxes = incr.layout_only(&arena, root_id, &map).unwrap();
+        let boxes = incr.layout_only(&arena, root_id, &map);
         let node = find_id(&arena, id).expect("dirty node");
         let rect = find_box(&boxes, node).expect("dirty box").rect;
         incr.repaint_region(&arena, &boxes, rect);
@@ -387,4 +387,65 @@ fn same_canvas(a: &[htui::tui::graph_api::Block], b: &[htui::tui::graph_api::Blo
                 && x.bcolor == y.bcolor
                 && x.style == y.style
         })
+}
+
+#[test]
+fn viewport_resize_recreates_canvas_and_recovers() {
+    // The render thread's resize path replaces the `TermLayout` (its
+    // dimensions are fixed at construction) and re-renders from scratch —
+    // this mirrors that: draw at one size, allocate a fresh canvas at a
+    // different size, and verify the incremental renderer re-emits the full
+    // viewport instead of silently keeping stale pixels.
+    let (root_id, arena) = setup("<div>hello resize</div>");
+
+    let small = TermMap {
+        columns: 40,
+        rows: 10,
+    };
+    let mut tl = TermLayout::new(&small, 1.0);
+    tl.draw(&arena, root_id, &small);
+    let first_bytes = tl.render_diff_to_bytes();
+    let first = String::from_utf8_lossy(&first_bytes);
+    assert!(
+        first.contains("hello") && first.contains("resize"),
+        "first frame must carry the document text"
+    );
+
+    // Grow: a fresh canvas has an empty `last_frame` snapshot, so the first
+    // diff must clear the screen and emit every content cell again.
+    let big = TermMap {
+        columns: 100,
+        rows: 30,
+    };
+    let mut grown = TermLayout::new(&big, 1.0);
+    grown.draw(&arena, root_id, &big);
+    let diff = grown.render_diff_to_bytes();
+    assert!(!diff.is_empty(), "resize must re-emit the whole viewport");
+    let text = String::from_utf8_lossy(&diff);
+    assert!(
+        text.contains("hello") && text.contains("resize"),
+        "resize frame must carry the document text"
+    );
+    assert!(
+        grown.render_diff_to_bytes().is_empty(),
+        "stable view after resize must emit nothing"
+    );
+
+    // A stale scroll position beyond the new viewport must clamp, not panic.
+    grown.scroll_y = 9999;
+    grown.clamp_scroll();
+    assert_eq!(grown.scroll_y, grown.max_scroll());
+    let _ = grown.render_diff_to_bytes();
+
+    // Shrink: fresh canvas again, still renders.
+    let tiny = TermMap {
+        columns: 20,
+        rows: 5,
+    };
+    let mut shrunk = TermLayout::new(&tiny, 1.0);
+    shrunk.draw(&arena, root_id, &tiny);
+    assert!(
+        !shrunk.render_diff_to_bytes().is_empty(),
+        "shrunken viewport must re-emit content"
+    );
 }

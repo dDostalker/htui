@@ -25,7 +25,7 @@ fn bench_full_redraw_small(c: &mut Criterion) {
             common::apply_cascade(root_id, &mut arena, &rules);
             // 4. Layout + paint.
             let mut tl = TermLayout::new(&map, 1.0);
-            tl.draw(&arena, root_id, &map).unwrap();
+            tl.draw(&arena, root_id, &map);
             // 5. ANSI encode.
             let _ = tl.render_to_bytes();
         });
@@ -42,7 +42,7 @@ fn bench_full_redraw_medium(c: &mut Criterion) {
             let rules = common::parse_css(&embedded);
             common::apply_cascade(root_id, &mut arena, &rules);
             let mut tl = TermLayout::new(&map, 1.0);
-            tl.draw(&arena, root_id, &map).unwrap();
+            tl.draw(&arena, root_id, &map);
             let _ = tl.render_to_bytes();
         });
     });

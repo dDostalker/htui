@@ -43,7 +43,7 @@ fn test_header_basic() {
     let (root_id, arena) = setup("<header>My Site</header>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("My Site"), "header should contain text");
 }
@@ -54,7 +54,7 @@ fn test_footer_basic() {
     let (root_id, arena) = setup("<footer>(c) 2024</footer>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("(c) 2024"), "footer should contain text");
 }
@@ -67,7 +67,7 @@ fn test_header_with_color() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let has_fg = tl
         .layout
         .iter()
@@ -90,7 +90,7 @@ fn test_header_solid_bg() {
     let cols = term_map.columns as usize;
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let content_idx = tl
         .layout
@@ -119,7 +119,7 @@ fn test_header_width_50pct() {
     let cols = term_map.columns as usize;
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let content_idx = tl
         .layout
@@ -161,7 +161,7 @@ fn test_header_width_fixed() {
     let cols = term_map.columns as usize;
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let content_idx = tl
         .layout
@@ -198,7 +198,7 @@ fn test_header_layout_structure() {
     let cols = term_map.columns as usize;
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(!canvas.contains('\u{2550}'));
@@ -237,7 +237,7 @@ fn test_footer_layout_structure() {
     let cols = term_map.columns as usize;
 
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(!canvas.contains('\u{2500}'));
@@ -264,7 +264,7 @@ fn test_header_center_align() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("Centered"));
 }
@@ -277,7 +277,7 @@ fn test_header_right_align() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("Right"));
 }
@@ -490,7 +490,7 @@ fn test_styled_space_cells_carry_style_flag() {
     let (root_id, arena) = setup("<p>a b</p>", "p { text-decoration: underline; }");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(
@@ -524,7 +524,7 @@ fn test_bold_italic_underline_all_apply_to_text_run() {
     );
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     for ch in ['x', 'y', 'z'] {
         let idx = tl
@@ -560,7 +560,7 @@ fn test_style_persists_after_consecutive_spaces() {
     let (root_id, arena) = setup("<p>a   b</p>", "p { text-decoration: underline; }");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let styled_spaces = tl
         .layout
@@ -585,7 +585,7 @@ fn test_render_emits_underline_sgr_across_spaces() {
     let (root_id, arena) = setup("<p>a b</p>", "p { text-decoration: underline; }");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let bytes = tl.render_to_bytes();
     let rendered = String::from_utf8_lossy(&bytes);
     let underline_sgr = "\x1B[4m";

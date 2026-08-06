@@ -11,8 +11,9 @@ use htui::layout::layout::TermMap;
 use htui::script::ScriptEngine;
 use htui::tdom::node::{NodeArena, NodeId, NodeType};
 use htui::tui::graph_api::{
-    InputRenderState, TermLayout, apply_input_key, apply_input_word_key, collect_input_ids,
-    is_input_field_key, key_event_info, next_word_boundary, prev_word_boundary, selection_range,
+    InputRenderState, InputState, TermLayout, apply_input_key, apply_input_word_key,
+    collect_input_ids, is_input_field_key, key_event_info, next_word_boundary, prev_word_boundary,
+    selection_range,
 };
 use htui::tui::graph_api::Block;
 
@@ -46,7 +47,7 @@ fn render_rows(html: &str) -> (Vec<String>, TermLayout) {
     let (root_id, arena) = setup(html);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     let cols = term_map.columns as usize;
     let mut rows: Vec<String> = Vec::new();
     for chunk in tl.layout.chunks(cols) {
@@ -116,7 +117,7 @@ fn input_renders_selection_highlight() {
             selection: Some((1, 4)),
         },
     );
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     // Cells: `[h e l l o · ]`. Selection (1..4) = `ell` (cols 2-4) get the
     // Tokyo Night selection blue; the caret sits on `o` (inverted) and the
     // unselected `h` keeps the field's (none) colours.
@@ -170,7 +171,7 @@ fn input_long_value_windows_around_the_caret() {
             selection: None,
         },
     );
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     // Caret at the end (a blank inverted cell): the window follows the caret
     // and shows `hijkl` (indices 7..12 of "abcdefghijkl") + the caret cell,
     // with the right frame intact.
@@ -248,7 +249,7 @@ fn layout_drops_unfocused_input_state_but_keeps_focused() {
             selection: None,
         },
     );
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     assert!(
         !tl.input_states.contains_key(&input_id),
         "layout must drop stale unfocused entries"
@@ -266,7 +267,7 @@ fn layout_drops_unfocused_input_state_but_keeps_focused() {
             selection: None,
         },
     );
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
     assert!(
         tl.input_states.contains_key(&input_id),
         "focused edit state must survive layout"
@@ -403,7 +404,7 @@ fn engine_input_state_renders_value_and_caret() {
             selection: None,
         },
     );
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     // Field shows the engine value `abc`, caret inverts the char at index 1.
     let cell = |x: usize| -> &Block { &tl.layout[x] };
@@ -639,4 +640,27 @@ fn key_event_info_maps_every_key_to_browser_fields() {
     };
     info = key_event_info(&ev);
     assert!(info.repeat, "repeat presses must be visible to JS listeners");
+}
+
+#[test]
+fn input_state_clamps_scroll_to_the_content_ceiling() {
+    // Regression: growing the terminal (or reloading a shorter document) drops
+    // `max_scroll` below the current scroll position. The input loop must
+    // follow the render thread's clamp or every wheel / arrow `Rerender` is
+    // clamped to the same value in the render thread and dropped as a no-op —
+    // the scroll wheel appears dead after a resize.
+    let mut state = InputState::new();
+    state.scroll_y = 60; // scrolled to the bottom of a 100-row doc @ 24 rows
+    state.clamp_scroll_to(76); // ceiling above the position: no clamp
+    assert_eq!(state.scroll_y, 60);
+    state.clamp_scroll_to(60); // terminal grew to 40 rows: ceiling at 60
+    assert_eq!(state.scroll_y, 60);
+    state.clamp_scroll_to(59); // grew further / shorter reload: ceiling drops
+    assert_eq!(state.scroll_y, 59);
+
+    // The u32::MAX startup placeholder must never clamp a fresh session.
+    let mut fresh = InputState::new();
+    fresh.scroll_y = 5;
+    fresh.clamp_scroll_to(u32::MAX);
+    assert_eq!(fresh.scroll_y, 5);
 }

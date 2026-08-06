@@ -1,4 +1,3 @@
-use anyhow::{Ok, Result};
 use crossterm::terminal;
 
 use crate::{
@@ -18,7 +17,9 @@ pub struct TermMap {
 }
 
 impl TermMap {
-    pub fn get_ter_map() -> Result<TermMap> {
+    /// Read the current terminal size from the tty, falling back to 80x24
+    /// when the reported size is 0 (no real terminal attached).
+    pub fn get_ter_map() -> std::io::Result<TermMap> {
         let (columns, rows) = terminal::size()?;
         log::info!("终端尺寸: {}x{}", columns, rows);
         let columns = if columns == 0 { 80 } else { columns };
@@ -76,12 +77,12 @@ impl TermLayout {
         arena: &NodeArena,
         root_id: NodeId,
         term_map: &TermMap,
-    ) -> Result<Vec<LayoutBox>> {
+    ) -> Vec<LayoutBox> {
         self.reset_canvas();
-        let boxes = self.layout_only(arena, root_id, term_map)?;
+        let boxes = self.layout_only(arena, root_id, term_map);
         self.ensure_capacity(&boxes);
         paint_layout_tree(&boxes, arena, self);
-        Ok(boxes)
+        boxes
     }
 
     /// Run only the layout pass (no canvas reset / paint) and return the
@@ -98,7 +99,7 @@ impl TermLayout {
         arena: &NodeArena,
         root_id: NodeId,
         term_map: &TermMap,
-    ) -> Result<Vec<LayoutBox>> {
+    ) -> Vec<LayoutBox> {
         // Unfocused `input_states` entries only bridge the single repaint
         // right after a blur (so the field doesn't flash its pre-commit DOM
         // value); once a fresh layout runs, the arena's `value` attribute is
@@ -109,14 +110,14 @@ impl TermLayout {
         assert_eq!(root.node_type, NodeType::Global);
         let containing = BoxConstraint::root(term_map);
         let mut cursor = Cursor::new();
-        Ok(layout_tree(
+        layout_tree(
             arena,
             root_id,
             containing,
             &mut cursor,
             term_map.columns as usize,
             term_map.rows as usize,
-        ))
+        )
     }
 
     /// Repaint only the cells inside `region` from an existing layout,

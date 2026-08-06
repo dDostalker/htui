@@ -4,7 +4,6 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-use anyhow::{Result, anyhow};
 use crossterm::style::Color;
 use image::{GenericImageView, imageops::FilterType};
 
@@ -12,6 +11,34 @@ use super::{
     canvas::TermLayout,
     cell::{Block, FontStyle},
 };
+
+/// Errors produced while loading or rasterizing an image.
+#[derive(Debug, thiserror::Error)]
+pub enum ImageError {
+    /// The image file could not be decoded (missing, corrupt, or unsupported
+    /// format).
+    #[error("image decode failed for {path}: {source}")]
+    Decode {
+        /// The image path that failed to decode.
+        path: String,
+        /// The underlying decode error.
+        #[source]
+        source: image::ImageError,
+    },
+    /// A decoded image entry vanished from the cache between insertion and
+    /// lookup.
+    #[error("Image cache entry vanished for {path}")]
+    CacheEntryVanished {
+        /// The image path whose entry disappeared.
+        path: String,
+    },
+    /// The decoded image carried no rasterized pixel data.
+    #[error("Image data empty: {path}")]
+    DataEmpty {
+        /// The image path with empty pixel data.
+        path: String,
+    },
+}
 
 // ============================================================
 // Image pixel -> terminal cell sampling ratio.
@@ -78,12 +105,15 @@ impl Img {
         }
     }
 
-    pub fn _create_img(&mut self) -> Result<()> {
+    pub fn _create_img(&mut self) -> Result<(), ImageError> {
         if self.picture.is_some() {
             return Ok(());
         }
 
-        let img = image::open(&self.path)?;
+        let img = image::open(&self.path).map_err(|source| ImageError::Decode {
+            path: self.path.display().to_string(),
+            source,
+        })?;
         // `term_size` is documented as `(cols, rows)` in terminal cells. Each
         // cell displays IMAGE_PIXELS_PER_CELL_COL x IMAGE_PIXELS_PER_CELL_ROW
         // source pixels (1 wide x 2 tall in half-block mode), so the pixel
@@ -195,7 +225,7 @@ impl ImageCache {
     /// Return the rasterized image for `(path, size)`, decoding it on first
     /// use. Failed decodes are not cached, so a temporarily missing file can
     /// recover on a later frame instead of pinning the error forever.
-    pub fn get_or_decode(&mut self, path: &str, size: (u32, u32)) -> Result<&Img> {
+    pub fn get_or_decode(&mut self, path: &str, size: (u32, u32)) -> Result<&Img, ImageError> {
         let key = (path.to_string(), size.0, size.1);
         if !self.entries.contains_key(&key) {
             if self.entries.len() >= MAX_CACHED_IMAGES {
@@ -205,9 +235,9 @@ impl ImageCache {
             img._create_img()?;
             self.entries.insert(key.clone(), img);
         }
-        self.entries
-            .get(&key)
-            .ok_or_else(|| anyhow!("Image cache entry vanished for {}", path))
+        self.entries.get(&key).ok_or_else(|| ImageError::CacheEntryVanished {
+            path: path.to_string(),
+        })
     }
 }
 
@@ -226,7 +256,7 @@ pub fn render_image_at(
     path: &str,
     origin: (usize, usize),
     max_size: (u32, u32),
-) -> Result<()> {
+) -> Result<(), ImageError> {
     let columns = term_layout.columns;
     let mut cache = ImageCache::new();
     render_image_at_slice(
@@ -260,13 +290,12 @@ pub fn render_image_at_slice(
     origin: (usize, usize),
     max_size: (u32, u32),
     clip: Option<ClipRect>,
-) -> Result<()> {
+) -> Result<(), ImageError> {
     let (x, y) = origin;
     let img_data = cache.get_or_decode(path, max_size)?;
-    let picture = img_data
-        .picture
-        .as_ref()
-        .ok_or_else(|| anyhow!("Image data empty: {}", path))?;
+    let picture = img_data.picture.as_ref().ok_or_else(|| ImageError::DataEmpty {
+        path: path.to_string(),
+    })?;
     let img_cols = img_data.cloumns as usize;
     let img_rows = img_data.rows as usize;
     let canvas_cols = canvas_cols as usize;

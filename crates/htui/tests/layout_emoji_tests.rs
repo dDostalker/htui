@@ -210,7 +210,7 @@ fn test_emoji_reaches_canvas() {
     let (root_id, arena) = setup("<p>Hi \u{1F600}!</p>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let canvas = canvas_string(&tl);
     assert!(canvas.contains("Hi"), "ASCII prefix must render");
@@ -226,7 +226,7 @@ fn test_emoji_occupies_two_columns() {
     let (root_id, arena) = setup("<p>a\u{1F603}b</p>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let idx = position_of(&tl, "a").expect("'a' cell exists");
     // Layout order:
@@ -253,7 +253,7 @@ fn test_heart_with_variation_selector_lands_in_one_cell() {
     let (root_id, arena) = setup("<p>\u{2764}\u{FE0F}</p>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let pair = "\u{2764}\u{FE0F}";
     let idx = tl
@@ -279,7 +279,7 @@ fn test_zwj_family_lands_in_one_cell() {
     let (root_id, arena) = setup(&format!("<p>{family}</p>"), "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let idx = tl
         .layout
@@ -302,7 +302,7 @@ fn test_mixed_cjk_emoji_layout_alignment() {
     let (root_id, arena) = setup("<p>A\u{4F60}\u{1F600}Z</p>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map).unwrap();
+    tl.draw(&arena, root_id, &term_map);
 
     let a_idx = position_of(&tl, "A").expect("A renders");
     let z_idx = position_of(&tl, "Z").expect("Z renders");

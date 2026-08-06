@@ -2,6 +2,44 @@ use std::str::FromStr;
 
 use crate::tdom::node::NodeType;
 
+/// Errors produced while parsing a CSS selector string.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SelectorError {
+    /// The selector string is empty.
+    #[error("empty selector")]
+    EmptySelector,
+    /// A compound part (e.g. `.class`, `#id`) is empty.
+    #[error("empty compound")]
+    EmptyCompound,
+    /// A class name after `.` is empty.
+    #[error("invalid class")]
+    InvalidClass,
+    /// An id after `#` is empty.
+    #[error("invalid id")]
+    InvalidId,
+    /// A bare tag name is empty.
+    #[error("invalid tag")]
+    InvalidTag,
+    /// `:hover` was given arguments, which it does not take.
+    #[error(":hover takes no arguments")]
+    HoverTakesNoArguments,
+    /// `:nth-child` is missing its `(...)` argument list.
+    #[error(":nth-child requires `(...)`")]
+    NthChildRequiresParens,
+    /// `:nth-child(...)` is missing the closing `)`.
+    #[error(":nth-child(...) missing ')'")]
+    NthChildMissingCloseParen,
+    /// The `:nth-child` argument is not a supported `an+b` form.
+    #[error("invalid :nth-child arg: {0:?}")]
+    InvalidNthChildArg(String),
+    /// The pseudo-class is not one of the supported set.
+    #[error("unsupported pseudo-class: :{0}")]
+    UnsupportedPseudoClass(String),
+    /// The tag name does not map to any known `NodeType`.
+    #[error("unsupported CSS tag: {0:?}")]
+    UnsupportedTag(String),
+}
+
 /// `an + b` expression used by the `:nth-child()` pseudo-class.
 ///
 /// The selector matches an element when its 1-based index among its parent's
@@ -70,11 +108,11 @@ pub struct CssSelector {
 }
 
 impl FromStr for CssSelector {
-    type Err = anyhow::Error;
+    type Err = SelectorError;
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let s = s.trim();
         if s.is_empty() {
-            return Err(anyhow::anyhow!("empty selector"));
+            return Err(SelectorError::EmptySelector);
         }
         // Split the selector chain into segments and the combinator that
         // introduces each segment. Whitespace is a descendant combinator; `>`,
@@ -83,7 +121,7 @@ impl FromStr for CssSelector {
         // check at the bottom.
         let (segments, combinators) = split_by_combinators(s);
         if segments.is_empty() {
-            return Err(anyhow::anyhow!("empty selector"));
+            return Err(SelectorError::EmptySelector);
         }
         let mut compounds = Vec::with_capacity(segments.len());
         for seg in &segments {
@@ -196,10 +234,10 @@ fn split_by_combinators(s: &str) -> (Vec<&str>, Vec<Combinator>) {
     (segments, combinators)
 }
 
-fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, anyhow::Error> {
+fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, SelectorError> {
     let s = s.trim();
     if s.is_empty() {
-        return Err(anyhow::anyhow!("empty compound"));
+        return Err(SelectorError::EmptyCompound);
     }
     let mut out = Vec::new();
     let chars: Vec<char> = s.chars().collect();
@@ -214,7 +252,7 @@ fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, anyhow::Erro
                 }
                 let name: String = chars[start..i].iter().collect();
                 if name.is_empty() {
-                    return Err(anyhow::anyhow!("invalid class"));
+                    return Err(SelectorError::InvalidClass);
                 }
                 out.push(Selector::Class(name));
             }
@@ -226,7 +264,7 @@ fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, anyhow::Erro
                 }
                 let name: String = chars[start..i].iter().collect();
                 if name.is_empty() {
-                    return Err(anyhow::anyhow!("invalid id"));
+                    return Err(SelectorError::InvalidId);
                 }
                 out.push(Selector::Id(name));
             }
@@ -247,12 +285,12 @@ fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, anyhow::Erro
                 let name: String = chars[name_start..i].iter().collect();
                 if name.eq_ignore_ascii_case("hover") {
                     if i < chars.len() && chars[i] == '(' {
-                        return Err(anyhow::anyhow!(":hover takes no arguments"));
+                        return Err(SelectorError::HoverTakesNoArguments);
                     }
                     out.push(Selector::PseudoClass(PseudoClass::Hover));
                 } else if name.eq_ignore_ascii_case("nth-child") {
                     if i >= chars.len() || chars[i] != '(' {
-                        return Err(anyhow::anyhow!(":nth-child requires `(...)`"));
+                        return Err(SelectorError::NthChildRequiresParens);
                     }
                     i += 1;
                     let arg_start = i;
@@ -260,15 +298,15 @@ fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, anyhow::Erro
                         i += 1;
                     }
                     if i >= chars.len() {
-                        return Err(anyhow::anyhow!(":nth-child(...) missing ')'"));
+                        return Err(SelectorError::NthChildMissingCloseParen);
                     }
                     let arg: String = chars[arg_start..i].iter().collect();
                     i += 1; // consume ')'
                     let expr = parse_nth_child_arg(&arg)
-                        .ok_or_else(|| anyhow::anyhow!("invalid :nth-child arg: {arg:?}"))?;
+                        .ok_or_else(|| SelectorError::InvalidNthChildArg(arg.clone()))?;
                     out.push(Selector::NthChild(expr));
                 } else {
-                    return Err(anyhow::anyhow!("unsupported pseudo-class: :{name}"));
+                    return Err(SelectorError::UnsupportedPseudoClass(name));
                 }
             }
             _ => {
@@ -278,7 +316,7 @@ fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, anyhow::Erro
                 }
                 let tag: String = chars[start..i].iter().collect();
                 if tag.is_empty() {
-                    return Err(anyhow::anyhow!("invalid tag"));
+                    return Err(SelectorError::InvalidTag);
                 }
                 out.push(Selector::Tag(tag_str_to_node_type(&tag)?));
             }
@@ -357,7 +395,7 @@ fn parse_nth_child_arg(s: &str) -> Option<NthExpr> {
     })
 }
 
-fn tag_str_to_node_type(tag: &str) -> std::result::Result<NodeType, anyhow::Error> {
+fn tag_str_to_node_type(tag: &str) -> std::result::Result<NodeType, SelectorError> {
     let t = tag.to_ascii_lowercase();
     match t.as_str() {
         "a" => Ok(NodeType::A),
@@ -410,6 +448,6 @@ fn tag_str_to_node_type(tag: &str) -> std::result::Result<NodeType, anyhow::Erro
         "textarea" => Ok(NodeType::Textarea),
         "title" => Ok(NodeType::Title),
         "ul" => Ok(NodeType::Ul),
-        _ => Err(anyhow::anyhow!("unsupported CSS tag: {:?}", tag)),
+        _ => Err(SelectorError::UnsupportedTag(tag.to_string())),
     }
 }

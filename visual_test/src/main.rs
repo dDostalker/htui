@@ -15,7 +15,6 @@
 //!   src/{name}/index.html    — HTML document
 //!   src/{name}/style.css     — stylesheet (optional)
 
-use anyhow::Result;
 use htui::events::EventBindings;
 use htui::render;
 use htui::render_with_events;
@@ -50,10 +49,7 @@ fn dump(html: &str, css: &str, cols: u16, rows: u16, bg_map: bool) {
 
     let term_map = TermMap { columns: cols, rows };
     let mut tl = TermLayout::new(&term_map, 1.0);
-    if let Err(e) = tl.draw(&arena, root_id, &term_map) {
-        eprintln!("layout error: {e}");
-        std::process::exit(1);
-    }
+    tl.draw(&arena, root_id, &term_map);
 
     let c = term_map.columns as usize;
     for (i, chunk) in tl.layout.chunks(c).enumerate() {
@@ -84,7 +80,7 @@ macro_rules! test_case {
     };
 }
 
-fn main() -> Result<()> {
+fn main() -> std::io::Result<()> {
     let log_path = std::env::temp_dir().join("htui-visual-test.log");
     if let Err(e) = htui::logging::init_file_logger(&log_path, None) {
         eprintln!("warning: file logger init failed ({e}); logs will be dropped");

@@ -16,7 +16,6 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
-use anyhow::{Context, Result};
 use log::LevelFilter;
 
 /// Returns the default [`LevelFilter`] for the current build profile.
@@ -67,6 +66,32 @@ fn build_builder<W: Write + Send + 'static>(writer: W, level: LevelFilter) -> en
     builder
 }
 
+/// Errors returned by [`init_file_logger`].
+#[derive(Debug, thiserror::Error)]
+pub enum LogInitError {
+    /// The parent directory of the log file could not be created.
+    #[error("failed to create log directory: {path}")]
+    CreateDir {
+        /// The directory that could not be created.
+        path: String,
+        /// The underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+    /// The log file could not be opened for appending.
+    #[error("failed to open log file: {path}")]
+    OpenFile {
+        /// The file that could not be opened.
+        path: String,
+        /// The underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+    /// A global logger is already installed; only one can exist per process.
+    #[error("global logger is already initialized")]
+    AlreadyInitialized,
+}
+
 /// Initialize a file-based logger that appends log lines to `path`.
 ///
 /// The file is opened in append mode; missing parent directories are created
@@ -74,22 +99,30 @@ fn build_builder<W: Write + Send + 'static>(writer: W, level: LevelFilter) -> en
 ///
 /// Returns an error if the file cannot be opened, or if the global logger
 /// has already been initialized.
-pub fn init_file_logger(path: impl AsRef<Path>, level: Option<LevelFilter>) -> Result<()> {
+pub fn init_file_logger(
+    path: impl AsRef<Path>,
+    level: Option<LevelFilter>,
+) -> Result<(), LogInitError> {
     let path = path.as_ref();
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create log directory: {}", parent.display()))?;
+            fs::create_dir_all(parent).map_err(|source| LogInitError::CreateDir {
+                path: parent.display().to_string(),
+                source,
+            })?;
         }
     }
     let file = File::options()
         .create(true)
         .append(true)
         .open(path)
-        .with_context(|| format!("failed to open log file: {}", path.display()))?;
+        .map_err(|source| LogInitError::OpenFile {
+            path: path.display().to_string(),
+            source,
+        })?;
 
     build_builder(file, level.unwrap_or_else(default_level))
         .try_init()
-        .context("global logger is already initialized")?;
+        .map_err(|_| LogInitError::AlreadyInitialized)?;
     Ok(())
 }

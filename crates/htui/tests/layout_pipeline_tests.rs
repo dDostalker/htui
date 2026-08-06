@@ -138,9 +138,7 @@ fn unified_pipeline_renders_mixed_document_end_to_end() {
     let (root_id, arena) = setup(html, "section { display: flex; }");
     let map = term_map();
     let mut terminal_layout = TermLayout::new(&map, 1.0);
-    terminal_layout
-        .draw(&arena, root_id, &map)
-        .expect("mixed document should render");
+    terminal_layout.draw(&arena, root_id, &map);
 
     let canvas: String = terminal_layout
         .layout
@@ -171,9 +169,7 @@ fn sibling_top_level_boxes_paint_on_distinct_rows() {
 
     let map = term_map();
     let mut terminal_layout = TermLayout::new(&map, 1.0);
-    terminal_layout
-        .draw(&arena, root, &map)
-        .expect("multi-box document should render");
+    terminal_layout.draw(&arena, root, &map);
 
     let canvas: String = terminal_layout
         .layout
