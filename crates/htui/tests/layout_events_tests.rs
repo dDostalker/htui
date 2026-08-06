@@ -1262,7 +1262,7 @@ fn visual_test_sysmon_document_initializes() {
     // Smoke test: sysmon page initializes; its script references the host
     // `sample` function which is only defined at runtime, so init must not
     // fail on the unresolved reference (the refresh action resolves it later).
-    let html = include_str!("../../../visual_test/src/sysmon/index.html");
+    let html = include_str!("../../../example/src/sysmon/index.html");
     let mut bindings = EventBindings::default();
     bindings.host.insert(
         "sample".to_string(),
@@ -1302,7 +1302,7 @@ fn sysmon_page_refresh_populates_all_cards() {
     // End-to-end over the real demo page: the host `sample()` returns the full
     // field set and the page's own `refresh()` writes every card. Any typo in
     // the page's element ids fails here.
-    let html = include_str!("../../../visual_test/src/sysmon/index.html");
+    let html = include_str!("../../../example/src/sysmon/index.html");
     let mut bindings = EventBindings::default();
     bindings.host.insert(
         "sample".to_string(),

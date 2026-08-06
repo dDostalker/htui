@@ -803,6 +803,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "example"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "boa_engine",
+ "htui",
+ "log",
+ "sysinfo",
+]
+
+[[package]]
 name = "exr"
 version = "1.74.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1058,7 +1069,6 @@ dependencies = [
  "indexmap",
  "log",
  "markup5ever_rcdom",
- "rayon",
  "slotmap",
  "tendril",
  "unicode-segmentation",
@@ -2660,7 +2670,6 @@ dependencies = [
  "boa_engine",
  "htui",
  "log",
- "sysinfo",
 ]
 
 [[package]]

@@ -13,7 +13,7 @@
 以下是项目的结构，如果不是特殊要求不得修改项目结构，仅当提示词要求需要时修改，修改前进行询问，并**必须**对项目结构进行同步
 ```
 htui/
-├── Cargo.toml              # workspace 根（members: crates/htui, crates/htui-macros, visual_test）
+├── Cargo.toml              # workspace 根（members: crates/htui, crates/htui-macros, visual_test, example）
 ├── crates/
 │   ├── htui/               # 主库 crate：终端 HTML/CSS 渲染引擎（独立发布单元）
 │   │   ├── Cargo.toml
@@ -156,12 +156,9 @@ htui/
 ├── docs/
 │   ├── script-layer.md    # 脚本层完整使用与架构文档（脚本 / on* / 宿主函数 / RenderArena）
 │   └── examples-notes.md  # 交互示例（codex/yazi/snake）与遇到的问题记录（键盘事件/input 值滞后等）
-├── visual_test/          # 可视化测试工具（cargo run -p visual_test）
+├── visual_test/          # 可视化测试工具（cargo run -p visual_test；渲染/布局/事件能力验证）
 │   └── src/
 │       ├── main.rs
-│       ├── sysmon.rs     # 系统监控器示例逻辑（sysinfo 采样 + 页面重建）
-│       ├── yazi.rs       # yazi 文件管理器宿主命令（listDir 读真实目录）
-│       ├── snake.rs      # snake 游戏绑定（无命令；游戏循环由 JS setInterval 驱动）
 │       ├── all_in_one/   # index.html: 可直接浏览器打开，内部 <style> 内联 CSS
 │       ├── headings/
 │       ├── image/        # includes pic.png
@@ -170,7 +167,6 @@ htui/
 │       ├── text/
 │       ├── css/
 │       ├── events/       # 事件系统交互演示（onclick / hover / 动态重渲染，render_with_events）
-│       ├── sysmon/       # 系统状态监控器（JS setInterval 每 200ms 触发，分层采样 CPU/内存/磁盘并重建页面）
 │       ├── header_footer/
 │       ├── aside/
 │       ├── helloworld/
@@ -188,10 +184,17 @@ htui/
 │       ├── position/     # CSS 定位演示（relative / absolute / fixed / z-index）
 │       ├── input/        # <input> 输入框演示（点击聚焦 + 键盘编辑 + focus/blur/input/change 事件）
 │       ├── configurator/ # 配置器设置表单演示（input + 原生 select 下拉 + JS 开关 + 实时预览 + 保存/重置）
-│       ├── codex/        # Codex CLI 风格聊天界面（input + change 提交，无执行）
-│       ├── yazi/         # Yazi 风格文件管理器（点击导航目录/文件 + [ .. ] 返回）
-│       ├── snake/        # 贪吃蛇（JS 游戏 + setInterval 驱动 tick + 点击方向按钮）
 │       └── viewport_units/
+└── example/              # 完整交互示例（cargo run -p example -- codex|snake|sysmon|yazi）
+    └── src/
+        ├── main.rs      # 运行器：dump（headless 预览）/ render_with_events 分派
+        ├── snake.rs     # 贪吃蛇绑定（无命令；游戏循环由 JS setInterval 驱动）
+        ├── sysmon.rs    # 系统监控器宿主命令（sysinfo 后台采样 + 快照发布）
+        ├── yazi.rs      # yazi 文件管理器宿主命令（listDir 读真实目录）
+        ├── codex/       # Codex CLI 风格聊天界面（input + change 提交，无执行）
+        ├── snake/       # 贪吃蛇（森林风：方向键/WASD 转向 + 空格暂停 + r 重开 + 吃食物加速）
+        ├── sysmon/      # 系统状态监控器（JS setInterval 每 200ms 触发，分层采样 CPU/内存/磁盘并重建页面）
+        └── yazi/        # Yazi 风格文件管理器（点击导航目录/文件 + [ .. ] 返回）
 ```
 
 ## 架构

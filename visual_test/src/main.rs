@@ -21,10 +21,6 @@ use htui::render;
 use htui::render_with_events;
 use log::info;
 
-mod snake;
-mod sysmon;
-mod yazi;
-
 /// Headless preview: parse the document, run the full layout pipeline into a
 /// [`TermLayout`] canvas, and print each non-empty row as plain text so the
 /// structure can be inspected without an interactive terminal.
@@ -103,14 +99,6 @@ fn main() -> Result<()> {
     // `--dump` enables the headless preview (see `dump`); `--dump bg` prints
     // a background-fill map instead of the text glyphs.
     let dump_mode = args.iter().any(|a| a == "--dump");
-    // `--sample` (used with the `sysmon` test) prints the HTML string the
-    // refresh handler would produce, so the sampled page can be inspected
-    // without an interactive terminal.
-    let sample_mode = args.iter().any(|a| a == "--sample");
-    // `--watch` (used with the `sysmon` test) renders several consecutive
-    // sampled frames, simulating the auto-refresh headlessly so the changing
-    // values can be observed without an interactive terminal.
-    let watch_mode = args.iter().any(|a| a == "--watch");
     let bg_map = dump_mode
         && args
             .iter()
@@ -125,8 +113,6 @@ fn main() -> Result<()> {
 
     let mut cols: u16 = 104;
     let mut rows: u16 = 32;
-    let mut count: usize = 5;
-    let mut every_ms: u64 = 800;
     let mut it = args.iter().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -142,20 +128,6 @@ fn main() -> Result<()> {
                     && let Ok(n) = v.parse()
                 {
                     rows = n;
-                }
-            }
-            "--count" => {
-                if let Some(v) = it.next()
-                    && let Ok(n) = v.parse()
-                {
-                    count = n;
-                }
-            }
-            "--every" => {
-                if let Some(v) = it.next()
-                    && let Ok(n) = v.parse()
-                {
-                    every_ms = n;
                 }
             }
             _ => {}
@@ -187,14 +159,10 @@ fn main() -> Result<()> {
         "flex_nested" => test_case!(flex_nested, no_css),
         "css_props" => test_case!(css_props, no_css),
         "events" => test_case!(events),
-        "sysmon" => test_case!(sysmon),
         "viewport_units" => test_case!(viewport_units, no_css),
         "position" => test_case!(position, no_css),
         "input" => test_case!(input, no_css),
         "configurator" => test_case!(configurator, no_css),
-        "codex" => test_case!(codex, no_css),
-        "yazi" => test_case!(yazi, no_css),
-        "snake" => test_case!(snake, no_css),
         "showcase" => test_case!(showcase, no_css),
         _ => {
             let available = [
@@ -220,14 +188,10 @@ fn main() -> Result<()> {
                 "flex_nested",
                 "css_props",
                 "events",
-                "sysmon",
                 "viewport_units",
                 "position",
                 "input",
                 "configurator",
-                "codex",
-                "yazi",
-                "snake",
                 "showcase",
             ];
             eprintln!(
@@ -243,39 +207,6 @@ fn main() -> Result<()> {
         html.len(),
         css.len()
     );
-
-    // The `sysmon` case runs through `render_with_events` with a dedicated
-    // bindings set (see `sysmon::bindings`): a background thread samples the
-    // machine via `sysinfo`, and JS `refresh()` (auto every 200 ms) writes the
-    // values into the DOM with `textContent`; the buttons highlight on hover
-    // through CSS `:hover`. `--dump` / `--sample` / `--watch` fall back to the
-    // static preview (interaction needs a real terminal).
-    if test_name == "sysmon" {
-        if watch_mode {
-            // Headless frame stepping: render `count` sampled frames,
-            // `every_ms` apart, so the updating values are visible.
-            for i in 1..=count {
-                println!("\n===== frame {i}/{count} ===");
-                dump(&sysmon::preview_page(), css, cols, rows, bg_map);
-                if i < count {
-                    std::thread::sleep(std::time::Duration::from_millis(every_ms));
-                }
-            }
-            return Ok(());
-        }
-        if sample_mode {
-            // Render the page the `refresh` handler would produce, headlessly.
-            dump(&sysmon::preview_page(), css, cols, rows, bg_map);
-            return Ok(());
-        }
-        if dump_mode {
-            dump(html, css, cols, rows, bg_map);
-        } else {
-            render_with_events(html, css, sysmon::bindings());
-        }
-        info!("Test '{test_name}' completed");
-        return Ok(());
-    }
 
     // The `events` case runs through `render_with_events`. The demo is fully
     // script-driven: its `<script>` block defines the handler functions and
@@ -314,45 +245,6 @@ fn main() -> Result<()> {
             dump(html, css, cols, rows, bg_map);
         } else {
             render_with_events(html, css, EventBindings::default());
-        }
-        info!("Test '{test_name}' completed");
-        return Ok(());
-    }
-
-    // The `codex` case runs through `render_with_events`: a chat-style input
-    // box (`change` on Enter appends the message to the thread — execution is
-    // disabled by design). `--dump` falls back to the static preview.
-    if test_name == "codex" {
-        if dump_mode {
-            dump(html, css, cols, rows, bg_map);
-        } else {
-            render_with_events(html, css, EventBindings::default());
-        }
-        info!("Test '{test_name}' completed");
-        return Ok(());
-    }
-
-    // The `yazi` case runs through `render_with_events` with the `listDir`
-    // host command (see `yazi.rs`): a real directory listing navigable by
-    // click. `--dump` falls back to the static preview.
-    if test_name == "yazi" {
-        if dump_mode {
-            dump(html, css, cols, rows, bg_map);
-        } else {
-            render_with_events(html, css, yazi::bindings());
-        }
-        info!("Test '{test_name}' completed");
-        return Ok(());
-    }
-
-    // The `snake` case runs through `render_with_events`: the game runs in
-    // JS, driven by a 150 ms `setInterval(tick, 150)` (see `snake.rs`), with
-    // click-to-steer buttons. `--dump` falls back to the static preview.
-    if test_name == "snake" {
-        if dump_mode {
-            dump(html, css, cols, rows, bg_map);
-        } else {
-            render_with_events(html, css, snake::bindings());
         }
         info!("Test '{test_name}' completed");
         return Ok(());

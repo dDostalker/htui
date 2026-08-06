@@ -9,7 +9,7 @@
 | ---- | ---- | ---- | ---- |
 | `visual_test/src/codex/` | Codex CLI 聊天界面 | `<input>` + Enter 提交（`change` 事件） | `cargo run -p visual_test -- codex` |
 | `visual_test/src/yazi/` + `yazi.rs` | Yazi 文件管理器 | 点击目录进入 / 点击文件选中 / `[ .. ]` 返回 | `cargo run -p visual_test -- yazi` |
-| `visual_test/src/snake/` + `snake.rs` | 贪吃蛇 | 方向键 / WASD 转向 + `r` 重开（`<body onkeydown>`）+ 点击方向按钮 + 150ms auto 驱动 | `cargo run -p visual_test -- snake` |
+| `visual_test/src/snake/` + `snake.rs` | 贪吃蛇（森林风） | 方向键 / WASD 转向（`preventDefault` 取消内置滚动）+ 空格/`p` 暂停 + `r` 重开 + 吃食物加速；点击按钮亦可 | `cargo run -p visual_test -- snake` |
 
 ## 记录的问题（按发现顺序）
 
@@ -59,6 +59,10 @@
 
 ## 验证有效的部分
 
+- 逐格着色的棋盘可以完全用 DOM 做：`createElement('span')` 每格一个元素 +
+  `el.style.backgroundColor` 增量更新（只改本轮变化的 2–4 格，蛇身/头/食物/草丛
+  分色）——`snake/index.html` 的森林风棋盘即此模式，增量重绘配合每格 id
+  （`c{r}-{c}`）方便测试断言。
 - `<input>` + `change` 提交是可行的"命令行输入"模式（Codex 已用）。
 - 宿主函数返回 `#[derive(IntoJs)]` 的 `Vec<结构体>`（`listDir`）→ JS 侧直接是对象
   数组（`e.name` / `e.is_dir` / `e.size`），无需手动序列化 ✓。
