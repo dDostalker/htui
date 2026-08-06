@@ -4,15 +4,13 @@ use std::time::Duration;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind};
 
 use crate::{
-    events::interaction,
-    script::ScriptEngine,
+    script::ScriptMsg,
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::char_width,
 };
-use crate::events::{ElementRef, EventType, HitMap, HitRegion};
+use crate::events::HitMap;
 use crate::layout::layoutbox::geometry::{select_options, select_overlay_rect};
 use crate::layout::paint::value_window;
-use crate::layout::Rect;
 
 const SCROLL_LINES_PER_TICK: u32 = 3;
 const ZOOM_STEP: f32 = 0.1;
@@ -144,8 +142,6 @@ pub struct InputState {
     /// Screen coordinates of the last left-button press; a click is only
     /// recognised when the release lands on the same cell.
     pub pressed: Option<(u16, u16)>,
-    /// Hover tracking state for mouse enter / leave detection.
-    pub hover: interaction::HoverState,
     /// The `<input>` node currently focused (receives typed characters).
     pub focused_input: Option<NodeId>,
     /// Edit buffer of the focused input; the DOM `value` attribute is the
@@ -187,7 +183,6 @@ impl InputState {
             scroll_y: 0,
             zoom: 1.0,
             pressed: None,
-            hover: interaction::HoverState::new(),
             focused_input: None,
             input_value: String::new(),
             input_cursor: 0,
@@ -387,58 +382,15 @@ fn apply_shift_navigation(state: &mut InputState, key: KeyCode) -> bool {
     state.input_cursor != before
 }
 
-/// Build a minimal hit region for `node_id` (no geometry) so the input loop
-/// can fire focus / blur / input / change events along the DOM ancestor chain,
-/// exactly like a pointer-driven region from the hit map.
-fn region_for(arena: &NodeArena, node_id: NodeId) -> HitRegion {
-    let mut path = Vec::new();
-    let mut current = Some(node_id);
-    while let Some(id) = current {
-        let node = &arena[id];
-        path.push(ElementRef {
-            id: node.get_id().cloned(),
-            node_id: id,
-        });
-        current = node.parent;
-    }
-    HitRegion {
-        node_id,
-        rect: Rect::new(0, 0, 0, 0),
-        path,
-    }
-}
-
-/// Fire `blur` (+ `change` when the edited value differs from the committed
-/// DOM value) for `node_id`, committing `new_value` into the DOM first.
-/// Returns any render commands pushed by handlers.
-fn fire_blur_and_change(
-    engine: &mut ScriptEngine,
-    node_id: NodeId,
-    new_value: &str,
-) -> Vec<RenderCmd> {
-    let arena = engine.arena();
-    let old = arena
-        .get(node_id)
-        .and_then(|n| n.attributes.get("value"))
-        .cloned()
-        .unwrap_or_default();
-    engine.set_value(node_id, new_value);
-    let region = region_for(&arena, node_id);
-    let mut cmds = engine.fire(&region, EventType::Blur, 0, 0);
-    if old != new_value {
-        cmds.extend(engine.fire(&region, EventType::Change, 0, 0));
-    }
-    cmds
-}
-
 /// Focus `node_id` (an `<input>`), seeding the edit buffer from the DOM
 /// `value` attribute and repainting the previously focused field (if any).
-/// Fires `focus` on the newly focused field and `blur` / `change` on the
-/// previously focused one.
+/// Queues `focus` on the newly focused field and `blur` / `change` on the
+/// previously focused one as script messages.
 fn focus_input(
     state: &mut InputState,
     node_id: NodeId,
-    engine: &mut ScriptEngine,
+    arena: &NodeArena,
+    msgs: &mut Vec<ScriptMsg>,
     cmds: &mut Vec<RenderCmd>,
 ) {
     if state.focused_input == Some(node_id) {
@@ -447,7 +399,10 @@ fn focus_input(
     if let Some(prev) = state.focused_input.replace(node_id) {
         // Commit the previous field's edits back to the DOM before switching
         // focus, firing `blur` (+ `change` when the value differs).
-        cmds.extend(fire_blur_and_change(engine, prev, &state.input_value));
+        msgs.push(ScriptMsg::BlurInput {
+            node_id: prev,
+            value: state.input_value.clone(),
+        });
         state.input_sel_anchor = None;
         cmds.push(RenderCmd::RenderInput {
             node_id: prev,
@@ -457,8 +412,7 @@ fn focus_input(
             selection: None,
         });
     }
-    let value = engine
-        .arena()
+    let value = arena
         .get(node_id)
         .and_then(|n| n.attributes.get("value"))
         .cloned()
@@ -475,26 +429,26 @@ fn focus_input(
         selection: None,
     });
     // Fire `focus` on the newly focused field.
-    let region = region_for(&engine.arena(), node_id);
-    cmds.extend(engine.fire(&region, EventType::Focus, 0, 0));
+    msgs.push(ScriptMsg::FocusInput { node_id });
 }
 
 /// Blur the focused `<input>`: repaint it unfocused, commit the edited value
 /// back into the DOM (so a later focus or re-render sees it), and clear the
-/// edit session. `engine` is `None` in the no-event mode, where there is no
-/// live DOM to write back to.
+/// edit session. The commit and the `blur` / `change` events themselves run on
+/// the script thread via [`ScriptMsg::BlurInput`].
 fn blur_input(
     state: &mut InputState,
-    engine: Option<&mut ScriptEngine>,
+    msgs: &mut Vec<ScriptMsg>,
     cmds: &mut Vec<RenderCmd>,
 ) {
     let Some(focused) = state.focused_input.take() else {
         return;
     };
     state.input_sel_anchor = None;
-    if let Some(engine) = engine {
-        cmds.extend(fire_blur_and_change(engine, focused, &state.input_value));
-    }
+    msgs.push(ScriptMsg::BlurInput {
+        node_id: focused,
+        value: state.input_value.clone(),
+    });
     cmds.push(RenderCmd::RenderInput {
         node_id: focused,
         value: std::mem::take(&mut state.input_value),
@@ -519,35 +473,38 @@ fn push_input_render(state: &InputState, focused: NodeId, cmds: &mut Vec<RenderC
 
 /// Handle a completed left-button click at canvas coordinates `(x, y)`.
 ///
-/// Dispatches the `Click` event (via [`interaction::on_click`], which also
-/// syncs the hover state) and then applies the field-focus rule used by the
-/// input loop: a click on an `<input>` focuses it (blurring the previously
-/// focused field), any other click blurs the focused field. Render commands
-/// are appended to `cmds` in dispatch order.
+/// Queues the `Click` dispatch (the script thread runs it via
+/// [`interaction::on_click`], which also syncs the hover state) and then
+/// applies the field-focus rule used by the input loop: a click on an
+/// `<input>` focuses it (blurring the previously focused field), any other
+/// click blurs the focused field. `arena` is the input loop's latest DOM
+/// snapshot for the read-only node-type / value lookups; everything that
+/// needs the engine is collected into `msgs` for the script thread. Local
+/// render commands are appended to `cmds` in dispatch order.
 pub fn handle_click(
     state: &mut InputState,
     hit_map: &HitMap,
-    engine: &mut ScriptEngine,
+    arena: &NodeArena,
     x: u32,
     y: u32,
+    msgs: &mut Vec<ScriptMsg>,
     cmds: &mut Vec<RenderCmd>,
 ) {
-    cmds.extend(interaction::on_click(&mut state.hover, hit_map, engine, x, y));
+    msgs.push(ScriptMsg::Click { x, y });
     // Clicking an `<input>` focuses it; any other click blurs the previously
     // focused field.
     let clicked = hit_map.hit_test(x, y);
     let clicked_input = clicked.is_some_and(|r| {
-        engine
-            .arena()
+        arena
             .get(r.node_id)
             .is_some_and(|n| n.node_type == NodeType::Input)
     });
     if clicked_input {
         if let Some(node_id) = clicked.map(|r| r.node_id) {
-            focus_input(state, node_id, engine, cmds);
+            focus_input(state, node_id, arena, msgs, cmds);
         }
     } else if state.focused_input.is_some() {
-        blur_input(state, Some(engine), cmds);
+        blur_input(state, msgs, cmds);
     }
 }
 
@@ -608,15 +565,14 @@ fn hit_select_option(open: &SelectOpenState, x: u32, y: u32) -> Option<usize> {
 fn open_select(
     state: &mut InputState,
     hit_map: &HitMap,
-    engine: &ScriptEngine,
+    arena: &NodeArena,
     node_id: NodeId,
     cmds: &mut Vec<RenderCmd>,
 ) {
     let Some(region) = hit_map.iter().find(|r| r.node_id == node_id) else {
         return;
     };
-    let arena = engine.arena();
-    let options = select_options(&arena, node_id);
+    let options = select_options(arena, node_id);
     let value = arena
         .get(node_id)
         .and_then(|n| n.attributes.get("value"))
@@ -638,14 +594,15 @@ fn open_select(
 }
 
 /// Close the open `<select>` dropdown. When `pick` is `Some`, the option is
-/// selected: its value is committed to the DOM (`set_value_dirty`), a
-/// `change` event fires when the value actually changed, and a re-render
-/// repaints the new label. `pick: None` just closes without changing the
-/// value.
+/// selected: its value is committed to the DOM (`set_value_dirty`) and a
+/// `change` event fires when the value actually changed; the commit + event
+/// run on the script thread via [`ScriptMsg::SelectPick`]. `pick: None` just
+/// closes without changing the value.
 fn close_select(
     state: &mut InputState,
-    engine: &mut ScriptEngine,
+    arena: &NodeArena,
     pick: Option<usize>,
+    msgs: &mut Vec<ScriptMsg>,
     cmds: &mut Vec<RenderCmd>,
 ) {
     let Some(open) = state.open_select.take() else {
@@ -657,16 +614,16 @@ fn close_select(
     if let Some(idx) = pick {
         if idx < open.options.len() {
             let value = open.options[idx].0.clone();
-            let old = engine
-                .arena()
+            let old = arena
                 .get(open.node_id)
                 .and_then(|n| n.attributes.get("value"))
                 .cloned()
                 .unwrap_or_default();
             if value != old {
-                engine.set_value_dirty(open.node_id, &value);
-                let region = region_for(&engine.arena(), open.node_id);
-                cmds.extend(engine.fire(&region, EventType::Change, 0, 0));
+                msgs.push(ScriptMsg::SelectPick {
+                    node_id: open.node_id,
+                    value,
+                });
             }
         }
     }
@@ -678,15 +635,18 @@ fn close_select(
 /// (blurring any previously focused field) and positions the caret at the
 /// press point, entering drag-selection mode; a press anywhere else blurs the
 /// focused field and starts a page text selection (the anchor for the drag).
-/// Any prior page selection is cleared. Render commands are appended to `cmds`
-/// in dispatch order.
+/// Any prior page selection is cleared. `arena` is the input loop's latest DOM
+/// snapshot; everything that needs the engine is collected into `msgs` for the
+/// script thread. Local render commands are appended to `cmds` in dispatch
+/// order.
 pub fn handle_mouse_down(
     state: &mut InputState,
     hit_map: &HitMap,
-    engine: &mut ScriptEngine,
+    arena: &NodeArena,
     x: u32,
     y: u32,
     button: MouseButton,
+    msgs: &mut Vec<ScriptMsg>,
     cmds: &mut Vec<RenderCmd>,
 ) {
     let clicked = hit_map.hit_test(x, y);
@@ -696,19 +656,18 @@ pub fn handle_mouse_down(
     // then falls through to the normal dispatch.
     if let Some(open) = state.open_select.clone() {
         if let Some(idx) = hit_select_option(&open, x, y) {
-            close_select(state, engine, Some(idx), cmds);
+            close_select(state, arena, Some(idx), msgs, cmds);
             return;
         }
         let clicked_self = clicked.is_some_and(|r| r.node_id == open.node_id);
-        close_select(state, engine, None, cmds);
+        close_select(state, arena, None, msgs, cmds);
         if clicked_self {
             return;
         }
     }
 
     let clicked_input = clicked.is_some_and(|r| {
-        engine
-            .arena()
+        arena
             .get(r.node_id)
             .is_some_and(|n| n.node_type == NodeType::Input)
     });
@@ -716,7 +675,7 @@ pub fn handle_mouse_down(
         MouseButton::Left => {
             if clicked_input {
                 if let Some(node_id) = clicked.map(|r| r.node_id) {
-                    focus_input(state, node_id, engine, cmds);
+                    focus_input(state, node_id, arena, msgs, cmds);
                     state.drag_selecting = true;
                     // Position the caret (and the selection anchor) at the press
                     // point within the field.
@@ -738,7 +697,7 @@ pub fn handle_mouse_down(
                 // Mousedown outside a field blurs it (browser timing), then
                 // starts a flow text selection anchored at the press point.
                 if state.focused_input.is_some() {
-                    blur_input(state, Some(engine), cmds);
+                    blur_input(state, msgs, cmds);
                 }
                 clear_text_selection(state, cmds);
                 state.text_sel_anchor = Some((x, y));
@@ -761,15 +720,14 @@ pub fn handle_mouse_down(
     // focused field, like a browser mousedown on a control).
     if button == MouseButton::Left
         && let Some(region) = clicked
-        && engine
-            .arena()
+        && arena
             .get(region.node_id)
             .is_some_and(|n| n.node_type == NodeType::Select)
     {
         if state.focused_input.is_some() {
-            blur_input(state, Some(engine), cmds);
+            blur_input(state, msgs, cmds);
         }
-        open_select(state, hit_map, engine, region.node_id, cmds);
+        open_select(state, hit_map, arena, region.node_id, cmds);
     }
 }
 
@@ -778,14 +736,16 @@ pub fn handle_mouse_down(
 /// While the left button is held this drives the active drag: inside a
 /// focused `<input>` the caret (and with it the character selection) follows
 /// the pointer; over page content the text selection rectangle tracks the
-/// pointer. Without a press it is a plain pointer move, dispatched to the
-/// hover machinery as usual.
+/// pointer. Without a press it queues a [`ScriptMsg::Move`] for the script
+/// thread's hover machinery (pointer enter / leave + `MouseOver` /
+/// `MouseOut`). Local render commands are appended to `cmds` in dispatch
+/// order.
 pub fn handle_mouse_move(
     state: &mut InputState,
     hit_map: &HitMap,
-    engine: &mut ScriptEngine,
     x: u32,
     y: u32,
+    msgs: &mut Vec<ScriptMsg>,
     cmds: &mut Vec<RenderCmd>,
 ) {
     // An open `<select>` dropdown follows the pointer: hovering an option row
@@ -835,11 +795,17 @@ pub fn handle_mouse_move(
         }
         return;
     }
-    // No button held: ordinary pointer movement → hover tracking.
-    cmds.extend(interaction::on_move(&mut state.hover, hit_map, engine, x, y));
+    // No button held: ordinary pointer movement → hover tracking on the
+    // script thread.
+    msgs.push(ScriptMsg::Move { x, y });
 }
 
 /// Wait for the next input event and translate it into render commands.
+///
+/// The input loop never executes JS: everything that needs the engine is
+/// queued into `msgs` (forwarded to the dedicated script thread, so a blocking
+/// host function never stalls input); DOM reads use `arena`, the input loop's
+/// latest snapshot.
 ///
 /// `timeout` controls how long to block on `event::poll`:
 /// - `None` blocks indefinitely (legacy behaviour, suitable for tests or
@@ -857,25 +823,27 @@ pub fn handle_mouse_move(
 /// send and, more importantly, one fewer frame that risks a visible flash
 /// at the scroll bounds.
 ///
-/// `hit_map` and `engine` activate mouse interaction (pass both together,
+/// `hit_map` and `arena` activate mouse interaction (pass both together,
 /// or neither):
 /// - left `Down` records the press position and (browser-aligned) focuses an
 ///   `<input>` / blurs the focused field / starts a drag selection;
 /// - `Moved` while the button is held drives the active drag (field-internal
 ///   character selection or the page text selection); without a press it
-///   detects pointer enter / leave and dispatches `MouseOver` / `MouseOut`
-///   via [`interaction::on_move`](crate::events::interaction::on_move). Like
-///   a browser without CSS `:hover`, moving the pointer never changes what is
+///   queues a [`ScriptMsg::Move`] for the script thread's hover machinery
+///   (`MouseOver` / `MouseOut`, via
+///   [`interaction::on_move`](crate::events::interaction::on_move)). Like a
+///   browser without CSS `:hover`, moving the pointer never changes what is
 ///   painted;
-/// - left `Up` on the same cell is dispatched as a bubbling `Click` via
-///   [`interaction::on_click`](crate::events::interaction::on_click); a drag
+/// - left `Up` on the same cell queues a bubbling `Click` (via
+///   [`interaction::on_click`](crate::events::interaction::on_click)); a drag
 ///   that ends elsewhere keeps the selection.
 pub fn trigger_refresh(
     state: &mut InputState,
     rows: u16,
     max_scroll: u32,
     hit_map: Option<&HitMap>,
-    engine: Option<&mut ScriptEngine>,
+    arena: Option<&NodeArena>,
+    msgs: &mut Vec<ScriptMsg>,
     timeout: Option<Duration>,
 ) -> Vec<RenderCmd> {
     let mut cmds = Vec::new();
@@ -898,7 +866,7 @@ pub fn trigger_refresh(
             // closes. Any other key closes the dropdown and is swallowed
             // (the dropdown owns the keyboard while open).
             if state.open_select.is_some() {
-                let Some(engine) = engine else {
+                let Some(arena) = arena else {
                     return cmds;
                 };
                 let node_id = state
@@ -935,15 +903,15 @@ pub fn trigger_refresh(
                     }
                     KeyCode::Enter => {
                         let pick = state.open_select.as_ref().map(|o| o.highlight);
-                        close_select(state, engine, pick, &mut cmds);
+                        close_select(state, arena, pick, msgs, &mut cmds);
                         return cmds;
                     }
                     KeyCode::Esc => {
-                        close_select(state, engine, None, &mut cmds);
+                        close_select(state, arena, None, msgs, &mut cmds);
                         return cmds;
                     }
                     _ => {
-                        close_select(state, engine, None, &mut cmds);
+                        close_select(state, arena, None, msgs, &mut cmds);
                         return cmds;
                     }
                 }
@@ -954,7 +922,7 @@ pub fn trigger_refresh(
             // to the DOM. Either returns control to scrolling / quitting.
             if state.focused_input.is_some() {
                 if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
-                    blur_input(state, engine, &mut cmds);
+                    blur_input(state, msgs, &mut cmds);
                     return cmds;
                 }
                 let Some(focused) = state.focused_input else {
@@ -967,9 +935,8 @@ pub fn trigger_refresh(
                 if key.modifiers.contains(event::KeyModifiers::CONTROL) {
                     if apply_ctrl_shortcut(state, key.code) {
                         push_input_render(state, focused, &mut cmds);
-                        if let Some(engine) = engine {
-                            let region = region_for(&engine.arena(), focused);
-                            cmds.extend(engine.fire(&region, EventType::Input, 0, 0));
+                        if arena.is_some() {
+                            msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
                         }
                     }
                     return cmds;
@@ -987,9 +954,8 @@ pub fn trigger_refresh(
                 if apply_input_key(&mut state.input_value, &mut state.input_cursor, key.code) {
                     state.input_sel_anchor = None;
                     push_input_render(state, focused, &mut cmds);
-                    if let Some(engine) = engine {
-                        let region = region_for(&engine.arena(), focused);
-                        cmds.extend(engine.fire(&region, EventType::Input, 0, 0));
+                    if arena.is_some() {
+                        msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
                     }
                 }
                 return cmds;
@@ -1113,9 +1079,9 @@ pub fn trigger_refresh(
                 MouseEventKind::ScrollUp => {
                     // Scrolling dismisses an open dropdown (focus loss).
                     if state.open_select.is_some()
-                        && let Some(engine) = engine
+                        && let Some(arena) = arena
                     {
-                        close_select(state, engine, None, &mut cmds);
+                        close_select(state, arena, None, msgs, &mut cmds);
                     }
                     if ctrl {
                         state.zoom = (state.zoom - ZOOM_STEP).max(ZOOM_MIN);
@@ -1135,9 +1101,9 @@ pub fn trigger_refresh(
                 MouseEventKind::ScrollDown => {
                     // Scrolling dismisses an open dropdown (focus loss).
                     if state.open_select.is_some()
-                        && let Some(engine) = engine
+                        && let Some(arena) = arena
                     {
-                        close_select(state, engine, None, &mut cmds);
+                        close_select(state, arena, None, msgs, &mut cmds);
                     }
                     if ctrl {
                         state.zoom = (state.zoom + ZOOM_STEP).min(ZOOM_MAX);
@@ -1155,15 +1121,15 @@ pub fn trigger_refresh(
                     });
                 }
                 MouseEventKind::Down(button) => {
-                    if let (Some(hit_map), Some(engine)) = (hit_map, engine) {
+                    if let (Some(hit_map), Some(arena)) = (hit_map, arena) {
                         state.pressed = Some((mouse.column, mouse.row));
                         let (x, y) = canvas_pos(state, mouse.column, mouse.row);
-                        handle_mouse_down(state, hit_map, engine, x, y, button, &mut cmds);
+                        handle_mouse_down(state, hit_map, arena, x, y, button, msgs, &mut cmds);
                     }
                 }
                 MouseEventKind::Up(MouseButton::Left) => {
-                    if let (Some((px, py)), Some(hit_map), Some(engine)) =
-                        (state.pressed, hit_map, engine)
+                    if let (Some((px, py)), Some(hit_map), Some(arena)) =
+                        (state.pressed, hit_map, arena)
                     {
                         state.pressed = None;
                         state.drag_selecting = false;
@@ -1173,12 +1139,12 @@ pub fn trigger_refresh(
                         // when the release lands off the press cell.
                         if let Some(open) = state.open_select.clone() {
                             if let Some(idx) = hit_select_option(&open, x, y) {
-                                close_select(state, engine, Some(idx), &mut cmds);
+                                close_select(state, arena, Some(idx), msgs, &mut cmds);
                                 return cmds;
                             }
                         }
                         if px == mouse.column && py == mouse.row {
-                            handle_click(state, hit_map, engine, x, y, &mut cmds);
+                            handle_click(state, hit_map, arena, x, y, msgs, &mut cmds);
                         }
                         // A drag ended on a different cell: the selection
                         // (field-internal or page text) is kept as-is.
@@ -1196,9 +1162,9 @@ pub fn trigger_refresh(
                 // 32..34) and button-free motion as `Moved` (SGR 64) — both
                 // must reach the drag / hover handler.
                 MouseEventKind::Drag(_) | MouseEventKind::Moved => {
-                    if let (Some(hit_map), Some(engine)) = (hit_map, engine) {
+                    if let (Some(hit_map), Some(_)) = (hit_map, arena) {
                         let (x, y) = canvas_pos(state, mouse.column, mouse.row);
-                        handle_mouse_move(state, hit_map, engine, x, y, &mut cmds);
+                        handle_mouse_move(state, hit_map, x, y, msgs, &mut cmds);
                     }
                 }
                 _ => {}

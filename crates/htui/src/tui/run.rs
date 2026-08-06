@@ -21,7 +21,7 @@ use crossterm::{
 };
 
 use crate::{
-    events::{AutoRefresh, EventBindings, Geometry, HitMap},
+    events::{EventBindings, Geometry, HitMap},
     html::css_parse::{
         self, CssRule, PseudoClass, Selector, css_into_node_with_hover, reset_css_attr,
         selector_chain_matches_with_hover,
@@ -29,7 +29,7 @@ use crate::{
     layout::layoutbox::geometry::{select_options, select_overlay_rect},
     layout::{LayoutBox, Rect},
     layout::layout::TermMap,
-    script::ScriptEngine,
+    script::{ScriptMsg, ScriptResponse, run_script_thread},
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{
         Block, DirtyInfo, FontStyle, InputRenderState, InputState, RenderCmd, SelectionMode,
@@ -1228,19 +1228,6 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
     let css_rules = Arc::new(build_css_rules(html, css));
 
     let html: Arc<str> = Arc::from(html);
-    // The script engine owns the live DOM when events are enabled; it parses
-    // the document itself (arena + `<script>` blocks) and reports dirty flags
-    // when JS mutates the DOM.
-    let mut engine: Option<ScriptEngine> = None;
-    if let Some(bindings) = bindings {
-        engine = match ScriptEngine::new(html.as_ref(), bindings) {
-            Ok(e) => Some(e),
-            Err(err) => {
-                log::error!("Failed to initialize script engine: {err}");
-                None
-            }
-        };
-    }
 
     // Shared scroll upper bound — initial value `u32::MAX` means "not yet
     // known" (the first layout hasn't run); the render thread overwrites it
@@ -1248,11 +1235,44 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
     let max_scroll = Arc::new(AtomicU32::new(u32::MAX));
 
     // Geometry snapshot channel (render thread → hit-test thread) and the
-    // published hit map (hit-test thread → input loop). The hit-test thread
-    // is only spawned when event handling is requested.
+    // published hit map (hit-test thread → input loop + script thread). The
+    // hit-test thread is only spawned when event handling is requested.
     let (geo_tx, geo_rx) = mpsc::channel::<Arc<Geometry>>();
     let hit_map: Arc<Mutex<Arc<HitMap>>> = Arc::new(Mutex::new(Arc::new(HitMap::new())));
-    if engine.is_some() {
+
+    // The script engine owns the live DOM when events are enabled; it parses
+    // the document itself (arena + `<script>` blocks) and reports dirty flags
+    // when JS mutates the DOM. It runs on a dedicated script thread so a
+    // blocking host function never stalls input handling (see
+    // `script::msg::run_script_thread`).
+    let (script_tx, script_rx) = mpsc::channel::<ScriptMsg>();
+    let (script_out_tx, script_out_rx) = mpsc::channel::<ScriptResponse>();
+    let script_thread: Option<std::thread::JoinHandle<()>> = bindings.map(|bindings| {
+        let html = Arc::clone(&html);
+        let hit_map_thread = Arc::clone(&hit_map);
+        std::thread::spawn(move || {
+            run_script_thread(html, bindings, script_rx, script_out_tx, hit_map_thread)
+        })
+    });
+
+    // Wait for the engine to come up — the first frame needs its live arena.
+    // `live_dom` is the input loop's latest DOM snapshot for read-only queries;
+    // it is refreshed whenever JS mutates the arena.
+    let mut live_dom: Option<(Arc<NodeArena>, NodeId)> = None;
+    if script_thread.is_some() {
+        match script_out_rx.recv() {
+            Ok(ScriptResponse::Ready { arena, root_id }) => live_dom = Some((arena, root_id)),
+            Ok(ScriptResponse::Failed(err)) => {
+                log::error!("Failed to initialize script engine: {err}");
+            }
+            Ok(ScriptResponse::Event(_)) => {
+                log::error!("Script thread sent an event before Ready");
+            }
+            Err(e) => log::error!("Script thread init channel error: {e}"),
+        }
+    }
+    let events_active = live_dom.is_some();
+    if events_active {
         let hit_map_thread = Arc::clone(&hit_map);
         std::thread::spawn(move || hit_test_thread(geo_rx, hit_map_thread));
     }
@@ -1267,7 +1287,7 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
         let css_clone = Arc::clone(&css_rules);
         let max_scroll_clone = Arc::clone(&max_scroll);
         let selection_text_clone = Arc::clone(&selection_text);
-        let geo_tx = engine.is_some().then_some(geo_tx);
+        let geo_tx = events_active.then_some(geo_tx);
         move || {
             render_thread(
                 rx,
@@ -1292,10 +1312,10 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
 
     // First frame: the engine's live arena (scripts already ran and may have
     // mutated the DOM) or a plain parse-based redraw.
-    let first_cmd = match engine.as_mut() {
-        Some(eng) => RenderCmd::RenderArena {
-            arena: Arc::new(eng.arena()),
-            root_id: eng.root_id(),
+    let first_cmd = match &live_dom {
+        Some((arena, root_id)) => RenderCmd::RenderArena {
+            arena: Arc::clone(arena),
+            root_id: *root_id,
             scroll_y: state.scroll_y,
             zoom: state.zoom,
             hovered: None,
@@ -1313,10 +1333,10 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
         }
     }
 
-    // Periodic auto action (see `EventBindings::auto`): cloned once so the
-    // loop can read it while mutably borrowing `engine` for dispatch.
-    let auto: Option<AutoRefresh> = engine.as_ref().and_then(|e| e.auto());
-    let mut last_auto = std::time::Instant::now();
+    // Current `:hover` target, reported by the script thread after every
+    // pointer message; feeds `RenderArena.hovered` so re-cascades re-apply
+    // the highlight.
+    let mut hovered: Option<NodeId> = None;
 
     let mut quit = false;
     while !quit {
@@ -1329,7 +1349,20 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
             break;
         }
 
-        let mut cmds = if engine.is_some() {
+        // A dead script thread must not be silently ignored either: without
+        // this check the loop would keep sending messages into a void and
+        // hover / events would freeze while scrolling still worked.
+        if events_active
+            && script_thread
+                .as_ref()
+                .is_some_and(|h| h.is_finished())
+        {
+            log::error!("Script thread has terminated unexpectedly");
+            break;
+        }
+
+        let mut msgs: Vec<ScriptMsg> = Vec::new();
+        let mut cmds = if events_active {
             let map = match hit_map.lock() {
                 Ok(guard) => Arc::clone(&guard),
                 Err(e) => {
@@ -1342,7 +1375,8 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
                 rows,
                 max_scroll.load(Ordering::Relaxed),
                 Some(&map),
-                engine.as_mut(),
+                live_dom.as_ref().map(|(arena, _)| arena.as_ref()),
+                &mut msgs,
                 Some(Duration::from_millis(100)),
             )
         } else {
@@ -1352,39 +1386,44 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
                 max_scroll.load(Ordering::Relaxed),
                 None,
                 None,
+                &mut msgs,
                 Some(Duration::from_millis(100)),
             )
         };
 
-        // Periodic auto action: when the interval has elapsed, invoke the
-        // configured JS global function (see `ScriptEngine::invoke_action`)
-        // and forward its render commands alongside the input events.
-        if let Some(auto) = &auto {
-            let now = std::time::Instant::now();
-            if now.duration_since(last_auto) >= auto.every
-                && let Some(engine) = engine.as_mut()
-            {
-                last_auto = now;
-                cmds.extend(engine.invoke_action(&auto.action));
+        // Hand the actions that need the engine to the script thread (the
+        // channel is unbounded, so a busy script thread never blocks us).
+        for msg in msgs {
+            if let Err(e) = script_tx.send(msg) {
+                log::error!("Failed to send script message: {}", e);
+                quit = true;
+                break;
             }
         }
 
-        // JS mutations of the live DOM need a re-render from the engine's
-        // arena (no HTML re-parse). The hover target is folded in so the
-        // `RenderArena` cascade re-applies the current `:hover` highlight
-        // without a separate `Hover` command. The mutated node ids ride along
-        // so the render thread can repaint just those regions.
-        if let Some(engine) = engine.as_mut() {
-            let dirty = engine.take_dirty();
-            if !dirty.is_empty() {
-                cmds.push(RenderCmd::RenderArena {
-                    arena: Arc::new(engine.arena()),
-                    root_id: engine.root_id(),
-                    scroll_y: state.scroll_y,
-                    zoom: state.zoom,
-                    hovered: state.hover.current().map(|r| r.node_id),
-                    dirty,
-                });
+        // Fold the script thread's replies into this frame: render commands
+        // pushed by host functions, hover updates, and — when JS mutated the
+        // DOM — a fresh arena snapshot + dirty set for a (region) repaint.
+        for resp in script_out_rx.try_iter() {
+            match resp {
+                ScriptResponse::Event(ev) => {
+                    hovered = ev.hovered;
+                    cmds.extend(ev.cmds);
+                    if let Some(d) = ev.dirty {
+                        live_dom = Some((Arc::clone(&d.arena), d.root_id));
+                        cmds.push(RenderCmd::RenderArena {
+                            arena: d.arena,
+                            root_id: d.root_id,
+                            scroll_y: state.scroll_y,
+                            zoom: state.zoom,
+                            hovered: ev.hovered,
+                            dirty: d.dirty,
+                        });
+                    }
+                }
+                ScriptResponse::Ready { .. } | ScriptResponse::Failed(_) => {
+                    log::error!("Unexpected one-shot script response in the input loop");
+                }
             }
         }
 
@@ -1422,17 +1461,17 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
             // With the script engine active, the engine's live arena is the
             // source of truth: convert parse-based `Redraw` (zoom / resize)
             // into a `RenderArena` so JS DOM mutations survive re-renders.
-            let cmd = match (cmd, engine.as_mut()) {
-                (
-                    RenderCmd::Redraw { scroll_y, zoom },
-                    Some(engine),
-                ) => RenderCmd::RenderArena {
-                    arena: Arc::new(engine.arena()),
-                    root_id: engine.root_id(),
-                    scroll_y,
-                    zoom,
-                    hovered: state.hover.current().map(|r| r.node_id),
-                    dirty: DirtyInfo::default(),
+            let cmd = match (cmd, events_active.then_some(())) {
+                (RenderCmd::Redraw { scroll_y, zoom }, Some(())) => match &live_dom {
+                    Some((arena, root_id)) => RenderCmd::RenderArena {
+                        arena: Arc::clone(arena),
+                        root_id: *root_id,
+                        scroll_y,
+                        zoom,
+                        hovered,
+                        dirty: DirtyInfo::default(),
+                    },
+                    None => RenderCmd::Redraw { scroll_y, zoom },
                 },
                 (other, _) => other,
             };
@@ -1447,6 +1486,16 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
                 break;
             }
         }
+    }
+
+    // Ask the script thread to stop. It is not joined — the process is about
+    // to exit, and a host function blocked inside it must not hang shutdown
+    // (it holds no terminal resources; it only talks through channels).
+    if let Some(handle) = script_thread {
+        if script_tx.send(ScriptMsg::Quit).is_err() {
+            log::debug!("Script thread already gone; skipping Quit");
+        }
+        drop(handle);
     }
 
     if let Err(payload) = render_handle.join() {

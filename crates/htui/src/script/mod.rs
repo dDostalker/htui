@@ -43,11 +43,13 @@ use crate::{
 
 mod dom;
 mod host;
+mod msg;
 
 pub mod convert;
 
 pub use convert::{FromJs, IntoJs, JsObjectBuilder};
 pub use host::{HostCall, HostFn};
+pub use msg::{ScriptDirty, ScriptEvent, ScriptMsg, ScriptResponse, apply_message, run_script_thread};
 
 use dom::{add_listener, element_wrapper, get_listeners, install_builtins, with_state};
 

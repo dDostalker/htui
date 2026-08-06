@@ -15,53 +15,34 @@
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use htui::events::{AutoRefresh, EventBindings};
-use htui::script::HostCall;
+use htui::events::EventBindings;
+use htui::script::{HostCall, HostFn};
 use sysinfo::{Disks, System};
 
-/// Register the functions the demo document calls: the host function
-/// `sample()` returns the latest snapshot as a JS object, and the document's
-/// `<script>` defines `refresh()` to update the DOM with it. The page
-/// auto-refreshes every 200 ms.
-pub fn bindings() -> EventBindings {
-    let mut bindings = EventBindings::default();
+/// Latest snapshot published by the sampler thread, read by the `sample()`
+/// host function (registered by `#[htui::commands]`) without captures.
+static SNAPSHOT: OnceLock<Arc<Mutex<Snapshot>>> = OnceLock::new();
 
-    // Session anchor shared by the sampler (for the `session` readout) and by
-    // the `sample()` host function so the wall-clock fields are computed at
-    // read time. `Instant` is `Copy`, so the two `move` closures each hold an
-    // identical copy.
-    let start = Instant::now();
+/// Everything the demo document calls, declared in one module and registered
+/// by a single `#[htui::commands]` invocation: the three pure formatting
+/// commands (`bar` / `gb` / `formatDateTime`), the stateful `sample()`
+/// command (returning a `HostFn` closure), and the 200 ms auto-refresh of the
+/// page's `refresh()` function.
+#[htui::commands(auto = "refresh", every_ms = 200)]
+mod commands {
+    use super::*;
 
-    // The published snapshot, written by the sampler thread and read by the
-    // host `sample()` on the input thread. The lock is held only for the
-    // microsecond-scale publish / clone — all sysinfo sampling happens on the
-    // background thread *before* acquiring it, so the input loop never blocks
-    // on a query.
-    let snapshot: Arc<Mutex<Snapshot>> = Arc::new(Mutex::new(Snapshot::default()));
-    {
-        let snapshot = Arc::clone(&snapshot);
-        std::thread::spawn(move || {
-            let mut sampler = Sampler::with_start(start);
-            loop {
-                // Slow sampling runs on this thread, lock-free.
-                let next = sampler.sample_tick();
-                // Publish: brief lock, memcpy-sized.
-                if let Ok(mut snap) = snapshot.lock() {
-                    *snap = next;
-                }
-                std::thread::sleep(Duration::from_millis(200));
-            }
-        });
-    }
-
-    let snapshot_for_host = Arc::clone(&snapshot);
-    bindings.host.insert(
-        "sample".to_string(),
-        Box::new(move |call: &mut HostCall| {
-            let snap = snapshot_for_host
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
+    /// `sample()` �?read the latest snapshot the sampler thread published and
+    /// return it as a JS object. The wall-clock `now` is computed at read time
+    /// (every auto refresh); `session` comes from the latest sampled snapshot
+    /// (the sampler ticks every 200 ms, so the readout is at most that stale).
+    #[htui::command(name = "sample")]
+    pub(super) fn sample() -> HostFn {
+        Box::new(|call: &mut HostCall| {
+            let snap = SNAPSHOT
+                .get()
+                .map(|s| s.lock().unwrap_or_else(|e| e.into_inner()).clone())
+                .unwrap_or_default();
             // Wall-clock readouts are computed at read time (every auto
             // refresh), not frozen at sampling time, so the clock ticks every
             // second regardless of the sampling cadence.
@@ -69,7 +50,6 @@ pub fn bindings() -> EventBindings {
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(snap.now_secs);
-            let session_secs = start.elapsed().as_secs();
             let cpu_bar = snap
                 .cpu_load
                 .map(|l| bar(l / 100.0, 14))
@@ -99,21 +79,98 @@ pub fn bindings() -> EventBindings {
                 "disks"   => disks,
                 "proc"    => snap.process_count,
                 "now"     => format_datetime(now_secs),
-                "session" => format!("{:02}:{:02}", session_secs / 60, session_secs % 60),
+                "session" => format!(
+                    "{:02}:{:02}",
+                    snap.session_secs / 60,
+                    snap.session_secs % 60
+                ),
             ))
-        }),
-    );
-    // Pure-formatting helpers exposed as JS-callable commands (tauri-style
-    // `#[htui::command]` bindings): the page may call them directly, and the
-    // `sample()` host function below reuses the same Rust functions.
-    bindings.command("bar", bar_command());
-    bindings.command("gb", gb_command());
-    bindings.command("formatDateTime", format_datetime_command());
+        })
+    }
 
-    bindings.auto = Some(AutoRefresh {
-        every: Duration::from_millis(200),
-        action: "refresh".to_string(),
-    });
+    /// `bar(ratio, width)` �?progress bar.
+    ///
+    /// Deliberately avoids the U+2588 FULL BLOCK / U+2591 LIGHT SHADE glyphs:
+    /// their East Asian Width is *Ambiguous*, so CJK-configured consoles render
+    /// them two columns wide (or backfill a CJK font), which misaligns the bar
+    /// and the digits after it; LIGHT SHADE is also near-invisible on light
+    /// backgrounds. `#` / `-` are single-column in every terminal.
+    ///
+    /// Any positive ratio keeps at least one filled cell �?`round()` would
+    /// blank the whole bar below ~3% load, which reads as "nothing is
+    /// displayed" on a lightly loaded machine.
+    #[htui::command]
+    pub(super) fn bar(ratio: f32, width: usize) -> String {
+        let ratio = ratio.clamp(0.0, 1.0);
+        let filled = if ratio > 0.0 {
+            ((ratio * width as f32).ceil() as usize).clamp(1, width)
+        } else {
+            0
+        };
+        format!("[{}{}]", "#".repeat(filled), "-".repeat(width - filled))
+    }
+
+    /// `gb(bytes)` �?human-readable byte count (`GiB` �?`GB`).
+    #[htui::command]
+    pub(super) fn gb(bytes: u64) -> String {
+        format!("{:.1} GB", bytes as f32 / 1_073_741_824.0)
+    }
+
+    /// `formatDateTime(secs)` �?format a UNIX timestamp as `YYYY-MM-DD
+    /// HH:MM:SS` without external crates.
+    #[htui::command(name = "formatDateTime")]
+    pub(super) fn format_datetime(secs: u64) -> String {
+        let days = (secs / 86_400) as i64;
+        let day_secs = secs % 86_400;
+        let (y, m, d) = civil_from_days(days);
+        format!(
+            "{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}",
+            day_secs / 3600,
+            (day_secs % 3600) / 60,
+            day_secs % 60
+        )
+    }
+}
+
+/// Register the functions the demo document calls: the host function
+/// `sample()` returns the latest snapshot as a JS object, and the document's
+/// `<script>` defines `refresh()` to update the DOM with it. The page
+/// auto-refreshes every 200 ms.
+pub fn bindings() -> EventBindings {
+    // Session anchor shared by the sampler (for the `session` readout). The
+    // `sample()` host reads the sampled `session_secs` from the published
+    // snapshot, so no capture is needed.
+    let start = Instant::now();
+
+    // The published snapshot, written by the sampler thread and read by the
+    // host `sample()` on the input thread. The lock is held only for the
+    // microsecond-scale publish / clone �?all sysinfo sampling happens on the
+    // background thread *before* acquiring it, so the input loop never blocks
+    // on a query.
+    let snapshot: Arc<Mutex<Snapshot>> = Arc::new(Mutex::new(Snapshot::default()));
+    // Publish a clone so the capture-less `sample()` host can reach it.
+    SNAPSHOT.get_or_init(|| Arc::clone(&snapshot));
+    {
+        let snapshot = Arc::clone(&snapshot);
+        std::thread::spawn(move || {
+            let mut sampler = Sampler::with_start(start);
+            loop {
+                // Slow sampling runs on this thread, lock-free.
+                let next = sampler.sample_tick();
+                // Publish: brief lock, memcpy-sized.
+                if let Ok(mut snap) = snapshot.lock() {
+                    *snap = next;
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        });
+    }
+
+    // One call registers `bar` / `gb` / `formatDateTime`, the `sample()` host
+    // One call registers `bar` / `gb` / `formatDateTime`, the `sample()`
+    // command and the auto-refresh (see `mod commands` above).
+    let mut bindings = EventBindings::default();
+    commands::register(&mut bindings);
     bindings
 }
 
@@ -173,7 +230,7 @@ impl Snapshot {
     fn render_html(&self) -> String {
         let cpu_bar = self
             .cpu_load
-            .map(|load| bar(load / 100.0, 14))
+            .map(|load| commands::bar(load / 100.0, 14))
             .unwrap_or_else(|| "n/a".to_string());
         let cpu_pct = self
             .cpu_load
@@ -181,11 +238,11 @@ impl Snapshot {
             .unwrap_or_default();
         let mem_bar = self
             .memory
-            .map(|(used, total)| bar(used as f32 / total.max(1) as f32, 14))
+            .map(|(used, total)| commands::bar(used as f32 / total.max(1) as f32, 14))
             .unwrap_or_else(|| "n/a".to_string());
         let mem_text = self
             .memory
-            .map(|(used, total)| format!("{} / {}", gb(used), gb(total)))
+            .map(|(used, total)| format!("{} / {}", commands::gb(used), commands::gb(total)))
             .unwrap_or_default();
         let disks_html = if self.disks.is_empty() {
             "<div id=\"disks\" class=\"dim pad-x1\">n/a</div>".to_string()
@@ -200,9 +257,9 @@ impl Snapshot {
                     let used = total.saturating_sub(free);
                     format!(
                         "{label} {} {} / {}",
-                        bar(used as f32 / total.max(1) as f32, 10),
-                        gb(used),
-                        gb(total)
+                        commands::bar(used as f32 / total.max(1) as f32, 10),
+                        commands::gb(used),
+                        commands::gb(total)
                     )
                 })
                 .collect();
@@ -212,7 +269,7 @@ impl Snapshot {
             )
         };
         let proc_text = self.process_count.to_string();
-        let now_text = format_datetime(self.now_secs);
+        let now_text = commands::format_datetime(self.now_secs);
         let session_text = format!(
             "{:02}:{:02}",
             self.session_secs / 60,
@@ -316,7 +373,7 @@ impl Sampler {
     /// Refresh every metric and return the next snapshot.
     ///
     /// [`System::refresh_all`] is fast enough to run every tick (no subprocess
-    /// spawning), so each tick samples everything: CPU usage (0–100), memory,
+    /// spawning), so each tick samples everything: CPU usage (0-100), memory,
     /// process count and per-disk free space. Static facts are cached after
     /// the first tick.
     fn sample_tick(&mut self) -> Snapshot {
@@ -413,34 +470,6 @@ fn escape_html(s: &str) -> String {
 // Formatting helpers
 // ============================================================
 
-/// Render a `width`-cell progress bar as ASCII blocks.
-///
-/// Deliberately avoids the U+2588 FULL BLOCK / U+2591 LIGHT SHADE glyphs:
-/// their East Asian Width is *Ambiguous*, so CJK-configured consoles render
-/// them two columns wide (or backfill a CJK font), which misaligns the bar
-/// and the digits after it; LIGHT SHADE is also near-invisible on light
-/// backgrounds. `#` / `-` are single-column in every terminal.
-///
-/// Any positive ratio keeps at least one filled cell — `round()` would blank
-/// the whole bar below ~3% load, which reads as "nothing is displayed" on a
-/// lightly loaded machine.
-#[htui::command]
-fn bar(ratio: f32, width: usize) -> String {
-    let ratio = ratio.clamp(0.0, 1.0);
-    let filled = if ratio > 0.0 {
-        ((ratio * width as f32).ceil() as usize).clamp(1, width)
-    } else {
-        0
-    };
-    format!("[{}{}]", "#".repeat(filled), "-".repeat(width - filled))
-}
-
-/// Human-readable byte count (`GiB` → `GB`).
-#[htui::command]
-fn gb(bytes: u64) -> String {
-    format!("{:.1} GB", bytes as f32 / 1_073_741_824.0)
-}
-
 /// Format the per-disk usage lines (`label` + bar + used/total) for the
 /// page's `disks` field; `disk_free` is aligned with `disks` by index.
 fn format_disks(disks: &[(String, u64)], disk_free: &[u64]) -> String {
@@ -456,27 +485,13 @@ fn format_disks(disks: &[(String, u64)], disk_free: &[u64]) -> String {
             let used = total.saturating_sub(free);
             format!(
                 "{label} {} {} / {}",
-                bar(used as f32 / total.max(1) as f32, 10),
-                gb(used),
-                gb(total)
+                commands::bar(used as f32 / total.max(1) as f32, 10),
+                commands::gb(used),
+                commands::gb(total)
             )
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-/// Format a UNIX timestamp as `YYYY-MM-DD HH:MM:SS` without external crates.
-#[htui::command]
-fn format_datetime(secs: u64) -> String {
-    let days = (secs / 86_400) as i64;
-    let day_secs = secs % 86_400;
-    let (y, m, d) = civil_from_days(days);
-    format!(
-        "{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}",
-        day_secs / 3600,
-        (day_secs % 3600) / 60,
-        day_secs % 60
-    )
 }
 
 /// Convert a day count since 1970-01-01 to a `(year, month, day)` calendar

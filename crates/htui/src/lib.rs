@@ -11,6 +11,8 @@ pub mod tui;
 pub use boa_engine;
 /// `#[htui::command]` — wrap a Rust function as a host binding.
 pub use htui_macros::command;
+/// `#[htui::commands]` — auto-register every binding declared in a module.
+pub use htui_macros::commands;
 /// `#[derive(IntoJs)]` / `#[derive(FromJs)]` — struct ↔ JS object.
 pub use htui_macros::{FromJs, IntoJs};
 

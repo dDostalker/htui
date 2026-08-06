@@ -178,17 +178,19 @@ Enter / 点击别处 / 焦点切换提交时触发 `blur`（值有变化时额�
 
 ---
 
-## 5. 宿主函数（Host Functions）
+## 5. 命令（Commands，即宿主函数）
 
-宿主函数是"JS ↔ Rust 之间的桥"：页面脚本调用它们完成 Rust 侧的工作（系统采样、
-IO、复杂计算），并把结果返回给 JS。
+命令是"JS ↔ Rust 之间的桥"：页面脚本调用它们完成 Rust 侧的工作（系统采样、
+IO、复杂计算），并把结果返回给 JS。写法只有一种：`#[htui::command]`。
+（文档有时沿用"宿主函数"一词指代同一个概念；底层类型为 `HostFn` / `HostCall`。）
 
-### 5.1 推荐写法：`#[htui::command]`（tauri 式，不碰 Boa）
+### 5.1 推荐写法：`#[htui::commands]` + `#[htui::command]`（tauri 式，不碰 Boa）
 
-写一个普通 Rust 函数 + derive，注册后 JS 里直接调用：
+写一个普通 Rust 函数 + derive，注册后 JS 里直接调用。把命令集中放在一个模块里，
+用 `#[htui::commands]` 一次注册全部（连 `bindings.command(...)` 都省掉）：
 
 ```rust
-use htui::{command, IntoJs, events::EventBindings};
+use htui::{commands, command, IntoJs, events::EventBindings};
 
 /// 返回给 JS 的结构体：字段自动映射成 JS 对象属性
 #[derive(IntoJs)]
@@ -199,31 +201,52 @@ struct SampleData {
     proc: u64,
 }
 
-/// 注册为 JS 全局函数 `sample()`；参数 FromJs，返回值 IntoJs
-#[htui::command]
-fn sample() -> SampleData { /* … */ }
+/// 所有宿主函数集中在一个模块，`register()` 由宏生成
+#[htui::commands(auto = "refresh", every_ms = 200)]  // 顺带配置定时刷新
+mod app {
+    use super::*;
 
-/// 带参数 + 错误：`Err` 变成 JS throw，页面 `try/catch` 可捕获
-#[htui::command]
-fn set_threshold(value: f64) -> Result<(), String> { /* … */ }
+    /// 注册为 JS 全局函数 `sample()`；参数 FromJs，返回值 IntoJs
+    #[htui::command]
+    pub fn sample() -> SampleData { /* … */ }
+
+    /// 带参数 + 错误：`Err` 变成 JS throw，页面 `try/catch` 可捕获
+    #[htui::command]
+    pub fn set_threshold(value: f64) -> Result<(), String> { /* … */ }
+
+    /// 有状态命令：返回 `HostFn` 闭包（闭包内自行捕获锁、Arc 等状态）
+    #[htui::command]
+    pub fn snapshot() -> HostFn {
+        let shared = Arc::new(Mutex::new(State::default()));
+        Box::new(move |call: &mut HostCall| { /* 读 shared，构造返回对象 */ })
+    }
+
+    /// 需要重命名的命令：JS 侧叫 `formatDateTime`
+    #[htui::command(name = "formatDateTime")]
+    pub fn format_datetime(secs: u64) -> String { /* … */ }
+}
 
 let mut bindings = EventBindings::default();
-bindings.command("sample", sample_command());      // 宏生成 `<fn>_command()`
-bindings.command("set_threshold", set_threshold_command());
+app::register(&mut bindings);   // 一条语句注册模块内全部命令 + 定时刷新
 ```
 
 页面侧：`var d = sample(); d.cpuBar`；出错时 `try { set_threshold(120) } catch (e) { … }`。
 
+- **只有 `#[htui::command]` 一种写法**，注册统一走 `<fn>_command()`：
+  - 普通函数（参数 `FromJs`、返回 `IntoJs`）自动包成 `HostFn`；
+  - 返回 `HostFn` 的函数（零参数）用于有状态场景，闭包捕获什么由你决定。
+- `#[htui::commands]` 扫描模块内的 `#[htui::command]` 函数，生成 `register(&mut
+  EventBindings)`：JS 名默认取函数名，`#[htui::command(name = "…")]` 可改名。
+  属性上的 `auto = "…"` + `every_ms = N` 会顺带设置 `AutoRefresh`。
 - 返回值 `IntoJs` 支持：`String`/`&str`/数值/`bool`/`()`/`Option<T>`/`Vec<T>`/`Result<T, E>`
   （`E: String/&str/JsNativeError`，`Err` 抛异常）以及 `#[derive(IntoJs)]` 结构体。
 - 参数 `FromJs` 支持：`String`/`f64`/整数/`bool`/`Option<T>`/`Vec<T>`，以及
   `#[derive(FromJs)]` 结构体（同样支持 `#[js_name]` 属性名映射，如
   `{ maxCpu: 80 }` → `max_cpu` 字段）。
-- **适用于无捕获的纯函数**。需要外部状态（锁、Arc）时用 5.2 的手写闭包。
-  两种形态可以混用：`visual_test/src/sysmon.rs` 把纯格式化函数（`bar` /
-  `gb` / `format_datetime`）做成 `#[htui::command]` 注册为 JS 全局函数，
-  `sample()` 闭包内部直接复用这些纯函数（Rust 侧调用，不走 JS 层），页面
-  脚本也可直接 `bar(0.5, 14)` / `formatDateTime(...)` 调用。
+- 两种形态可以混用：`visual_test/src/sysmon.rs` 把纯格式化函数
+  （`bar` / `gb` / `format_datetime`）做成 `#[htui::command]`，`sample()`
+  命令（返回 `HostFn`）内部直接复用这些纯函数（Rust 侧调用，不走 JS 层），
+  页面脚本也可直接 `bar(0.5, 14)` / `formatDateTime(...)` 调用。
 
 ### 5.2 手写闭包（有状态 / 高级场景）
 
@@ -238,27 +261,37 @@ pub struct HostCall<'a> {
 }
 ```
 
-- 注册：`bindings.host.insert("name".into(), Box::new(|call: &mut HostCall| …))`
+- 注册：`bindings.host.insert("name".into(), Box::new(|call: &mut HostCall| …))`。
+  更推荐把闭包包进零参数函数、用 `#[htui::command]`（返回 `HostFn`）放进
+  `#[htui::commands]` 模块统一注册（闭包内的状态自行创建），例如
+  `visual_test/src/sysmon.rs` 的 `sample()`。
 - `HostFn` 返回 `JsResult<JsValue>`：`Err` 抛 JS 异常，`Ok` 是调用结果。
 - 便捷方法：`call.arg::<T>(i)` / `call.arg_required::<T>(i)`（`FromJs` 转换）、
   `call.ret(value)`（`IntoJs` 转换）；构造对象用 `htui::js_obj!(call.context, "k" => v, …)`。
 - 需要触发重渲染时 push `RenderCmd`（例如 `RenderCmd::Quit`）。
-- **不要在宿主函数里做长时间阻塞操作**：宿主函数在输入循环的线程上执行。
-  建议重活放后台线程 + `Arc<Mutex<Snapshot>>`，宿主函数只读快照
+- **宿主函数在脚本线程上执行**：引擎（Boa Context + live DOM + hover 状态机）独占一个
+  脚本线程，输入循环只发 `ScriptMsg`、收 `ScriptResponse`，永不执行 JS。因此宿主函数
+  阻塞只会拖住脚本线程——滚动、退出、鼠标拖选照常（Tauri 式 UI 解耦）。但**慢宿主
+  函数会延迟后续 JS 派发**（hover/click/auto-refresh 排队等待），所以重活仍建议放
+  后台线程 + `Arc<Mutex<Snapshot>>`，宿主函数只读快照
   （参考 `visual_test/src/sysmon.rs` 的后台采样线程模式）。
 
 ### 定时任务（AutoRefresh）
 
 `bindings.auto = Some(AutoRefresh { every, action })`：每 `every` 调用一次
 JS 全局函数 `action`（可以是在 `<script>` 里定义的函数，也可以是宿主函数名）。
+`#[htui::commands(auto = "…", every_ms = N)]` 会自动设置这一项。定时器在**脚本线程**
+上跑（消息间隙经 `recv_timeout` 触发），所以即便 auto 的宿主函数较慢，也不冻结
+输入与渲染。
 
 ---
 
 ## 6. 渲染集成（RenderArena）
 
-JS 修改 DOM 后，引擎把被改动的节点 id 记入 `dirty`（一组 `NodeId`）；输入循环把引擎的
-live arena 通过 `RenderCmd::RenderArena { arena, root_id, scroll_y, zoom, hovered, dirty }`
-发给渲染线程。渲染线程：
+JS 修改 DOM 后，引擎把被改动的节点 id 记入 `dirty`（一组 `NodeId`）；脚本线程经
+`ScriptResponse::Event { cmds, dirty{arena,root_id}, hovered }` 回传，输入循环据此发送
+`RenderCmd::RenderArena { arena, root_id, scroll_y, zoom, hovered, dirty }`
+给渲染线程。渲染线程：
 
 1. 记录 `hovered` 节点（`RenderArena` 直接携带，无需单独的 `Hover` 命令）；
 2. `reset_css_attr` + `css_into_node_with_hover`（保留当前 `:hover`）重新级联；
@@ -272,8 +305,23 @@ live arena 通过 `RenderCmd::RenderArena { arena, root_id, scroll_y, zoom, hove
 在渲染线程内完成，只有引擎持有的 arena 被克隆发送；且单个 `textContent` 变化
 不再触发整张画布的清空与重绘。
 
-> 注意：`RenderCmd::RenderHtml` 仍保留用于"整文档替换"场景；输入循环遇到它时
-> 会交给引擎重新解析并走 `RenderArena` 路径。
+> 注意：`RenderCmd::RenderHtml` 仍保留用于"整文档替换"场景——宿主函数 push 后由
+> 渲染线程重新解析并渲染（脚本引擎自身的 live arena 不变）。
+
+### 脚本线程（引擎与输入解耦）
+
+`ScriptEngine` 独占一个**脚本线程**（`script::msg::run_script_thread`），输入循环永不
+执行 JS：
+
+1. **只读查询走快照**：输入循环维护引擎最新 arena 快照（来自 `Ready` / 每次 `dirty`
+   回传），`handle_*` 内部读快照判断 node 类型、value、select 选项——不碰引擎。
+2. **写与派发走消息**：聚焦/失焦/输入/select 选择等打包成 `ScriptMsg`（Move / Click /
+   FocusInput / BlurInput / InputKeystroke / SelectPick）发给脚本线程，`apply_message`
+   统一执行（含 blur→change、mouseout→mouseover 的顺序保证），回 `ScriptResponse`。
+3. **hover 状态机在脚本线程**：`interaction::on_move/on_click` 由脚本线程调用，
+   `RenderCmd::Hover` 与 `hovered` 经响应回传，`RenderArena` 据此重级联 `:hover`。
+4. **宿主函数阻塞不冻结 UI**：滚动、缩放、退出、拖选全在输入循环，宿主函数再慢
+   也只拖脚本线程（后续 JS 派发排队）。
 
 ### 增量重绘（Region Repaint）
 
@@ -310,8 +358,9 @@ JS 每 200ms 刷一次监控器，大部分帧只改几个 `<p>` 的文本。旧
    hover 目标（含 `:hover` 可匹配的祖先）所在区域的并集，样式表无 `:hover` 规则
    时直接跳过渲染——实测 hover 从全量 ~1.6ms 降到区域 ~0.6ms，鼠标高亮跟随更跟手。
 
-如果仍觉得卡顿，优先检查：**宿主函数是否在输入线程做了慢操作**（重活必须放
-后台线程 + 快照发布，参考 `visual_test/src/sysmon.rs`）。
+如果仍觉得卡顿，优先检查：**宿主函数是否做了慢操作**——虽然它只在脚本线程上跑、
+不再冻结输入，但会排队延迟后续 JS 派发与 auto-refresh（重活放后台线程 + 快照发布，
+参考 `visual_test/src/sysmon.rs`）。
 
 ---
 
@@ -320,9 +369,9 @@ JS 每 200ms 刷一次监控器，大部分帧只改几个 `<p>` 的文本。旧
 ```
 html → tdom → layout → tui    （不可破坏的既有四层）
              ▲
-             │ 只读：arena 快照（Geometry）经 RenderArena 从引擎流入
+             │ 只读：arena 快照（Geometry）经 RenderArena 从渲染线程发布
              │
-      script 层（旁路）：Boa Context + live NodeArena + 宿主函数
+      script 层（旁路）：独占脚本线程的 Boa Context + live NodeArena + 宿主函数
 ```
 
 - **布局/绘制仍是渲染线程的职责**；脚本层不参与布局，只维护 DOM 与监听器。
@@ -356,10 +405,18 @@ html → tdom → layout → tui    （不可破坏的既有四层）
   变更标记 dirty、CSS `:hover` 级联，以及 `#[htui::command]` /
   `#[derive(IntoJs / FromJs)]` 端到端（含 `#[js_name]` 重命名与
   `Result::Err` → JS throw，纯内存，不依赖终端）。
+- `tests/macro_tests.rs`：`#[htui::commands]` 模块自动注册（纯命令 + 有状态
+  `HostFn` 返回命令 + auto-refresh）、JS 可调用性，以及
+  `#[htui::command(name = "…")]` 与手工注册的兼容（纯内存）。
+- `tests/script_loop_tests.rs`：脚本线程桥——`apply_message` 语义（hover 进出顺序 /
+  blur→change / select 提交+dirty）、`run_script_thread` 端到端，以及**阻塞宿主
+  函数不阻塞输入侧通道**的解耦保证（纯内存）。
 - `visual_test/src/events/`：事件演示页（`<script>` + on* + addEventListener +
   DOM 变更计数器）。
 - `visual_test/src/sysmon/`：系统监控器——后台采样线程 + 宿主 `sample()`
-  返回快照对象 + JS `refresh()` 每 200ms 更新 DOM。
+  返回快照对象 + JS `refresh()` 每 200ms 更新 DOM（宿主函数全部由
+  `#[htui::commands]` 模块注册）。
 
-运行：`cargo test --test layout_events_tests`；
+运行：`cargo test --test layout_events_tests` / `cargo test --test macro_tests` /
+`cargo test --test script_loop_tests`；
 可视化：`cargo run -p visual_test -- events` / `cargo run -p visual_test -- sysmon`。

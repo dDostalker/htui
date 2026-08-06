@@ -24,12 +24,13 @@ htui/
 │   │   │   │   ├── mod.rs          # EventType / HtmlEvent / ElementRef / EventBindings（宿主函数注册表）
 │   │   │   │   ├── geometry.rs     # Geometry（arena + boxes 快照，Arc 共享）
 │   │   │   │   ├── hit_map.rs      # HitRegion / HitMap / build / hit_test / resolve_by_id
-│   │   │   │   └── interaction.rs  # 纯逻辑鼠标交互（HoverState / on_move / on_click，调 ScriptEngine::fire）
+│   │   │   │   └── interaction.rs  # 纯逻辑鼠标交互（HoverState / on_move / on_click，脚本线程内调 ScriptEngine::fire）
 │   │   │   ├── script/             # JS 脚本层（旁路：Boa 引擎 + live DOM + 宿主函数）
 │   │   │   │   ├── mod.rs          # ScriptEngine：Context + ScriptState(thread_local) + 引导脚本 + fire/invoke_action + on* 属性编译
 │   │   │   │   ├── host.rs         # HostFn / HostCall（Rust 回调 → JS 可调用）+ arg/arg_required/ret 便捷方法
 │   │   │   │   ├── convert.rs      # IntoJs/FromJs 转换层 + js_obj! 宏 + JsObjectBuilder（Rust ↔ JS 值）
-│   │   │   │   └── dom.rs          # DOM 绑定：document / element 包装 / style / addEventListener / console / alert / quit
+│   │   │   │   ├── dom.rs          # DOM 绑定：document / element 包装 / style / addEventListener / console / alert / quit
+│   │   │   │   └── msg.rs          # 脚本线程桥：ScriptMsg/ScriptResponse + apply_message + run_script_thread（引擎独占线程）
 │   │   │   ├── html/
 │   │   │   │   ├── mod.rs
 │   │   │   │   ├── html_parse.rs   # HTML → tdom 树（html5ever）
@@ -109,7 +110,7 @@ htui/
 │   │   │   │       └── text.rs     # paint_runs
 │   │   │   └── tui/
 │   │   │       ├── mod.rs
-│   │   │       ├── run.rs          # 引擎驱动：渲染/命中线程 + 输入循环 + 增量重绘辅助
+│   │   │   │   ├── run.rs          # 引擎驱动：渲染/命中/脚本线程 + 输入循环 + 增量重绘辅助
 │   │   │       └── graph_api.rs    # 模块入口：re-exports（TermLayout / Block / RenderCmd / Img / ...）
 │   │   │           └── graph_api/  # 子模块目录（与 graph_api.rs 同模块）
 │   │   │               ├── canvas.rs   # TermLayout 画布
@@ -145,11 +146,13 @@ htui/
 │   │   │   ├── layout_position_tests.rs # CSS 定位测试（relative / absolute / fixed + z-index）
 │   │   │   ├── layout_input_tests.rs # <input> 输入框测试（渲染 / 编辑逻辑 / 光标状态）
 │   │   │   ├── render_diff_tests.rs # 帧差增量渲染（不变零输出 / 滚动 diff / 全帧对比）
-│   │   │   └── logging_tests.rs
+│   │   │   │   ├── macro_tests.rs       # 注册宏测试（commands/host/command(name) 自动注册，纯内存）
+│   │   │   │   ├── script_loop_tests.rs # 脚本线程桥测试（apply_message 语义 + 阻塞宿主函数不阻塞输入，纯内存）
+│   │   │   │   └── logging_tests.rs
 │   │   └── benches/               # criterion 基准（parse / cascade / paint / render_to_bytes / full_redraw）
-│   └── htui-macros/             # 过程宏 crate：#[htui::command] + #[derive(IntoJs/FromJs)]
+│   └── htui-macros/             # 过程宏 crate：#[htui::command]/#[htui::commands] + #[derive(IntoJs/FromJs)]
 │       ├── Cargo.toml
-│       └── src/lib.rs           # proc-macro：命令包装 / 结构体 ↔ JS 对象 derive
+│       └── src/lib.rs           # proc-macro：命令包装（纯 fn + 返回 HostFn）/ 模块自动注册 / 结构体 ↔ JS 对象 derive
 ├── docs/
 │   └── script-layer.md    # 脚本层完整使用与架构文档（脚本 / on* / 宿主函数 / RenderArena）
 ├── visual_test/          # 可视化测试工具（cargo run -p visual_test）
@@ -248,16 +251,18 @@ flow/flex/table 算法并生成统一的 `LayoutBox` 树，最终由
                           HitMap::build()（收集所有盒子，:hover 可作用于任意元素）
                                                             │
                                               Arc<Mutex<Arc<HitMap>>>（共享）
-                                                            ▼
-                   主线程 input ── 鼠标 Down/Up/Moved ──► interaction::on_click / on_move
-                                                            │
-                                    ScriptEngine::fire(region, type, x, y)
-                                                            │
-                           沿 path 触发 JS 监听器（addEventListener / 编译后的 on* 属性体）
-                                                            │
-                                     宿主函数（HostFn，可返回值 + push RenderCmd）
-                                                            │
-                        JS 改 DOM → dom_dirty → RenderArena{arena} ──► 渲染线程
+                                                             │
+             ┌───────────────────────────────────────────────┘
+             ▼
+   输入循环（主线程，永不执行 JS）                脚本线程（独占 ScriptEngine）
+   event::poll + 纯 UI 状态机          ScriptMsg    ├─ interaction::on_move/on_click
+   （滚动/缩放/焦点/拖选） ────────────────────►    ├─ ScriptEngine::fire（沿 path 触发监听器）
+             ▲                                    └─ 宿主函数（可返回值 + push RenderCmd）
+             │       ScriptResponse                   │
+             └────────────────────────────────────────┤
+                cmds / hovered / dirty{arena,root_id} │
+                                                     ▼
+                       JS 改 DOM → RenderArena{arena} ──► 渲染线程
 ```
 
 事件目标用元素 `node_id`（会话内稳定）传递，命中路径沿 DOM 祖先链冒泡。
@@ -272,13 +277,25 @@ hover 驱动 `onmouseover`/`onmouseout` 事件，并在悬停目标变化时发�
 `css_into_node_with_hover` 重新级联再重绘——只有样式表写了 `:hover` 规则才产生视觉
 高亮，与浏览器一致。
 
-### 动态内容：JS 修改 live DOM 后引擎把被改动的 `NodeId` 记入 `dirty`，输入循环发送
+### 脚本线程（引擎与输入解耦）
+
+`ScriptEngine` 独占一个**脚本线程**（`script::msg::run_script_thread`）。输入循环
+永不执行 JS：DOM 只读查询走它维护的最新 arena 快照（`ScriptResponse::Event.dirty`），
+DOM 写与事件派发打包成 `ScriptMsg`（Move / Click / FocusInput / BlurInput /
+InputKeystroke / SelectPick）发给脚本线程，后者经 `apply_message` 统一执行后回
+`ScriptResponse::Event { cmds, dirty, hovered }`。hover 状态机（`HoverState`）也在
+脚本线程。**宿主函数阻塞只拖住脚本线程**——滚动、退出、鼠标拖选照常（Tauri 式 UI
+解耦）；`handle_click` 等输入处理函数只读 DOM 快照、产出 `ScriptMsg`，不碰引擎
+（测试用 `apply_message` 在引擎上回放这些消息）。
+
+### 动态内容：JS 修改 live DOM 后引擎把被改动的 `NodeId` 记入 `dirty`，脚本线程回
+`ScriptResponse::Event`，输入循环据其发送
 `RenderCmd::RenderArena { arena, root_id, scroll_y, zoom, hovered, dirty }`——渲染线程
 重新级联（保留当前 `:hover`）→ 重排 → 重绘（**仅 dirty 区域，见下**）→ 发布新
 Geometry，**无需重新解析 HTML**。`RenderCmd::RenderHtml` 仍保留用于整文档替换。
-定时任务：`EventBindings::auto`（`AutoRefresh`）让输入循环按间隔经
+定时任务：`EventBindings::auto`（`AutoRefresh`）由脚本线程在消息间隙经
 `ScriptEngine::invoke_action` 自动触发 JS 全局函数（监控器/时钟/动画用）。宿主函数在
-输入循环线程执行，重活应放后台线程（参考 `visual_test/src/sysmon.rs` 后台采样 +
+脚本线程执行，重活应放后台线程（参考 `visual_test/src/sysmon.rs` 后台采样 +
 快照模式）。
 
 ## 渲染合并优化（避免无意义的重排）
@@ -393,7 +410,7 @@ Geometry，**无需重新解析 HTML**。`RenderCmd::RenderHtml` 仍保留用于
 | `FontStyle`        | `tui::graph_api`        | `Block` 的聚合样式位掩码（`BOLD` / `ITALIC` / `UNDERLINED` / `CROSSED_OUT`） |
 | `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举（Rerender / Redraw / RenderArena / RenderHtml / Hover / Quit） |
 | `DirtyInfo`        | `tui::graph_api`        | `RenderArena` 携带的脏节点集合（`nodes: Vec<NodeId>`，JS 本轮改动的节点） |
-| `InputState`       | `tui::graph_api::input` | 输入循环状态（scroll_y / zoom / pressed / hover / 焦点输入框） |
+| `InputState`       | `tui::graph_api::input` | 输入循环状态（scroll_y / zoom / pressed / 焦点输入框 / 编辑缓冲 / 选择 / open_select；hover 归脚本线程） |
 | `InputRenderState` | `tui::graph_api::canvas`| `<input>` 渲染状态（value / cursor / focused），`TermLayout.input_states` |
 | `EventType`        | `events`                | DOM 事件类型（Click / MouseOver / MouseOut）               |
 | `HtmlEvent`        | `events`                | 事件对象（event_type / target / current_target / x / y / bubbles）|
@@ -402,13 +419,16 @@ Geometry，**无需重新解析 HTML**。`RenderCmd::RenderHtml` 仍保留用于
 | `HitMap`           | `events::hit_map`       | 全部命中区域 + hit_test() / resolve_by_id() / build()     |
 | `EventBindings`    | `events`                | 宿主函数注册表（host: 名字 → HostFn）+ auto 定时刷新      |
 | `AutoRefresh`      | `events`                | 周期自动触发的 action（every + JS 全局函数名）            |
-| `HoverState`       | `events::interaction`   | 指针悬停跟踪（enter / leave 判定，不产生视觉）        |
-| `ScriptEngine`     | `script`                | Boa 引擎封装：live NodeArena + DOM 绑定 + fire/invoke_action + eval_source |
+| `HoverState`       | `events::interaction`   | 指针悬停跟踪（enter / leave 判定，不产生视觉）；生产环境归脚本线程所有 |
+| `ScriptEngine`     | `script`                | Boa 引擎封装：live NodeArena + DOM 绑定 + fire/invoke_action + eval_source（脚本线程独占） |
+| `ScriptMsg`        | `script::msg`           | 脚本线程消息协议：Move / Click / FocusInput / BlurInput / InputKeystroke / SelectPick / Quit |
+| `ScriptResponse`   | `script::msg`           | 脚本线程回复：Ready / Failed / Event{cmds, dirty{arena,root_id}, hovered} |
 | `HostCall`         | `script::host`          | 宿主函数调用上下文（args / event / render / context）+ arg/arg_required/ret 便捷方法 |
 | `HostFn`           | `script::host`          | 宿主函数类型：`Box<dyn FnMut(&mut HostCall) -> JsResult<JsValue> + Send>`（Err → JS throw） |
 | `IntoJs` / `FromJs` | `script::convert`       | Rust ↔ JS 值转换 trait（基础类型 + Option/Vec/Result 实现） |
 | `js_obj!`          | `script::convert`       | JS 对象字面量宏（`js_obj!(ctx, "k" => v, …)`） |
-| `#[htui::command]` | `htui_macros`           | 把 `fn(… FromJs 参数) -> IntoJs 返回值` 包装成 `HostFn`（生成 `<fn>_command()`） |
+| `#[htui::command]` | `htui_macros`           | 唯一命令写法：普通 `fn(… FromJs 参数) -> IntoJs 返回值` 自动包成 `HostFn`，或零参数 `fn() -> HostFn`（有状态，闭包捕获状态），均生成 `<fn>_command()`；`name = "…"` 指定 JS 注册名 |
+| `#[htui::commands]` | `htui_macros`          | 模块级自动注册：扫描模块内 `#[htui::command]`，生成 `register(&mut EventBindings)`；`auto = "…", every_ms = N` 配置定时刷新 |
 | `#[derive(IntoJs/FromJs)]` | `htui_macros`    | 结构体 ↔ JS 对象（`#[js_name = "…"]` 重命名属性） |
 | `EdgeSizes`        | `html::box_edges`       | 四边长度（top/right/bottom/left），用于 padding / margin |
 | `BorderStyle`      | `html::box_edges`       | `border-style` 枚举（`None` / `Solid`） |
