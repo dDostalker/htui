@@ -7,9 +7,10 @@
 
 | 目录 | 模仿对象 | 交互方式 | 入口 |
 | ---- | ---- | ---- | ---- |
-| `visual_test/src/codex/` | Codex CLI 聊天界面 | `<input>` + Enter 提交（`change` 事件） | `cargo run -p visual_test -- codex` |
-| `visual_test/src/yazi/` + `yazi.rs` | Yazi 文件管理器 | 点击目录进入 / 点击文件选中 / `[ .. ]` 返回 | `cargo run -p visual_test -- yazi` |
-| `visual_test/src/snake/` + `snake.rs` | 贪吃蛇（森林风） | 方向键 / WASD 转向（`preventDefault` 取消内置滚动）+ 空格/`p` 暂停 + `r` 重开 + 吃食物加速；点击按钮亦可 | `cargo run -p visual_test -- snake` |
+| `example/src/codex/` | Codex CLI 聊天界面 | `<input>` + Enter 提交（`change` 事件） | `cargo run -p example -- codex` |
+| `example/src/yazi/` + `yazi.rs` | Yazi 文件管理器 | 点击目录进入 / 点击文件选中 / `[ .. ]` 返回 | `cargo run -p example -- yazi` |
+| `example/src/snake/` + `snake.rs` | 贪吃蛇（森林风） | 方向键 / WASD 转向（`preventDefault` 取消内置滚动）+ 空格/`p` 暂停 + `r` 重开 + 吃食物加速；点击按钮亦可 | `cargo run -p example -- snake` |
+| `example/src/sysmon/` + `sysmon.rs` | 系统监控器 | JS `setInterval` 刷新 + 宿主 `sample()`（后台采样） | `cargo run -p example -- sysmon` |
 
 ## 记录的问题（按发现顺序）
 
@@ -26,7 +27,7 @@
   `event.preventDefault()` 可丢弃对应内置动作（脚本线程忙时 8ms 超时回退内置，
   解耦保证不破，见 `docs/browser-compat.md` §6.5.5）。**Snake 已升级为方向键/WASD
   转向并对方向键 `preventDefault()`**——即使终端超高也不再滚动页面
-  （`visual_test/src/snake/index.html`）；Yazi 保持点击导航（其 `j/k` 由页面自行
+  （`example/src/snake/index.html`）；Yazi 保持点击导航（其 `j/k` 由页面自行
   绑定并对 `j`/`k` `preventDefault()` 即可同时取消内置滚动）。
 
 ### 2.【`<input>` 语义】编辑中 `el.value` 读取滞后
@@ -61,7 +62,7 @@
 
 - 逐格着色的棋盘可以完全用 DOM 做：`createElement('span')` 每格一个元素 +
   `el.style.backgroundColor` 增量更新（只改本轮变化的 2–4 格，蛇身/头/食物/草丛
-  分色）——`snake/index.html` 的森林风棋盘即此模式，增量重绘配合每格 id
+  分色）——`example/src/snake/index.html` 的森林风棋盘即此模式，增量重绘配合每格 id
   （`c{r}-{c}`）方便测试断言。
 - `<input>` + `change` 提交是可行的"命令行输入"模式（Codex 已用）。
 - 宿主函数返回 `#[derive(IntoJs)]` 的 `Vec<结构体>`（`listDir`）→ JS 侧直接是对象

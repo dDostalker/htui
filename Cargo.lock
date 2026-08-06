@@ -807,7 +807,6 @@ name = "example"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "boa_engine",
  "htui",
  "log",
  "sysinfo",
@@ -2667,7 +2666,6 @@ name = "visual_test"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "boa_engine",
  "htui",
  "log",
 ]

@@ -52,7 +52,7 @@ pub fn derive_into_js(input: TokenStream) -> TokenStream {
             let v = format_ident!("__v{i}");
             quote! {
                 __init.property(
-                    ::htui::boa_engine::js_string!(#key),
+                    ::htui::boa_engine::JsString::from(#key),
                     #v,
                     ::htui::boa_engine::property::Attribute::all(),
                 );
@@ -91,7 +91,7 @@ pub fn derive_from_js(input: TokenStream) -> TokenStream {
             quote! {
                 #field: {
                     let __raw =
-                        __obj.get(::htui::boa_engine::js_string!(#key), __ctx)?;
+                        __obj.get(::htui::boa_engine::JsString::from(#key), __ctx)?;
                     ::htui::script::FromJs::from_js(&__raw, __ctx)?
                 }
             }

@@ -270,7 +270,7 @@ app::register(&mut bindings);   // 一条语句注册模块内全部命令
 - 参数 `FromJs` 支持：`String`/`f64`/整数/`bool`/`Option<T>`/`Vec<T>`，以及
   `#[derive(FromJs)]` 结构体（同样支持 `#[js_name]` 属性名映射，如
   `{ maxCpu: 80 }` → `max_cpu` 字段）。
-- 两种形态可以混用：`visual_test/src/sysmon.rs` 把纯格式化函数
+- 两种形态可以混用：`example/src/sysmon.rs` 把纯格式化函数
   （`bar` / `gb` / `format_datetime`）做成 `#[htui::command]`，`sample()`
   命令（返回 `HostFn`）内部直接复用这些纯函数（Rust 侧调用，不走 JS 层），
   页面脚本也可直接 `bar(0.5, 14)` / `formatDateTime(...)` 调用。
@@ -291,7 +291,7 @@ pub struct HostCall<'a> {
 - 注册：`bindings.host.insert("name".into(), Box::new(|call: &mut HostCall| …))`。
   更推荐把闭包包进零参数函数、用 `#[htui::command]`（返回 `HostFn`）放进
   `#[htui::commands]` 模块统一注册（闭包内的状态自行创建），例如
-  `visual_test/src/sysmon.rs` 的 `sample()`。
+  `example/src/sysmon.rs` 的 `sample()`。
 - `HostFn` 返回 `JsResult<JsValue>`：`Err` 抛 JS 异常，`Ok` 是调用结果。
 - 便捷方法：`call.arg::<T>(i)` / `call.arg_required::<T>(i)`（`FromJs` 转换）、
   `call.ret(value)`（`IntoJs` 转换）；构造对象用 `htui::js_obj!(call.context, "k" => v, …)`。
@@ -301,7 +301,7 @@ pub struct HostCall<'a> {
   阻塞只会拖住脚本线程——滚动、退出、鼠标拖选照常（Tauri 式 UI 解耦）。但**慢宿主
   函数会延迟后续 JS 派发**（hover/click/定时回调排队等待），所以重活仍建议放
   后台线程 + `Arc<Mutex<Snapshot>>`，宿主函数只读快照
-  （参考 `visual_test/src/sysmon.rs` 的后台采样线程模式）。
+  （参考 `example/src/sysmon.rs` 的后台采样线程模式）。
 
 ### 定时任务（JS `setInterval` / `setTimeout`）
 
@@ -399,7 +399,7 @@ JS 每 200ms 刷一次监控器，大部分帧只改几个 `<p>` 的文本。旧
 
 如果仍觉得卡顿，优先检查：**宿主函数是否做了慢操作**——虽然它只在脚本线程上跑、
 不再冻结输入，但会排队延迟后续 JS 派发与定时回调（重活放后台线程 + 快照发布，
-参考 `visual_test/src/sysmon.rs`）。
+参考 `example/src/sysmon.rs`）。
 
 ---
 
@@ -452,10 +452,10 @@ html → tdom → layout → tui    （不可破坏的既有四层）
   函数不阻塞输入侧通道**的解耦保证（纯内存）。
 - `visual_test/src/events/`：事件演示页（`<script>` + on* + addEventListener +
   DOM 变更计数器）。
-- `visual_test/src/sysmon/`：系统监控器——后台采样线程 + 宿主 `sample()`
+- `example/src/sysmon/`：系统监控器——后台采样线程 + 宿主 `sample()`
   返回快照对象 + JS `refresh()` 每 200ms 更新 DOM（宿主函数全部由
   `#[htui::commands]` 模块注册）。
 
 运行：`cargo test --test layout_events_tests` / `cargo test --test macro_tests` /
 `cargo test --test script_loop_tests`；
-可视化：`cargo run -p visual_test -- events` / `cargo run -p visual_test -- sysmon`。
+可视化：`cargo run -p visual_test -- events` / `cargo run -p example -- sysmon`。
