@@ -12,8 +12,8 @@
 //!   `#[htui::commands]`.
 //! - `#[htui::commands]` — collect every `#[htui::command]` function in a
 //!   module and generate one `register(&mut EventBindings)` entry point (plus
-//!   an optional auto-refresh), removing the per-command `bindings.command(...)`
-//!   boilerplate.
+//!   a `register(&mut EventBindings)` entry point), removing the per-command
+//!   `bindings.command(...)` boilerplate.
 
 use std::collections::HashSet;
 
@@ -22,9 +22,8 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
     Attribute, Data, DeriveInput, Expr, ExprLit, Fields, FnArg, Ident, Item, ItemFn, ItemMod,
-    Lit, LitInt, LitStr, Meta, Pat, ReturnType, Type, parse_macro_input, parse_quote,
-    parse::{Parse, ParseStream, Parser},
-    punctuated::Punctuated,
+    Lit, Meta, Pat, ReturnType, Type, parse_macro_input, parse_quote,
+    parse::Parser, punctuated::Punctuated,
 };
 
 /// `#[derive(IntoJs)]` — struct → JS object.
@@ -312,11 +311,8 @@ fn command_attr(attr: TokenStream) -> syn::Result<()> {
 /// `#[htui::command(name = "...")]`), whether the command is a plain function
 /// or a stateful one returning a [`HostFn`] — the registration is uniform.
 ///
-/// The attribute also accepts `auto = "action"` plus `every_ms = N` to
-/// configure the periodic auto-refresh:
-///
 /// ```ignore
-/// #[htui::commands(auto = "refresh", every_ms = 200)]
+/// #[htui::commands]
 /// mod bindings {
 ///     #[htui::command]
 ///     fn bar(ratio: f32, width: usize) -> String { /* … */ }
@@ -329,24 +325,27 @@ fn command_attr(attr: TokenStream) -> syn::Result<()> {
 /// let mut bindings = EventBindings::default();
 /// bindings::register(&mut bindings);
 /// ```
+///
+/// Periodic work is scheduled from the page itself with the standard JS
+/// `setInterval` / `setTimeout` (the engine drives them on the script
+/// thread), so this macro takes no arguments.
 #[proc_macro_attribute]
 pub fn commands(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let attr = parse_macro_input!(attr as CommandsAttr);
+    if !attr.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "`#[htui::commands]` takes no arguments: the former `auto = \"...\"` / \
+             `every_ms = N` refresh was removed — schedule it from the page with \
+             `setInterval(fn, ms)` instead",
+        )
+        .to_compile_error()
+        .into();
+    }
     let mut module = parse_macro_input!(item as ItemMod);
 
     let registrations = match command_registrations(&module) {
         Ok(r) => r,
         Err(e) => return e.to_compile_error().into(),
-    };
-
-    let auto_setup = match (&attr.auto, attr.every_ms) {
-        (Some(action), Some(every_ms)) => quote! {
-            bindings.auto = Some(::htui::events::AutoRefresh {
-                every: ::std::time::Duration::from_millis(#every_ms),
-                action: #action.to_string(),
-            });
-        },
-        _ => quote! {},
     };
 
     let Some((_, items)) = module.content.as_mut() else {
@@ -358,60 +357,12 @@ pub fn commands(attr: TokenStream, item: TokenStream) -> TokenStream {
         .into();
     };
     items.push(parse_quote! {
-        /// Register every `#[htui::command]` in this module (plus the optional
-        /// auto-refresh) into `bindings`.
+        /// Register every `#[htui::command]` in this module into `bindings`.
         pub fn register(bindings: &mut ::htui::events::EventBindings) {
             #( #registrations )*
-            #auto_setup
         }
     });
     quote! { #module }.into()
-}
-
-/// Attribute arguments for `#[htui::commands]` (`auto = "…"` + `every_ms = N`).
-struct CommandsAttr {
-    auto: Option<String>,
-    every_ms: Option<u64>,
-}
-
-impl Parse for CommandsAttr {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        let mut auto = None;
-        let mut every_ms = None;
-        while !input.is_empty() {
-            let key: Ident = input.parse()?;
-            input.parse::<syn::token::Eq>()?;
-            match key.to_string().as_str() {
-                "auto" => {
-                    let lit: LitStr = input.parse()?;
-                    auto = Some(lit.value());
-                }
-                "every_ms" => {
-                    let lit: LitInt = input.parse()?;
-                    every_ms = Some(lit.base10_parse()?);
-                }
-                other => {
-                    return Err(syn::Error::new_spanned(
-                        key,
-                        format!(
-                            "unknown `#[htui::commands]` argument `{other}`; \
-                             expected `auto = \"...\"` and/or `every_ms = N`"
-                        ),
-                    ));
-                }
-            }
-            if !input.is_empty() {
-                input.parse::<syn::token::Comma>()?;
-            }
-        }
-        if auto.is_some() != every_ms.is_some() {
-            return Err(syn::Error::new(
-                input.span(),
-                "`#[htui::commands]`: `auto` and `every_ms` must be used together",
-            ));
-        }
-        Ok(Self { auto, every_ms })
-    }
 }
 
 /// Scan a `#[htui::commands]` module for `#[htui::command]` functions and

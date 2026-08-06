@@ -63,6 +63,8 @@
     function setText(id, v) {
       document.getElementById(id).textContent = v;
     }
+    // Periodic refresh: the engine fires this every 200 ms (script thread).
+    setInterval(refresh, 200);
   </script>
 </body>
 </html>

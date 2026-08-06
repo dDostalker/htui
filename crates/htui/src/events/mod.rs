@@ -115,21 +115,6 @@ pub struct HtmlEvent {
     pub bubbles: bool,
 }
 
-/// Periodic action configuration for [`EventBindings`].
-///
-/// When set, the input loop re-invokes the named **JS global function** every
-/// `every`, so applications get an automatic refresh / tick without user input
-/// (system monitors, clocks, animations). The action may be a `<script>`
-///-defined function or a registered host function.
-#[derive(Debug, Clone)]
-pub struct AutoRefresh {
-    /// How often to re-invoke the action.
-    pub every: std::time::Duration,
-    /// JS global function name to invoke (a `<script>` function or a host
-    /// function registered in [`EventBindings::host`]).
-    pub action: String,
-}
-
 /// Application bindings for the script engine.
 ///
 /// `host` maps JS global names to Rust callbacks (see [`HostFn`]). Every entry
@@ -139,8 +124,6 @@ pub struct AutoRefresh {
 pub struct EventBindings {
     /// JS-callable host functions.
     pub host: HashMap<String, HostFn>,
-    /// Optional periodic action (see [`AutoRefresh`]).
-    pub auto: Option<AutoRefresh>,
 }
 
 impl EventBindings {

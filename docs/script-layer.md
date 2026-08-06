@@ -74,7 +74,7 @@ HTML ──► html_parse（提取 style CSS / script JS 源码）
 ### 2.2 宿主侧（Rust）
 
 ```rust
-use htui::events::{AutoRefresh, EventBindings};
+use htui::events::EventBindings;
 use htui::script::HostCall;
 use boa_engine::JsValue;
 
@@ -89,11 +89,6 @@ fn main() {
             JsValue::from(12.5)
         }),
     );
-    // 可选：每 200ms 调用一次 JS 全局函数 refresh()
-    bindings.auto = Some(AutoRefresh {
-        every: std::time::Duration::from_millis(200),
-        action: "refresh".to_string(),
-    });
 
     let html = include_str!("page/index.html");
     let css = include_str!("page/style.css");
@@ -202,7 +197,7 @@ struct SampleData {
 }
 
 /// 所有宿主函数集中在一个模块，`register()` 由宏生成
-#[htui::commands(auto = "refresh", every_ms = 200)]  // 顺带配置定时刷新
+#[htui::commands]
 mod app {
     use super::*;
 
@@ -227,17 +222,17 @@ mod app {
 }
 
 let mut bindings = EventBindings::default();
-app::register(&mut bindings);   // 一条语句注册模块内全部命令 + 定时刷新
+app::register(&mut bindings);   // 一条语句注册模块内全部命令
 ```
 
 页面侧：`var d = sample(); d.cpuBar`；出错时 `try { set_threshold(120) } catch (e) { … }`。
+周期刷新直接在页面里写 `setInterval(refresh, 200)`（见下「定时任务」）。
 
 - **只有 `#[htui::command]` 一种写法**，注册统一走 `<fn>_command()`：
   - 普通函数（参数 `FromJs`、返回 `IntoJs`）自动包成 `HostFn`；
   - 返回 `HostFn` 的函数（零参数）用于有状态场景，闭包捕获什么由你决定。
 - `#[htui::commands]` 扫描模块内的 `#[htui::command]` 函数，生成 `register(&mut
   EventBindings)`：JS 名默认取函数名，`#[htui::command(name = "…")]` 可改名。
-  属性上的 `auto = "…"` + `every_ms = N` 会顺带设置 `AutoRefresh`。
 - 返回值 `IntoJs` 支持：`String`/`&str`/数值/`bool`/`()`/`Option<T>`/`Vec<T>`/`Result<T, E>`
   （`E: String/&str/JsNativeError`，`Err` 抛异常）以及 `#[derive(IntoJs)]` 结构体。
 - 参数 `FromJs` 支持：`String`/`f64`/整数/`bool`/`Option<T>`/`Vec<T>`，以及
@@ -272,17 +267,17 @@ pub struct HostCall<'a> {
 - **宿主函数在脚本线程上执行**：引擎（Boa Context + live DOM + hover 状态机）独占一个
   脚本线程，输入循环只发 `ScriptMsg`、收 `ScriptResponse`，永不执行 JS。因此宿主函数
   阻塞只会拖住脚本线程——滚动、退出、鼠标拖选照常（Tauri 式 UI 解耦）。但**慢宿主
-  函数会延迟后续 JS 派发**（hover/click/auto-refresh 排队等待），所以重活仍建议放
+  函数会延迟后续 JS 派发**（hover/click/定时回调排队等待），所以重活仍建议放
   后台线程 + `Arc<Mutex<Snapshot>>`，宿主函数只读快照
   （参考 `visual_test/src/sysmon.rs` 的后台采样线程模式）。
 
-### 定时任务（AutoRefresh）
+### 定时任务（JS `setInterval` / `setTimeout`）
 
-`bindings.auto = Some(AutoRefresh { every, action })`：每 `every` 调用一次
-JS 全局函数 `action`（可以是在 `<script>` 里定义的函数，也可以是宿主函数名）。
-`#[htui::commands(auto = "…", every_ms = N)]` 会自动设置这一项。定时器在**脚本线程**
-上跑（消息间隙经 `recv_timeout` 触发），所以即便 auto 的宿主函数较慢，也不冻结
-输入与渲染。
+页面直接调用标准 JS 定时器即可：`setInterval(refresh, 200)` 或
+`setTimeout(fn, ms)`，`clearInterval(id)` / `clearTimeout(id)` 停止。回调在**脚本
+线程**上跑（消息间隙经 `recv_timeout` 触发 `ScriptEngine::run_due_timers`），所以
+即便定时回调里的宿主函数较慢，也不冻结输入与渲染。回调改 DOM 会像其他 JS 一样
+标记 dirty 触发渲染。
 
 ---
 
@@ -368,7 +363,7 @@ JS 每 200ms 刷一次监控器，大部分帧只改几个 `<p>` 的文本。旧
    时直接跳过渲染——实测 hover 从全量 ~1.6ms 降到区域 ~0.6ms，鼠标高亮跟随更跟手。
 
 如果仍觉得卡顿，优先检查：**宿主函数是否做了慢操作**——虽然它只在脚本线程上跑、
-不再冻结输入，但会排队延迟后续 JS 派发与 auto-refresh（重活放后台线程 + 快照发布，
+不再冻结输入，但会排队延迟后续 JS 派发与定时回调（重活放后台线程 + 快照发布，
 参考 `visual_test/src/sysmon.rs`）。
 
 ---
@@ -415,7 +410,7 @@ html → tdom → layout → tui    （不可破坏的既有四层）
   `#[derive(IntoJs / FromJs)]` 端到端（含 `#[js_name]` 重命名与
   `Result::Err` → JS throw，纯内存，不依赖终端）。
 - `tests/macro_tests.rs`：`#[htui::commands]` 模块自动注册（纯命令 + 有状态
-  `HostFn` 返回命令 + auto-refresh）、JS 可调用性，以及
+  `HostFn` 返回命令）、JS 可调用性，以及
   `#[htui::command(name = "…")]` 与手工注册的兼容（纯内存）。
 - `tests/script_loop_tests.rs`：脚本线程桥——`apply_message` 语义（hover 进出顺序 /
   blur→change / select 提交+dirty）、`run_script_thread` 端到端，以及**阻塞宿主

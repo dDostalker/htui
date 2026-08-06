@@ -508,11 +508,14 @@
 - **示例**：`el.addEventListener('keydown', f)` 静默不触发（未注册类型）。
 - **代码**：`events/mod.rs`（`EventType`）。
 
-#### 6.4.3 【简化】无定时器 / 无异步驱动
-- **浏览器**：`setInterval` 等驱动动态页面。
-- **htui**：脚本无法自驱动；用 `EventBindings::auto`（Rust 侧）周期性 `invoke_action`。
-- **示例**：`setInterval(() => {...}, 1000)` → `ReferenceError: setInterval is not defined`。
-- **代码**：`script/mod.rs` + `tui/run.rs`（auto 触发）。
+#### 6.4.3 【简化】定时器仅标准 API，无高精度/帧对齐
+- **浏览器**：`setTimeout` / `setInterval` / `clearTimeout` / `clearInterval` +
+  `requestAnimationFrame`（刷新率对齐）等。
+- **htui**：四个标准定时器 API 已实现；回调在脚本线程的消息间隙触发
+  （`ScriptEngine::run_due_timers`），与其它 JS 派发共享同一队列。无
+  `requestAnimationFrame`（无刷新率概念）。
+- **示例**：`setInterval(() => {...}, 1000)` 正常工作 ✓。
+- **代码**：`script/dom.rs`（原生函数）+ `script/msg.rs`（脚本线程调度）。
 
 #### 6.4.4 【简化】`Promise`/`async` 语法存在但无事件循环
 - **浏览器**：完整异步运行时。

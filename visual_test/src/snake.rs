@@ -1,5 +1,6 @@
-//! Snake game demo: the page runs the whole game in JS; Rust only supplies
-//! the periodic `tick()` auto-refresh (every 150 ms) via `#[htui::commands]`.
+//! Snake game demo: the whole game runs in JS, including the game loop
+//! (the page calls `setInterval(tick, 150)` itself). Rust registers no
+//! commands — `bindings()` returns empty bindings.
 //!
 //! Direction is controlled with clickable buttons — there is no keyboard
 //! event outside `<input>` fields, and an `<input>`'s value only becomes
@@ -7,13 +8,7 @@
 
 use htui::events::EventBindings;
 
-/// Bindings for the page: auto-invoke the JS `tick()` function every 150 ms.
-#[htui::commands(auto = "tick", every_ms = 150)]
-mod commands {}
-
-/// Bindings for the page: the auto-refresh only.
+/// Bindings for the page: none (the game loop is a JS `setInterval`).
 pub fn bindings() -> EventBindings {
-    let mut bindings = EventBindings::default();
-    commands::register(&mut bindings);
-    bindings
+    EventBindings::default()
 }

@@ -26,7 +26,7 @@ htui/
 │   │   │   │   ├── hit_map.rs      # HitRegion / HitMap / build / hit_test / resolve_by_id
 │   │   │   │   └── interaction.rs  # 纯逻辑鼠标交互（HoverState / on_move / on_click，脚本线程内调 ScriptEngine::fire）
 │   │   │   ├── script/             # JS 脚本层（旁路：Boa 引擎 + live DOM + 宿主函数）
-│   │   │   │   ├── mod.rs          # ScriptEngine：Context + ScriptState(thread_local) + 引导脚本 + fire/invoke_action + on* 属性编译
+│   │   │   │   ├── mod.rs          # ScriptEngine：Context + ScriptState(thread_local) + 引导脚本 + fire/invoke_action/run_due_timers + on* 属性编译
 │   │   │   │   ├── host.rs         # HostFn / HostCall（Rust 回调 → JS 可调用）+ arg/arg_required/ret 便捷方法
 │   │   │   │   ├── convert.rs      # IntoJs/FromJs 转换层 + js_obj! 宏 + JsObjectBuilder（Rust ↔ JS 值）
 │   │   │   │   ├── dom.rs          # DOM 绑定：document / element 包装 / style / addEventListener / console / alert / quit
@@ -161,7 +161,7 @@ htui/
 │       ├── main.rs
 │       ├── sysmon.rs     # 系统监控器示例逻辑（sysinfo 采样 + 页面重建）
 │       ├── yazi.rs       # yazi 文件管理器宿主命令（listDir 读真实目录）
-│       ├── snake.rs      # snake 游戏 auto-refresh 绑定（150ms 驱动 JS tick）
+│       ├── snake.rs      # snake 游戏绑定（无命令；游戏循环由 JS setInterval 驱动）
 │       ├── all_in_one/   # index.html: 可直接浏览器打开，内部 <style> 内联 CSS
 │       ├── headings/
 │       ├── image/        # includes pic.png
@@ -170,7 +170,7 @@ htui/
 │       ├── text/
 │       ├── css/
 │       ├── events/       # 事件系统交互演示（onclick / hover / 动态重渲染，render_with_events）
-│       ├── sysmon/       # 系统状态监控器（auto 每 200ms 触发，分层采样 CPU/内存/磁盘并重建页面）
+│       ├── sysmon/       # 系统状态监控器（JS setInterval 每 200ms 触发，分层采样 CPU/内存/磁盘并重建页面）
 │       ├── header_footer/
 │       ├── aside/
 │       ├── helloworld/
@@ -190,7 +190,7 @@ htui/
 │       ├── configurator/ # 配置器设置表单演示（input + 原生 select 下拉 + JS 开关 + 实时预览 + 保存/重置）
 │       ├── codex/        # Codex CLI 风格聊天界面（input + change 提交，无执行）
 │       ├── yazi/         # Yazi 风格文件管理器（点击导航目录/文件 + [ .. ] 返回）
-│       ├── snake/        # 贪吃蛇（JS 游戏 + auto 驱动 tick + 点击方向按钮）
+│       ├── snake/        # 贪吃蛇（JS 游戏 + setInterval 驱动 tick + 点击方向按钮）
 │       └── viewport_units/
 ```
 
@@ -307,8 +307,9 @@ InputKeystroke / SelectPick）发给脚本线程，后者经 `apply_message` 统
 Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `RenderCmd::RenderHtml`）
 由脚本引擎在内部执行 `ScriptEngine::reload`（重新解析 + 跑脚本 + mark root dirty），
 随 `RenderArena` 同步——渲染线程不再独立解析。
-定时任务：`EventBindings::auto`（`AutoRefresh`）由脚本线程在消息间隙经
-`ScriptEngine::invoke_action` 自动触发 JS 全局函数（监控器/时钟/动画用）。宿主函数在
+定时任务：JS 侧 `setTimeout` / `setInterval`（标准 API）由脚本引擎登记到
+`ScriptState.timers`，脚本线程在消息间隙经 `recv_timeout` 调度
+`ScriptEngine::run_due_timers` 触发回调（监控器/时钟/动画用）。宿主函数在
 脚本线程执行，重活应放后台线程（参考 `visual_test/src/sysmon.rs` 后台采样 +
 快照模式）。
 
@@ -431,10 +432,9 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
 | `ElementRef`       | `events`                | 冒泡路径上的单个元素（id + node_id）                |
 | `HitRegion`        | `events::hit_map`       | 元素命中区域（node_id + rect + path 冒泡链，所有盒子）|
 | `HitMap`           | `events::hit_map`       | 全部命中区域 + hit_test() / resolve_by_id() / build()     |
-| `EventBindings`    | `events`                | 宿主函数注册表（host: 名字 → HostFn）+ auto 定时刷新      |
-| `AutoRefresh`      | `events`                | 周期自动触发的 action（every + JS 全局函数名）            |
+| `EventBindings`    | `events`                | 宿主函数注册表（host: 名字 → HostFn）                     |
 | `HoverState`       | `events::interaction`   | 指针悬停跟踪（enter / leave 判定，不产生视觉）；生产环境归脚本线程所有 |
-| `ScriptEngine`     | `script`                | Boa 引擎封装：live NodeArena + DOM 绑定 + fire/invoke_action + eval_source（脚本线程独占） |
+| `ScriptEngine`     | `script`                | Boa 引擎封装：live NodeArena + DOM 绑定 + fire/invoke_action/run_due_timers + eval_source（脚本线程独占） |
 | `ScriptMsg`        | `script::msg`           | 脚本线程消息协议：Move / Click / FocusInput / BlurInput / InputKeystroke / SelectPick / Quit |
 | `ScriptResponse`   | `script::msg`           | 脚本线程回复：Ready / Failed / Event{cmds, dirty{arena,root_id}, hovered} |
 | `HostCall`         | `script::host`          | 宿主函数调用上下文（args / event / render / context）+ arg/arg_required/ret 便捷方法 |
@@ -442,7 +442,7 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
 | `IntoJs` / `FromJs` | `script::convert`       | Rust ↔ JS 值转换 trait（基础类型 + Option/Vec/Result 实现） |
 | `js_obj!`          | `script::convert`       | JS 对象字面量宏（`js_obj!(ctx, "k" => v, …)`） |
 | `#[htui::command]` | `htui_macros`           | 唯一命令写法：普通 `fn(… FromJs 参数) -> IntoJs 返回值` 自动包成 `HostFn`，或零参数 `fn() -> HostFn`（有状态，闭包捕获状态），均生成 `<fn>_command()`；`name = "…"` 指定 JS 注册名 |
-| `#[htui::commands]` | `htui_macros`          | 模块级自动注册：扫描模块内 `#[htui::command]`，生成 `register(&mut EventBindings)`；`auto = "…", every_ms = N` 配置定时刷新 |
+| `#[htui::commands]` | `htui_macros`          | 模块级自动注册：扫描模块内 `#[htui::command]`，生成 `register(&mut EventBindings)`；周期任务由页面 JS `setInterval` 调度 |
 | `#[derive(IntoJs/FromJs)]` | `htui_macros`    | 结构体 ↔ JS 对象（`#[js_name = "…"]` 重命名属性） |
 | `EdgeSizes`        | `html::box_edges`       | 四边长度（top/right/bottom/left），用于 padding / margin |
 | `BorderStyle`      | `html::box_edges`       | `border-style` 枚举（`None` / `Solid`） |

@@ -165,8 +165,8 @@
 `currentTarget`/`x`/`y`/`bubbles`/`preventDefault()`）、`on*` 属性按
 `function(event){ body }` 编译（裸标识符只求值不调用）。
 
-✗ 无定时器（`setInterval`/`setTimeout`）——周期性刷新用
-`EventBindings::auto`（Rust 侧）或宿主函数。
+✅ 定时器：`setTimeout` / `setInterval` / `clearTimeout` / `clearInterval`——
+回调在脚本线程的消息间隙执行（`ScriptEngine::run_due_timers`），改 DOM 照常触发渲染。
 
 ## 4. 输入与交互（终端特有）
 
@@ -185,7 +185,6 @@
 | `calc()`、CSS 变量、媒体查询、`float`、多列 | ✗ |
 | `querySelector(All)`、`classList`、`innerHTML` | ✗ |
 | `fetch`、网络请求、完整 Promise 语义 | ✗ |
-| `setInterval` / `setTimeout` | ✗（用 `EventBindings::auto`） |
 | 系统剪贴板（OSC 52） | ✗ 拒绝项 |
 | 像素级渲染（除 `<img>`） | ✗ 拒绝项 |
 | 触摸 / 无障碍 / 多文档窗口 | ✗ 拒绝项 |

@@ -272,6 +272,7 @@
 - ✅ 标准语法：函数/闭包/解构/`...` 展开/可选链 `?.`/空值合并 `??`/`class`/模板字符串/`for...of`/`async` 语法
 - ✅ 内建对象：`Object` `Array` `String` `Number` `Boolean` `Math` `Date` `JSON` `RegExp` `Map` `Set` `WeakMap` `WeakSet` `Error` 族 `Symbol` `BigInt` `Proxy` `Reflect` `Intl`（以 Boa 为准）
 - ◐ `Promise`：对象可用，但**无事件循环驱动**——`then` 回调不会在后续同步代码后自动执行（宿主 `fire`/`invoke_action` 是同步的），不要依赖 `await` 时序
+- ✅ `setTimeout` / `setInterval` / `clearTimeout` / `clearInterval`：宿主实现，回调在脚本线程消息间隙执行
 - ✗ `fetch`、`Worker`、`WebAssembly` 集成等浏览器/宿主 API
 
 ### B.6 常见 JS 写法在 htui 的可用性速查
@@ -283,8 +284,8 @@
 | `el.addEventListener('click', fn)` | ✅ | |
 | `document.createElement('div')` + `appendChild` | ✅ | 动态构建 DOM |
 | `el.innerHTML = '<div>…</div>'` | ✗ | 无 |
+| `setInterval(fn, ms)` / `setTimeout(fn, ms)` | ✅ | 脚本线程驱动（见 `script-layer.md` 定时任务） |
 | `document.querySelectorAll('.x')` | ✗ | 无 |
-| `setInterval(fn, 1000)` | ✗ | 用 Rust `EventBindings::auto` |
 | `el.classList.add('on')` | ✗ | 用 `setAttribute('class', …)` |
 | `el.dataset.id` | ✗ | 用 `getAttribute('data-id')` |
 | `async function refresh() { await … }` | ◐ | 语法可解析，await 无驱动 |

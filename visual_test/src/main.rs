@@ -252,8 +252,8 @@ fn main() -> Result<()> {
     // static preview (interaction needs a real terminal).
     if test_name == "sysmon" {
         if watch_mode {
-            // Headless simulation of the auto-refresh: render `count` sampled
-            // frames, `every_ms` apart, so the updating values are visible.
+            // Headless frame stepping: render `count` sampled frames,
+            // `every_ms` apart, so the updating values are visible.
             for i in 1..=count {
                 println!("\n===== frame {i}/{count} ===");
                 dump(&sysmon::preview_page(), css, cols, rows, bg_map);
@@ -346,7 +346,7 @@ fn main() -> Result<()> {
     }
 
     // The `snake` case runs through `render_with_events`: the game runs in
-    // JS, driven by a 150 ms auto-refresh of `tick()` (see `snake.rs`), with
+    // JS, driven by a 150 ms `setInterval(tick, 150)` (see `snake.rs`), with
     // click-to-steer buttons. `--dump` falls back to the static preview.
     if test_name == "snake" {
         if dump_mode {

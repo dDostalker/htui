@@ -53,8 +53,8 @@
 - `<input>` + `change` 提交是可行的"命令行输入"模式（Codex 已用）。
 - 宿主函数返回 `#[derive(IntoJs)]` 的 `Vec<结构体>`（`listDir`）→ JS 侧直接是对象
   数组（`e.name` / `e.is_dir` / `e.size`），无需手动序列化 ✓。
-- `#[htui::commands(auto = "tick", every_ms = 150)]` 空模块即可配置 auto-refresh，
-  驱动 JS 游戏循环 ✓。
+- 页面内 `setInterval(tick, 150)` 直接驱动 JS 游戏循环 ✓（`#[htui::commands]`
+  仅做命令注册，不再承载定时配置）。
 - 动态元素 `addEventListener` + 点击命中正常 ✓；`el.style.backgroundColor` 高亮 ✓。
 
 ## 若要"改库"才能更接近原版（待办）

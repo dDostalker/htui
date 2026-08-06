@@ -29,13 +29,14 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use boa_engine::{Context, JsError, JsResult, JsValue, NativeFunction, Source, js_string};
 use boa_engine::object::ObjectInitializer;
 use boa_engine::property::Attribute;
 
 use crate::{
-    events::{AutoRefresh, EventBindings, EventType, HitRegion, HtmlEvent},
+    events::{EventBindings, EventType, HitRegion, HtmlEvent},
     html::html_parse::Parser,
     tdom::node::{NodeArena, NodeId},
     tui::graph_api::RenderCmd,
@@ -73,6 +74,23 @@ pub(crate) struct ScriptState {
     pub current_event: Option<HtmlEvent>,
     /// Registered host functions, keyed by JS global name.
     pub host_fns: HashMap<String, HostFn>,
+    /// Pending `setTimeout` / `setInterval` registrations, driven by the
+    /// script thread's message loop (the only thread allowed to run JS).
+    pub timers: Vec<TimerEntry>,
+    /// Monotonic id source for timer registrations.
+    pub next_timer_id: u32,
+}
+
+/// A pending `setTimeout` / `setInterval` registration.
+pub(crate) struct TimerEntry {
+    pub id: u32,
+    /// When the callback is due (monotonic clock).
+    pub deadline: Instant,
+    /// Repeat cadence for `setInterval` (re-scheduling after each fire);
+    /// ignored for one-shot `setTimeout` entries.
+    pub period: Duration,
+    /// `true` for `setInterval`, `false` for `setTimeout`.
+    pub repeat: bool,
 }
 
 thread_local! {
@@ -84,13 +102,13 @@ thread_local! {
 pub struct ScriptEngine {
     context: Context,
     state: Rc<RefCell<ScriptState>>,
-    auto: Option<AutoRefresh>,
 }
 
-/// Bootstrap script: the GC-rooted listener + element registries.
+/// Bootstrap script: the GC-rooted listener / element / timer registries.
 const BOOTSTRAP: &str = r#"
 globalThis.__htuiListeners = {};
 globalThis.__htuiElements = {};
+globalThis.__htuiTimers = {};
 globalThis.__htuiAddListener = function (nodeId, type, fn) {
   var entry = globalThis.__htuiListeners[nodeId] || (globalThis.__htuiListeners[nodeId] = {});
   var arr = entry[type] || (entry[type] = []);
@@ -114,15 +132,11 @@ impl ScriptEngine {
             Ok(v) => v,
             Err((e, _)) => return Err(e),
         };
-        Ok(ScriptEngine {
-            context,
-            state,
-            auto: bindings.auto,
-        })
+        Ok(ScriptEngine { context, state })
     }
 
     /// Replace the live document with a freshly parsed one and re-run its
-    /// scripts, keeping the session's host functions and auto-refresh config.
+    /// scripts, keeping the session's host functions.
     ///
     /// The engine is the single source of truth for the document: a
     /// whole-document replacement re-parses here and marks the root dirty, so
@@ -171,6 +185,8 @@ impl ScriptEngine {
             dirty: DirtyInfo::default(),
             current_event: None,
             host_fns,
+            timers: Vec::new(),
+            next_timer_id: 0,
         }));
         ENGINE_STATE.with(|s| *s.borrow_mut() = Some(Rc::clone(&state)));
 
@@ -226,9 +242,71 @@ impl ScriptEngine {
         out
     }
 
-    /// The periodic auto-refresh configuration, if any.
-    pub fn auto(&self) -> Option<AutoRefresh> {
-        self.auto.clone()
+    /// How long the message loop may block before the earliest pending timer
+    /// fires, or `None` when no timer is active (block indefinitely).
+    pub fn next_timer_timeout(&self) -> Option<Duration> {
+        let st = self.state.borrow();
+        st.timers
+            .iter()
+            .map(|t| t.deadline.saturating_duration_since(Instant::now()))
+            .min()
+    }
+
+    /// Fire every timer whose deadline has passed, in registration order.
+    ///
+    /// Callbacks run in the calling thread — the script thread in production —
+    /// exactly like a browser event-loop task, so a callback that rewrites the
+    /// DOM marks nodes dirty as usual. Returns render commands pushed by host
+    /// functions during the dispatch. `setInterval` callbacks are re-scheduled
+    /// relative to the fire time; a badly-lagged interval jumps to `now +
+    /// period` instead of bursting. `setTimeout` callbacks are one-shot.
+    pub fn run_due_timers(&mut self) -> Vec<RenderCmd> {
+        let now = Instant::now();
+        // Snapshot the due ids first: callbacks may register or clear timers,
+        // so the table mutates while we iterate.
+        let due: Vec<u32> = {
+            let st = self.state.borrow();
+            st.timers
+                .iter()
+                .filter(|t| t.deadline <= now)
+                .map(|t| t.id)
+                .collect()
+        };
+        if due.is_empty() {
+            return Vec::new();
+        }
+        // Re-schedule / remove before firing so a slow callback cannot make a
+        // missed repeat deadline fire again immediately after.
+        {
+            let mut st = self.state.borrow_mut();
+            st.timers.retain_mut(|t| {
+                if t.deadline > now {
+                    return true;
+                }
+                if t.repeat {
+                    t.deadline = now + t.period;
+                    true
+                } else {
+                    false
+                }
+            });
+        }
+        for id in due {
+            let callback = timer_callback(&mut self.context, id);
+            if !callback.is_callable() {
+                log::debug!("Timer {id} has no callable callback — skipping");
+                continue;
+            }
+            if let Some(f) = callback.to_object(&mut self.context).ok()
+                && let Err(e) = f.call(&JsValue::undefined(), &[], &mut self.context)
+            {
+                log::warn!("Timer callback threw: {e}");
+            }
+        }
+        let mut st = self.state.borrow_mut();
+        let cmds = std::mem::take(&mut st.render_cmds);
+        drop(st);
+        self.intercept_render_html(cmds)
     }
 
     /// Clone of the live DOM arena.
@@ -382,7 +460,7 @@ impl ScriptEngine {
         self.context.eval(Source::from_bytes(src.as_bytes()))
     }
 
-    /// Invoke a JS global function by name (backs the periodic auto-refresh).
+    /// Invoke a JS global function by name.
     ///
     /// The name may be a `<script>`-defined function or a registered host
     /// function. Returns any render commands pushed during the call.
@@ -474,6 +552,20 @@ fn stop_propagation(this: &JsValue, _args: &[JsValue], context: &mut Context) ->
         }
     }
     Ok(JsValue::undefined())
+}
+
+/// Fetch a GC-rooted timer callback from `globalThis.__htuiTimers` by id.
+fn timer_callback(context: &mut Context, id: u32) -> JsValue {
+    let global = context.global_object();
+    let Ok(registry) = global.get(js_string!("__htuiTimers"), context) else {
+        return JsValue::undefined();
+    };
+    let Ok(registry) = registry.to_object(context) else {
+        return JsValue::undefined();
+    };
+    registry
+        .get(js_string!(id.to_string()), context)
+        .unwrap_or(JsValue::undefined())
 }
 
 /// `event.preventDefault()` — accepted for API parity, no default action exists.

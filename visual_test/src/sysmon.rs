@@ -5,8 +5,8 @@
 //! function** `sample()` (a Rust callback) and writes the returned values into
 //! the DOM via `document.getElementById(...).textContent`. A background
 //! sampling thread keeps the data fresh; the main thread only reads the latest
-//! snapshot, so clicks / hover stay responsive. Auto-refresh every 200 ms
-//! re-invokes `refresh`.
+//! snapshot, so clicks / hover stay responsive. The page's `refresh()` runs
+//! on a 200 ms JS `setInterval`.
 //!
 //! Sampling is backed by the [`sysinfo`] crate (no `wmic` subprocess): the
 //! sampler owns one [`System`] and refreshes it on a fixed cadence, which is
@@ -25,10 +25,10 @@ static SNAPSHOT: OnceLock<Arc<Mutex<Snapshot>>> = OnceLock::new();
 
 /// Everything the demo document calls, declared in one module and registered
 /// by a single `#[htui::commands]` invocation: the three pure formatting
-/// commands (`bar` / `gb` / `formatDateTime`), the stateful `sample()`
-/// command (returning a `HostFn` closure), and the 200 ms auto-refresh of the
-/// page's `refresh()` function.
-#[htui::commands(auto = "refresh", every_ms = 200)]
+/// commands (`bar` / `gb` / `formatDateTime`) and the stateful `sample()`
+/// command (returning a `HostFn` closure). The page drives the 200 ms refresh
+/// itself with `setInterval(refresh, 200)`.
+#[htui::commands]
 mod commands {
     use super::*;
 
@@ -135,7 +135,7 @@ mod commands {
 /// Register the functions the demo document calls: the host function
 /// `sample()` returns the latest snapshot as a JS object, and the document's
 /// `<script>` defines `refresh()` to update the DOM with it. The page
-/// auto-refreshes every 200 ms.
+/// auto-refreshes every 200 ms via JS `setInterval`.
 pub fn bindings() -> EventBindings {
     // Session anchor shared by the sampler (for the `session` readout). The
     // `sample()` host reads the sampled `session_secs` from the published
@@ -166,9 +166,8 @@ pub fn bindings() -> EventBindings {
         });
     }
 
-    // One call registers `bar` / `gb` / `formatDateTime`, the `sample()` host
-    // One call registers `bar` / `gb` / `formatDateTime`, the `sample()`
-    // command and the auto-refresh (see `mod commands` above).
+    // One call registers `bar` / `gb` / `formatDateTime` and the `sample()`
+    // command (see `mod commands` above).
     let mut bindings = EventBindings::default();
     commands::register(&mut bindings);
     bindings

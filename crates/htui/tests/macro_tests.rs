@@ -4,7 +4,6 @@
 //! required.
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use htui::events::EventBindings;
 use htui::script::{HostCall, HostFn, ScriptEngine};
@@ -13,9 +12,8 @@ use htui::script::{HostCall, HostFn, ScriptEngine};
 //   - `greet` is registered under its function name,
 //   - `format_datetime` under the explicit `name = "formatDateTime"`,
 //   - `sample` is a stateful command returning a `HostFn` (its counter
-//     survives across JS calls) — the only way stateful hosts are written,
-//   - the module configures a 250 ms auto-refresh of the `refresh` action.
-#[htui::commands(auto = "refresh", every_ms = 250)]
+//     survives across JS calls) — the only way stateful hosts are written.
+#[htui::commands]
 mod app {
     use std::sync::{Arc, Mutex};
 
@@ -54,10 +52,6 @@ fn commands_module_registers_every_binding() {
         assert!(bindings.host.contains_key(name), "missing host `{name}`");
     }
     assert_eq!(bindings.host.len(), 3);
-
-    let auto = bindings.auto.expect("auto-refresh must be configured");
-    assert_eq!(auto.action, "refresh");
-    assert_eq!(auto.every, Duration::from_millis(250));
 }
 
 #[test]
@@ -86,12 +80,8 @@ fn commands_module_makes_hosts_callable_from_js() {
         "1",
         "stateful host functions must survive across JS calls"
     );
+    assert_eq!(eval_str(&mut engine, "globalThis.__n"), "1", "stateful host functions must survive across JS calls");
     assert_eq!(eval_str(&mut engine, "globalThis.__n2"), "2");
-    assert_eq!(
-        engine.auto().map(|a| a.action),
-        Some("refresh".to_string()),
-        "engine must carry the module's auto-refresh config"
-    );
 }
 
 /// A `#[htui::command(name = "…")]` used outside a `#[htui::commands]` module

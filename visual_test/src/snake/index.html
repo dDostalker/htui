@@ -132,6 +132,8 @@
     statusEl = document.getElementById('status');
     reset();
     paint();
+    // Game loop: the engine fires this every 150 ms (script thread).
+    setInterval(tick, 150);
   </script>
 </body>
 </html>

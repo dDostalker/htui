@@ -58,7 +58,7 @@ pub struct ScriptDirty {
     pub dirty: DirtyInfo,
 }
 
-/// Outcome of processing one [`ScriptMsg`] (or one auto-refresh tick).
+/// Outcome of processing one [`ScriptMsg`] (or a due timer tick).
 #[derive(Debug)]
 pub struct ScriptEvent {
     /// Render commands pushed by host functions / hover repaints.
@@ -175,7 +175,6 @@ pub fn run_script_thread(
             return;
         }
     };
-    let auto = engine.auto();
     let mut hover = HoverState::new();
 
     if tx
@@ -190,10 +189,11 @@ pub fn run_script_thread(
     }
 
     loop {
-        // Block for the next message; the auto-refresh interval bounds the
-        // wait so a tick can fire even without user input.
-        let msg = match &auto {
-            Some(auto) => match rx.recv_timeout(auto.every) {
+        // Block for the next message; an active timer (JS `setTimeout` /
+        // `setInterval`) bounds the wait so a due callback can fire even
+        // without user input.
+        let msg = match engine.next_timer_timeout() {
+            Some(d) => match rx.recv_timeout(d) {
                 Ok(msg) => Some(msg),
                 Err(RecvTimeoutError::Timeout) => None,
                 Err(RecvTimeoutError::Disconnected) => break,
@@ -204,7 +204,7 @@ pub fn run_script_thread(
             },
         };
 
-        let event = match msg {
+        let mut event = match msg {
             Some(ScriptMsg::Quit) => break,
             Some(msg) => {
                 let map = match hit_map.lock() {
@@ -216,29 +216,35 @@ pub fn run_script_thread(
                 };
                 apply_message(&mut engine, &mut hover, &map, msg)
             }
-            // Auto-refresh tick (no message arrived in time).
-            None => {
-                let action = auto.as_ref().map(|a| a.action.as_str()).unwrap_or_default();
-                let cmds = engine.invoke_action(action);
-                let dirty = {
-                    let dirty = engine.take_dirty();
-                    if dirty.is_empty() {
-                        None
-                    } else {
-                        Some(ScriptDirty {
-                            arena: Arc::new(engine.arena()),
-                            root_id: engine.root_id(),
-                            dirty,
-                        })
-                    }
-                };
-                ScriptEvent {
-                    cmds,
-                    dirty,
-                    hovered: hover.current().map(|r| r.node_id),
-                }
-            }
+            // No message arrived in time — a timer must be due.
+            None => ScriptEvent {
+                cmds: Vec::new(),
+                dirty: None,
+                hovered: hover.current().map(|r| r.node_id),
+            },
         };
+
+        // Fire timers that came due while waiting / processing the message.
+        // Their callbacks may rewrite the DOM, so the dirty snapshot must
+        // merge whatever they produced after the message's own batch.
+        event.cmds.extend(engine.run_due_timers());
+        let extra = engine.take_dirty();
+        if !extra.is_empty() {
+            let snapshot = ScriptDirty {
+                arena: Arc::new(engine.arena()),
+                root_id: engine.root_id(),
+                dirty: extra,
+            };
+            event.dirty = match event.dirty {
+                Some(mut d) => {
+                    d.dirty.nodes.extend(snapshot.dirty.nodes);
+                    d.arena = snapshot.arena;
+                    d.root_id = snapshot.root_id;
+                    Some(d)
+                }
+                None => Some(snapshot),
+            };
+        }
 
         if tx.send(ScriptResponse::Event(event)).is_err() {
             log::debug!("Script response channel closed");

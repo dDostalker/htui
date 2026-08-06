@@ -1205,7 +1205,7 @@ fn hover_fires_mouseover_and_mouseout_listeners() {
 }
 
 // ============================================================
-// Auto-refresh (invoke_action)
+// invoke_action (manual JS global invocation)
 // ============================================================
 
 #[test]

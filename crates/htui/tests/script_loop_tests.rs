@@ -117,6 +117,147 @@ fn host_render_html_reloads_in_engine_instead_of_render_thread() {
 }
 
 #[test]
+fn set_timeout_fires_once_then_clears() {
+    // `setTimeout` fires exactly once when the deadline passes.
+    let (mut engine, _geo) = build_geometry(
+        r#"<script>
+          var seen = [];
+          setTimeout(function(){ seen.push('t'); }, 5);
+          globalThis.__seen = seen;
+        </script><p>x</p>"#,
+        EventBindings::default(),
+    );
+    // Not yet due: nothing fires.
+    assert!(engine.run_due_timers().is_empty());
+    std::thread::sleep(Duration::from_millis(30));
+    engine.run_due_timers();
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.__seen.join(','))"),
+        "t",
+        "one-shot timeout must fire once"
+    );
+    // One-shot: a later run does not re-fire.
+    std::thread::sleep(Duration::from_millis(30));
+    engine.run_due_timers();
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.__seen.join(','))"),
+        "t"
+    );
+}
+
+#[test]
+fn set_interval_repeats_until_cleared() {
+    // `setInterval` re-schedules after each fire; `clearInterval` stops it.
+    let (mut engine, _geo) = build_geometry(
+        r#"<script>
+          var seen = [];
+          var iv = setInterval(function(){ seen.push('i'); }, 5);
+          globalThis.__seen = seen;
+          globalThis.__iv = iv;
+        </script><p>x</p>"#,
+        EventBindings::default(),
+    );
+    std::thread::sleep(Duration::from_millis(30));
+    engine.run_due_timers();
+    std::thread::sleep(Duration::from_millis(30));
+    engine.run_due_timers();
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.__seen.join(','))"),
+        "i,i",
+        "interval must re-schedule and fire again"
+    );
+    eval_str(&mut engine, "clearInterval(globalThis.__iv)");
+    eval_str(&mut engine, "globalThis.__seen = []");
+    std::thread::sleep(Duration::from_millis(30));
+    engine.run_due_timers();
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.__seen.join(','))"),
+        "",
+        "cleared interval must not fire"
+    );
+}
+
+#[test]
+fn timer_callback_dom_write_marks_dirty() {
+    // A timer callback that rewrites the DOM behaves like any other JS
+    // mutation: it marks the touched nodes dirty for the next RenderArena.
+    let (mut engine, _geo) = build_geometry(
+        r#"<script>
+          var el = document.getElementById('f');
+          setTimeout(function(){ el.textContent = 'tick'; }, 5);
+        </script><p id="f">x</p>"#,
+        EventBindings::default(),
+    );
+    assert!(engine.take_dirty().is_empty(), "nothing mutated yet");
+    std::thread::sleep(Duration::from_millis(30));
+    engine.run_due_timers();
+    assert!(
+        !engine.take_dirty().is_empty(),
+        "timer DOM write must mark dirty"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('f').textContent"),
+        "tick"
+    );
+}
+
+#[test]
+fn timer_callback_can_push_render_commands() {
+    // Host functions called from a timer callback push into the same render
+    // command queue as any other JS execution.
+    let bindings = host_bindings("pushIt", move |call| {
+        call.render.push(RenderCmd::Redraw {
+            scroll_y: 0,
+            zoom: 1.0,
+        });
+        boa_engine::JsValue::undefined()
+    });
+    let mut engine = ScriptEngine::new(
+        r#"<script>
+          setTimeout(function(){ pushIt(); }, 5);
+        </script><p>x</p>"#,
+        bindings,
+    )
+    .expect("engine");
+    std::thread::sleep(Duration::from_millis(30));
+    let cmds = engine.run_due_timers();
+    assert!(
+        cmds.iter().any(|c| matches!(c, RenderCmd::Redraw { .. })),
+        "host push from a timer must surface in the returned commands"
+    );
+}
+
+#[test]
+fn timer_callback_can_register_new_timers() {
+    // Timers scheduled from inside a timer callback must fire too (the due
+    // ids are snapshotted before the callbacks run).
+    let (mut engine, _geo) = build_geometry(
+        r#"<script>
+          var seen = [];
+          setTimeout(function(){
+            seen.push('outer');
+            setTimeout(function(){ seen.push('inner'); }, 5);
+          }, 5);
+          globalThis.__seen = seen;
+        </script><p>x</p>"#,
+        EventBindings::default(),
+    );
+    std::thread::sleep(Duration::from_millis(30));
+    engine.run_due_timers();
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.__seen.join(','))"),
+        "outer"
+    );
+    std::thread::sleep(Duration::from_millis(30));
+    engine.run_due_timers();
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.__seen.join(','))"),
+        "outer,inner",
+        "a timer registered inside a callback must fire later"
+    );
+}
+
+#[test]
 fn apply_message_blur_commits_the_value_and_fires_blur_then_change() {
     // `BlurInput` commits the edited value and fires `blur` + `change` in
     // order (change only when the value differs).

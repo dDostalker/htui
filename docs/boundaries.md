@@ -46,7 +46,7 @@ htui 不是"用 Rust 写终端 UI 的又一种方式"，而是"在终端里跑 W
 | ------ | ---- |
 | CSS 动画 / 过渡 / `transform` / `opacity` | 终端无时间轴与像素语义，做了就是永无止境的追赶 |
 | 完整 CSS（`calc()`、变量、媒体查询、完整 grid 等） | flex 的 `gap` 已实现；其余按需逐项评估，不整体承诺 |
-| 完整 JS 语义（`Promise` 完整实现、`fetch`、计时器、完整 Web API） | Boa 提供基础；网络与异步不是终端 UI 的必要条件 |
+| 完整 JS 语义（`Promise` 完整实现、`fetch`、完整 Web API） | Boa 提供基础；网络与异步不是终端 UI 的必要条件（`setTimeout` / `setInterval` 已实现） |
 | 像素级渲染（除 `<img>` 光栅化） | 终端是字符网格，像素渲染偏离使命 |
 | 浏览器 devtools | 用 `--dump` + 日志 + 测试替代 |
 | 系统剪贴板（OSC 52 / GUI 剪贴板） | 保持会话内剪贴板，避免平台依赖 |
@@ -76,7 +76,8 @@ htui 不是"用 Rust 写终端 UI 的又一种方式"，而是"在终端里跑 W
 | 布局 | flow（块 / 内联）、flex、简化 table | ✅ | grid 模块为预留空壳 |
 | 布局 | 多列、`float`、`clear` | ✗ | 不计划 |
 | JS | Boa 运行时 + DOM/样式绑定 + 宿主函数 | ✅ | API 清单见 `web-support.md` §3 |
-| JS | `querySelector` / `classList` / 计时器 / `fetch` | ○ | 按用户需求评估 |
+| JS | `querySelector` / `classList` / `fetch` | ○ | 按用户需求评估 |
+| JS | `setTimeout` / `setInterval`（定时器） | ✅ | 脚本线程调度，见 `web-support.md` §3 |
 | 事件 | `click` / `mouseover` / `mouseout` / `focus` / `blur` / `input` / `change` + 冒泡 | ✅ | |
 | 输入 | 输入框编辑 / 选择 / 剪贴板 / 拖选（流式 + 块式） | ✅ | |
 | 渲染 | 增量 diff、区域重绘、hover 增量、图片光栅化 | ✅ | |
@@ -96,7 +97,7 @@ htui 不是"用 Rust 写终端 UI 的又一种方式"，而是"在终端里跑 W
 ## 7. 性能边界
 
 - 交互（点击 / hover / 拖选）：单帧增量渲染目标 **< 5ms**（区域重绘路径）。
-- 动态页面（auto 刷新）：刷新间隔 ≥ 100ms 时不应掉帧；
+- 动态页面（`setInterval` 刷新）：刷新间隔 ≥ 100ms 时不应掉帧；
   "值未变不触发渲染" 与命令合并是必须机制，不是优化选项。
 - 每次渲染线程全量重绘是最后手段，任何新特性不得默认走全量路径。
 - 布局 / 绘制 / 提取逻辑应可无头基准（`benches/`）。
