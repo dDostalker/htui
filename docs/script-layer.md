@@ -122,11 +122,43 @@ fn main() {
 | 失焦（`<input>` 失去焦点） | `onblur` | `"blur"` |
 | 输入（编辑中每次值变化） | `oninput` | `"input"` |
 | 提交（失焦/Enter 且值变化） | `onchange` | `"change"` |
+| 按键按下 | `onkeydown` | `"keydown"` |
+| 按键释放 | `onkeyup` | `"keyup"` |
 
 `focus` / `blur` / `input` / `change` 目前仅由 `<input>` 字段产生：点击聚焦触发
 `focus`（mousedown 时聚焦，对齐浏览器时序），编辑每键触发 `input`，Esc /
 Enter / 点击别处 / 焦点切换提交时触发 `blur`（值有变化时额外触发 `change`）。
 这些事件沿 DOM 祖先链冒泡，与鼠标事件同一套分发机制。
+
+### 键盘事件（`keydown` / `keyup`）
+
+- **触发时机**：每次按键（含 auto-repeat）都派发 `keydown`；终端报告按键释放时
+  派发 `keyup`（多数终端不报告释放，此时无 `keyup`）。
+- **目标**：聚焦的 `<input>`；无焦点时是文档 `<body>`（`<body onkeydown="…">`
+  可拦截全局按键），沿祖先链冒泡到根。
+- **事件对象**：除通用字段外携带 `key` / `code` / `keyCode` / `shiftKey` /
+  `ctrlKey` / `altKey` / `metaKey` / `repeat` / `defaultPrevented`（对齐浏览器
+  `KeyboardEvent`），全部 `KeyCode` 变体均有稳定字符串映射
+  （`ArrowUp`/`Enter`/`F5`/`Escape`/…）。
+- **`preventDefault()`（滚动/缩放/退出门控）**：按键到达页面级（无下拉/输入框
+  消费）且会产生内置动作时，输入循环把 `keydown` 派发到脚本层并等待其判定
+  （`KeyGate`，超时 `KEY_GATE_TIMEOUT` = 8ms）：处理器调 `event.preventDefault()`
+  → 内置动作被丢弃，页面接管该键（如 Snake 用方向键转向且不再滚动页面）；否则
+  照常执行。**脚本线程忙/被宿主函数阻塞时门控超时，回退执行内置动作**——滚动/退出
+  仍响应（解耦保证，代价最多 8ms/键）。输入框编辑键、下拉导航、`Tab` 焦点遍历不
+  门控（属于输入控件行为，直接执行）。
+- **典型用法**：
+  ```html
+  <body onkeydown="if (event.key === 'ArrowUp') move(); if (event.key === ' ') toggle();">
+  <script>
+    document.getElementById('btn').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { submit(); e.preventDefault(); }  // 阻止 Enter 的默认行为
+    });
+  </script>
+  ```
+- **相关 API**：`KeyEventInfo`（终端无关键盘负载）、`tui::graph_api::key_event_info`
+  （crossterm `KeyEvent` → `KeyEventInfo`）、`tui::graph_api::KeyGate` /
+  `KEY_GATE_TIMEOUT`、`ScriptMsg::KeyDown/KeyUp`。
 
 ### 鼠标拖选与复制
 
@@ -312,9 +344,12 @@ JS 修改 DOM 后，引擎把被改动的节点 id 记入 `dirty`（一组 `Node
 
 1. **只读查询走快照**：输入循环维护引擎最新 arena 快照（来自 `Ready` / 每次 `dirty`
    回传），`handle_*` 内部读快照判断 node 类型、value、select 选项——不碰引擎。
-2. **写与派发走消息**：聚焦/失焦/输入/select 选择等打包成 `ScriptMsg`（Move / Click /
-   FocusInput / BlurInput / InputKeystroke / SelectPick）发给脚本线程，`apply_message`
+2. **写与派发走消息**：聚焦/失焦/输入/select 选择/按键等打包成 `ScriptMsg`（Move /
+   Click / FocusInput / BlurInput / InputKeystroke / SelectPick / KeyDown /
+   KeyUp）发给脚本线程，`apply_message`
    统一执行（含 blur→change、mouseout→mouseover 的顺序保证），回 `ScriptResponse`。
+   按键消息携带终端无关键的 `KeyEventInfo`（`key`/`code`/`keyCode`/修饰键/`repeat`），
+   目标为聚焦 `<input>` 或 `<body>`（见 §3 键盘事件）。
 3. **hover 状态机在脚本线程**：`interaction::on_move/on_click` 由脚本线程调用，
    `RenderCmd::Hover` 与 `hovered` 经响应回传，`RenderArena` 据此重级联 `:hover`。
 4. **宿主函数阻塞不冻结 UI**：滚动、缩放、退出、拖选全在输入循环，宿主函数再慢

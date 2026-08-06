@@ -1,9 +1,13 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MediaKeyCode, ModifierKeyCode,
+    MouseButton, MouseEventKind,
+};
 
 use crate::{
+    events::KeyEventInfo,
     script::ScriptMsg,
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::char_width,
@@ -16,6 +20,110 @@ const SCROLL_LINES_PER_TICK: u32 = 3;
 const ZOOM_STEP: f32 = 0.1;
 const ZOOM_MIN: f32 = 0.2;
 const ZOOM_MAX: f32 = 5.0;
+
+/// Convert a crossterm `KeyEvent` into the terminal-agnostic payload the
+/// script layer dispatches as `keydown` / `keyup`, mirroring the browser
+/// `KeyboardEvent` fields (`key` / `code` / `keyCode` + modifier flags). Every
+/// `KeyCode` variant maps to a stable string so pages can branch on the same
+/// values they would in a real browser.
+pub fn key_event_info(ev: &KeyEvent) -> KeyEventInfo {
+    let (key, code, key_code): (String, String, u32) = match ev.code {
+        KeyCode::Backspace => ("Backspace".into(), "Backspace".into(), 8),
+        KeyCode::Enter => ("Enter".into(), "Enter".into(), 13),
+        KeyCode::Left => ("ArrowLeft".into(), "ArrowLeft".into(), 37),
+        KeyCode::Right => ("ArrowRight".into(), "ArrowRight".into(), 39),
+        KeyCode::Up => ("ArrowUp".into(), "ArrowUp".into(), 38),
+        KeyCode::Down => ("ArrowDown".into(), "ArrowDown".into(), 40),
+        KeyCode::Home => ("Home".into(), "Home".into(), 36),
+        KeyCode::End => ("End".into(), "End".into(), 35),
+        KeyCode::PageUp => ("PageUp".into(), "PageUp".into(), 33),
+        KeyCode::PageDown => ("PageDown".into(), "PageDown".into(), 34),
+        KeyCode::Tab | KeyCode::BackTab => ("Tab".into(), "Tab".into(), 9),
+        KeyCode::Delete => ("Delete".into(), "Delete".into(), 46),
+        KeyCode::Insert => ("Insert".into(), "Insert".into(), 45),
+        KeyCode::F(n) => (format!("F{n}"), format!("F{n}"), 111 + n as u32),
+        KeyCode::Char(c) => (c.to_string(), char_code(c), c as u32),
+        KeyCode::Null => ("Unidentified".into(), "Unidentified".into(), 0),
+        KeyCode::Esc => ("Escape".into(), "Escape".into(), 27),
+        KeyCode::CapsLock => ("CapsLock".into(), "CapsLock".into(), 20),
+        KeyCode::ScrollLock => ("ScrollLock".into(), "ScrollLock".into(), 145),
+        KeyCode::NumLock => ("NumLock".into(), "NumLock".into(), 144),
+        KeyCode::PrintScreen => ("PrintScreen".into(), "PrintScreen".into(), 44),
+        KeyCode::Pause => ("Pause".into(), "Pause".into(), 19),
+        KeyCode::Menu => ("ContextMenu".into(), "ContextMenu".into(), 93),
+        KeyCode::KeypadBegin => ("Unidentified".into(), "Unidentified".into(), 0),
+        KeyCode::Media(m) => media_key(m),
+        KeyCode::Modifier(m) => modifier_key(m),
+    };
+    KeyEventInfo {
+        key,
+        code,
+        key_code,
+        shift: ev.modifiers.contains(event::KeyModifiers::SHIFT),
+        ctrl: ev.modifiers.contains(event::KeyModifiers::CONTROL),
+        alt: ev.modifiers.contains(event::KeyModifiers::ALT),
+        meta: ev.modifiers.contains(event::KeyModifiers::SUPER)
+            || ev.modifiers.contains(event::KeyModifiers::HYPER)
+            || ev.modifiers.contains(event::KeyModifiers::META),
+        repeat: ev.kind == KeyEventKind::Repeat,
+    }
+}
+
+/// `event.code` for a character key: `KeyA`…`KeyZ`, `Digit0`…`Digit9`, `Space`
+/// and `Unidentified` for everything else (matching the DOM physical-key
+/// vocabulary).
+fn char_code(c: char) -> String {
+    if c.is_ascii_alphabetic() {
+        format!("Key{}", c.to_ascii_uppercase())
+    } else if c.is_ascii_digit() {
+        format!("Digit{c}")
+    } else if c == ' ' {
+        "Space".to_string()
+    } else {
+        "Unidentified".to_string()
+    }
+}
+
+/// `(key, code, keyCode)` for a crossterm media key.
+fn media_key(m: MediaKeyCode) -> (String, String, u32) {
+    let (k, c, code) = match m {
+        MediaKeyCode::Play | MediaKeyCode::PlayPause => ("MediaPlayPause", "MediaPlayPause", 179),
+        MediaKeyCode::Pause => ("Pause", "MediaPause", 179),
+        MediaKeyCode::Reverse => ("MediaReverse", "MediaReverse", 227),
+        MediaKeyCode::Stop => ("MediaStop", "MediaStop", 178),
+        MediaKeyCode::FastForward => ("MediaFastForward", "MediaFastForward", 228),
+        MediaKeyCode::Rewind => ("MediaRewind", "MediaRewind", 227),
+        MediaKeyCode::TrackNext => ("MediaTrackNext", "MediaTrackNext", 176),
+        MediaKeyCode::TrackPrevious => ("MediaTrackPrevious", "MediaTrackPrevious", 177),
+        MediaKeyCode::Record => ("MediaRecord", "MediaRecord", 0),
+        MediaKeyCode::LowerVolume => ("AudioVolumeDown", "AudioVolumeDown", 174),
+        MediaKeyCode::RaiseVolume => ("AudioVolumeUp", "AudioVolumeUp", 175),
+        MediaKeyCode::MuteVolume => ("AudioVolumeMute", "AudioVolumeMute", 173),
+    };
+    (k.into(), c.into(), code)
+}
+
+/// `(key, code, keyCode)` for a crossterm modifier-key press (only readable
+/// with the keyboard-enhancement flags enabled on the terminal).
+fn modifier_key(m: ModifierKeyCode) -> (String, String, u32) {
+    let (k, c, code) = match m {
+        ModifierKeyCode::LeftShift => ("Shift", "ShiftLeft", 16),
+        ModifierKeyCode::RightShift => ("Shift", "ShiftRight", 16),
+        ModifierKeyCode::LeftControl => ("Control", "ControlLeft", 17),
+        ModifierKeyCode::RightControl => ("Control", "ControlRight", 17),
+        ModifierKeyCode::LeftAlt => ("Alt", "AltLeft", 18),
+        ModifierKeyCode::RightAlt => ("Alt", "AltRight", 18),
+        ModifierKeyCode::LeftSuper => ("Meta", "MetaLeft", 91),
+        ModifierKeyCode::RightSuper => ("Meta", "MetaRight", 91),
+        ModifierKeyCode::LeftHyper => ("Hyper", "HyperLeft", 91),
+        ModifierKeyCode::RightHyper => ("Hyper", "HyperRight", 91),
+        ModifierKeyCode::LeftMeta => ("Meta", "MetaLeft", 91),
+        ModifierKeyCode::RightMeta => ("Meta", "MetaRight", 91),
+        ModifierKeyCode::IsoLevel3Shift => ("AltGraph", "AltGraph", 18),
+        ModifierKeyCode::IsoLevel5Shift => ("Unidentified", "Unidentified", 0),
+    };
+    (k.into(), c.into(), code)
+}
 
 /// Shape of the page text selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,6 +237,27 @@ pub struct SelectOpenState {
     pub highlight: usize,
 }
 
+/// A page-level built-in action deferred pending its `keydown` gate verdict.
+///
+/// When the script layer is active, scroll / zoom / quit keys are dispatched
+/// to JS first; if a listener calls `event.preventDefault()` the deferred
+/// commands are dropped (the page owns that key), otherwise the input loop
+/// applies them. The wait is bounded by [`KEY_GATE_TIMEOUT`], so a busy or
+/// blocked script thread falls back to running the built-in action anyway.
+#[derive(Debug)]
+pub struct KeyGate {
+    /// Key id echoed by the script thread's `KeyDown` response (matching).
+    pub id: u32,
+    /// The built-in commands to apply when the gate clears.
+    pub cmds: Vec<RenderCmd>,
+}
+
+/// How long the input loop waits for the script thread's `keydown` verdict
+/// before falling back to the built-in shortcut. Sub-millisecond when the
+/// script thread is healthy; the bound keeps scrolling / quitting responsive
+/// even while a host function blocks the script thread.
+pub const KEY_GATE_TIMEOUT: Duration = Duration::from_millis(8);
+
 /// Input-loop state that persists between events.
 ///
 /// Groups the variables the input loop mutates (`scroll_y`, `zoom`) with the
@@ -176,6 +305,14 @@ pub struct InputState {
     /// clicks inside the overlay pick an option and clicks outside close it;
     /// `↑` / `↓` / `Enter` / `Esc` navigate it.
     pub open_select: Option<SelectOpenState>,
+    /// Monotonic id source for gated `keydown` dispatches; each press echoes
+    /// the id back in the script thread's response so the input loop can match
+    /// the gate verdict (`preventDefault`).
+    pub next_key_id: u32,
+    /// A page-level built-in action (scroll / zoom / quit) waiting for its
+    /// `keydown` gate verdict (`None` = no key pending). Set by
+    /// [`trigger_refresh`], consumed by the run loop after the wait.
+    pub key_gate: Option<KeyGate>,
 }
 
 impl InputState {
@@ -195,6 +332,8 @@ impl InputState {
             text_sel_mode: SelectionMode::Flow,
             selection_text: Arc::new(Mutex::new(String::new())),
             open_select: None,
+            next_key_id: 0,
+            key_gate: None,
         }
     }
 }
@@ -292,6 +431,140 @@ pub fn is_input_field_key(code: KeyCode) -> bool {
             | KeyCode::Home
             | KeyCode::End
     )
+}
+
+/// Character index of the previous word boundary at or before `cursor`.
+///
+/// Whitespace runs are skipped, then one word (alphanumeric / underscore) or
+/// one run of other non-space characters — browser / vim `b` semantics. Used
+/// by `Ctrl`/`Alt`+`←` word navigation and `Ctrl`+`Backspace`.
+pub fn prev_word_boundary(value: &str, cursor: usize) -> usize {
+    let chars: Vec<char> = value.chars().collect();
+    let mut i = cursor.min(chars.len());
+    while i > 0 && chars[i - 1].is_whitespace() {
+        i -= 1;
+    }
+    if i > 0 && is_word_char(chars[i - 1]) {
+        while i > 0 && is_word_char(chars[i - 1]) {
+            i -= 1;
+        }
+    } else {
+        while i > 0 && !is_word_char(chars[i - 1]) && !chars[i - 1].is_whitespace() {
+            i -= 1;
+        }
+    }
+    i
+}
+
+/// Character index of the next word boundary at or after `cursor` (browser /
+/// vim `w` semantics).
+pub fn next_word_boundary(value: &str, cursor: usize) -> usize {
+    let chars: Vec<char> = value.chars().collect();
+    let mut i = cursor.min(chars.len());
+    while i < chars.len() && chars[i].is_whitespace() {
+        i += 1;
+    }
+    if i < chars.len() && is_word_char(chars[i]) {
+        while i < chars.len() && is_word_char(chars[i]) {
+            i += 1;
+        }
+    } else {
+        while i < chars.len() && !is_word_char(chars[i]) && !chars[i].is_whitespace() {
+            i += 1;
+        }
+    }
+    i
+}
+
+/// A word character: alphanumeric or underscore (`\w` without the locale
+/// quirks).
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// Apply a `Ctrl` / `Alt` word-level editing key to a field's edit state.
+///
+/// Handles word navigation (`Ctrl`/`Alt`+`←`/`→`, `Ctrl`+`Home`/`End`), word
+/// deletion (`Ctrl`+`Backspace` / `Ctrl`+`Delete`) and selection extension
+/// (`Shift` combined with the navigation keys). Returns `true` when the value
+/// or caret moved (the caller repaints the field); `false` for keys this
+/// helper does not own. Non-navigation word edits clear the selection, like
+/// plain typing.
+pub fn apply_input_word_key(
+    value: &mut String,
+    cursor: &mut usize,
+    sel_anchor: &mut Option<usize>,
+    key: KeyCode,
+    modifiers: KeyModifiers,
+) -> bool {
+    let ctrl = modifiers.contains(event::KeyModifiers::CONTROL);
+    let alt = modifiers.contains(event::KeyModifiers::ALT);
+    let shift = modifiers.contains(event::KeyModifiers::SHIFT);
+    if !ctrl && !alt {
+        return false;
+    }
+    let before = *cursor;
+    match key {
+        KeyCode::Left => {
+            *cursor = prev_word_boundary(value, *cursor);
+        }
+        KeyCode::Right => {
+            *cursor = next_word_boundary(value, *cursor);
+        }
+        KeyCode::Home => *cursor = 0,
+        KeyCode::End => *cursor = value.chars().count(),
+        KeyCode::Backspace if ctrl => {
+            let new_cursor = prev_word_boundary(value, *cursor);
+            let sb = char_to_byte(value, new_cursor);
+            let eb = char_to_byte(value, *cursor);
+            value.drain(sb..eb);
+            *cursor = new_cursor;
+            *sel_anchor = None;
+            return true;
+        }
+        KeyCode::Delete if ctrl => {
+            let end = next_word_boundary(value, *cursor);
+            let sb = char_to_byte(value, *cursor);
+            let eb = char_to_byte(value, end);
+            value.drain(sb..eb);
+            *sel_anchor = None;
+            return true;
+        }
+        _ => return false,
+    }
+    if *cursor != before {
+        if shift {
+            // Selection extends from the original caret position.
+            let anchor = sel_anchor.unwrap_or(before);
+            *sel_anchor = Some(anchor);
+        } else {
+            *sel_anchor = None;
+        }
+        true
+    } else {
+        false
+    }
+}
+
+/// All `<input>` node ids in document order (depth-first), for `Tab` /
+/// `Shift`+`Tab` focus cycling. Reads the input loop's DOM snapshot; a
+/// removed or not-yet-rendered field is simply not included.
+pub fn collect_input_ids(arena: &NodeArena) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    let Some(root) = arena.iter().find(|(_, n)| n.parent.is_none()).map(|(id, _)| id) else {
+        return out;
+    };
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        let node = &arena[id];
+        if node.node_type == NodeType::Input {
+            out.push(id);
+        }
+        for child in node.children.iter().rev() {
+            stack.push(*child);
+        }
+    }
+    out
 }
 
 /// Byte offset of the `char_idx`-th character (clamped to the end).
@@ -876,7 +1149,30 @@ pub fn trigger_refresh(
     match event::read() {
         Ok(Event::Key(key)) => {
             if key.kind == KeyEventKind::Release {
+                // Key releases only matter to the script layer (`keyup`); most
+                // terminals never report them, so the built-in shortcuts stay
+                // idle here.
+                if arena.is_some() {
+                    msgs.push(ScriptMsg::KeyUp {
+                        target: state.focused_input,
+                        key: key_event_info(&key),
+                    });
+                }
                 return cmds;
+            }
+
+            // Every press / auto-repeat also reaches the script layer as
+            // `keydown` (targeted at the focused `<input>`, or the document
+            // `<body>` when nothing is focused). `key_id` correlates the
+            // response back so a page `preventDefault()` can cancel the key's
+            // built-in shortcut (scroll / zoom / quit, gated below).
+            if arena.is_some() {
+                state.next_key_id = state.next_key_id.wrapping_add(1);
+                msgs.push(ScriptMsg::KeyDown {
+                    key_id: state.next_key_id,
+                    target: state.focused_input,
+                    key: key_event_info(&key),
+                });
             }
 
             // An open `<select>` dropdown consumes navigation keys: ↑ / ↓
@@ -950,6 +1246,37 @@ pub fn trigger_refresh(
                     return cmds;
                 };
 
+                // Word-level editing: Ctrl / Alt + ←/→/Home/End/Backspace/
+                // Delete, with optional Shift extending the selection. Must
+                // run before the plain Ctrl shortcuts so Ctrl+Left is a word
+                // move rather than an ignored combo.
+                if (key.modifiers.contains(event::KeyModifiers::CONTROL)
+                    || key.modifiers.contains(event::KeyModifiers::ALT))
+                    && matches!(
+                        key.code,
+                        KeyCode::Left
+                            | KeyCode::Right
+                            | KeyCode::Home
+                            | KeyCode::End
+                            | KeyCode::Backspace
+                            | KeyCode::Delete
+                    )
+                {
+                    if apply_input_word_key(
+                        &mut state.input_value,
+                        &mut state.input_cursor,
+                        &mut state.input_sel_anchor,
+                        key.code,
+                        key.modifiers,
+                    ) {
+                        push_input_render(state, focused, &mut cmds);
+                        if arena.is_some() {
+                            msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
+                        }
+                    }
+                    return cmds;
+                }
+
                 // Ctrl shortcuts: select-all / copy / cut / paste. Other Ctrl
                 // combos are ignored (not inserted as characters — browser
                 // behaviour).
@@ -988,115 +1315,24 @@ pub fn trigger_refresh(
                 // Fall through to the page-level key handling below.
             }
 
-            if key.modifiers.contains(event::KeyModifiers::CONTROL) {
-                match key.code {
-                    KeyCode::Char('=') | KeyCode::Char('+') => {
-                        state.zoom = (state.zoom + ZOOM_STEP).min(ZOOM_MAX);
-                        return vec![RenderCmd::Redraw {
-                            scroll_y: state.scroll_y,
-                            zoom: state.zoom,
-                        }];
-                    }
-                    KeyCode::Char('-') | KeyCode::Char('_') => {
-                        state.zoom = (state.zoom - ZOOM_STEP).max(ZOOM_MIN);
-                        return vec![RenderCmd::Redraw {
-                            scroll_y: state.scroll_y,
-                            zoom: state.zoom,
-                        }];
-                    }
-                    KeyCode::Char('0') => {
-                        state.zoom = 1.0;
-                        return vec![RenderCmd::Redraw {
-                            scroll_y: state.scroll_y,
-                            zoom: state.zoom,
-                        }];
-                    }
-                    // Copy a page text selection (inside an `<input>` the
-                    // Ctrl shortcuts are handled earlier). `Ctrl+X` on read-
-                    // only page text degrades to a copy, like a browser.
-                    KeyCode::Char('c') | KeyCode::Char('x') => {
-                        if state.focused_input.is_none() && state.text_sel_anchor.is_some() {
-                            if let Ok(guard) = state.selection_text.lock() {
-                                state.input_clipboard = guard.clone();
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            } else if state.text_sel_anchor.is_some() {
-                // A non-Ctrl key abandons the page text selection (the
-                // selection is a pointer-driven, transient visual state).
-                clear_text_selection(state, &mut cmds);
+            // Page-level built-ins: no dropdown / field consumed the key. With
+            // the script layer active, scroll / zoom / quit keys are deferred
+            // pending the `keydown` gate — a page `preventDefault()` cancels
+            // them, a gate timeout (busy or blocked script thread) falls back
+            // to running them so input stays responsive. `Tab` focus cycling
+            // is input-control behaviour and always runs immediately.
+            let builtin = page_level_builtins(state, key, rows, max_scroll, arena, msgs);
+            if arena.is_some()
+                && !builtin.is_empty()
+                && !matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
+            {
+                state.key_gate = Some(KeyGate {
+                    id: state.next_key_id,
+                    cmds: builtin,
+                });
+                return cmds;
             }
-
-            match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => cmds.push(RenderCmd::Quit),
-
-                KeyCode::Up | KeyCode::Char('k') => {
-                    // Already at the top boundary — drop the event instead
-                    // of forwarding a no-op scroll to the render thread.
-                    if state.scroll_y == 0 {
-                        return cmds;
-                    }
-                    state.scroll_y -= 1;
-                    cmds.push(RenderCmd::Rerender {
-                        scroll_y: state.scroll_y,
-                    });
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    // Already at the bottom boundary — drop the event.
-                    if state.scroll_y >= max_scroll {
-                        return cmds;
-                    }
-                    state.scroll_y += 1;
-                    cmds.push(RenderCmd::Rerender {
-                        scroll_y: state.scroll_y,
-                    });
-                }
-                KeyCode::PageUp => {
-                    if state.scroll_y == 0 {
-                        return cmds;
-                    }
-                    let step = (rows as u32).saturating_sub(1).max(1);
-                    state.scroll_y = state.scroll_y.saturating_sub(step);
-                    cmds.push(RenderCmd::Rerender {
-                        scroll_y: state.scroll_y,
-                    });
-                }
-                KeyCode::PageDown => {
-                    if state.scroll_y >= max_scroll {
-                        return cmds;
-                    }
-                    let step = (rows as u32).saturating_sub(1).max(1);
-                    state.scroll_y = state.scroll_y.saturating_add(step);
-                    cmds.push(RenderCmd::Rerender {
-                        scroll_y: state.scroll_y,
-                    });
-                }
-                KeyCode::Home => {
-                    // No-op move — drop to avoid a wasted rerender.
-                    if state.scroll_y == 0 {
-                        return cmds;
-                    }
-                    state.scroll_y = 0;
-                    cmds.push(RenderCmd::Rerender {
-                        scroll_y: state.scroll_y,
-                    });
-                }
-                KeyCode::End => {
-                    // No-op move (already at the bottom) — drop.
-                    if state.scroll_y >= max_scroll {
-                        return cmds;
-                    }
-                    // Use the actual upper bound rather than u32::MAX so the
-                    // render thread receives a value it doesn't have to clamp.
-                    state.scroll_y = max_scroll;
-                    cmds.push(RenderCmd::Rerender {
-                        scroll_y: state.scroll_y,
-                    });
-                }
-                _ => {}
-            }
+            cmds.extend(builtin);
             cmds
         }
 
@@ -1206,6 +1442,237 @@ pub fn trigger_refresh(
 
         _ => cmds,
     }
+}
+
+/// The page-level built-in action for a key that no `<select>` dropdown or
+/// focused `<input>` consumed: `Ctrl` zoom / document jumps, page text-
+/// selection clearing, `Shift`+Space page-up, plain Space / PageUp / PageDown /
+/// arrows / `g` / `G` / `j` / `k` scrolling, `Home` / `End`, `q` / `Esc` quit
+/// and `Tab` / `Shift`+`Tab` focus cycling.
+///
+/// Returns the render commands the key produces (empty = no built-in action,
+/// e.g. a scroll key already at the page boundary). With the script layer
+/// active the caller defers scroll / zoom / quit commands until the keydown
+/// gate verdict; `Tab` focus cycling pushes script messages, so it is excluded
+/// from the gate and always runs immediately.
+fn page_level_builtins(
+    state: &mut InputState,
+    key: KeyEvent,
+    rows: u16,
+    max_scroll: u32,
+    arena: Option<&NodeArena>,
+    msgs: &mut Vec<ScriptMsg>,
+) -> Vec<RenderCmd> {
+    let mut cmds = Vec::new();
+    if key.modifiers.contains(event::KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('=') | KeyCode::Char('+') => {
+                state.zoom = (state.zoom + ZOOM_STEP).min(ZOOM_MAX);
+                return vec![RenderCmd::Redraw {
+                    scroll_y: state.scroll_y,
+                    zoom: state.zoom,
+                }];
+            }
+            KeyCode::Char('-') | KeyCode::Char('_') => {
+                state.zoom = (state.zoom - ZOOM_STEP).max(ZOOM_MIN);
+                return vec![RenderCmd::Redraw {
+                    scroll_y: state.scroll_y,
+                    zoom: state.zoom,
+                }];
+            }
+            KeyCode::Char('0') => {
+                state.zoom = 1.0;
+                return vec![RenderCmd::Redraw {
+                    scroll_y: state.scroll_y,
+                    zoom: state.zoom,
+                }];
+            }
+            // Copy a page text selection (inside an `<input>` the Ctrl
+            // shortcuts are handled earlier). `Ctrl+X` on read-only page text
+            // degrades to a copy, like a browser.
+            KeyCode::Char('c') | KeyCode::Char('x') => {
+                if state.focused_input.is_none() && state.text_sel_anchor.is_some() {
+                    if let Ok(guard) = state.selection_text.lock() {
+                        state.input_clipboard = guard.clone();
+                    }
+                }
+            }
+            // `Ctrl` + Home / End jump to the top / bottom of the page
+            // (matching most editors' document navigation).
+            KeyCode::Home => {
+                if state.scroll_y == 0 {
+                    return cmds;
+                }
+                state.scroll_y = 0;
+                return vec![RenderCmd::Rerender {
+                    scroll_y: state.scroll_y,
+                }];
+            }
+            KeyCode::End => {
+                if state.scroll_y >= max_scroll {
+                    return cmds;
+                }
+                state.scroll_y = max_scroll;
+                return vec![RenderCmd::Rerender {
+                    scroll_y: state.scroll_y,
+                }];
+            }
+            _ => {}
+        }
+    } else if state.text_sel_anchor.is_some() {
+        // A non-Ctrl key abandons the page text selection (the selection is
+        // a pointer-driven, transient visual state).
+        clear_text_selection(state, &mut cmds);
+    }
+
+    // `Shift` + Space scrolls up a page (the browser flip of the plain
+    // `Space` page-down handled below).
+    if key.code == KeyCode::Char(' ') && key.modifiers.contains(event::KeyModifiers::SHIFT) {
+        if state.scroll_y == 0 {
+            return cmds;
+        }
+        let step = (rows as u32).saturating_sub(1).max(1);
+        state.scroll_y = state.scroll_y.saturating_sub(step);
+        return vec![RenderCmd::Rerender {
+            scroll_y: state.scroll_y,
+        }];
+    }
+
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => cmds.push(RenderCmd::Quit),
+
+        // vim-style document jumps: `g` to the top, `G` to the bottom
+        // (shifted `g` — the shift modifier is read via the `Char('G')` code
+        // crossterm reports).
+        KeyCode::Char('g') => {
+            if state.scroll_y == 0 {
+                return cmds;
+            }
+            state.scroll_y = 0;
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        KeyCode::Char('G') => {
+            if state.scroll_y >= max_scroll {
+                return cmds;
+            }
+            state.scroll_y = max_scroll;
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        // Plain `Space` scrolls down a page, like a browser.
+        KeyCode::Char(' ') => {
+            if state.scroll_y >= max_scroll {
+                return cmds;
+            }
+            let step = (rows as u32).saturating_sub(1).max(1);
+            state.scroll_y = state.scroll_y.saturating_add(step);
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        // `Tab` / `Shift`+`Tab` cycle keyboard focus between the page's
+        // `<input>` fields (browser tab order). With no field focused, `Tab`
+        // focuses the first one.
+        KeyCode::Tab => {
+            if let Some(arena) = arena {
+                let ids = collect_input_ids(arena);
+                if !ids.is_empty() {
+                    let next = match state
+                        .focused_input
+                        .and_then(|cur| ids.iter().position(|&id| id == cur))
+                    {
+                        Some(p) => ids[(p + 1) % ids.len()],
+                        None => ids[0],
+                    };
+                    focus_input(state, next, arena, msgs, &mut cmds);
+                }
+            }
+        }
+        KeyCode::BackTab => {
+            if let Some(arena) = arena {
+                let ids = collect_input_ids(arena);
+                if !ids.is_empty() {
+                    let next = match state
+                        .focused_input
+                        .and_then(|cur| ids.iter().position(|&id| id == cur))
+                    {
+                        Some(p) => ids[(p + ids.len() - 1) % ids.len()],
+                        None => ids[ids.len() - 1],
+                    };
+                    focus_input(state, next, arena, msgs, &mut cmds);
+                }
+            }
+        }
+
+        KeyCode::Up | KeyCode::Char('k') => {
+            // Already at the top boundary — drop the event instead of
+            // forwarding a no-op scroll to the render thread.
+            if state.scroll_y == 0 {
+                return cmds;
+            }
+            state.scroll_y -= 1;
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            // Already at the bottom boundary — drop the event.
+            if state.scroll_y >= max_scroll {
+                return cmds;
+            }
+            state.scroll_y += 1;
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        KeyCode::PageUp => {
+            if state.scroll_y == 0 {
+                return cmds;
+            }
+            let step = (rows as u32).saturating_sub(1).max(1);
+            state.scroll_y = state.scroll_y.saturating_sub(step);
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        KeyCode::PageDown => {
+            if state.scroll_y >= max_scroll {
+                return cmds;
+            }
+            let step = (rows as u32).saturating_sub(1).max(1);
+            state.scroll_y = state.scroll_y.saturating_add(step);
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        KeyCode::Home => {
+            // No-op move — drop to avoid a wasted rerender.
+            if state.scroll_y == 0 {
+                return cmds;
+            }
+            state.scroll_y = 0;
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        KeyCode::End => {
+            // No-op move (already at the bottom) — drop.
+            if state.scroll_y >= max_scroll {
+                return cmds;
+            }
+            // Use the actual upper bound rather than u32::MAX so the render
+            // thread receives a value it doesn't have to clamp.
+            state.scroll_y = max_scroll;
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        _ => {}
+    }
+    cmds
 }
 
 /// Convert a screen position to canvas coordinates by adding the scroll

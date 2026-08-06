@@ -688,6 +688,8 @@ fn event_type_str(et: EventType) -> &'static str {
         EventType::Blur => "blur",
         EventType::Input => "input",
         EventType::Change => "change",
+        EventType::KeyDown => "keydown",
+        EventType::KeyUp => "keyup",
     }
 }
 

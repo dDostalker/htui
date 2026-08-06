@@ -4,14 +4,15 @@
 //! The editing tests drive `apply_input_key` directly (no terminal, no event
 //! loop); the render tests draw a small document and assert on the canvas.
 
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use htui::events::EventBindings;
 use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
 use htui::script::ScriptEngine;
 use htui::tdom::node::{NodeArena, NodeId, NodeType};
 use htui::tui::graph_api::{
-    InputRenderState, TermLayout, apply_input_key, is_input_field_key, selection_range,
+    InputRenderState, TermLayout, apply_input_key, apply_input_word_key, collect_input_ids,
+    is_input_field_key, key_event_info, next_word_boundary, prev_word_boundary, selection_range,
 };
 use htui::tui::graph_api::Block;
 
@@ -417,4 +418,225 @@ fn engine_input_state_renders_value_and_caret() {
     assert_eq!(cell(1).fcolor, None);
     assert_eq!(cell(1).bcolor, None);
     assert_eq!(cell(2).bcolor, Some(crossterm::style::Color::White));
+}
+
+#[test]
+fn word_boundaries_match_browser_semantics() {
+    // `Ctrl`/`Alt`+←/→ word navigation: boundaries fall between word runs and
+    // non-word / whitespace runs (browser / vim `b` / `w` semantics).
+    let s = "hello brave new world";
+    assert_eq!(prev_word_boundary(s, 11), 6, "back to the previous word start");
+    assert_eq!(next_word_boundary(s, 0), 5, "forward to the next word end");
+    assert_eq!(
+        next_word_boundary(s, 5),
+        11,
+        "whitespace + the next word are covered in one step (browser semantics)"
+    );
+    assert_eq!(prev_word_boundary(s, 6), 0, "back over a leading word");
+
+    // Punctuation counts as a non-word run (a single boundary hop).
+    assert_eq!(prev_word_boundary("a,b", 2), 1, "stop before the comma");
+    assert_eq!(next_word_boundary("a,b", 0), 1, "stop after `a`");
+
+    // Clamping at the string ends.
+    assert_eq!(prev_word_boundary("ab", 0), 0);
+    assert_eq!(next_word_boundary("ab", 2), 2);
+    assert_eq!(prev_word_boundary("", 0), 0);
+    assert_eq!(next_word_boundary("", 0), 0);
+}
+
+#[test]
+fn apply_word_key_moves_caret_by_word() {
+    let mut value = String::from("hello brave new world");
+    let mut cursor = 0;
+    let mut anchor = None;
+
+    // Ctrl+Right jumps to the end of the next word.
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Right,
+        KeyModifiers::CONTROL,
+    ));
+    assert_eq!(cursor, 5);
+    // Ctrl+Left returns to the previous word start.
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Left,
+        KeyModifiers::CONTROL,
+    ));
+    assert_eq!(cursor, 0);
+    // Alt+Left is accepted as a word move too (mac muscle memory).
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Right,
+        KeyModifiers::ALT,
+    ));
+    assert_eq!(cursor, 5);
+    // Boundary no-ops report `false` (caret already at the start).
+    cursor = 0;
+    assert!(!apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Left,
+        KeyModifiers::ALT,
+    ));
+    assert_eq!(cursor, 0);
+}
+
+#[test]
+fn apply_word_key_deletes_by_word() {
+    // Ctrl+Backspace removes the word before the caret.
+    let mut value = String::from("hello world");
+    let mut cursor = 11;
+    let mut anchor = None;
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Backspace,
+        KeyModifiers::CONTROL,
+    ));
+    assert_eq!(value, "hello ");
+    assert_eq!(cursor, 6, "caret lands on the deleted word's start");
+
+    // Ctrl+Delete removes the word after the caret.
+    let mut value = String::from("hello world");
+    let mut cursor = 6;
+    let mut anchor = None;
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Delete,
+        KeyModifiers::CONTROL,
+    ));
+    assert_eq!(value, "hello ");
+    assert_eq!(cursor, 6);
+
+    // Ctrl+Home / Ctrl+End jump to the line edges (browser caret movement).
+    let mut value = String::from("abc def");
+    let mut cursor = 3;
+    let mut anchor = None;
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Home,
+        KeyModifiers::CONTROL,
+    ));
+    assert_eq!(cursor, 0);
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::End,
+        KeyModifiers::CONTROL,
+    ));
+    assert_eq!(cursor, 7);
+}
+
+#[test]
+fn apply_word_key_shift_extends_the_selection() {
+    // Shift+Ctrl+Right selects from the original caret to the next word end.
+    let mut value = String::from("hello brave");
+    let mut cursor = 0;
+    let mut anchor = None;
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Right,
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    ));
+    assert_eq!(cursor, 5);
+    assert_eq!(anchor, Some(0), "selection anchor stays at the start");
+
+    // A second word move extends the selection further: the whitespace run
+    // and the next word are covered in one step (browser semantics).
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Right,
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    ));
+    assert_eq!(cursor, 11);
+    assert_eq!(anchor, Some(0));
+
+    // A plain word move (no Shift) drops the selection.
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Left,
+        KeyModifiers::CONTROL,
+    ));
+    assert_eq!(anchor, None, "plain navigation clears the selection");
+}
+
+#[test]
+fn collect_input_ids_returns_document_order() {
+    init();
+    let (root_id, arena) = setup(
+        r#"<div><input id="first"><p><input id="second"><input id="third"></p></div>"#,
+    );
+    let ids = collect_input_ids(&arena);
+    let labels: Vec<&str> = ids
+        .iter()
+        .map(|&id| arena[id].attributes.get("id").map(String::as_str).unwrap_or("?"))
+        .collect();
+    assert_eq!(labels, vec!["first", "second", "third"], "Tab order follows DOM order");
+    assert!(ids.iter().all(|&id| id != root_id), "root is not an input");
+}
+
+#[test]
+fn key_event_info_maps_every_key_to_browser_fields() {
+    // The crossterm → `KeyEventInfo` conversion keeps the browser vocabulary:
+    // pages branch on the same `key` / `code` / `keyCode` strings as in a real
+    // browser.
+    let mut info = key_event_info(&KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+    assert_eq!(info.key, "a");
+    assert_eq!(info.code, "KeyA");
+    assert_eq!(info.key_code, 'a' as u32);
+    assert!(!info.ctrl && !info.shift && !info.alt && !info.meta && !info.repeat);
+
+    info = key_event_info(&KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    assert_eq!(info.key, " ");
+    assert_eq!(info.code, "Space");
+    assert_eq!(info.key_code, 32);
+
+    info = key_event_info(&KeyEvent::new(KeyCode::Char('5'), KeyModifiers::NONE));
+    assert_eq!(info.code, "Digit5");
+
+    info = key_event_info(&KeyEvent::new(KeyCode::Up, KeyModifiers::SHIFT));
+    assert_eq!(info.key, "ArrowUp");
+    assert_eq!(info.key_code, 38);
+    assert!(info.shift);
+
+    info = key_event_info(&KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!((info.key.as_str(), info.key_code), ("Enter", 13));
+
+    info = key_event_info(&KeyEvent::new(KeyCode::F(5), KeyModifiers::NONE));
+    assert_eq!((info.key.as_str(), info.code.as_str(), info.key_code), ("F5", "F5", 116));
+
+    info = key_event_info(&KeyEvent::new(KeyCode::Esc, KeyModifiers::CONTROL));
+    assert_eq!(info.key, "Escape");
+    assert!(info.ctrl);
+
+    // A repeated press is flagged for JS (`event.repeat`).
+    let ev = KeyEvent {
+        code: KeyCode::Char('x'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Repeat,
+        state: KeyEventState::empty(),
+    };
+    info = key_event_info(&ev);
+    assert!(info.repeat, "repeat presses must be visible to JS listeners");
 }

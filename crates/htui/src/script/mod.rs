@@ -36,7 +36,7 @@ use boa_engine::object::ObjectInitializer;
 use boa_engine::property::Attribute;
 
 use crate::{
-    events::{EventBindings, EventType, HitRegion, HtmlEvent},
+    events::{EventBindings, EventType, HitRegion, HtmlEvent, KeyEventInfo},
     html::html_parse::Parser,
     tdom::node::{NodeArena, NodeId},
     tui::graph_api::RenderCmd,
@@ -377,13 +377,57 @@ impl ScriptEngine {
         x: u32,
         y: u32,
     ) -> Vec<RenderCmd> {
+        self.dispatch(region, event_type, x, y, None).0
+    }
+
+    /// Dispatch a keyboard event ([`EventType::KeyDown`] / [`EventType::KeyUp`])
+    /// along the hit region's ancestor path.
+    ///
+    /// Like [`fire`](Self::fire) but attaches the [`KeyEventInfo`] payload so
+    /// JS listeners read `event.key` / `event.code` / `event.ctrlKey` / …;
+    /// coordinates are meaningless for keys and report `0, 0`.
+    pub fn fire_key(
+        &mut self,
+        region: &HitRegion,
+        event_type: EventType,
+        key: &KeyEventInfo,
+    ) -> Vec<RenderCmd> {
+        self.fire_key_gated(region, event_type, key).0
+    }
+
+    /// Gated variant of [`fire_key`](Self::fire_key): additionally reports
+    /// whether any listener on the bubbling path called `event.preventDefault()`,
+    /// so the input loop can skip the built-in shortcut for that key.
+    pub(crate) fn fire_key_gated(
+        &mut self,
+        region: &HitRegion,
+        event_type: EventType,
+        key: &KeyEventInfo,
+    ) -> (Vec<RenderCmd>, bool) {
+        self.dispatch(region, event_type, 0, 0, Some(key))
+    }
+
+    /// Shared dispatch core of [`fire`](Self::fire) and
+    /// [`fire_key`](Self::fire_key): build the JS event object (with keyboard
+    /// fields when `key` is set), walk `region.path` target-first firing every
+    /// registered listener, honouring `stopPropagation()`. Returns any render
+    /// commands pushed by host functions during the dispatch, plus whether a
+    /// listener called `event.preventDefault()`.
+    fn dispatch(
+        &mut self,
+        region: &HitRegion,
+        event_type: EventType,
+        x: u32,
+        y: u32,
+        key: Option<&KeyEventInfo>,
+    ) -> (Vec<RenderCmd>, bool) {
         let target_id = region.path.first().and_then(|e| e.id.clone());
 
-        let event = match self.build_event_object(event_type, &region.path, x, y) {
+        let event = match self.build_event_object(event_type, &region.path, x, y, key) {
             Ok(e) => e,
             Err(e) => {
                 log::warn!("Failed to build JS event object: {e}");
-                return Vec::new();
+                return (Vec::new(), false);
             }
         };
 
@@ -396,6 +440,7 @@ impl ScriptEngine {
                 x,
                 y,
                 bubbles: true,
+                key: key.cloned(),
             });
         }
 
@@ -444,11 +489,18 @@ impl ScriptEngine {
             }
         }
 
+        // Any listener may have called `preventDefault()` — the input loop
+        // reads this verdict to decide whether the built-in shortcut runs.
+        let prevented = event
+            .as_object()
+            .and_then(|obj| obj.get(js_string!("_prevented"), &mut self.context).ok())
+            .is_some_and(|v| v.is_boolean() && v.to_boolean());
+
         let mut st = self.state.borrow_mut();
         st.current_event = None;
         let cmds = std::mem::take(&mut st.render_cmds);
         drop(st);
-        self.intercept_render_html(cmds)
+        (self.intercept_render_html(cmds), prevented)
     }
 
     /// Evaluate a JS snippet in the engine's global scope.
@@ -497,6 +549,7 @@ impl ScriptEngine {
         path: &[crate::events::ElementRef],
         x: u32,
         y: u32,
+        key: Option<&KeyEventInfo>,
     ) -> JsResult<JsValue> {
         let target = match path.first() {
             Some(el) => element_wrapper(&mut self.context, el.node_id)?,
@@ -510,6 +563,8 @@ impl ScriptEngine {
             EventType::Blur => "blur",
             EventType::Input => "input",
             EventType::Change => "change",
+            EventType::KeyDown => "keydown",
+            EventType::KeyUp => "keyup",
         };
 
         let mut init = ObjectInitializer::new(&mut self.context);
@@ -524,7 +579,23 @@ impl ScriptEngine {
                 false,
                 Attribute::WRITABLE | Attribute::NON_ENUMERABLE,
             )
-            .function(
+            .property(js_string!("defaultPrevented"), false, Attribute::all())
+            .property(
+                js_string!("_prevented"),
+                false,
+                Attribute::WRITABLE | Attribute::NON_ENUMERABLE,
+            );
+        if let Some(k) = key {
+            init.property(js_string!("key"), js_string!(k.key.as_str()), Attribute::all())
+                .property(js_string!("code"), js_string!(k.code.as_str()), Attribute::all())
+                .property(js_string!("keyCode"), k.key_code as f64, Attribute::all())
+                .property(js_string!("shiftKey"), k.shift, Attribute::all())
+                .property(js_string!("ctrlKey"), k.ctrl, Attribute::all())
+                .property(js_string!("altKey"), k.alt, Attribute::all())
+                .property(js_string!("metaKey"), k.meta, Attribute::all())
+                .property(js_string!("repeat"), k.repeat, Attribute::all());
+        }
+        init.function(
                 NativeFunction::from_fn_ptr(stop_propagation),
                 js_string!("stopPropagation"),
                 0,
@@ -568,8 +639,18 @@ fn timer_callback(context: &mut Context, id: u32) -> JsValue {
         .unwrap_or(JsValue::undefined())
 }
 
-/// `event.preventDefault()` — accepted for API parity, no default action exists.
-fn prevent_default(_this: &JsValue, _args: &[JsValue], _context: &mut Context) -> JsResult<JsValue> {
+/// `event.preventDefault()` — marks the event so the input loop can skip the
+/// built-in shortcut for that key (the verdict is echoed back in the script
+/// thread's response; the input loop waits for it before acting).
+fn prevent_default(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    if let Some(obj) = this.to_object(context).ok() {
+        for flag in ["_prevented", "defaultPrevented"] {
+            if let Err(e) = obj.set(js_string!(flag), true, false, context) {
+                log::warn!("Failed to mark event prevented: {e}");
+                break;
+            }
+        }
+    }
     Ok(JsValue::undefined())
 }
 
@@ -628,6 +709,8 @@ fn compile_attribute_listeners(
                     ("onblur", EventType::Blur),
                     ("oninput", EventType::Input),
                     ("onchange", EventType::Change),
+                    ("onkeydown", EventType::KeyDown),
+                    ("onkeyup", EventType::KeyUp),
                 ]
                 .iter()
                 .filter_map(|(attr, et)| n.attributes.get(*attr).cloned().map(|b| (b, *et)))

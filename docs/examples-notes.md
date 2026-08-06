@@ -9,16 +9,25 @@
 | ---- | ---- | ---- | ---- |
 | `visual_test/src/codex/` | Codex CLI 聊天界面 | `<input>` + Enter 提交（`change` 事件） | `cargo run -p visual_test -- codex` |
 | `visual_test/src/yazi/` + `yazi.rs` | Yazi 文件管理器 | 点击目录进入 / 点击文件选中 / `[ .. ]` 返回 | `cargo run -p visual_test -- yazi` |
-| `visual_test/src/snake/` + `snake.rs` | 贪吃蛇 | 点击方向按钮 + 150ms auto 驱动 | `cargo run -p visual_test -- snake` |
+| `visual_test/src/snake/` + `snake.rs` | 贪吃蛇 | 方向键 / WASD 转向 + `r` 重开（`<body onkeydown>`）+ 点击方向按钮 + 150ms auto 驱动 | `cargo run -p visual_test -- snake` |
 
 ## 记录的问题（按发现顺序）
 
-### 1.【事件系统】无 `<input>` 之外的键盘事件
+### 1.【已支持】`<input>` 之外的键盘事件（`keydown`/`keyup`）
 - **现象**：Yazi 想用 `j/k` / `↑↓` 移动选中、Snake 想用方向键转向——事件系统只支持
   `click` / `mouseover` / `mouseout` / `focus` / `blur` / `input` / `change`，键盘事件
   只会被聚焦的 `<input>` 消费（作为编辑输入），JS 侧拿不到"按键"。
-- **处理**：Yazi 用点击导航；Snake 用点击按钮转向。**未改库**。
-- **若要支持**：需要新增 `keydown` 事件类型 + 输入循环把非编辑键派发为 JS 事件。
+- **处理**：Yazi 用点击导航；Snake 用点击按钮转向。**当时未改库**。
+- **现状（已支持）**：新增 `keydown` / `keyup` 事件类型 + 输入循环把每次按键（含
+  auto-repeat）派发为 `keydown`（目标 = 聚焦 `<input>`，否则 `<body>`），事件对象
+  携带 `key`/`code`/`keyCode`/修饰键/`repeat`/`defaultPrevented`。`<body
+  onkeydown="...">` 或 `el.addEventListener('keydown', ...)` 即可实现 Yazi 的
+  `j/k` 导航、Snake 的方向键。**滚动/缩放/退出键带门控**：处理器调
+  `event.preventDefault()` 可丢弃对应内置动作（脚本线程忙时 8ms 超时回退内置，
+  解耦保证不破，见 `docs/browser-compat.md` §6.5.5）。**Snake 已升级为方向键/WASD
+  转向并对方向键 `preventDefault()`**——即使终端超高也不再滚动页面
+  （`visual_test/src/snake/index.html`）；Yazi 保持点击导航（其 `j/k` 由页面自行
+  绑定并对 `j`/`k` `preventDefault()` 即可同时取消内置滚动）。
 
 ### 2.【`<input>` 语义】编辑中 `el.value` 读取滞后
 - **现象**：`input` 事件每击键都触发，但 DOM `value` 属性只在**提交**（blur / Enter）时
@@ -59,7 +68,8 @@
 
 ## 若要"改库"才能更接近原版（待办）
 
-1. 非输入键盘事件（`keydown`）→ 解锁 Yazi 键盘导航、Snake 方向键。
+1. ~~非输入键盘事件（`keydown`）→ 解锁 Yazi 键盘导航、Snake 方向键~~ ✅ 已支持
+   （`events/mod.rs` + `script/msg.rs` + `tui/graph_api/input.rs`）。
 2. `Input` 事件携带当前编辑值 → 解锁"输入框实时命令"。
 3. `el.focus()` / 提交后保持焦点 → Codex 连续对话体验。
 4. `dblclick` → Yazi 经典"单击选中、双击进入"。

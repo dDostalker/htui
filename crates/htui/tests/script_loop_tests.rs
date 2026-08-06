@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use htui::events::{EventBindings, Geometry, HitMap, HoverState};
+use htui::events::{EventBindings, Geometry, HitMap, HoverState, KeyEventInfo};
 use htui::layout::layout::TermMap;
 use htui::layout::{BoxConstraint, Cursor, layout_tree};
 use htui::script::{ScriptEngine, ScriptMsg, ScriptResponse, apply_message, run_script_thread};
@@ -74,6 +74,280 @@ fn apply_message_click_fires_the_matching_listener() {
     let ev = apply_message(&mut engine, &mut hover, &map, ScriptMsg::Click { x, y });
     assert_eq!(*calls.lock().unwrap(), 1, "click must call the host function");
     assert_eq!(ev.hovered, Some(region.node_id), "click syncs the hover target");
+}
+
+#[test]
+fn apply_message_keydown_fires_body_listener_with_browser_fields() {
+    // A keydown with no focused field targets the document `<body>` (the
+    // browser's fallback target); the JS event object carries the
+    // browser-style keyboard fields (`key` / `code` / `keyCode` / modifiers).
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var seen = [];
+          globalThis.__seen = seen;
+        </script>
+        <body onkeydown="seen.push(event.type+':'+event.key+':'+event.code+':'+event.keyCode+(event.ctrlKey?':ctrl':'')+(event.shiftKey?':shift':'')+(event.repeat?':rep':''))">
+          <div id="a">A</div>
+        </body>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let mut hover = HoverState::new();
+    let ev = apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::KeyDown {
+            key_id: 1,
+            target: None,
+            key: KeyEventInfo {
+                key: "ArrowUp".into(),
+                code: "ArrowUp".into(),
+                key_code: 38,
+                shift: true,
+                repeat: true,
+                ..Default::default()
+            },
+        },
+    );
+    assert!(ev.dirty.is_none(), "a plain key dispatch mutates nothing");
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.__seen.join(','))",),
+        "keydown:ArrowUp:ArrowUp:38:shift:rep",
+        "keydown must reach the body handler with the full keyboard payload"
+    );
+}
+
+#[test]
+fn apply_message_keydown_targets_focused_input_and_bubbles_to_ancestors() {
+    // A keydown targeting a focused `<input>` fires the field's handler first,
+    // then bubbles up the DOM ancestor chain (browser key event propagation).
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var seen = [];
+          globalThis.__seen = seen;
+        </script>
+        <div id="wrap" onkeydown="seen.push('wrap:'+event.key)">
+          <input id="inp" onkeydown="seen.push('inp:'+event.key)">
+        </div>"#,
+        EventBindings::default(),
+    );
+    let input_id = find_node_by_id(&engine.arena(), "inp");
+    let map = HitMap::build(&geo);
+    let mut hover = HoverState::new();
+    apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::KeyDown {
+            key_id: 2,
+            target: Some(input_id),
+            key: KeyEventInfo {
+                key: "Enter".into(),
+                code: "Enter".into(),
+                key_code: 13,
+                ..Default::default()
+            },
+        },
+    );
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.__seen.join(','))",),
+        "inp:Enter,wrap:Enter",
+        "target fires before its ancestors (bubbling)"
+    );
+}
+
+#[test]
+fn apply_message_keydown_falls_back_to_body_for_removed_target() {
+    // A keydown targeted at a node the JS side removed must not panic: the
+    // dispatch falls back to the body handler, exactly like a stale focus
+    // reference in the input loop.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var seen = [];
+          globalThis.__seen = seen;
+        </script>
+        <body onkeydown="seen.push('body:'+event.key)"><div id="a">A</div></body>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let mut hover = HoverState::new();
+    // `NodeId::default()` is the null slotmap key — never present in the arena.
+    let ev = apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::KeyDown {
+            key_id: 3,
+            target: Some(NodeId::default()),
+            key: KeyEventInfo {
+                key: "F5".into(),
+                code: "F5".into(),
+                key_code: 116,
+                ..Default::default()
+            },
+        },
+    );
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.__seen.join(','))",),
+        "body:F5",
+        "stale target must degrade to the body handler without panicking"
+    );
+    assert!(ev.dirty.is_none());
+}
+
+#[test]
+fn apply_message_keyup_fires_the_keyup_listener() {
+    // `keyup` dispatches with the same targeting and a `type` of `keyup`.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var seen = [];
+          globalThis.__seen = seen;
+        </script>
+        <body onkeyup="seen.push(event.type+':'+event.key)"><div id="a">A</div></body>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let mut hover = HoverState::new();
+    apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::KeyUp {
+            target: None,
+            key: KeyEventInfo {
+                key: "Backspace".into(),
+                code: "Backspace".into(),
+                key_code: 8,
+                ..Default::default()
+            },
+        },
+    );
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.__seen.join(','))",),
+        "keyup:Backspace",
+        "keyup must reach the body handler"
+    );
+}
+
+#[test]
+fn apply_message_keydown_handler_can_mutate_dom_and_report_dirty() {
+    // A keydown handler is real JS: it can rewrite the DOM and the response
+    // reports the mutated nodes for a `RenderArena` — the same contract as
+    // mouse / form handlers.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          globalThis.__seen = [];
+        </script>
+        <body onkeydown="document.getElementById('a').textContent = 'x'"><div id="a">A</div></body>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let mut hover = HoverState::new();
+    let ev = apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::KeyDown {
+            key_id: 4,
+            target: None,
+            key: KeyEventInfo {
+                key: "Space".into(),
+                code: "Space".into(),
+                key_code: 32,
+                ..Default::default()
+            },
+        },
+    );
+    let dirty = ev.dirty.expect("keydown DOM mutation must be reported");
+    assert!(
+        dirty.dirty.nodes.iter().any(|&id| {
+            dirty.arena.get(id).is_some_and(|n| n.attributes.get("id").map(String::as_str) == Some("a"))
+        }),
+        "the mutated node must appear in the dirty set"
+    );
+}
+
+#[test]
+fn apply_message_keydown_prevent_default_is_reported_in_the_gate() {
+    // A keydown handler that calls `event.preventDefault()` must make the
+    // gate verdict report `prevented = true` (echoing the key id), so the
+    // input loop skips the built-in shortcut (scroll / zoom / quit) and the
+    // page owns that key.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var seen = [];
+          globalThis.__seen = seen;
+        </script>
+        <body onkeydown="event.preventDefault(); seen.push(event.defaultPrevented ? 'pd' : 'no')">
+          <div id="a">A</div>
+        </body>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let mut hover = HoverState::new();
+    let ev = apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::KeyDown {
+            key_id: 42,
+            target: None,
+            key: KeyEventInfo {
+                key: "ArrowUp".into(),
+                code: "ArrowUp".into(),
+                key_code: 38,
+                ..Default::default()
+            },
+        },
+    );
+    assert_eq!(
+        ev.key_gate,
+        Some((42, true)),
+        "preventDefault must be echoed with the matching key id"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.__seen.join(','))"),
+        "pd",
+        "defaultPrevented must read back true inside the handler"
+    );
+}
+
+#[test]
+fn apply_message_keydown_without_prevent_default_reports_clear_verdict() {
+    // Without any listener calling `preventDefault()` the gate reports a clear
+    // verdict (`prevented = false`), so the built-in shortcut runs normally.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var seen = [];
+          globalThis.__seen = seen;
+        </script>
+        <body onkeydown="seen.push('ran')"><div id="a">A</div></body>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let mut hover = HoverState::new();
+    let ev = apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::KeyDown {
+            key_id: 7,
+            target: None,
+            key: KeyEventInfo {
+                key: "j".into(),
+                code: "KeyJ".into(),
+                key_code: 106,
+                ..Default::default()
+            },
+        },
+    );
+    assert_eq!(
+        ev.key_gate,
+        Some((7, false)),
+        "an unprevented keydown clears the gate for the built-in action"
+    );
+    assert_eq!(eval_str(&mut engine, "String(globalThis.__seen.join(','))"), "ran");
 }
 
 #[test]

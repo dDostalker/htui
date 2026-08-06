@@ -83,6 +83,46 @@ pub enum EventType {
     /// Fired when a field's value is committed (on blur / Enter) and differs
     /// from the value it had when it gained focus (`onchange`).
     Change,
+    /// Fired when a key is pressed (`onkeydown`). Dispatched to the focused
+    /// `<input>` (or the document root when none) and bubbles along the DOM
+    /// ancestor chain. Built-in shortcuts (scrolling / zoom / quit) run on the
+    /// input loop before this event reaches scripts; `preventDefault()` is
+    /// accepted for parity but cannot cancel them yet (see the plan in
+    /// `docs/browser-compat.md` §6.5.5).
+    KeyDown,
+    /// Fired when a key is released (`onkeyup`). Only emitted by terminals
+    /// that report key releases (kitty keyboard protocol / Windows console
+    /// mode); the dispatch target matches [`EventType::KeyDown`].
+    KeyUp,
+}
+
+/// Terminal-agnostic keyboard payload carried by [`EventType::KeyDown`] /
+/// [`EventType::KeyUp`], converted from a crossterm `KeyEvent` on the input
+/// loop so the script layer stays independent of the terminal event source.
+/// Field values mirror the browser `KeyboardEvent` shape (`key` / `code` /
+/// `keyCode` + modifier flags), so JS listeners can branch on the same strings
+/// they would in a real browser.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct KeyEventInfo {
+    /// `event.key` — the printed character (`"a"`, `" "`, `"A"`) or a named
+    /// key (`"Enter"`, `"ArrowUp"`, `"F5"`, `"Escape"`, …).
+    pub key: String,
+    /// `event.code` — the physical key (`"KeyA"`, `"Space"`, `"ArrowUp"`,
+    /// `"Enter"`, `"F5"`, …); independent of the active layout / modifiers.
+    pub code: String,
+    /// Browser-style numeric key code (`13` for Enter, `32` for Space,
+    /// `112..123` for F1..F12, …). `0` when no DOM equivalent exists.
+    pub key_code: u32,
+    /// `event.shiftKey`.
+    pub shift: bool,
+    /// `event.ctrlKey`.
+    pub ctrl: bool,
+    /// `event.altKey`.
+    pub alt: bool,
+    /// `event.metaKey` (Super / Command / Windows key).
+    pub meta: bool,
+    /// `event.repeat` — whether this is an auto-repeated press.
+    pub repeat: bool,
 }
 
 /// One element on a bubbling path (target first, then its ancestors).
@@ -113,6 +153,9 @@ pub struct HtmlEvent {
     pub y: u32,
     /// Always `true` — bubbling is the only supported propagation model.
     pub bubbles: bool,
+    /// Keyboard payload for [`EventType::KeyDown`] / [`EventType::KeyUp`];
+    /// `None` for pointer / form events.
+    pub key: Option<KeyEventInfo>,
 }
 
 /// Application bindings for the script engine.

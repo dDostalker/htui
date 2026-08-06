@@ -16,10 +16,10 @@
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 
-use crate::events::{ElementRef, EventBindings, EventType, HitMap, HitRegion, HoverState, interaction};
+use crate::events::{ElementRef, EventBindings, EventType, HitMap, HitRegion, HoverState, KeyEventInfo, interaction};
 use crate::layout::Rect;
 use crate::script::ScriptEngine;
-use crate::tdom::node::{NodeArena, NodeId};
+use crate::tdom::node::{NodeArena, NodeId, NodeType};
 use crate::tui::graph_api::{DirtyInfo, RenderCmd};
 
 /// An action the input loop hands to the script thread.
@@ -43,6 +43,17 @@ pub enum ScriptMsg {
     /// A `<select>` option was picked: `set_value_dirty` + fire `change` when
     /// the value actually changed.
     SelectPick { node_id: NodeId, value: String },
+    /// A key was pressed (`KeyDown`). `target` is the focused `<input>` node
+    /// (the browser's key event target); `None` means the document `<body>`.
+    /// `key_id` correlates the response back to the input loop's gate wait, so
+    /// a JS `preventDefault()` can cancel the built-in shortcut for this key.
+    KeyDown {
+        key_id: u32,
+        target: Option<NodeId>,
+        key: KeyEventInfo,
+    },
+    /// A key was released (`KeyUp`); same target semantics as `KeyDown`.
+    KeyUp { target: Option<NodeId>, key: KeyEventInfo },
     /// Shut the script thread down.
     Quit,
 }
@@ -67,6 +78,10 @@ pub struct ScriptEvent {
     pub dirty: Option<ScriptDirty>,
     /// Current hover target after processing (feeds `RenderArena.hovered`).
     pub hovered: Option<NodeId>,
+    /// Non-`None` only when the message was a gated `KeyDown`: the echoed
+    /// `key_id` plus whether a JS listener called `preventDefault()` (the
+    /// input loop uses the pair to decide whether the built-in shortcut runs).
+    pub key_gate: Option<(u32, bool)>,
 }
 
 /// One-shot or per-message reply from the script thread.
@@ -91,16 +106,16 @@ pub fn apply_message(
     hit_map: &HitMap,
     msg: ScriptMsg,
 ) -> ScriptEvent {
-    let cmds = match &msg {
-        ScriptMsg::Move { x, y } => interaction::on_move(hover, hit_map, engine, *x, *y),
-        ScriptMsg::Click { x, y } => interaction::on_click(hover, hit_map, engine, *x, *y),
+    let (cmds, key_gate) = match &msg {
+        ScriptMsg::Move { x, y } => (interaction::on_move(hover, hit_map, engine, *x, *y), None),
+        ScriptMsg::Click { x, y } => (interaction::on_click(hover, hit_map, engine, *x, *y), None),
         ScriptMsg::FocusInput { node_id } => {
             let region = region_for(&engine.arena(), *node_id);
-            engine.fire(&region, EventType::Focus, 0, 0)
+            (engine.fire(&region, EventType::Focus, 0, 0), None)
         }
         ScriptMsg::InputKeystroke { node_id } => {
             let region = region_for(&engine.arena(), *node_id);
-            engine.fire(&region, EventType::Input, 0, 0)
+            (engine.fire(&region, EventType::Input, 0, 0), None)
         }
         ScriptMsg::BlurInput { node_id, value } => {
             let arena = engine.arena();
@@ -115,7 +130,7 @@ pub fn apply_message(
             if old != *value {
                 cmds.extend(engine.fire(&region, EventType::Change, 0, 0));
             }
-            cmds
+            (cmds, None)
         }
         ScriptMsg::SelectPick { node_id, value } => {
             let arena = engine.arena();
@@ -127,12 +142,21 @@ pub fn apply_message(
             if old != *value {
                 engine.set_value_dirty(*node_id, value);
                 let region = region_for(&engine.arena(), *node_id);
-                engine.fire(&region, EventType::Change, 0, 0)
+                (engine.fire(&region, EventType::Change, 0, 0), None)
             } else {
-                Vec::new()
+                (Vec::new(), None)
             }
         }
-        ScriptMsg::Quit => Vec::new(),
+        ScriptMsg::KeyDown { key_id, target, key } => {
+            let region = key_region(engine, *target);
+            let (cmds, prevented) = engine.fire_key_gated(&region, EventType::KeyDown, key);
+            (cmds, Some((*key_id, prevented)))
+        }
+        ScriptMsg::KeyUp { target, key } => {
+            let region = key_region(engine, *target);
+            (engine.fire_key(&region, EventType::KeyUp, key), None)
+        }
+        ScriptMsg::Quit => (Vec::new(), None),
     };
 
     let dirty = {
@@ -148,7 +172,12 @@ pub fn apply_message(
         }
     };
     let hovered = hover.current().map(|r| r.node_id);
-    ScriptEvent { cmds, dirty, hovered }
+    ScriptEvent {
+        cmds,
+        dirty,
+        hovered,
+        key_gate,
+    }
 }
 
 /// Drive a [`ScriptEngine`] on a dedicated thread.
@@ -221,6 +250,7 @@ pub fn run_script_thread(
                 cmds: Vec::new(),
                 dirty: None,
                 hovered: hover.current().map(|r| r.node_id),
+                key_gate: None,
             },
         };
 
@@ -252,6 +282,24 @@ pub fn run_script_thread(
         }
     }
     log::debug!("Script thread exiting");
+}
+
+/// Build the hit region a keyboard event targets: the focused `<input>` when
+/// it still exists in the live arena (JS may have removed it since the input
+/// loop's snapshot), otherwise the document `<body>` — the browser's fallback
+/// for key events with no focused element, so a `<body onkeydown>` handler
+/// catches every key the page does not intercept.
+pub(crate) fn key_region(engine: &ScriptEngine, target: Option<NodeId>) -> HitRegion {
+    let arena = engine.arena();
+    let id = match target {
+        Some(id) if arena.contains_key(id) => id,
+        _ => arena
+            .iter()
+            .find(|(_, n)| n.node_type == NodeType::Body)
+            .map(|(id, _)| id)
+            .unwrap_or_else(|| engine.root_id()),
+    };
+    region_for(&arena, id)
 }
 
 /// Build a minimal hit region for `node_id` (no geometry) so the script

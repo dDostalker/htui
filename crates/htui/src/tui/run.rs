@@ -9,7 +9,7 @@
 use std::io::{BufWriter, Write, stdout};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::mpsc;
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
 use crossterm::{
@@ -32,8 +32,8 @@ use crate::{
     script::{ScriptMsg, ScriptResponse, run_script_thread},
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{
-        Block, DirtyInfo, FontStyle, InputRenderState, InputState, RenderCmd, SelectionMode,
-        TermLayout, char_width, trigger_refresh,
+        Block, DirtyInfo, FontStyle, InputRenderState, InputState, KEY_GATE_TIMEOUT, RenderCmd,
+        SelectionMode, TermLayout, char_width, trigger_refresh,
     },
 };
 
@@ -1206,6 +1206,32 @@ fn hit_test_thread(rx: mpsc::Receiver<Arc<Geometry>>, hit_map: Arc<Mutex<Arc<Hit
     log::debug!("Hit-test thread exiting");
 }
 
+/// Fold one `ScriptResponse::Event` into the current frame: hover updates,
+/// host-pushed render commands, and — when JS mutated the DOM — a fresh arena
+/// snapshot + dirty set forwarded as a (region-repaint) `RenderArena`.
+/// Shared by the key-gate wait and the ordinary async reply fold.
+fn fold_script_event(
+    state: &InputState,
+    cmds: &mut Vec<RenderCmd>,
+    hovered: &mut Option<NodeId>,
+    live_dom: &mut Option<(Arc<NodeArena>, NodeId)>,
+    ev: crate::script::ScriptEvent,
+) {
+    *hovered = ev.hovered;
+    cmds.extend(ev.cmds);
+    if let Some(d) = ev.dirty {
+        *live_dom = Some((Arc::clone(&d.arena), d.root_id));
+        cmds.push(RenderCmd::RenderArena {
+            arena: d.arena,
+            root_id: d.root_id,
+            scroll_y: state.scroll_y,
+            zoom: state.zoom,
+            hovered: ev.hovered,
+            dirty: d.dirty,
+        });
+    }
+}
+
 // debug panic hook
 // this fun only used in debug to hook render panic
 pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
@@ -1401,25 +1427,59 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
             }
         }
 
+        // Gate a page-level built-in key (scroll / zoom / quit): the script
+        // thread's `keydown` response reports whether JS called
+        // `preventDefault()`. Clear verdict → the deferred commands are
+        // dropped (the page owns that key); no verdict within
+        // `KEY_GATE_TIMEOUT` → run the built-in anyway, so a busy or blocked
+        // script thread never stalls scrolling / quitting (decoupling). The
+        // wait also folds any responses that arrive meanwhile (hover, DOM
+        // mutations from key handlers).
+        if let Some(gate) = state.key_gate.take() {
+            let mut gate_cmds = gate.cmds;
+            let mut resolved = false;
+            while !resolved {
+                match script_out_rx.recv_timeout(KEY_GATE_TIMEOUT) {
+                    Ok(ScriptResponse::Event(ev)) => {
+                        let verdict = ev.key_gate.filter(|(id, _)| *id == gate.id);
+                        fold_script_event(&state, &mut cmds, &mut hovered, &mut live_dom, ev);
+                        if let Some((_, prevented)) = verdict {
+                            if !prevented {
+                                log::debug!(
+                                    "Key gate cleared for key id {} — applying built-in",
+                                    gate.id
+                                );
+                                cmds.extend(std::mem::take(&mut gate_cmds));
+                            }
+                            resolved = true;
+                        }
+                    }
+                    Ok(ScriptResponse::Ready { .. } | ScriptResponse::Failed(_)) => {
+                        log::error!("Unexpected one-shot script response during the key gate");
+                    }
+                    Err(RecvTimeoutError::Timeout) => {
+                        // Script thread busy / blocked in a host function:
+                        // fall back to the built-in so input stays responsive.
+                        log::debug!("Key gate timed out for key id {} — running built-in", gate.id);
+                        cmds.extend(std::mem::take(&mut gate_cmds));
+                        resolved = true;
+                    }
+                    Err(RecvTimeoutError::Disconnected) => {
+                        log::error!("Script thread disconnected during the key gate");
+                        cmds.extend(std::mem::take(&mut gate_cmds));
+                        resolved = true;
+                    }
+                }
+            }
+        }
+
         // Fold the script thread's replies into this frame: render commands
         // pushed by host functions, hover updates, and — when JS mutated the
         // DOM — a fresh arena snapshot + dirty set for a (region) repaint.
         for resp in script_out_rx.try_iter() {
             match resp {
                 ScriptResponse::Event(ev) => {
-                    hovered = ev.hovered;
-                    cmds.extend(ev.cmds);
-                    if let Some(d) = ev.dirty {
-                        live_dom = Some((Arc::clone(&d.arena), d.root_id));
-                        cmds.push(RenderCmd::RenderArena {
-                            arena: d.arena,
-                            root_id: d.root_id,
-                            scroll_y: state.scroll_y,
-                            zoom: state.zoom,
-                            hovered: ev.hovered,
-                            dirty: d.dirty,
-                        });
-                    }
+                    fold_script_event(&state, &mut cmds, &mut hovered, &mut live_dom, ev);
                 }
                 ScriptResponse::Ready { .. } | ScriptResponse::Failed(_) => {
                     log::error!("Unexpected one-shot script response in the input loop");

@@ -17,7 +17,7 @@
   #hint { color: #8b949e; margin-top: 1; }
 </style>
 </head>
-<body>
+<body onkeydown="onKey(event)">
   <div id="score">score: 1</div>
   <pre id="board"></pre>
   <div id="status"></div>
@@ -28,7 +28,7 @@
     <span class="btn" id="down">↓</span>
     <span class="btn" id="restart">restart</span>
   </div>
-  <div id="hint">click a direction button to steer · auto-advances every 150 ms · hit wall or self to restart</div>
+  <div id="hint">arrow keys / WASD to steer · r to restart · auto-advances every 150 ms · hit wall or self to restart</div>
 
   <script>
     // 20 × 14 grid; snake as a list of [row, col], head first.
@@ -56,7 +56,7 @@
       }
       if (cells.length === 0) {
         gameOver = true;
-        statusEl.textContent = 'you win! click restart';
+        statusEl.textContent = 'you win! press r or click restart';
         return;
       }
       food = cells[Math.floor(Math.random() * cells.length)];
@@ -88,7 +88,7 @@
       });
       if (hitWall || hitSelf) {
         gameOver = true;
-        statusEl.textContent = 'game over — click restart';
+        statusEl.textContent = 'game over — press r or click restart';
         paint();
         return;
       }
@@ -119,6 +119,22 @@
         grid.push(line);
       }
       boardEl.textContent = grid.join('\n');
+    }
+
+    // Keyboard steering: with no `<input>` focused, every keydown is
+    // dispatched to the document `<body>` (the `onkeydown` attribute above),
+    // carrying browser-style fields (`key` / `code` / modifiers / `repeat`).
+    // Arrow keys steer, WASD is an alias, `r` restarts. `preventDefault()`
+    // cancels the built-in page scroll for the direction keys, so steering
+    // never scrolls the page — even when the board overflows the terminal.
+    function onKey(e) {
+      var steerKey = false;
+      if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { turn('up'); steerKey = true; }
+      else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { turn('down'); steerKey = true; }
+      else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { turn('left'); steerKey = true; }
+      else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { turn('right'); steerKey = true; }
+      else if (e.key === 'r' || e.key === 'R') { reset(); paint(); }
+      if (steerKey) e.preventDefault();
     }
 
     document.getElementById('up').addEventListener('click', function () { turn('up'); });
