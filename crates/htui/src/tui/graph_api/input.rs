@@ -1,23 +1,129 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MediaKeyCode, ModifierKeyCode,
+    MouseButton, MouseEventKind,
+};
 
 use crate::{
-    events::interaction,
-    script::ScriptEngine,
+    events::KeyEventInfo,
+    script::ScriptMsg,
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::char_width,
 };
-use crate::events::{ElementRef, EventType, HitMap, HitRegion};
+use crate::events::HitMap;
 use crate::layout::layoutbox::geometry::{select_options, select_overlay_rect};
 use crate::layout::paint::value_window;
-use crate::layout::Rect;
 
 const SCROLL_LINES_PER_TICK: u32 = 3;
 const ZOOM_STEP: f32 = 0.1;
 const ZOOM_MIN: f32 = 0.2;
 const ZOOM_MAX: f32 = 5.0;
+
+/// Convert a crossterm `KeyEvent` into the terminal-agnostic payload the
+/// script layer dispatches as `keydown` / `keyup`, mirroring the browser
+/// `KeyboardEvent` fields (`key` / `code` / `keyCode` + modifier flags). Every
+/// `KeyCode` variant maps to a stable string so pages can branch on the same
+/// values they would in a real browser.
+pub fn key_event_info(ev: &KeyEvent) -> KeyEventInfo {
+    let (key, code, key_code): (String, String, u32) = match ev.code {
+        KeyCode::Backspace => ("Backspace".into(), "Backspace".into(), 8),
+        KeyCode::Enter => ("Enter".into(), "Enter".into(), 13),
+        KeyCode::Left => ("ArrowLeft".into(), "ArrowLeft".into(), 37),
+        KeyCode::Right => ("ArrowRight".into(), "ArrowRight".into(), 39),
+        KeyCode::Up => ("ArrowUp".into(), "ArrowUp".into(), 38),
+        KeyCode::Down => ("ArrowDown".into(), "ArrowDown".into(), 40),
+        KeyCode::Home => ("Home".into(), "Home".into(), 36),
+        KeyCode::End => ("End".into(), "End".into(), 35),
+        KeyCode::PageUp => ("PageUp".into(), "PageUp".into(), 33),
+        KeyCode::PageDown => ("PageDown".into(), "PageDown".into(), 34),
+        KeyCode::Tab | KeyCode::BackTab => ("Tab".into(), "Tab".into(), 9),
+        KeyCode::Delete => ("Delete".into(), "Delete".into(), 46),
+        KeyCode::Insert => ("Insert".into(), "Insert".into(), 45),
+        KeyCode::F(n) => (format!("F{n}"), format!("F{n}"), 111 + n as u32),
+        KeyCode::Char(c) => (c.to_string(), char_code(c), c as u32),
+        KeyCode::Null => ("Unidentified".into(), "Unidentified".into(), 0),
+        KeyCode::Esc => ("Escape".into(), "Escape".into(), 27),
+        KeyCode::CapsLock => ("CapsLock".into(), "CapsLock".into(), 20),
+        KeyCode::ScrollLock => ("ScrollLock".into(), "ScrollLock".into(), 145),
+        KeyCode::NumLock => ("NumLock".into(), "NumLock".into(), 144),
+        KeyCode::PrintScreen => ("PrintScreen".into(), "PrintScreen".into(), 44),
+        KeyCode::Pause => ("Pause".into(), "Pause".into(), 19),
+        KeyCode::Menu => ("ContextMenu".into(), "ContextMenu".into(), 93),
+        KeyCode::KeypadBegin => ("Unidentified".into(), "Unidentified".into(), 0),
+        KeyCode::Media(m) => media_key(m),
+        KeyCode::Modifier(m) => modifier_key(m),
+    };
+    KeyEventInfo {
+        key,
+        code,
+        key_code,
+        shift: ev.modifiers.contains(event::KeyModifiers::SHIFT),
+        ctrl: ev.modifiers.contains(event::KeyModifiers::CONTROL),
+        alt: ev.modifiers.contains(event::KeyModifiers::ALT),
+        meta: ev.modifiers.contains(event::KeyModifiers::SUPER)
+            || ev.modifiers.contains(event::KeyModifiers::HYPER)
+            || ev.modifiers.contains(event::KeyModifiers::META),
+        repeat: ev.kind == KeyEventKind::Repeat,
+    }
+}
+
+/// `event.code` for a character key: `KeyA`…`KeyZ`, `Digit0`…`Digit9`, `Space`
+/// and `Unidentified` for everything else (matching the DOM physical-key
+/// vocabulary).
+fn char_code(c: char) -> String {
+    if c.is_ascii_alphabetic() {
+        format!("Key{}", c.to_ascii_uppercase())
+    } else if c.is_ascii_digit() {
+        format!("Digit{c}")
+    } else if c == ' ' {
+        "Space".to_string()
+    } else {
+        "Unidentified".to_string()
+    }
+}
+
+/// `(key, code, keyCode)` for a crossterm media key.
+fn media_key(m: MediaKeyCode) -> (String, String, u32) {
+    let (k, c, code) = match m {
+        MediaKeyCode::Play | MediaKeyCode::PlayPause => ("MediaPlayPause", "MediaPlayPause", 179),
+        MediaKeyCode::Pause => ("Pause", "MediaPause", 179),
+        MediaKeyCode::Reverse => ("MediaReverse", "MediaReverse", 227),
+        MediaKeyCode::Stop => ("MediaStop", "MediaStop", 178),
+        MediaKeyCode::FastForward => ("MediaFastForward", "MediaFastForward", 228),
+        MediaKeyCode::Rewind => ("MediaRewind", "MediaRewind", 227),
+        MediaKeyCode::TrackNext => ("MediaTrackNext", "MediaTrackNext", 176),
+        MediaKeyCode::TrackPrevious => ("MediaTrackPrevious", "MediaTrackPrevious", 177),
+        MediaKeyCode::Record => ("MediaRecord", "MediaRecord", 0),
+        MediaKeyCode::LowerVolume => ("AudioVolumeDown", "AudioVolumeDown", 174),
+        MediaKeyCode::RaiseVolume => ("AudioVolumeUp", "AudioVolumeUp", 175),
+        MediaKeyCode::MuteVolume => ("AudioVolumeMute", "AudioVolumeMute", 173),
+    };
+    (k.into(), c.into(), code)
+}
+
+/// `(key, code, keyCode)` for a crossterm modifier-key press (only readable
+/// with the keyboard-enhancement flags enabled on the terminal).
+fn modifier_key(m: ModifierKeyCode) -> (String, String, u32) {
+    let (k, c, code) = match m {
+        ModifierKeyCode::LeftShift => ("Shift", "ShiftLeft", 16),
+        ModifierKeyCode::RightShift => ("Shift", "ShiftRight", 16),
+        ModifierKeyCode::LeftControl => ("Control", "ControlLeft", 17),
+        ModifierKeyCode::RightControl => ("Control", "ControlRight", 17),
+        ModifierKeyCode::LeftAlt => ("Alt", "AltLeft", 18),
+        ModifierKeyCode::RightAlt => ("Alt", "AltRight", 18),
+        ModifierKeyCode::LeftSuper => ("Meta", "MetaLeft", 91),
+        ModifierKeyCode::RightSuper => ("Meta", "MetaRight", 91),
+        ModifierKeyCode::LeftHyper => ("Hyper", "HyperLeft", 91),
+        ModifierKeyCode::RightHyper => ("Hyper", "HyperRight", 91),
+        ModifierKeyCode::LeftMeta => ("Meta", "MetaLeft", 91),
+        ModifierKeyCode::RightMeta => ("Meta", "MetaRight", 91),
+        ModifierKeyCode::IsoLevel3Shift => ("AltGraph", "AltGraph", 18),
+        ModifierKeyCode::IsoLevel5Shift => ("Unidentified", "Unidentified", 0),
+    };
+    (k.into(), c.into(), code)
+}
 
 /// Shape of the page text selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,9 +175,10 @@ pub enum RenderCmd {
         dirty: DirtyInfo,
     },
     /// Replace the session document with `html` and fully re-render it,
-    /// keeping the current scroll position / zoom. The render thread swaps
-    /// the document and diff-renders, so handlers can build dynamic content
-    /// (e.g. a counter that re-renders on every click).
+    /// keeping the current scroll position / zoom. Script-path uses are
+    /// intercepted by `ScriptEngine::reload` so the engine re-parses the
+    /// document (single source of truth); the render-thread branch only
+    /// handles direct API use / fallback.
     RenderHtml { html: Arc<str> },
     /// Re-style the cached document for the CSS `:hover` pseudo-class with the
     /// given session-local node (`None` clears any hover), then repaint. With
@@ -130,6 +237,27 @@ pub struct SelectOpenState {
     pub highlight: usize,
 }
 
+/// A page-level built-in action deferred pending its `keydown` gate verdict.
+///
+/// When the script layer is active, scroll / zoom / quit keys are dispatched
+/// to JS first; if a listener calls `event.preventDefault()` the deferred
+/// commands are dropped (the page owns that key), otherwise the input loop
+/// applies them. The wait is bounded by [`KEY_GATE_TIMEOUT`], so a busy or
+/// blocked script thread falls back to running the built-in action anyway.
+#[derive(Debug)]
+pub struct KeyGate {
+    /// Key id echoed by the script thread's `KeyDown` response (matching).
+    pub id: u32,
+    /// The built-in commands to apply when the gate clears.
+    pub cmds: Vec<RenderCmd>,
+}
+
+/// How long the input loop waits for the script thread's `keydown` verdict
+/// before falling back to the built-in shortcut. Sub-millisecond when the
+/// script thread is healthy; the bound keeps scrolling / quitting responsive
+/// even while a host function blocks the script thread.
+pub const KEY_GATE_TIMEOUT: Duration = Duration::from_millis(8);
+
 /// Input-loop state that persists between events.
 ///
 /// Groups the variables the input loop mutates (`scroll_y`, `zoom`) with the
@@ -144,8 +272,6 @@ pub struct InputState {
     /// Screen coordinates of the last left-button press; a click is only
     /// recognised when the release lands on the same cell.
     pub pressed: Option<(u16, u16)>,
-    /// Hover tracking state for mouse enter / leave detection.
-    pub hover: interaction::HoverState,
     /// The `<input>` node currently focused (receives typed characters).
     pub focused_input: Option<NodeId>,
     /// Edit buffer of the focused input; the DOM `value` attribute is the
@@ -179,6 +305,14 @@ pub struct InputState {
     /// clicks inside the overlay pick an option and clicks outside close it;
     /// `↑` / `↓` / `Enter` / `Esc` navigate it.
     pub open_select: Option<SelectOpenState>,
+    /// Monotonic id source for gated `keydown` dispatches; each press echoes
+    /// the id back in the script thread's response so the input loop can match
+    /// the gate verdict (`preventDefault`).
+    pub next_key_id: u32,
+    /// A page-level built-in action (scroll / zoom / quit) waiting for its
+    /// `keydown` gate verdict (`None` = no key pending). Set by
+    /// [`trigger_refresh`], consumed by the run loop after the wait.
+    pub key_gate: Option<KeyGate>,
 }
 
 impl InputState {
@@ -187,7 +321,6 @@ impl InputState {
             scroll_y: 0,
             zoom: 1.0,
             pressed: None,
-            hover: interaction::HoverState::new(),
             focused_input: None,
             input_value: String::new(),
             input_cursor: 0,
@@ -199,6 +332,8 @@ impl InputState {
             text_sel_mode: SelectionMode::Flow,
             selection_text: Arc::new(Mutex::new(String::new())),
             open_select: None,
+            next_key_id: 0,
+            key_gate: None,
         }
     }
 }
@@ -279,6 +414,157 @@ pub fn apply_input_key(value: &mut String, cursor: &mut usize, key: KeyCode) -> 
         }
         _ => false,
     }
+}
+
+/// Keys a focused `<input>` field owns. Editing / caret keys stay inside the
+/// field — even when they are boundary no-ops (Home at the start) — while
+/// everything else (page navigation like ↓ / ↑ / PageDown / PageUp, function
+/// keys) belongs to the page-level handler.
+pub fn is_input_field_key(code: KeyCode) -> bool {
+    matches!(
+        code,
+        KeyCode::Char(_)
+            | KeyCode::Backspace
+            | KeyCode::Delete
+            | KeyCode::Left
+            | KeyCode::Right
+            | KeyCode::Home
+            | KeyCode::End
+    )
+}
+
+/// Character index of the previous word boundary at or before `cursor`.
+///
+/// Whitespace runs are skipped, then one word (alphanumeric / underscore) or
+/// one run of other non-space characters — browser / vim `b` semantics. Used
+/// by `Ctrl`/`Alt`+`←` word navigation and `Ctrl`+`Backspace`.
+pub fn prev_word_boundary(value: &str, cursor: usize) -> usize {
+    let chars: Vec<char> = value.chars().collect();
+    let mut i = cursor.min(chars.len());
+    while i > 0 && chars[i - 1].is_whitespace() {
+        i -= 1;
+    }
+    if i > 0 && is_word_char(chars[i - 1]) {
+        while i > 0 && is_word_char(chars[i - 1]) {
+            i -= 1;
+        }
+    } else {
+        while i > 0 && !is_word_char(chars[i - 1]) && !chars[i - 1].is_whitespace() {
+            i -= 1;
+        }
+    }
+    i
+}
+
+/// Character index of the next word boundary at or after `cursor` (browser /
+/// vim `w` semantics).
+pub fn next_word_boundary(value: &str, cursor: usize) -> usize {
+    let chars: Vec<char> = value.chars().collect();
+    let mut i = cursor.min(chars.len());
+    while i < chars.len() && chars[i].is_whitespace() {
+        i += 1;
+    }
+    if i < chars.len() && is_word_char(chars[i]) {
+        while i < chars.len() && is_word_char(chars[i]) {
+            i += 1;
+        }
+    } else {
+        while i < chars.len() && !is_word_char(chars[i]) && !chars[i].is_whitespace() {
+            i += 1;
+        }
+    }
+    i
+}
+
+/// A word character: alphanumeric or underscore (`\w` without the locale
+/// quirks).
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// Apply a `Ctrl` / `Alt` word-level editing key to a field's edit state.
+///
+/// Handles word navigation (`Ctrl`/`Alt`+`←`/`→`, `Ctrl`+`Home`/`End`), word
+/// deletion (`Ctrl`+`Backspace` / `Ctrl`+`Delete`) and selection extension
+/// (`Shift` combined with the navigation keys). Returns `true` when the value
+/// or caret moved (the caller repaints the field); `false` for keys this
+/// helper does not own. Non-navigation word edits clear the selection, like
+/// plain typing.
+pub fn apply_input_word_key(
+    value: &mut String,
+    cursor: &mut usize,
+    sel_anchor: &mut Option<usize>,
+    key: KeyCode,
+    modifiers: KeyModifiers,
+) -> bool {
+    let ctrl = modifiers.contains(event::KeyModifiers::CONTROL);
+    let alt = modifiers.contains(event::KeyModifiers::ALT);
+    let shift = modifiers.contains(event::KeyModifiers::SHIFT);
+    if !ctrl && !alt {
+        return false;
+    }
+    let before = *cursor;
+    match key {
+        KeyCode::Left => {
+            *cursor = prev_word_boundary(value, *cursor);
+        }
+        KeyCode::Right => {
+            *cursor = next_word_boundary(value, *cursor);
+        }
+        KeyCode::Home => *cursor = 0,
+        KeyCode::End => *cursor = value.chars().count(),
+        KeyCode::Backspace if ctrl => {
+            let new_cursor = prev_word_boundary(value, *cursor);
+            let sb = char_to_byte(value, new_cursor);
+            let eb = char_to_byte(value, *cursor);
+            value.drain(sb..eb);
+            *cursor = new_cursor;
+            *sel_anchor = None;
+            return true;
+        }
+        KeyCode::Delete if ctrl => {
+            let end = next_word_boundary(value, *cursor);
+            let sb = char_to_byte(value, *cursor);
+            let eb = char_to_byte(value, end);
+            value.drain(sb..eb);
+            *sel_anchor = None;
+            return true;
+        }
+        _ => return false,
+    }
+    if *cursor != before {
+        if shift {
+            // Selection extends from the original caret position.
+            let anchor = sel_anchor.unwrap_or(before);
+            *sel_anchor = Some(anchor);
+        } else {
+            *sel_anchor = None;
+        }
+        true
+    } else {
+        false
+    }
+}
+
+/// All `<input>` node ids in document order (depth-first), for `Tab` /
+/// `Shift`+`Tab` focus cycling. Reads the input loop's DOM snapshot; a
+/// removed or not-yet-rendered field is simply not included.
+pub fn collect_input_ids(arena: &NodeArena) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    let Some(root) = arena.iter().find(|(_, n)| n.parent.is_none()).map(|(id, _)| id) else {
+        return out;
+    };
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        let node = &arena[id];
+        if node.node_type == NodeType::Input {
+            out.push(id);
+        }
+        for child in node.children.iter().rev() {
+            stack.push(*child);
+        }
+    }
+    out
 }
 
 /// Byte offset of the `char_idx`-th character (clamped to the end).
@@ -387,58 +673,15 @@ fn apply_shift_navigation(state: &mut InputState, key: KeyCode) -> bool {
     state.input_cursor != before
 }
 
-/// Build a minimal hit region for `node_id` (no geometry) so the input loop
-/// can fire focus / blur / input / change events along the DOM ancestor chain,
-/// exactly like a pointer-driven region from the hit map.
-fn region_for(arena: &NodeArena, node_id: NodeId) -> HitRegion {
-    let mut path = Vec::new();
-    let mut current = Some(node_id);
-    while let Some(id) = current {
-        let node = &arena[id];
-        path.push(ElementRef {
-            id: node.get_id().cloned(),
-            node_id: id,
-        });
-        current = node.parent;
-    }
-    HitRegion {
-        node_id,
-        rect: Rect::new(0, 0, 0, 0),
-        path,
-    }
-}
-
-/// Fire `blur` (+ `change` when the edited value differs from the committed
-/// DOM value) for `node_id`, committing `new_value` into the DOM first.
-/// Returns any render commands pushed by handlers.
-fn fire_blur_and_change(
-    engine: &mut ScriptEngine,
-    node_id: NodeId,
-    new_value: &str,
-) -> Vec<RenderCmd> {
-    let arena = engine.arena();
-    let old = arena
-        .get(node_id)
-        .and_then(|n| n.attributes.get("value"))
-        .cloned()
-        .unwrap_or_default();
-    engine.set_value(node_id, new_value);
-    let region = region_for(&arena, node_id);
-    let mut cmds = engine.fire(&region, EventType::Blur, 0, 0);
-    if old != new_value {
-        cmds.extend(engine.fire(&region, EventType::Change, 0, 0));
-    }
-    cmds
-}
-
 /// Focus `node_id` (an `<input>`), seeding the edit buffer from the DOM
 /// `value` attribute and repainting the previously focused field (if any).
-/// Fires `focus` on the newly focused field and `blur` / `change` on the
-/// previously focused one.
+/// Queues `focus` on the newly focused field and `blur` / `change` on the
+/// previously focused one as script messages.
 fn focus_input(
     state: &mut InputState,
     node_id: NodeId,
-    engine: &mut ScriptEngine,
+    arena: &NodeArena,
+    msgs: &mut Vec<ScriptMsg>,
     cmds: &mut Vec<RenderCmd>,
 ) {
     if state.focused_input == Some(node_id) {
@@ -447,7 +690,10 @@ fn focus_input(
     if let Some(prev) = state.focused_input.replace(node_id) {
         // Commit the previous field's edits back to the DOM before switching
         // focus, firing `blur` (+ `change` when the value differs).
-        cmds.extend(fire_blur_and_change(engine, prev, &state.input_value));
+        msgs.push(ScriptMsg::BlurInput {
+            node_id: prev,
+            value: state.input_value.clone(),
+        });
         state.input_sel_anchor = None;
         cmds.push(RenderCmd::RenderInput {
             node_id: prev,
@@ -457,8 +703,7 @@ fn focus_input(
             selection: None,
         });
     }
-    let value = engine
-        .arena()
+    let value = arena
         .get(node_id)
         .and_then(|n| n.attributes.get("value"))
         .cloned()
@@ -475,26 +720,26 @@ fn focus_input(
         selection: None,
     });
     // Fire `focus` on the newly focused field.
-    let region = region_for(&engine.arena(), node_id);
-    cmds.extend(engine.fire(&region, EventType::Focus, 0, 0));
+    msgs.push(ScriptMsg::FocusInput { node_id });
 }
 
 /// Blur the focused `<input>`: repaint it unfocused, commit the edited value
 /// back into the DOM (so a later focus or re-render sees it), and clear the
-/// edit session. `engine` is `None` in the no-event mode, where there is no
-/// live DOM to write back to.
+/// edit session. The commit and the `blur` / `change` events themselves run on
+/// the script thread via [`ScriptMsg::BlurInput`].
 fn blur_input(
     state: &mut InputState,
-    engine: Option<&mut ScriptEngine>,
+    msgs: &mut Vec<ScriptMsg>,
     cmds: &mut Vec<RenderCmd>,
 ) {
     let Some(focused) = state.focused_input.take() else {
         return;
     };
     state.input_sel_anchor = None;
-    if let Some(engine) = engine {
-        cmds.extend(fire_blur_and_change(engine, focused, &state.input_value));
-    }
+    msgs.push(ScriptMsg::BlurInput {
+        node_id: focused,
+        value: state.input_value.clone(),
+    });
     cmds.push(RenderCmd::RenderInput {
         node_id: focused,
         value: std::mem::take(&mut state.input_value),
@@ -519,35 +764,38 @@ fn push_input_render(state: &InputState, focused: NodeId, cmds: &mut Vec<RenderC
 
 /// Handle a completed left-button click at canvas coordinates `(x, y)`.
 ///
-/// Dispatches the `Click` event (via [`interaction::on_click`], which also
-/// syncs the hover state) and then applies the field-focus rule used by the
-/// input loop: a click on an `<input>` focuses it (blurring the previously
-/// focused field), any other click blurs the focused field. Render commands
-/// are appended to `cmds` in dispatch order.
+/// Queues the `Click` dispatch (the script thread runs it via
+/// [`interaction::on_click`], which also syncs the hover state) and then
+/// applies the field-focus rule used by the input loop: a click on an
+/// `<input>` focuses it (blurring the previously focused field), any other
+/// click blurs the focused field. `arena` is the input loop's latest DOM
+/// snapshot for the read-only node-type / value lookups; everything that
+/// needs the engine is collected into `msgs` for the script thread. Local
+/// render commands are appended to `cmds` in dispatch order.
 pub fn handle_click(
     state: &mut InputState,
     hit_map: &HitMap,
-    engine: &mut ScriptEngine,
+    arena: &NodeArena,
     x: u32,
     y: u32,
+    msgs: &mut Vec<ScriptMsg>,
     cmds: &mut Vec<RenderCmd>,
 ) {
-    cmds.extend(interaction::on_click(&mut state.hover, hit_map, engine, x, y));
+    msgs.push(ScriptMsg::Click { x, y });
     // Clicking an `<input>` focuses it; any other click blurs the previously
     // focused field.
     let clicked = hit_map.hit_test(x, y);
     let clicked_input = clicked.is_some_and(|r| {
-        engine
-            .arena()
+        arena
             .get(r.node_id)
             .is_some_and(|n| n.node_type == NodeType::Input)
     });
     if clicked_input {
         if let Some(node_id) = clicked.map(|r| r.node_id) {
-            focus_input(state, node_id, engine, cmds);
+            focus_input(state, node_id, arena, msgs, cmds);
         }
     } else if state.focused_input.is_some() {
-        blur_input(state, Some(engine), cmds);
+        blur_input(state, msgs, cmds);
     }
 }
 
@@ -608,15 +856,14 @@ fn hit_select_option(open: &SelectOpenState, x: u32, y: u32) -> Option<usize> {
 fn open_select(
     state: &mut InputState,
     hit_map: &HitMap,
-    engine: &ScriptEngine,
+    arena: &NodeArena,
     node_id: NodeId,
     cmds: &mut Vec<RenderCmd>,
 ) {
     let Some(region) = hit_map.iter().find(|r| r.node_id == node_id) else {
         return;
     };
-    let arena = engine.arena();
-    let options = select_options(&arena, node_id);
+    let options = select_options(arena, node_id);
     let value = arena
         .get(node_id)
         .and_then(|n| n.attributes.get("value"))
@@ -638,14 +885,15 @@ fn open_select(
 }
 
 /// Close the open `<select>` dropdown. When `pick` is `Some`, the option is
-/// selected: its value is committed to the DOM (`set_value_dirty`), a
-/// `change` event fires when the value actually changed, and a re-render
-/// repaints the new label. `pick: None` just closes without changing the
-/// value.
+/// selected: its value is committed to the DOM (`set_value_dirty`) and a
+/// `change` event fires when the value actually changed; the commit + event
+/// run on the script thread via [`ScriptMsg::SelectPick`]. `pick: None` just
+/// closes without changing the value.
 fn close_select(
     state: &mut InputState,
-    engine: &mut ScriptEngine,
+    arena: &NodeArena,
     pick: Option<usize>,
+    msgs: &mut Vec<ScriptMsg>,
     cmds: &mut Vec<RenderCmd>,
 ) {
     let Some(open) = state.open_select.take() else {
@@ -657,16 +905,16 @@ fn close_select(
     if let Some(idx) = pick {
         if idx < open.options.len() {
             let value = open.options[idx].0.clone();
-            let old = engine
-                .arena()
+            let old = arena
                 .get(open.node_id)
                 .and_then(|n| n.attributes.get("value"))
                 .cloned()
                 .unwrap_or_default();
             if value != old {
-                engine.set_value_dirty(open.node_id, &value);
-                let region = region_for(&engine.arena(), open.node_id);
-                cmds.extend(engine.fire(&region, EventType::Change, 0, 0));
+                msgs.push(ScriptMsg::SelectPick {
+                    node_id: open.node_id,
+                    value,
+                });
             }
         }
     }
@@ -678,15 +926,18 @@ fn close_select(
 /// (blurring any previously focused field) and positions the caret at the
 /// press point, entering drag-selection mode; a press anywhere else blurs the
 /// focused field and starts a page text selection (the anchor for the drag).
-/// Any prior page selection is cleared. Render commands are appended to `cmds`
-/// in dispatch order.
+/// Any prior page selection is cleared. `arena` is the input loop's latest DOM
+/// snapshot; everything that needs the engine is collected into `msgs` for the
+/// script thread. Local render commands are appended to `cmds` in dispatch
+/// order.
 pub fn handle_mouse_down(
     state: &mut InputState,
     hit_map: &HitMap,
-    engine: &mut ScriptEngine,
+    arena: &NodeArena,
     x: u32,
     y: u32,
     button: MouseButton,
+    msgs: &mut Vec<ScriptMsg>,
     cmds: &mut Vec<RenderCmd>,
 ) {
     let clicked = hit_map.hit_test(x, y);
@@ -696,19 +947,18 @@ pub fn handle_mouse_down(
     // then falls through to the normal dispatch.
     if let Some(open) = state.open_select.clone() {
         if let Some(idx) = hit_select_option(&open, x, y) {
-            close_select(state, engine, Some(idx), cmds);
+            close_select(state, arena, Some(idx), msgs, cmds);
             return;
         }
         let clicked_self = clicked.is_some_and(|r| r.node_id == open.node_id);
-        close_select(state, engine, None, cmds);
+        close_select(state, arena, None, msgs, cmds);
         if clicked_self {
             return;
         }
     }
 
     let clicked_input = clicked.is_some_and(|r| {
-        engine
-            .arena()
+        arena
             .get(r.node_id)
             .is_some_and(|n| n.node_type == NodeType::Input)
     });
@@ -716,7 +966,7 @@ pub fn handle_mouse_down(
         MouseButton::Left => {
             if clicked_input {
                 if let Some(node_id) = clicked.map(|r| r.node_id) {
-                    focus_input(state, node_id, engine, cmds);
+                    focus_input(state, node_id, arena, msgs, cmds);
                     state.drag_selecting = true;
                     // Position the caret (and the selection anchor) at the press
                     // point within the field.
@@ -738,7 +988,7 @@ pub fn handle_mouse_down(
                 // Mousedown outside a field blurs it (browser timing), then
                 // starts a flow text selection anchored at the press point.
                 if state.focused_input.is_some() {
-                    blur_input(state, Some(engine), cmds);
+                    blur_input(state, msgs, cmds);
                 }
                 clear_text_selection(state, cmds);
                 state.text_sel_anchor = Some((x, y));
@@ -761,15 +1011,14 @@ pub fn handle_mouse_down(
     // focused field, like a browser mousedown on a control).
     if button == MouseButton::Left
         && let Some(region) = clicked
-        && engine
-            .arena()
+        && arena
             .get(region.node_id)
             .is_some_and(|n| n.node_type == NodeType::Select)
     {
         if state.focused_input.is_some() {
-            blur_input(state, Some(engine), cmds);
+            blur_input(state, msgs, cmds);
         }
-        open_select(state, hit_map, engine, region.node_id, cmds);
+        open_select(state, hit_map, arena, region.node_id, cmds);
     }
 }
 
@@ -778,14 +1027,16 @@ pub fn handle_mouse_down(
 /// While the left button is held this drives the active drag: inside a
 /// focused `<input>` the caret (and with it the character selection) follows
 /// the pointer; over page content the text selection rectangle tracks the
-/// pointer. Without a press it is a plain pointer move, dispatched to the
-/// hover machinery as usual.
+/// pointer. Without a press it queues a [`ScriptMsg::Move`] for the script
+/// thread's hover machinery (pointer enter / leave + `MouseOver` /
+/// `MouseOut`). Local render commands are appended to `cmds` in dispatch
+/// order.
 pub fn handle_mouse_move(
     state: &mut InputState,
     hit_map: &HitMap,
-    engine: &mut ScriptEngine,
     x: u32,
     y: u32,
+    msgs: &mut Vec<ScriptMsg>,
     cmds: &mut Vec<RenderCmd>,
 ) {
     // An open `<select>` dropdown follows the pointer: hovering an option row
@@ -835,11 +1086,17 @@ pub fn handle_mouse_move(
         }
         return;
     }
-    // No button held: ordinary pointer movement → hover tracking.
-    cmds.extend(interaction::on_move(&mut state.hover, hit_map, engine, x, y));
+    // No button held: ordinary pointer movement → hover tracking on the
+    // script thread.
+    msgs.push(ScriptMsg::Move { x, y });
 }
 
 /// Wait for the next input event and translate it into render commands.
+///
+/// The input loop never executes JS: everything that needs the engine is
+/// queued into `msgs` (forwarded to the dedicated script thread, so a blocking
+/// host function never stalls input); DOM reads use `arena`, the input loop's
+/// latest snapshot.
 ///
 /// `timeout` controls how long to block on `event::poll`:
 /// - `None` blocks indefinitely (legacy behaviour, suitable for tests or
@@ -857,25 +1114,27 @@ pub fn handle_mouse_move(
 /// send and, more importantly, one fewer frame that risks a visible flash
 /// at the scroll bounds.
 ///
-/// `hit_map` and `engine` activate mouse interaction (pass both together,
+/// `hit_map` and `arena` activate mouse interaction (pass both together,
 /// or neither):
 /// - left `Down` records the press position and (browser-aligned) focuses an
 ///   `<input>` / blurs the focused field / starts a drag selection;
 /// - `Moved` while the button is held drives the active drag (field-internal
 ///   character selection or the page text selection); without a press it
-///   detects pointer enter / leave and dispatches `MouseOver` / `MouseOut`
-///   via [`interaction::on_move`](crate::events::interaction::on_move). Like
-///   a browser without CSS `:hover`, moving the pointer never changes what is
+///   queues a [`ScriptMsg::Move`] for the script thread's hover machinery
+///   (`MouseOver` / `MouseOut`, via
+///   [`interaction::on_move`](crate::events::interaction::on_move)). Like a
+///   browser without CSS `:hover`, moving the pointer never changes what is
 ///   painted;
-/// - left `Up` on the same cell is dispatched as a bubbling `Click` via
-///   [`interaction::on_click`](crate::events::interaction::on_click); a drag
+/// - left `Up` on the same cell queues a bubbling `Click` (via
+///   [`interaction::on_click`](crate::events::interaction::on_click)); a drag
 ///   that ends elsewhere keeps the selection.
 pub fn trigger_refresh(
     state: &mut InputState,
     rows: u16,
     max_scroll: u32,
     hit_map: Option<&HitMap>,
-    engine: Option<&mut ScriptEngine>,
+    arena: Option<&NodeArena>,
+    msgs: &mut Vec<ScriptMsg>,
     timeout: Option<Duration>,
 ) -> Vec<RenderCmd> {
     let mut cmds = Vec::new();
@@ -890,7 +1149,30 @@ pub fn trigger_refresh(
     match event::read() {
         Ok(Event::Key(key)) => {
             if key.kind == KeyEventKind::Release {
+                // Key releases only matter to the script layer (`keyup`); most
+                // terminals never report them, so the built-in shortcuts stay
+                // idle here.
+                if arena.is_some() {
+                    msgs.push(ScriptMsg::KeyUp {
+                        target: state.focused_input,
+                        key: key_event_info(&key),
+                    });
+                }
                 return cmds;
+            }
+
+            // Every press / auto-repeat also reaches the script layer as
+            // `keydown` (targeted at the focused `<input>`, or the document
+            // `<body>` when nothing is focused). `key_id` correlates the
+            // response back so a page `preventDefault()` can cancel the key's
+            // built-in shortcut (scroll / zoom / quit, gated below).
+            if arena.is_some() {
+                state.next_key_id = state.next_key_id.wrapping_add(1);
+                msgs.push(ScriptMsg::KeyDown {
+                    key_id: state.next_key_id,
+                    target: state.focused_input,
+                    key: key_event_info(&key),
+                });
             }
 
             // An open `<select>` dropdown consumes navigation keys: ↑ / ↓
@@ -898,7 +1180,7 @@ pub fn trigger_refresh(
             // closes. Any other key closes the dropdown and is swallowed
             // (the dropdown owns the keyboard while open).
             if state.open_select.is_some() {
-                let Some(engine) = engine else {
+                let Some(arena) = arena else {
                     return cmds;
                 };
                 let node_id = state
@@ -935,31 +1217,65 @@ pub fn trigger_refresh(
                     }
                     KeyCode::Enter => {
                         let pick = state.open_select.as_ref().map(|o| o.highlight);
-                        close_select(state, engine, pick, &mut cmds);
+                        close_select(state, arena, pick, msgs, &mut cmds);
                         return cmds;
                     }
                     KeyCode::Esc => {
-                        close_select(state, engine, None, &mut cmds);
+                        close_select(state, arena, None, msgs, &mut cmds);
                         return cmds;
                     }
                     _ => {
-                        close_select(state, engine, None, &mut cmds);
+                        close_select(state, arena, None, msgs, &mut cmds);
                         return cmds;
                     }
                 }
             }
 
-            // A focused `<input>` consumes text-editing keys; `Esc` blurs it
-            // and `Enter` confirms (blur + commit) — both write the value back
-            // to the DOM. Either returns control to scrolling / quitting.
+            // A focused `<input>` consumes the keys it owns: text editing and
+            // caret movement. `Esc` blurs it and `Enter` confirms (blur +
+            // commit) — both write the value back to the DOM. Keys the field
+            // does *not* own (page navigation such as ↓ / ↑ / PageDown /
+            // PageUp) fall through to the page-level handler below, matching
+            // a browser where an input only intercepts the keys it edits.
             if state.focused_input.is_some() {
                 if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
-                    blur_input(state, engine, &mut cmds);
+                    blur_input(state, msgs, &mut cmds);
                     return cmds;
                 }
                 let Some(focused) = state.focused_input else {
                     return cmds;
                 };
+
+                // Word-level editing: Ctrl / Alt + ←/→/Home/End/Backspace/
+                // Delete, with optional Shift extending the selection. Must
+                // run before the plain Ctrl shortcuts so Ctrl+Left is a word
+                // move rather than an ignored combo.
+                if (key.modifiers.contains(event::KeyModifiers::CONTROL)
+                    || key.modifiers.contains(event::KeyModifiers::ALT))
+                    && matches!(
+                        key.code,
+                        KeyCode::Left
+                            | KeyCode::Right
+                            | KeyCode::Home
+                            | KeyCode::End
+                            | KeyCode::Backspace
+                            | KeyCode::Delete
+                    )
+                {
+                    if apply_input_word_key(
+                        &mut state.input_value,
+                        &mut state.input_cursor,
+                        &mut state.input_sel_anchor,
+                        key.code,
+                        key.modifiers,
+                    ) {
+                        push_input_render(state, focused, &mut cmds);
+                        if arena.is_some() {
+                            msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
+                        }
+                    }
+                    return cmds;
+                }
 
                 // Ctrl shortcuts: select-all / copy / cut / paste. Other Ctrl
                 // combos are ignored (not inserted as characters — browser
@@ -967,9 +1283,8 @@ pub fn trigger_refresh(
                 if key.modifiers.contains(event::KeyModifiers::CONTROL) {
                     if apply_ctrl_shortcut(state, key.code) {
                         push_input_render(state, focused, &mut cmds);
-                        if let Some(engine) = engine {
-                            let region = region_for(&engine.arena(), focused);
-                            cmds.extend(engine.fire(&region, EventType::Input, 0, 0));
+                        if arena.is_some() {
+                            msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
                         }
                     }
                     return cmds;
@@ -983,127 +1298,41 @@ pub fn trigger_refresh(
                     return cmds;
                 }
 
-                // Plain editing keys clear the selection.
-                if apply_input_key(&mut state.input_value, &mut state.input_cursor, key.code) {
-                    state.input_sel_anchor = None;
-                    push_input_render(state, focused, &mut cmds);
-                    if let Some(engine) = engine {
-                        let region = region_for(&engine.arena(), focused);
-                        cmds.extend(engine.fire(&region, EventType::Input, 0, 0));
-                    }
-                }
-                return cmds;
-            }
-
-            if key.modifiers.contains(event::KeyModifiers::CONTROL) {
-                match key.code {
-                    KeyCode::Char('=') | KeyCode::Char('+') => {
-                        state.zoom = (state.zoom + ZOOM_STEP).min(ZOOM_MAX);
-                        return vec![RenderCmd::Redraw {
-                            scroll_y: state.scroll_y,
-                            zoom: state.zoom,
-                        }];
-                    }
-                    KeyCode::Char('-') | KeyCode::Char('_') => {
-                        state.zoom = (state.zoom - ZOOM_STEP).max(ZOOM_MIN);
-                        return vec![RenderCmd::Redraw {
-                            scroll_y: state.scroll_y,
-                            zoom: state.zoom,
-                        }];
-                    }
-                    KeyCode::Char('0') => {
-                        state.zoom = 1.0;
-                        return vec![RenderCmd::Redraw {
-                            scroll_y: state.scroll_y,
-                            zoom: state.zoom,
-                        }];
-                    }
-                    // Copy a page text selection (inside an `<input>` the
-                    // Ctrl shortcuts are handled earlier). `Ctrl+X` on read-
-                    // only page text degrades to a copy, like a browser.
-                    KeyCode::Char('c') | KeyCode::Char('x') => {
-                        if state.focused_input.is_none() && state.text_sel_anchor.is_some() {
-                            if let Ok(guard) = state.selection_text.lock() {
-                                state.input_clipboard = guard.clone();
-                            }
+                // Field-owned keys stay in the field even when they are
+                // boundary no-ops (Home at the start must not scroll the
+                // page). Everything else belongs to the page-level handler.
+                if is_input_field_key(key.code) {
+                    // Plain editing keys clear the selection.
+                    if apply_input_key(&mut state.input_value, &mut state.input_cursor, key.code) {
+                        state.input_sel_anchor = None;
+                        push_input_render(state, focused, &mut cmds);
+                        if arena.is_some() {
+                            msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
                         }
                     }
-                    _ => {}
+                    return cmds;
                 }
-            } else if state.text_sel_anchor.is_some() {
-                // A non-Ctrl key abandons the page text selection (the
-                // selection is a pointer-driven, transient visual state).
-                clear_text_selection(state, &mut cmds);
+                // Fall through to the page-level key handling below.
             }
 
-            match key.code {
-                KeyCode::Esc | KeyCode::Char('q') => cmds.push(RenderCmd::Quit),
-
-                KeyCode::Up | KeyCode::Char('k') => {
-                    // Already at the top boundary — drop the event instead
-                    // of forwarding a no-op scroll to the render thread.
-                    if state.scroll_y == 0 {
-                        return cmds;
-                    }
-                    state.scroll_y -= 1;
-                    cmds.push(RenderCmd::Rerender {
-                        scroll_y: state.scroll_y,
-                    });
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    // Already at the bottom boundary — drop the event.
-                    if state.scroll_y >= max_scroll {
-                        return cmds;
-                    }
-                    state.scroll_y += 1;
-                    cmds.push(RenderCmd::Rerender {
-                        scroll_y: state.scroll_y,
-                    });
-                }
-                KeyCode::PageUp => {
-                    if state.scroll_y == 0 {
-                        return cmds;
-                    }
-                    let step = (rows as u32).saturating_sub(1).max(1);
-                    state.scroll_y = state.scroll_y.saturating_sub(step);
-                    cmds.push(RenderCmd::Rerender {
-                        scroll_y: state.scroll_y,
-                    });
-                }
-                KeyCode::PageDown => {
-                    if state.scroll_y >= max_scroll {
-                        return cmds;
-                    }
-                    let step = (rows as u32).saturating_sub(1).max(1);
-                    state.scroll_y = state.scroll_y.saturating_add(step);
-                    cmds.push(RenderCmd::Rerender {
-                        scroll_y: state.scroll_y,
-                    });
-                }
-                KeyCode::Home => {
-                    // No-op move — drop to avoid a wasted rerender.
-                    if state.scroll_y == 0 {
-                        return cmds;
-                    }
-                    state.scroll_y = 0;
-                    cmds.push(RenderCmd::Rerender {
-                        scroll_y: state.scroll_y,
-                    });
-                }
-                KeyCode::End => {
-                    // No-op move (already at the bottom) — drop.
-                    if state.scroll_y >= max_scroll {
-                        return cmds;
-                    }
-                    // Use the actual upper bound rather than u32::MAX so the
-                    // render thread receives a value it doesn't have to clamp.
-                    state.scroll_y = max_scroll;
-                    cmds.push(RenderCmd::Rerender {
-                        scroll_y: state.scroll_y,
-                    });
-                }
-                _ => {}
+            // Page-level built-ins: no dropdown / field consumed the key. With
+            // the script layer active, scroll / zoom / quit keys are deferred
+            // pending the `keydown` gate — a page `preventDefault()` cancels
+            // them, a gate timeout (busy or blocked script thread) falls back
+            // to running them so input stays responsive. `Tab` focus cycling
+            // is input-control behaviour and always runs immediately.
+            let builtin = page_level_builtins(state, key, rows, max_scroll, arena, msgs);
+            if arena.is_some()
+                && !builtin.is_empty()
+                && !matches!(key.code, KeyCode::Tab | KeyCode::BackTab)
+            {
+                state.key_gate = Some(KeyGate {
+                    id: state.next_key_id,
+                    cmds: builtin,
+                });
+                return cmds;
             }
+            cmds.extend(builtin);
             cmds
         }
 
@@ -1113,9 +1342,9 @@ pub fn trigger_refresh(
                 MouseEventKind::ScrollUp => {
                     // Scrolling dismisses an open dropdown (focus loss).
                     if state.open_select.is_some()
-                        && let Some(engine) = engine
+                        && let Some(arena) = arena
                     {
-                        close_select(state, engine, None, &mut cmds);
+                        close_select(state, arena, None, msgs, &mut cmds);
                     }
                     if ctrl {
                         state.zoom = (state.zoom - ZOOM_STEP).max(ZOOM_MIN);
@@ -1135,9 +1364,9 @@ pub fn trigger_refresh(
                 MouseEventKind::ScrollDown => {
                     // Scrolling dismisses an open dropdown (focus loss).
                     if state.open_select.is_some()
-                        && let Some(engine) = engine
+                        && let Some(arena) = arena
                     {
-                        close_select(state, engine, None, &mut cmds);
+                        close_select(state, arena, None, msgs, &mut cmds);
                     }
                     if ctrl {
                         state.zoom = (state.zoom + ZOOM_STEP).min(ZOOM_MAX);
@@ -1155,15 +1384,15 @@ pub fn trigger_refresh(
                     });
                 }
                 MouseEventKind::Down(button) => {
-                    if let (Some(hit_map), Some(engine)) = (hit_map, engine) {
+                    if let (Some(hit_map), Some(arena)) = (hit_map, arena) {
                         state.pressed = Some((mouse.column, mouse.row));
                         let (x, y) = canvas_pos(state, mouse.column, mouse.row);
-                        handle_mouse_down(state, hit_map, engine, x, y, button, &mut cmds);
+                        handle_mouse_down(state, hit_map, arena, x, y, button, msgs, &mut cmds);
                     }
                 }
                 MouseEventKind::Up(MouseButton::Left) => {
-                    if let (Some((px, py)), Some(hit_map), Some(engine)) =
-                        (state.pressed, hit_map, engine)
+                    if let (Some((px, py)), Some(hit_map), Some(arena)) =
+                        (state.pressed, hit_map, arena)
                     {
                         state.pressed = None;
                         state.drag_selecting = false;
@@ -1173,12 +1402,12 @@ pub fn trigger_refresh(
                         // when the release lands off the press cell.
                         if let Some(open) = state.open_select.clone() {
                             if let Some(idx) = hit_select_option(&open, x, y) {
-                                close_select(state, engine, Some(idx), &mut cmds);
+                                close_select(state, arena, Some(idx), msgs, &mut cmds);
                                 return cmds;
                             }
                         }
                         if px == mouse.column && py == mouse.row {
-                            handle_click(state, hit_map, engine, x, y, &mut cmds);
+                            handle_click(state, hit_map, arena, x, y, msgs, &mut cmds);
                         }
                         // A drag ended on a different cell: the selection
                         // (field-internal or page text) is kept as-is.
@@ -1196,9 +1425,9 @@ pub fn trigger_refresh(
                 // 32..34) and button-free motion as `Moved` (SGR 64) — both
                 // must reach the drag / hover handler.
                 MouseEventKind::Drag(_) | MouseEventKind::Moved => {
-                    if let (Some(hit_map), Some(engine)) = (hit_map, engine) {
+                    if let (Some(hit_map), Some(_)) = (hit_map, arena) {
                         let (x, y) = canvas_pos(state, mouse.column, mouse.row);
-                        handle_mouse_move(state, hit_map, engine, x, y, &mut cmds);
+                        handle_mouse_move(state, hit_map, x, y, msgs, &mut cmds);
                     }
                 }
                 _ => {}
@@ -1213,6 +1442,237 @@ pub fn trigger_refresh(
 
         _ => cmds,
     }
+}
+
+/// The page-level built-in action for a key that no `<select>` dropdown or
+/// focused `<input>` consumed: `Ctrl` zoom / document jumps, page text-
+/// selection clearing, `Shift`+Space page-up, plain Space / PageUp / PageDown /
+/// arrows / `g` / `G` / `j` / `k` scrolling, `Home` / `End`, `q` / `Esc` quit
+/// and `Tab` / `Shift`+`Tab` focus cycling.
+///
+/// Returns the render commands the key produces (empty = no built-in action,
+/// e.g. a scroll key already at the page boundary). With the script layer
+/// active the caller defers scroll / zoom / quit commands until the keydown
+/// gate verdict; `Tab` focus cycling pushes script messages, so it is excluded
+/// from the gate and always runs immediately.
+fn page_level_builtins(
+    state: &mut InputState,
+    key: KeyEvent,
+    rows: u16,
+    max_scroll: u32,
+    arena: Option<&NodeArena>,
+    msgs: &mut Vec<ScriptMsg>,
+) -> Vec<RenderCmd> {
+    let mut cmds = Vec::new();
+    if key.modifiers.contains(event::KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('=') | KeyCode::Char('+') => {
+                state.zoom = (state.zoom + ZOOM_STEP).min(ZOOM_MAX);
+                return vec![RenderCmd::Redraw {
+                    scroll_y: state.scroll_y,
+                    zoom: state.zoom,
+                }];
+            }
+            KeyCode::Char('-') | KeyCode::Char('_') => {
+                state.zoom = (state.zoom - ZOOM_STEP).max(ZOOM_MIN);
+                return vec![RenderCmd::Redraw {
+                    scroll_y: state.scroll_y,
+                    zoom: state.zoom,
+                }];
+            }
+            KeyCode::Char('0') => {
+                state.zoom = 1.0;
+                return vec![RenderCmd::Redraw {
+                    scroll_y: state.scroll_y,
+                    zoom: state.zoom,
+                }];
+            }
+            // Copy a page text selection (inside an `<input>` the Ctrl
+            // shortcuts are handled earlier). `Ctrl+X` on read-only page text
+            // degrades to a copy, like a browser.
+            KeyCode::Char('c') | KeyCode::Char('x') => {
+                if state.focused_input.is_none() && state.text_sel_anchor.is_some() {
+                    if let Ok(guard) = state.selection_text.lock() {
+                        state.input_clipboard = guard.clone();
+                    }
+                }
+            }
+            // `Ctrl` + Home / End jump to the top / bottom of the page
+            // (matching most editors' document navigation).
+            KeyCode::Home => {
+                if state.scroll_y == 0 {
+                    return cmds;
+                }
+                state.scroll_y = 0;
+                return vec![RenderCmd::Rerender {
+                    scroll_y: state.scroll_y,
+                }];
+            }
+            KeyCode::End => {
+                if state.scroll_y >= max_scroll {
+                    return cmds;
+                }
+                state.scroll_y = max_scroll;
+                return vec![RenderCmd::Rerender {
+                    scroll_y: state.scroll_y,
+                }];
+            }
+            _ => {}
+        }
+    } else if state.text_sel_anchor.is_some() {
+        // A non-Ctrl key abandons the page text selection (the selection is
+        // a pointer-driven, transient visual state).
+        clear_text_selection(state, &mut cmds);
+    }
+
+    // `Shift` + Space scrolls up a page (the browser flip of the plain
+    // `Space` page-down handled below).
+    if key.code == KeyCode::Char(' ') && key.modifiers.contains(event::KeyModifiers::SHIFT) {
+        if state.scroll_y == 0 {
+            return cmds;
+        }
+        let step = (rows as u32).saturating_sub(1).max(1);
+        state.scroll_y = state.scroll_y.saturating_sub(step);
+        return vec![RenderCmd::Rerender {
+            scroll_y: state.scroll_y,
+        }];
+    }
+
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') => cmds.push(RenderCmd::Quit),
+
+        // vim-style document jumps: `g` to the top, `G` to the bottom
+        // (shifted `g` — the shift modifier is read via the `Char('G')` code
+        // crossterm reports).
+        KeyCode::Char('g') => {
+            if state.scroll_y == 0 {
+                return cmds;
+            }
+            state.scroll_y = 0;
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        KeyCode::Char('G') => {
+            if state.scroll_y >= max_scroll {
+                return cmds;
+            }
+            state.scroll_y = max_scroll;
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        // Plain `Space` scrolls down a page, like a browser.
+        KeyCode::Char(' ') => {
+            if state.scroll_y >= max_scroll {
+                return cmds;
+            }
+            let step = (rows as u32).saturating_sub(1).max(1);
+            state.scroll_y = state.scroll_y.saturating_add(step);
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        // `Tab` / `Shift`+`Tab` cycle keyboard focus between the page's
+        // `<input>` fields (browser tab order). With no field focused, `Tab`
+        // focuses the first one.
+        KeyCode::Tab => {
+            if let Some(arena) = arena {
+                let ids = collect_input_ids(arena);
+                if !ids.is_empty() {
+                    let next = match state
+                        .focused_input
+                        .and_then(|cur| ids.iter().position(|&id| id == cur))
+                    {
+                        Some(p) => ids[(p + 1) % ids.len()],
+                        None => ids[0],
+                    };
+                    focus_input(state, next, arena, msgs, &mut cmds);
+                }
+            }
+        }
+        KeyCode::BackTab => {
+            if let Some(arena) = arena {
+                let ids = collect_input_ids(arena);
+                if !ids.is_empty() {
+                    let next = match state
+                        .focused_input
+                        .and_then(|cur| ids.iter().position(|&id| id == cur))
+                    {
+                        Some(p) => ids[(p + ids.len() - 1) % ids.len()],
+                        None => ids[ids.len() - 1],
+                    };
+                    focus_input(state, next, arena, msgs, &mut cmds);
+                }
+            }
+        }
+
+        KeyCode::Up | KeyCode::Char('k') => {
+            // Already at the top boundary — drop the event instead of
+            // forwarding a no-op scroll to the render thread.
+            if state.scroll_y == 0 {
+                return cmds;
+            }
+            state.scroll_y -= 1;
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            // Already at the bottom boundary — drop the event.
+            if state.scroll_y >= max_scroll {
+                return cmds;
+            }
+            state.scroll_y += 1;
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        KeyCode::PageUp => {
+            if state.scroll_y == 0 {
+                return cmds;
+            }
+            let step = (rows as u32).saturating_sub(1).max(1);
+            state.scroll_y = state.scroll_y.saturating_sub(step);
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        KeyCode::PageDown => {
+            if state.scroll_y >= max_scroll {
+                return cmds;
+            }
+            let step = (rows as u32).saturating_sub(1).max(1);
+            state.scroll_y = state.scroll_y.saturating_add(step);
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        KeyCode::Home => {
+            // No-op move — drop to avoid a wasted rerender.
+            if state.scroll_y == 0 {
+                return cmds;
+            }
+            state.scroll_y = 0;
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        KeyCode::End => {
+            // No-op move (already at the bottom) — drop.
+            if state.scroll_y >= max_scroll {
+                return cmds;
+            }
+            // Use the actual upper bound rather than u32::MAX so the render
+            // thread receives a value it doesn't have to clamp.
+            state.scroll_y = max_scroll;
+            cmds.push(RenderCmd::Rerender {
+                scroll_y: state.scroll_y,
+            });
+        }
+        _ => {}
+    }
+    cmds
 }
 
 /// Convert a screen position to canvas coordinates by adding the scroll

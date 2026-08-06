@@ -159,3 +159,66 @@ fn test_parse_meta_void_element() {
         Some("utf-8")
     );
 }
+
+#[test]
+fn test_script_inline_extract() {
+    init();
+    let mut p = Parser::new("<script>globalThis.__a = 1;</script><p>x</p>");
+    let doc = p.parse_with_scripts();
+    assert!(
+        doc.scripts.iter().any(|s| s.contains("__a = 1")),
+        "inline <script> content must be extracted"
+    );
+}
+
+#[test]
+fn test_script_src_loads_external_js() {
+    // `<script src>` reads the file like `<link rel="stylesheet">`: local
+    // filesystem path (absolute here so the test is CWD-independent).
+    init();
+    let path = std::env::temp_dir().join(format!(
+        "htui_script_src_{}.js",
+        std::process::id()
+    ));
+    std::fs::write(&path, "globalThis.__loaded = 42;").expect("write temp js");
+    let href = path.to_string_lossy();
+    let html = format!("<script src=\"{href}\"></script><p>x</p>");
+    let doc = Parser::new(&html).parse_with_scripts();
+    assert!(
+        doc.scripts.iter().any(|s| s.contains("__loaded = 42")),
+        "<script src> must load the external JS file"
+    );
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(e) => eprintln!("temp js cleanup failed: {e}"),
+    }
+}
+
+#[test]
+fn test_script_src_wins_over_inline() {
+    // A `src` attribute wins over the inline body (browser rule: external
+    // script content is ignored).
+    init();
+    let path = std::env::temp_dir().join(format!(
+        "htui_script_src_win_{}.js",
+        std::process::id()
+    ));
+    std::fs::write(&path, "globalThis.__ext = true;").expect("write temp js");
+    let href = path.to_string_lossy();
+    let html = format!(
+        "<script src=\"{href}\">globalThis.__inline = true;</script>"
+    );
+    let doc = Parser::new(&html).parse_with_scripts();
+    assert!(
+        doc.scripts.iter().any(|s| s.contains("__ext = true")),
+        "external file content must be extracted"
+    );
+    assert!(
+        doc.scripts.iter().all(|s| !s.contains("__inline")),
+        "inline body must be ignored when src is present"
+    );
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(e) => eprintln!("temp js cleanup failed: {e}"),
+    }
+}

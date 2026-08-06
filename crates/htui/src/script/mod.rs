@@ -29,25 +29,28 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
-use boa_engine::{Context, JsResult, JsValue, NativeFunction, Source, js_string};
+use boa_engine::{Context, JsError, JsResult, JsValue, NativeFunction, Source, js_string};
 use boa_engine::object::ObjectInitializer;
 use boa_engine::property::Attribute;
 
 use crate::{
-    events::{AutoRefresh, EventBindings, EventType, HitRegion, HtmlEvent},
+    events::{EventBindings, EventType, HitRegion, HtmlEvent, KeyEventInfo},
     html::html_parse::Parser,
-    tdom::node::{NodeArena, NodeId, NodeType},
+    tdom::node::{NodeArena, NodeId},
     tui::graph_api::RenderCmd,
 };
 
 mod dom;
 mod host;
+mod msg;
 
 pub mod convert;
 
 pub use convert::{FromJs, IntoJs, JsObjectBuilder};
 pub use host::{HostCall, HostFn};
+pub use msg::{ScriptDirty, ScriptEvent, ScriptMsg, ScriptResponse, apply_message, run_script_thread};
 
 use dom::{add_listener, element_wrapper, get_listeners, install_builtins, with_state};
 
@@ -71,6 +74,23 @@ pub(crate) struct ScriptState {
     pub current_event: Option<HtmlEvent>,
     /// Registered host functions, keyed by JS global name.
     pub host_fns: HashMap<String, HostFn>,
+    /// Pending `setTimeout` / `setInterval` registrations, driven by the
+    /// script thread's message loop (the only thread allowed to run JS).
+    pub timers: Vec<TimerEntry>,
+    /// Monotonic id source for timer registrations.
+    pub next_timer_id: u32,
+}
+
+/// A pending `setTimeout` / `setInterval` registration.
+pub(crate) struct TimerEntry {
+    pub id: u32,
+    /// When the callback is due (monotonic clock).
+    pub deadline: Instant,
+    /// Repeat cadence for `setInterval` (re-scheduling after each fire);
+    /// ignored for one-shot `setTimeout` entries.
+    pub period: Duration,
+    /// `true` for `setInterval`, `false` for `setTimeout`.
+    pub repeat: bool,
 }
 
 thread_local! {
@@ -82,13 +102,13 @@ thread_local! {
 pub struct ScriptEngine {
     context: Context,
     state: Rc<RefCell<ScriptState>>,
-    auto: Option<AutoRefresh>,
 }
 
-/// Bootstrap script: the GC-rooted listener + element registries.
+/// Bootstrap script: the GC-rooted listener / element / timer registries.
 const BOOTSTRAP: &str = r#"
 globalThis.__htuiListeners = {};
 globalThis.__htuiElements = {};
+globalThis.__htuiTimers = {};
 globalThis.__htuiAddListener = function (nodeId, type, fn) {
   var entry = globalThis.__htuiListeners[nodeId] || (globalThis.__htuiListeners[nodeId] = {});
   var arr = entry[type] || (entry[type] = []);
@@ -108,33 +128,90 @@ impl ScriptEngine {
     /// listeners, then runs every `<script>` block. Errors are returned as
     /// Boa errors; individual script failures log a warning and continue.
     pub fn new(html: &str, bindings: EventBindings) -> JsResult<Self> {
-        let doc = Parser::new(html).parse_with_scripts();
+        let (context, state) = match Self::build_engine(html, bindings.host) {
+            Ok(v) => v,
+            Err((e, _)) => return Err(e),
+        };
+        Ok(ScriptEngine { context, state })
+    }
 
+    /// Replace the live document with a freshly parsed one and re-run its
+    /// scripts, keeping the session's host functions.
+    ///
+    /// The engine is the single source of truth for the document: a
+    /// whole-document replacement re-parses here and marks the root dirty, so
+    /// the change reaches the render thread as a `RenderArena` — never as an
+    /// independent re-parse on the render side. On failure the previous
+    /// document is left intact and the error is returned.
+    pub fn reload(&mut self, html: &str) -> JsResult<()> {
+        let host_fns = std::mem::take(&mut self.state.borrow_mut().host_fns);
+        let (context, state) = match Self::build_engine(html, host_fns) {
+            Ok(v) => v,
+            Err((e, host_fns)) => {
+                // Restore the previous session so a failed reload leaves it
+                // usable: put the host map back and re-point the thread-local
+                // state the DOM natives read through.
+                self.state.borrow_mut().host_fns = host_fns;
+                ENGINE_STATE.with(|s| *s.borrow_mut() = Some(Rc::clone(&self.state)));
+                return Err(e);
+            }
+        };
+        // The whole document changed: mark the root dirty so the next
+        // response carries the fresh arena to the render thread.
+        {
+            let mut st = state.borrow_mut();
+            let root_id = st.root_id;
+            st.dirty.nodes.push(root_id);
+        }
+        self.context = context;
+        self.state = state;
+        Ok(())
+    }
+
+    /// Build a fresh Boa context + DOM state for `html`, consuming `host_fns`.
+    ///
+    /// On failure the host map is returned inside the `Err` so a caller that
+    /// borrowed it (like [`reload`](Self::reload)) can restore the previous
+    /// session.
+    fn build_engine(
+        html: &str,
+        host_fns: HashMap<String, HostFn>,
+    ) -> Result<(Context, Rc<RefCell<ScriptState>>), (JsError, HashMap<String, HostFn>)> {
+        let doc = Parser::new(html).parse_with_scripts();
         let state = Rc::new(RefCell::new(ScriptState {
             arena: doc.arena,
             root_id: doc.root_id,
             render_cmds: Vec::new(),
             dirty: DirtyInfo::default(),
             current_event: None,
-            host_fns: bindings.host,
+            host_fns,
+            timers: Vec::new(),
+            next_timer_id: 0,
         }));
         ENGINE_STATE.with(|s| *s.borrow_mut() = Some(Rc::clone(&state)));
 
         let mut context = Context::default();
 
         // GC-rooted registries used by the DOM natives.
-        context.eval(Source::from_bytes(BOOTSTRAP.as_bytes()))?;
-
-        install_builtins(&mut context)?;
+        if let Err(e) = context.eval(Source::from_bytes(BOOTSTRAP.as_bytes())) {
+            return Err((e, std::mem::take(&mut state.borrow_mut().host_fns)));
+        }
+        if let Err(e) = install_builtins(&mut context) {
+            return Err((e, std::mem::take(&mut state.borrow_mut().host_fns)));
+        }
 
         // Expose host functions as JS globals.
         let host_names: Vec<String> = state.borrow().host_fns.keys().cloned().collect();
         for name in host_names {
-            register_host_global(&mut context, &name)?;
+            if let Err(e) = register_host_global(&mut context, &name) {
+                return Err((e, std::mem::take(&mut state.borrow_mut().host_fns)));
+            }
         }
 
         // Compile `on*` attribute bodies into listeners.
-        compile_attribute_listeners(&mut context, &state)?;
+        if let Err(e) = compile_attribute_listeners(&mut context, &state) {
+            return Err((e, std::mem::take(&mut state.borrow_mut().host_fns)));
+        }
 
         // Run the document's `<script>` blocks.
         for script in &doc.scripts {
@@ -142,17 +219,94 @@ impl ScriptEngine {
                 log::warn!("Script execution failed: {e}");
             }
         }
-
-        Ok(ScriptEngine {
-            context,
-            state,
-            auto: bindings.auto,
-        })
+        Ok((context, state))
     }
 
-    /// The periodic auto-refresh configuration, if any.
-    pub fn auto(&self) -> Option<AutoRefresh> {
-        self.auto.clone()
+    /// Rewrite `RenderCmd::RenderHtml` pushed by host functions into an
+    /// in-engine document reload, so the script engine stays the single
+    /// source of truth for the document (see [`reload`](Self::reload)). A
+    /// failed reload keeps the command for the render thread's legacy path.
+    fn intercept_render_html(&mut self, cmds: Vec<RenderCmd>) -> Vec<RenderCmd> {
+        let mut out = Vec::with_capacity(cmds.len());
+        for cmd in cmds {
+            match cmd {
+                RenderCmd::RenderHtml { html } => {
+                    if let Err(e) = self.reload(&html) {
+                        log::error!("In-engine document reload failed: {e}");
+                        out.push(RenderCmd::RenderHtml { html });
+                    }
+                }
+                other => out.push(other),
+            }
+        }
+        out
+    }
+
+    /// How long the message loop may block before the earliest pending timer
+    /// fires, or `None` when no timer is active (block indefinitely).
+    pub fn next_timer_timeout(&self) -> Option<Duration> {
+        let st = self.state.borrow();
+        st.timers
+            .iter()
+            .map(|t| t.deadline.saturating_duration_since(Instant::now()))
+            .min()
+    }
+
+    /// Fire every timer whose deadline has passed, in registration order.
+    ///
+    /// Callbacks run in the calling thread — the script thread in production —
+    /// exactly like a browser event-loop task, so a callback that rewrites the
+    /// DOM marks nodes dirty as usual. Returns render commands pushed by host
+    /// functions during the dispatch. `setInterval` callbacks are re-scheduled
+    /// relative to the fire time; a badly-lagged interval jumps to `now +
+    /// period` instead of bursting. `setTimeout` callbacks are one-shot.
+    pub fn run_due_timers(&mut self) -> Vec<RenderCmd> {
+        let now = Instant::now();
+        // Snapshot the due ids first: callbacks may register or clear timers,
+        // so the table mutates while we iterate.
+        let due: Vec<u32> = {
+            let st = self.state.borrow();
+            st.timers
+                .iter()
+                .filter(|t| t.deadline <= now)
+                .map(|t| t.id)
+                .collect()
+        };
+        if due.is_empty() {
+            return Vec::new();
+        }
+        // Re-schedule / remove before firing so a slow callback cannot make a
+        // missed repeat deadline fire again immediately after.
+        {
+            let mut st = self.state.borrow_mut();
+            st.timers.retain_mut(|t| {
+                if t.deadline > now {
+                    return true;
+                }
+                if t.repeat {
+                    t.deadline = now + t.period;
+                    true
+                } else {
+                    false
+                }
+            });
+        }
+        for id in due {
+            let callback = timer_callback(&mut self.context, id);
+            if !callback.is_callable() {
+                log::debug!("Timer {id} has no callable callback — skipping");
+                continue;
+            }
+            if let Some(f) = callback.to_object(&mut self.context).ok()
+                && let Err(e) = f.call(&JsValue::undefined(), &[], &mut self.context)
+            {
+                log::warn!("Timer callback threw: {e}");
+            }
+        }
+        let mut st = self.state.borrow_mut();
+        let cmds = std::mem::take(&mut st.render_cmds);
+        drop(st);
+        self.intercept_render_html(cmds)
     }
 
     /// Clone of the live DOM arena.
@@ -173,32 +327,41 @@ impl ScriptEngine {
     }
 
     /// Commit an `<input>` field's edited value into the DOM `value`
-    /// attribute.
+    /// attribute and mark the node dirty.
     ///
     /// The DOM is the single source of truth for a field's content: editing
     /// while focused repaints through the lightweight `input_states` path, and
     /// this writes the result back on blur / Enter / focus-switch so the next
-    /// focus (or any later re-render) sees the edited value. It does *not*
-    /// mark the node dirty — the field's layout is width-fixed, so the visible
-    /// repaint is driven by `RenderCmd::RenderInput` instead of a re-layout.
+    /// focus (or any later re-render) sees the edited value. Marking the node
+    /// dirty guarantees the commit reaches the render thread as a
+    /// `RenderArena`, so a JS blur handler that rewrites the value (e.g.
+    /// clearing a submitted box) is what ends up on screen. Committing an
+    /// unchanged value is a no-op (no dirty marker), mirroring the `el.value`
+    /// JS setter's fast path.
     pub fn set_value(&mut self, node_id: NodeId, value: &str) {
-        if let Some(node) = self.state.borrow_mut().arena.get_mut(node_id) {
-            node.attributes.insert("value".to_string(), value.to_string());
-        }
-    }
-
-    /// Commit a new `value` attribute and mark the node dirty.
-    ///
-    /// Unlike [`set_value`](Self::set_value) (whose field layout is
-    /// width-fixed), this is for controls whose rendered size can change with
-    /// the value — a `<select>` selection swaps the shown label, so the next
-    /// frame must re-cascade and re-render.
-    pub fn set_value_dirty(&mut self, node_id: NodeId, value: &str) {
         let mut st = self.state.borrow_mut();
+        let existing = st
+            .arena
+            .get(node_id)
+            .and_then(|n| n.attributes.get("value"))
+            .cloned()
+            .unwrap_or_default();
+        if existing == value {
+            return;
+        }
         if let Some(node) = st.arena.get_mut(node_id) {
             node.attributes.insert("value".to_string(), value.to_string());
         }
         st.dirty.nodes.push(node_id);
+    }
+
+    /// Commit a new `value` attribute and mark the node dirty.
+    ///
+    /// A convenience alias of [`set_value`](Self::set_value) for callers that
+    /// always change the value (e.g. a `<select>` selection swapping the shown
+    /// label), so the next frame re-cascades and re-renders.
+    pub fn set_value_dirty(&mut self, node_id: NodeId, value: &str) {
+        self.set_value(node_id, value);
     }
 
     /// Dispatch a DOM event along the hit region's ancestor path.
@@ -214,13 +377,57 @@ impl ScriptEngine {
         x: u32,
         y: u32,
     ) -> Vec<RenderCmd> {
+        self.dispatch(region, event_type, x, y, None).0
+    }
+
+    /// Dispatch a keyboard event ([`EventType::KeyDown`] / [`EventType::KeyUp`])
+    /// along the hit region's ancestor path.
+    ///
+    /// Like [`fire`](Self::fire) but attaches the [`KeyEventInfo`] payload so
+    /// JS listeners read `event.key` / `event.code` / `event.ctrlKey` / …;
+    /// coordinates are meaningless for keys and report `0, 0`.
+    pub fn fire_key(
+        &mut self,
+        region: &HitRegion,
+        event_type: EventType,
+        key: &KeyEventInfo,
+    ) -> Vec<RenderCmd> {
+        self.fire_key_gated(region, event_type, key).0
+    }
+
+    /// Gated variant of [`fire_key`](Self::fire_key): additionally reports
+    /// whether any listener on the bubbling path called `event.preventDefault()`,
+    /// so the input loop can skip the built-in shortcut for that key.
+    pub(crate) fn fire_key_gated(
+        &mut self,
+        region: &HitRegion,
+        event_type: EventType,
+        key: &KeyEventInfo,
+    ) -> (Vec<RenderCmd>, bool) {
+        self.dispatch(region, event_type, 0, 0, Some(key))
+    }
+
+    /// Shared dispatch core of [`fire`](Self::fire) and
+    /// [`fire_key`](Self::fire_key): build the JS event object (with keyboard
+    /// fields when `key` is set), walk `region.path` target-first firing every
+    /// registered listener, honouring `stopPropagation()`. Returns any render
+    /// commands pushed by host functions during the dispatch, plus whether a
+    /// listener called `event.preventDefault()`.
+    fn dispatch(
+        &mut self,
+        region: &HitRegion,
+        event_type: EventType,
+        x: u32,
+        y: u32,
+        key: Option<&KeyEventInfo>,
+    ) -> (Vec<RenderCmd>, bool) {
         let target_id = region.path.first().and_then(|e| e.id.clone());
 
-        let event = match self.build_event_object(event_type, &region.path, x, y) {
+        let event = match self.build_event_object(event_type, &region.path, x, y, key) {
             Ok(e) => e,
             Err(e) => {
                 log::warn!("Failed to build JS event object: {e}");
-                return Vec::new();
+                return (Vec::new(), false);
             }
         };
 
@@ -233,6 +440,7 @@ impl ScriptEngine {
                 x,
                 y,
                 bubbles: true,
+                key: key.cloned(),
             });
         }
 
@@ -241,7 +449,11 @@ impl ScriptEngine {
             if let Ok(wrapper) = element_wrapper(&mut self.context, element.node_id)
                 && let Some(obj) = event.as_object()
             {
-                let _ = obj.set(js_string!("currentTarget"), wrapper, false, &mut self.context);
+                if let Err(e) =
+                    obj.set(js_string!("currentTarget"), wrapper, false, &mut self.context)
+                {
+                    log::warn!("Failed to set event.currentTarget: {e}");
+                }
             }
             if let Some(ev) = &mut self.state.borrow_mut().current_event {
                 ev.current_target = element.id.clone();
@@ -277,9 +489,18 @@ impl ScriptEngine {
             }
         }
 
+        // Any listener may have called `preventDefault()` — the input loop
+        // reads this verdict to decide whether the built-in shortcut runs.
+        let prevented = event
+            .as_object()
+            .and_then(|obj| obj.get(js_string!("_prevented"), &mut self.context).ok())
+            .is_some_and(|v| v.is_boolean() && v.to_boolean());
+
         let mut st = self.state.borrow_mut();
         st.current_event = None;
-        std::mem::take(&mut st.render_cmds)
+        let cmds = std::mem::take(&mut st.render_cmds);
+        drop(st);
+        (self.intercept_render_html(cmds), prevented)
     }
 
     /// Evaluate a JS snippet in the engine's global scope.
@@ -291,7 +512,7 @@ impl ScriptEngine {
         self.context.eval(Source::from_bytes(src.as_bytes()))
     }
 
-    /// Invoke a JS global function by name (backs the periodic auto-refresh).
+    /// Invoke a JS global function by name.
     ///
     /// The name may be a `<script>`-defined function or a registered host
     /// function. Returns any render commands pushed during the call.
@@ -316,7 +537,9 @@ impl ScriptEngine {
             log::warn!("Action `{name}` threw: {e}");
         }
         let mut st = self.state.borrow_mut();
-        std::mem::take(&mut st.render_cmds)
+        let cmds = std::mem::take(&mut st.render_cmds);
+        drop(st);
+        self.intercept_render_html(cmds)
     }
 
     /// Build a JS `Event` object for a dispatch.
@@ -326,6 +549,7 @@ impl ScriptEngine {
         path: &[crate::events::ElementRef],
         x: u32,
         y: u32,
+        key: Option<&KeyEventInfo>,
     ) -> JsResult<JsValue> {
         let target = match path.first() {
             Some(el) => element_wrapper(&mut self.context, el.node_id)?,
@@ -339,6 +563,8 @@ impl ScriptEngine {
             EventType::Blur => "blur",
             EventType::Input => "input",
             EventType::Change => "change",
+            EventType::KeyDown => "keydown",
+            EventType::KeyUp => "keyup",
         };
 
         let mut init = ObjectInitializer::new(&mut self.context);
@@ -353,7 +579,23 @@ impl ScriptEngine {
                 false,
                 Attribute::WRITABLE | Attribute::NON_ENUMERABLE,
             )
-            .function(
+            .property(js_string!("defaultPrevented"), false, Attribute::all())
+            .property(
+                js_string!("_prevented"),
+                false,
+                Attribute::WRITABLE | Attribute::NON_ENUMERABLE,
+            );
+        if let Some(k) = key {
+            init.property(js_string!("key"), js_string!(k.key.as_str()), Attribute::all())
+                .property(js_string!("code"), js_string!(k.code.as_str()), Attribute::all())
+                .property(js_string!("keyCode"), k.key_code as f64, Attribute::all())
+                .property(js_string!("shiftKey"), k.shift, Attribute::all())
+                .property(js_string!("ctrlKey"), k.ctrl, Attribute::all())
+                .property(js_string!("altKey"), k.alt, Attribute::all())
+                .property(js_string!("metaKey"), k.meta, Attribute::all())
+                .property(js_string!("repeat"), k.repeat, Attribute::all());
+        }
+        init.function(
                 NativeFunction::from_fn_ptr(stop_propagation),
                 js_string!("stopPropagation"),
                 0,
@@ -376,13 +618,39 @@ impl Drop for ScriptEngine {
 /// `event.stopPropagation()` — marks the event as stopped.
 fn stop_propagation(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     if let Some(obj) = this.to_object(context).ok() {
-        let _ = obj.set(js_string!("_stopped"), true, false, context);
+        if let Err(e) = obj.set(js_string!("_stopped"), true, false, context) {
+            log::warn!("Failed to mark event stopped: {e}");
+        }
     }
     Ok(JsValue::undefined())
 }
 
-/// `event.preventDefault()` — accepted for API parity, no default action exists.
-fn prevent_default(_this: &JsValue, _args: &[JsValue], _context: &mut Context) -> JsResult<JsValue> {
+/// Fetch a GC-rooted timer callback from `globalThis.__htuiTimers` by id.
+fn timer_callback(context: &mut Context, id: u32) -> JsValue {
+    let global = context.global_object();
+    let Ok(registry) = global.get(js_string!("__htuiTimers"), context) else {
+        return JsValue::undefined();
+    };
+    let Ok(registry) = registry.to_object(context) else {
+        return JsValue::undefined();
+    };
+    registry
+        .get(js_string!(id.to_string()), context)
+        .unwrap_or(JsValue::undefined())
+}
+
+/// `event.preventDefault()` — marks the event so the input loop can skip the
+/// built-in shortcut for that key (the verdict is echoed back in the script
+/// thread's response; the input loop waits for it before acting).
+fn prevent_default(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    if let Some(obj) = this.to_object(context).ok() {
+        for flag in ["_prevented", "defaultPrevented"] {
+            if let Err(e) = obj.set(js_string!(flag), true, false, context) {
+                log::warn!("Failed to mark event prevented: {e}");
+                break;
+            }
+        }
+    }
     Ok(JsValue::undefined())
 }
 
@@ -441,6 +709,8 @@ fn compile_attribute_listeners(
                     ("onblur", EventType::Blur),
                     ("oninput", EventType::Input),
                     ("onchange", EventType::Change),
+                    ("onkeydown", EventType::KeyDown),
+                    ("onkeyup", EventType::KeyUp),
                 ]
                 .iter()
                 .filter_map(|(attr, et)| n.attributes.get(*attr).cloned().map(|b| (b, *et)))
@@ -465,39 +735,4 @@ fn compile_attribute_listeners(
         }
     }
     Ok(())
-}
-
-/// `NodeType` variants that map back to a CSS selector string (for
-/// `document.createElement`).
-#[allow(dead_code)]
-fn node_type_str(t: &NodeType) -> Option<String> {
-    let s = match t {
-        NodeType::Div => "div",
-        NodeType::Span => "span",
-        NodeType::P => "p",
-        NodeType::Button => "button",
-        NodeType::A => "a",
-        NodeType::H1 => "h1",
-        NodeType::H2 => "h2",
-        NodeType::H3 => "h3",
-        NodeType::Li => "li",
-        NodeType::Ul => "ul",
-        NodeType::Ol => "ol",
-        NodeType::Pre => "pre",
-        NodeType::Header => "header",
-        NodeType::Footer => "footer",
-        NodeType::Section => "section",
-        NodeType::Article => "article",
-        NodeType::Aside => "aside",
-        NodeType::Main => "main",
-        NodeType::Nav => "nav",
-        NodeType::Table => "table",
-        NodeType::Tr => "tr",
-        NodeType::Td => "td",
-        NodeType::Th => "th",
-        NodeType::Input => "input",
-        NodeType::Img => "img",
-        _ => return None,
-    };
-    Some(s.to_string())
 }

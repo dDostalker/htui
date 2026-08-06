@@ -24,8 +24,10 @@ pub struct HostCall<'a> {
     /// The DOM event currently being dispatched, if the call happens inside a
     /// listener (synthetic calls like auto-refresh carry `None`).
     pub event: Option<&'a HtmlEvent>,
-    /// Push render commands here (e.g. `RenderCmd::RenderHtml`) to request a
-    /// re-render after the JS call returns.
+    /// Push render commands here to request a re-render after the JS call
+    /// returns. `RenderCmd::RenderHtml` is intercepted in-engine
+    /// (`ScriptEngine::reload`), keeping the engine the document's source of
+    /// truth.
     pub render: &'a mut Vec<RenderCmd>,
     /// The Boa engine context, available so host functions can construct
     /// complex return values (objects, arrays, …).

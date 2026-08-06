@@ -17,7 +17,7 @@ use htui::html::css_parse::{
 use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
 use htui::layout::{BoxConstraint, Cursor, Rect, layout_tree};
-use htui::script::ScriptEngine;
+use htui::script::{ScriptEngine, ScriptMsg, apply_message};
 use htui::tdom::node::{NodeArena, NodeId};
 use htui::tui::graph_api::{
     InputState, RenderCmd, SelectionMode, TermLayout, apply_input_key, handle_click,
@@ -85,7 +85,7 @@ fn clamp(value: f64, config: Threshold) -> Result<f64, String> {
 fn input_events_dispatch_via_listeners_and_onstar_attributes() {
     // The four input events must fire along the DOM ancestor chain for both
     // `addEventListener` listeners and compiled `on*` attributes.
-    let (mut engine, geo) = build_geometry(
+    let (mut engine, _geo) = build_geometry(
         r#"<script>
           var seen = [];
           var el = document.getElementById('f');
@@ -156,8 +156,7 @@ fn click_input_focuses_and_click_elsewhere_blurs() {
     let (ix, iy) = center(input_region.rect);
 
     let mut state = InputState::new();
-    let mut cmds = Vec::new();
-    handle_click(&mut state, &map, &mut engine, ix, iy, &mut cmds);
+    let cmds = click(&mut state, &mut engine, &map, ix, iy);
     assert_eq!(state.focused_input, Some(input_region.node_id));
     assert!(
         cmds.iter().any(|c| matches!(
@@ -172,8 +171,7 @@ fn click_input_focuses_and_click_elsewhere_blurs() {
     );
 
     // Click far below the document (blank space) → the field must blur.
-    let mut cmds = Vec::new();
-    handle_click(&mut state, &map, &mut engine, 0, 1000, &mut cmds);
+    let cmds = click(&mut state, &mut engine, &map, 0, 1000);
     assert!(state.focused_input.is_none(), "click outside must blur");
     assert!(
         cmds.iter().any(|c| matches!(
@@ -206,8 +204,7 @@ fn click_another_input_commits_the_previous_field() {
     let (cx, cy) = center(city.rect);
 
     let mut state = InputState::new();
-    let mut cmds = Vec::new();
-    handle_click(&mut state, &map, &mut engine, nx, ny, &mut cmds);
+    click(&mut state, &mut engine, &map, nx, ny);
     // Type into the focused field.
     assert!(apply_input_key(
         &mut state.input_value,
@@ -216,8 +213,7 @@ fn click_another_input_commits_the_previous_field() {
     ));
 
     // Click the other field.
-    let mut cmds = Vec::new();
-    handle_click(&mut state, &map, &mut engine, cx, cy, &mut cmds);
+    let cmds = click(&mut state, &mut engine, &map, cx, cy);
     assert_eq!(state.focused_input, Some(city.node_id));
     assert!(
         cmds.iter().any(|c| matches!(
@@ -264,8 +260,7 @@ fn mouse_down_on_input_focuses_and_positions_caret() {
     let (x, y) = center(region.rect);
 
     let mut state = InputState::new();
-    let mut cmds = Vec::new();
-    handle_mouse_down(&mut state, &map, &mut engine, x, y, MouseButton::Left, &mut cmds);
+    let cmds = mouse_down(&mut state, &mut engine, &map, x, y, MouseButton::Left);
     assert!(
         state.drag_selecting,
         "press on a field starts drag-selection mode"
@@ -299,22 +294,12 @@ fn drag_on_input_selects_a_character_range() {
     let ry = region.rect.y as u32;
 
     let mut state = InputState::new();
-    let mut cmds = Vec::new();
-    handle_mouse_down(
-        &mut state,
-        &map,
-        &mut engine,
-        rx + 1,
-        ry,
-        MouseButton::Left,
-        &mut cmds,
-    );
+    mouse_down(&mut state, &mut engine, &map, rx + 1, ry, MouseButton::Left);
     assert_eq!(state.input_cursor, 0, "press on the first column → char 0");
 
     // The input loop tracks the press position; a plain move is a drag.
     state.pressed = Some((0, 0));
-    let mut cmds = Vec::new();
-    handle_mouse_move(&mut state, &map, &mut engine, rx + 3, ry, &mut cmds);
+    let cmds = mouse_move(&mut state, &mut engine, &map, rx + 3, ry);
     assert_eq!(state.input_cursor, 2, "drag to the third column → char 2");
     let sel = cmds.iter().find_map(|c| match c {
         RenderCmd::RenderInput {
@@ -337,23 +322,13 @@ fn drag_on_page_text_emits_text_selection() {
     let map = HitMap::build(&geo);
 
     let mut state = InputState::new();
-    let mut cmds = Vec::new();
-    handle_mouse_down(
-        &mut state,
-        &map,
-        &mut engine,
-        0,
-        0,
-        MouseButton::Left,
-        &mut cmds,
-    );
+    mouse_down(&mut state, &mut engine, &map, 0, 0, MouseButton::Left);
     assert_eq!(state.text_sel_anchor, Some((0, 0)));
     assert_eq!(state.text_sel_end, Some((0, 0)));
     assert_eq!(state.text_sel_mode, SelectionMode::Flow);
 
     state.pressed = Some((0, 0));
-    let mut cmds = Vec::new();
-    handle_mouse_move(&mut state, &map, &mut engine, 4, 0, &mut cmds);
+    let cmds = mouse_move(&mut state, &mut engine, &map, 4, 0);
     assert_eq!(state.text_sel_end, Some((4, 0)));
     assert!(
         cmds.iter().any(|c| matches!(
@@ -379,30 +354,12 @@ fn pressing_elsewhere_replaces_the_page_selection() {
     let map = HitMap::build(&geo);
 
     let mut state = InputState::new();
-    let mut cmds = Vec::new();
-    handle_mouse_down(
-        &mut state,
-        &map,
-        &mut engine,
-        5,
-        5,
-        MouseButton::Left,
-        &mut cmds,
-    );
+    mouse_down(&mut state, &mut engine, &map, 5, 5, MouseButton::Left);
     state.pressed = Some((0, 0));
-    handle_mouse_move(&mut state, &map, &mut engine, 8, 5, &mut cmds);
+    mouse_move(&mut state, &mut engine, &map, 8, 5);
     assert!(state.text_sel_anchor.is_some(), "a selection now exists");
 
-    let mut cmds = Vec::new();
-    handle_mouse_down(
-        &mut state,
-        &map,
-        &mut engine,
-        2,
-        2,
-        MouseButton::Left,
-        &mut cmds,
-    );
+    let cmds = mouse_down(&mut state, &mut engine, &map, 2, 2, MouseButton::Left);
     assert!(
         cmds.iter().any(|c| matches!(
             c,
@@ -428,22 +385,12 @@ fn right_drag_emits_a_block_selection() {
     let map = HitMap::build(&geo);
 
     let mut state = InputState::new();
-    let mut cmds = Vec::new();
-    handle_mouse_down(
-        &mut state,
-        &map,
-        &mut engine,
-        2,
-        0,
-        MouseButton::Right,
-        &mut cmds,
-    );
+    mouse_down(&mut state, &mut engine, &map, 2, 0, MouseButton::Right);
     assert_eq!(state.text_sel_mode, SelectionMode::Block);
     assert_eq!(state.text_sel_anchor, Some((2, 0)));
 
     state.pressed = Some((0, 0));
-    let mut cmds = Vec::new();
-    handle_mouse_move(&mut state, &map, &mut engine, 5, 2, &mut cmds);
+    let cmds = mouse_move(&mut state, &mut engine, &map, 5, 2);
     assert!(
         cmds.iter().any(|c| matches!(
             c,
@@ -474,8 +421,7 @@ fn click_select_opens_the_dropdown() {
     let (sx, sy) = center(region.rect);
 
     let mut state = InputState::new();
-    let mut cmds = Vec::new();
-    handle_mouse_down(&mut state, &map, &mut engine, sx, sy, MouseButton::Left, &mut cmds);
+    let cmds = mouse_down(&mut state, &mut engine, &map, sx, sy, MouseButton::Left);
     assert!(
         state.open_select.is_some(),
         "clicking a select must open its dropdown"
@@ -509,19 +455,16 @@ fn picking_a_select_option_commits_the_value_and_fires_change() {
     let (sx, sy) = center(region.rect);
 
     let mut state = InputState::new();
-    let mut cmds = Vec::new();
-    handle_mouse_down(&mut state, &map, &mut engine, sx, sy, MouseButton::Left, &mut cmds);
+    mouse_down(&mut state, &mut engine, &map, sx, sy, MouseButton::Left);
     let open = state.open_select.clone().unwrap();
     // Click the second option row (one row below the field).
-    let mut cmds = Vec::new();
-    handle_mouse_down(
+    let cmds = mouse_down(
         &mut state,
-        &map,
         &mut engine,
+        &map,
         open.rect.x as u32,
         open.rect.y as u32 + 1,
         MouseButton::Left,
-        &mut cmds,
     );
     assert!(state.open_select.is_none(), "picking an option closes the dropdown");
     assert!(
@@ -554,18 +497,15 @@ fn hovering_a_select_option_moves_the_highlight() {
     let (sx, sy) = center(region.rect);
 
     let mut state = InputState::new();
-    let mut cmds = Vec::new();
-    handle_mouse_down(&mut state, &map, &mut engine, sx, sy, MouseButton::Left, &mut cmds);
+    mouse_down(&mut state, &mut engine, &map, sx, sy, MouseButton::Left);
     let open = state.open_select.clone().unwrap();
 
-    let mut cmds = Vec::new();
-    handle_mouse_move(
+    let cmds = mouse_move(
         &mut state,
-        &map,
         &mut engine,
+        &map,
         open.rect.x as u32,
         open.rect.y as u32 + 1,
-        &mut cmds,
     );
     assert_eq!(
         state.open_select.as_ref().unwrap().highlight,
@@ -578,14 +518,12 @@ fn hovering_a_select_option_moves_the_highlight() {
     );
 
     // Hovering the same row again emits nothing (highlight unchanged).
-    let mut cmds = Vec::new();
-    handle_mouse_move(
+    let cmds = mouse_move(
         &mut state,
-        &map,
         &mut engine,
+        &map,
         open.rect.x as u32,
         open.rect.y as u32 + 1,
-        &mut cmds,
     );
     assert!(
         cmds.iter().all(|c| !matches!(c, RenderCmd::SelectMove { .. })),
@@ -607,20 +545,17 @@ fn dragging_over_select_options_moves_the_highlight() {
     let (sx, sy) = center(region.rect);
 
     let mut state = InputState::new();
-    let mut cmds = Vec::new();
-    handle_mouse_down(&mut state, &map, &mut engine, sx, sy, MouseButton::Left, &mut cmds);
+    mouse_down(&mut state, &mut engine, &map, sx, sy, MouseButton::Left);
     let open = state.open_select.clone().unwrap();
 
     // Button held while dragging to the bottommost row.
     state.pressed = Some((0, 0));
-    let mut cmds = Vec::new();
-    handle_mouse_move(
+    let cmds = mouse_move(
         &mut state,
-        &map,
         &mut engine,
+        &map,
         open.rect.x as u32,
         open.rect.y as u32 + 2,
-        &mut cmds,
     );
     assert_eq!(
         state.open_select.as_ref().unwrap().highlight,
@@ -644,13 +579,11 @@ fn clicking_outside_a_select_closes_it_without_changing_the_value() {
     let (sx, sy) = center(region.rect);
 
     let mut state = InputState::new();
-    let mut cmds = Vec::new();
-    handle_mouse_down(&mut state, &map, &mut engine, sx, sy, MouseButton::Left, &mut cmds);
+    mouse_down(&mut state, &mut engine, &map, sx, sy, MouseButton::Left);
     assert!(state.open_select.is_some());
 
     // Click far away (below the document): closes, value untouched.
-    let mut cmds = Vec::new();
-    handle_mouse_down(&mut state, &map, &mut engine, 0, 1000, MouseButton::Left, &mut cmds);
+    mouse_down(&mut state, &mut engine, &map, 0, 1000, MouseButton::Left);
     assert!(state.open_select.is_none());
     let arena = engine.arena();
     let value = arena
@@ -924,6 +857,89 @@ fn region_of(arena: &NodeArena, node_id: NodeId) -> HitRegion {
 }
 
 // ============================================================
+// Input-loop drivers (test-side script thread)
+// ============================================================
+
+/// Drive the collected script messages against a real engine — the test-side
+/// counterpart of the production script thread — and fold the replies into
+/// the returned commands (hover updates + host-pushed cmds + dirty snapshots).
+fn drive_msgs(
+    state: &mut InputState,
+    engine: &mut ScriptEngine,
+    map: &HitMap,
+    msgs: Vec<ScriptMsg>,
+) -> Vec<RenderCmd> {
+    let mut cmds = Vec::new();
+    let mut hover = HoverState::new();
+    for msg in msgs {
+        let ev = apply_message(engine, &mut hover, map, msg);
+        cmds.extend(ev.cmds);
+        if let Some(d) = ev.dirty {
+            cmds.push(RenderCmd::RenderArena {
+                arena: d.arena,
+                root_id: d.root_id,
+                scroll_y: state.scroll_y,
+                zoom: state.zoom,
+                hovered: ev.hovered,
+                dirty: d.dirty,
+            });
+        }
+    }
+    cmds
+}
+
+/// Click at canvas coordinates, executing the queued messages like the script
+/// thread would.
+fn click(
+    state: &mut InputState,
+    engine: &mut ScriptEngine,
+    map: &HitMap,
+    x: u32,
+    y: u32,
+) -> Vec<RenderCmd> {
+    let arena = engine.arena();
+    let mut msgs = Vec::new();
+    let mut cmds = Vec::new();
+    handle_click(state, map, &arena, x, y, &mut msgs, &mut cmds);
+    cmds.extend(drive_msgs(state, engine, map, msgs));
+    cmds
+}
+
+/// Mouse-down at canvas coordinates, executing the queued messages like the
+/// script thread would.
+fn mouse_down(
+    state: &mut InputState,
+    engine: &mut ScriptEngine,
+    map: &HitMap,
+    x: u32,
+    y: u32,
+    button: MouseButton,
+) -> Vec<RenderCmd> {
+    let arena = engine.arena();
+    let mut msgs = Vec::new();
+    let mut cmds = Vec::new();
+    handle_mouse_down(state, map, &arena, x, y, button, &mut msgs, &mut cmds);
+    cmds.extend(drive_msgs(state, engine, map, msgs));
+    cmds
+}
+
+/// Pointer move at canvas coordinates, executing the queued messages like the
+/// script thread would.
+fn mouse_move(
+    state: &mut InputState,
+    engine: &mut ScriptEngine,
+    map: &HitMap,
+    x: u32,
+    y: u32,
+) -> Vec<RenderCmd> {
+    let mut msgs = Vec::new();
+    let mut cmds = Vec::new();
+    handle_mouse_move(state, map, x, y, &mut msgs, &mut cmds);
+    cmds.extend(drive_msgs(state, engine, map, msgs));
+    cmds
+}
+
+// ============================================================
 // Hit regions
 // ============================================================
 
@@ -1189,7 +1205,7 @@ fn hover_fires_mouseover_and_mouseout_listeners() {
 }
 
 // ============================================================
-// Auto-refresh (invoke_action)
+// invoke_action (manual JS global invocation)
 // ============================================================
 
 #[test]
@@ -1246,7 +1262,7 @@ fn visual_test_sysmon_document_initializes() {
     // Smoke test: sysmon page initializes; its script references the host
     // `sample` function which is only defined at runtime, so init must not
     // fail on the unresolved reference (the refresh action resolves it later).
-    let html = include_str!("../../../visual_test/src/sysmon/index.html");
+    let html = include_str!("../../../example/src/sysmon/index.html");
     let mut bindings = EventBindings::default();
     bindings.host.insert(
         "sample".to_string(),
@@ -1286,7 +1302,7 @@ fn sysmon_page_refresh_populates_all_cards() {
     // End-to-end over the real demo page: the host `sample()` returns the full
     // field set and the page's own `refresh()` writes every card. Any typo in
     // the page's element ids fails here.
-    let html = include_str!("../../../visual_test/src/sysmon/index.html");
+    let html = include_str!("../../../example/src/sysmon/index.html");
     let mut bindings = EventBindings::default();
     bindings.host.insert(
         "sample".to_string(),

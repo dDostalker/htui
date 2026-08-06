@@ -22,10 +22,10 @@
 | `html` `head` `body` | ✅ | ✅ | 结构骨架 |
 | `title` | ✅ | ✅ | 写入终端窗口标题 |
 | `meta` | ✅ | ✅ | 解析但忽略属性 |
-| `link` | ✅ | ✗ | 不加载外部 CSS/图标 |
+| `link` | ✅ | ◐ | 仅 `rel="stylesheet"`：`href` 按**本地文件路径**读取（相对进程 CWD，无 URL/网络），失败仅 warn 静默跳过 |
 | `style` | ✅ | ✅ | `<style>` 内 CSS 参与级联 |
 | `script` | ✅ | ✅ | 执行内嵌脚本（Boa） |
-| `script src=...` | ✅ | ✗ | 不加载外部脚本 |
+| `script src=...` | ✅ | ◐ | `src` 按**本地文件路径**读取（相对进程 CWD，无 URL/网络），失败仅 warn 静默跳过；有 `src` 时内联内容被忽略（对齐浏览器） |
 | `noscript` | ✅ | ✗ | 无 |
 
 ### 1.2 块级与文本
@@ -276,7 +276,8 @@
 | `mouseover` `mouseout` | ✅ | ✅ | |
 | `mousemove` `mousedown` `mouseup` | ✅ | ✗ | 无（JS 不可见） |
 | `focus` `blur` `input` `change` | ✅ | ✅ | 仅 `<input>` 产生 |
-| `keydown` `keyup` `keypress` | ✅ | ✗ | 键盘不可编程监听 |
+| `keydown` `keyup` | ✅ | ✅ | 目标 = 聚焦 `<input>`，否则 `<body>`；沿祖先链冒泡 |
+| `keypress` | ✅ | ✗ | 无（需按下/释放组合时序） |
 | `wheel` `scroll` `resize` `dblclick` `contextmenu` `submit` | ✅ | ✗ | 无 |
 
 ### 3.5 Event 对象
@@ -284,10 +285,11 @@
 | 能力 | 浏览器 | htui | 说明 |
 | ---- | :----: | :---: | ---- |
 | `type` `target` `currentTarget` `bubbles` | ✅ | ✅ | |
-| `x` `y` | ✅ | ◐ | canvas 坐标，非像素坐标 |
+| `x` `y` | ✅ | ◐ | canvas 坐标，非像素坐标；键盘事件为 0,0 |
 | `stopPropagation()` | ✅ | ✅ | |
-| `preventDefault()` | ✅ | ◐ | 存在但多数事件无默认行为可阻止 |
-| `keyCode` `button` `clientX` 等 | ✅ | ✗ | 无 |
+| `preventDefault()` | ✅ | ◐ | 存在；可阻止页面 handler 外无默认行为可阻止（内置快捷键先于 JS 执行，见 §6.5.5） |
+| `key` `code` `keyCode` + 修饰键标志 | ✅ | ◐ | 仅 `keydown`/`keyup` 事件对象上有；`repeat` 支持 |
+| `button` `clientX` 等 | ✅ | ✗ | 无 |
 
 ---
 
@@ -302,9 +304,9 @@
 | 双击选词 / 三击选行 | ✅ | ✗ | 无 |
 | 右键上下文菜单 | ✅ | ✗ | 右键改为框选【刻意】 |
 | 系统剪贴板互通 | ✅ | ✗ | 会话内剪贴板【刻意】 |
-| 文本编辑（IME/方向键/Home/End/删除） | ✅ | ✅ | `<input>` 内 |
-| `Tab` 焦点遍历 | ✅ | ✗ | 焦点仅鼠标点击 |
-| 快捷键体系 | ✅ | ◐ | 引擎固定（j/k/方向滚动、q 退出、Ctrl 缩放），脚本不可接管 |
+| 文本编辑（IME/方向键/Home/End/删除） | ✅ | ✅ | `<input>` 内；另支持 Ctrl/Alt+←→ 按词移动、Ctrl+Backspace/Delete 按词删除、Ctrl+Home/End |
+| `Tab` 焦点遍历 | ✅ | ✅ | 在 `<input>` 间循环；`Shift+Tab` 反向 |
+| 快捷键体系 | ✅ | ◐ | 引擎内置（j/k/方向/空格/PageUp/PageDown/g/G 滚动、q/Esc 退出、Ctrl 缩放）**且**每个按键同时派发 `keydown` 到脚本层；`preventDefault` 尚不能取消内置行为（见 §6.5.5） |
 | HTML5 拖放 | ✅ | ✗ | 无 |
 | 触摸/触控板 | ✅ | ✗ | 【刻意】 |
 
@@ -504,15 +506,20 @@
 
 #### 6.4.2 【简化】事件子集
 - **浏览器**：键盘/滚轮/滚动/双击/提交等事件。
-- **htui**：仅 click/mouseover/mouseout/focus/blur/input/change。
-- **示例**：`el.addEventListener('keydown', f)` 静默不触发（未注册类型）。
+- **htui**：click/mouseover/mouseout/focus/blur/input/change/**keydown/keyup**；
+  滚轮、双击、提交等仍不可监听。
+- **示例**：`el.addEventListener('keydown', f)` 在聚焦链上正常触发 ✓；
+  `el.addEventListener('wheel', f)` 静默不触发（未注册类型）。
 - **代码**：`events/mod.rs`（`EventType`）。
 
-#### 6.4.3 【简化】无定时器 / 无异步驱动
-- **浏览器**：`setInterval` 等驱动动态页面。
-- **htui**：脚本无法自驱动；用 `EventBindings::auto`（Rust 侧）周期性 `invoke_action`。
-- **示例**：`setInterval(() => {...}, 1000)` → `ReferenceError: setInterval is not defined`。
-- **代码**：`script/mod.rs` + `tui/run.rs`（auto 触发）。
+#### 6.4.3 【简化】定时器仅标准 API，无高精度/帧对齐
+- **浏览器**：`setTimeout` / `setInterval` / `clearTimeout` / `clearInterval` +
+  `requestAnimationFrame`（刷新率对齐）等。
+- **htui**：四个标准定时器 API 已实现；回调在脚本线程的消息间隙触发
+  （`ScriptEngine::run_due_timers`），与其它 JS 派发共享同一队列。无
+  `requestAnimationFrame`（无刷新率概念）。
+- **示例**：`setInterval(() => {...}, 1000)` 正常工作 ✓。
+- **代码**：`script/dom.rs`（原生函数）+ `script/msg.rs`（脚本线程调度）。
 
 #### 6.4.4 【简化】`Promise`/`async` 语法存在但无事件循环
 - **浏览器**：完整异步运行时。
@@ -529,25 +536,48 @@
 - **htui**：仅 `getElementById`/`createElement`。
 - **代码**：`script/dom.rs`（`install_builtins`）。
 
-#### 6.4.7 【简化】`preventDefault()` 无实质效果
+#### 6.4.7 【简化】`preventDefault()` 对滚动/缩放/退出键生效
 - **浏览器**：可阻止链接跳转、表单提交等默认行为。
-- **htui**：存在该方法，但事件没有可阻止的默认行为（链接不导航、无提交）。
-- **代码**：`script/mod.rs`（事件对象构建）。
+- **htui**：页面级内置键（滚动/缩放/退出）经 keydown 门控——`preventDefault()`
+  丢弃对应内置动作（见 §6.5.5）；对输入框编辑/下拉/Tab 等输入控件行为不生效。
+- **代码**：`script/mod.rs`（`prevent_default` 置位 + `fire_key_gated`）。
 
 #### 6.4.8 【简化】`on*` 属性事件名子集
 - **浏览器**：`onkeydown`、`onwheel` 等全部事件属性。
-- **htui**：仅支持 7 个事件对应属性，其他 `on*` 不编译。
+- **htui**：支持 9 个事件对应属性（click/mouseover/mouseout/focus/blur/input/change/
+  keydown/keyup），其他 `on*` 不编译。
 - **代码**：`script/mod.rs`（`on*` 编译）。
 
 #### 6.4.9 【简化】脚本与宿主函数边界
 - **浏览器**：无（浏览器脚本只能调 Web API）。
-- **htui**：宿主函数在输入循环线程同步执行，重活需自行放后台线程（sysmon 模式）。
-- **代码**：`script/host.rs` + `visual_test/src/sysmon.rs`。
+- **htui**：宿主函数在**脚本线程**同步执行（引擎独占线程，阻塞只拖住脚本线程，
+  不冻结输入/渲染）；重活仍建议放后台线程（sysmon 模式）以免排队阻塞后续 JS 派发。
+- **代码**：`script/msg.rs` + `example/src/sysmon.rs`。
 
 #### 6.4.10 【简化】`el.value` 语义仅限 `<input>`
 - **浏览器**：`value` 还适用于 `<textarea>`/`<select>`/`<option>`。
 - **htui**：非 input 元素读写 `value` 无效果。
 - **代码**：`script/dom.rs`（`native_get_value`）。
+
+#### 6.4.11 【已知】输入循环读 DOM 快照（read-behind 窗口）
+- **浏览器**：交互线程与脚本共享同一 DOM，读取总是最新。
+- **htui**：输入循环读的是脚本线程发布的 arena **快照**（仅 JS 改 DOM 后经
+  `ScriptResponse::Event.dirty` 更新）。在"JS 改动 → 响应被消费"之间输入循环看到
+  旧文档：`focus_input` 用旧 `value` 种子编辑缓冲，编辑期间 JS 改 `value` 后 blur
+  提交可能覆盖新值；node_type 判断与 `<select>` 选项读取同理。窗口约 0–100ms。
+  **已缓解**：blur 提交（`set_value`）现在必 mark dirty（等值短路），提交随 JS blur
+  处理器的改写一起以 `RenderArena` 发布，显示侧不再停留旧值——read-behind 只剩
+  "输入循环读旧快照去种子 / 判定"这类读路径，不再影响显示正确性。
+- **代码**：`tui/run.rs`（`live_dom`）+ `script/msg.rs`。
+
+#### 6.4.12 【已修复】`RenderCmd::RenderHtml` 后引擎 live DOM 不同步
+- **浏览器**：无对应概念。
+- **旧问题**：宿主函数 push `RenderHtml` 时渲染线程独立重新解析渲染，脚本引擎的
+  live arena 保持旧文档，JS 读 `getElementById` 等读到旧内容。
+- **修复**：脚本路径的 `RenderHtml` 由 **`ScriptEngine::reload` 在引擎内**重建文档
+  （重新解析 + 跑脚本 + 保留宿主函数），mark root dirty 后随 `RenderArena` 同步——
+  引擎保持文档单一真源；渲染线程的 `RenderHtml` 分支仅作外部 API 兜底。
+- **代码**：`script/mod.rs`（`reload` / `intercept_render_html`）。
 
 ### 6.5 交互与输入
 
@@ -567,15 +597,28 @@
 - **htui**：双击等同两次点击（无扩展）。
 - **代码**：`tui/graph_api/input.rs`（无 dblclick 处理）。
 
-#### 6.5.4 【简化】无 `Tab` 焦点遍历
+#### 6.5.4 【简化】`Tab` 焦点遍历
 - **浏览器**：`Tab` 在可聚焦元素间移动 + `:focus-visible`。
-- **htui**：焦点仅鼠标点击 input；`Tab` 无效果。
-- **代码**：`tui/graph_api/input.rs`（Key 分支）。
+- **htui**：`Tab`/`Shift+Tab` 在 `<input>` 间按 DOM 顺序循环（无 `:focus-visible`）；
+  焦点也可鼠标点击。
+- **代码**：`tui/graph_api/input.rs`（`collect_input_ids` + Key 分支）。
 
-#### 6.5.5 【简化】键盘不可编程监听
-- **浏览器**：页面可监听并拦截键盘。
-- **htui**：方向键/`j`/`k` 滚动、`q` 退出、`Ctrl` 缩放为引擎固定行为；脚本不可接管。
-- **代码**：`tui/graph_api/input.rs`（`trigger_refresh` Key 分支）。
+#### 6.5.5 【简化】键盘事件可达脚本层，`preventDefault` 可拦截滚动/缩放/退出
+- **浏览器**：页面可监听并拦截键盘（`preventDefault`）。
+- **htui**：**每次按键**（含 auto-repeat）都会派发 `keydown`（目标 = 聚焦
+  `<input>`，否则 `<body>`），`keyup` 在终端报告释放时派发；事件对象携带
+  `key`/`code`/`keyCode`/修饰键/`repeat`。**滚动/缩放/退出门控**：当按键
+  抵达页面级（无下拉/输入框消费）且会产生内置动作（j/k/方向/空格/PageUp/
+  PageDown/g/G/Home/End 滚动、q/Esc 退出、Ctrl±/0 缩放）时，输入循环先派发
+  `keydown` 并等待脚本线程判定（`KeyGate` + `recv_timeout(KEY_GATE_TIMEOUT=8ms)`）：
+  处理器调 `event.preventDefault()` → 内置动作被丢弃（页面接管该键，例如
+  Snake 用方向键转向同时不再滚动页面）；未阻止 → 照常执行内置动作。**脚本线程
+  忙/被宿主函数阻塞时门控超时，回退执行内置动作**——滚动/退出仍响应（解耦保证），
+  仅代价是最多 8ms/键的等待。**不门控**：输入框编辑键、下拉导航、`Tab` 焦点
+  遍历（属于输入控件行为，直接执行）。
+- **代码**：`tui/graph_api/input.rs`（`KeyGate`/`KEY_GATE_TIMEOUT`/`page_level_builtins`）、
+  `tui/run.rs`（门控等待）、`script/msg.rs`（`key_gate` 回传）、`script/mod.rs`
+  （`fire_key_gated` / `prevent_default`）。
 
 #### 6.5.6 【简化】滚动整行步进
 - **浏览器**：平滑/惯性/像素级。

@@ -16,7 +16,9 @@
 
 ### 1.1 文档结构（不渲染为可视内容）
 
-`html` `head` `title` `meta` `link` `style`（`<style>` 内的 CSS 会级联）
+`html` `head` `title` `meta` `link` `style`（`<style>` 内的 CSS 会级联）；
+`<link rel="stylesheet">` / `<script src="...">` 支持本地文件加载（`href`/`src`
+相对进程 CWD，无 URL/网络，失败仅 warn 静默跳过）
 
 ### 1.2 块级与文本（✅ 专用布局/渲染）
 
@@ -110,7 +112,7 @@
 
 - ✅ 继承属性表（`INHERITED_PROPS`）、内联 `style` 属性 > 选择器规则、
   相同优先级按出现顺序
-- ✅ 支持 `<style>` 标签内联 CSS（外部 `<link>` 不加载）
+- ✅ 支持 `<style>` 标签内联 CSS；也支持 `<link rel="stylesheet">`（`href` 按本地文件路径读取，相对进程 CWD，失败静默跳过）
 
 ## 3. JavaScript / DOM
 
@@ -163,8 +165,8 @@
 `currentTarget`/`x`/`y`/`bubbles`/`preventDefault()`）、`on*` 属性按
 `function(event){ body }` 编译（裸标识符只求值不调用）。
 
-✗ 无定时器（`setInterval`/`setTimeout`）——周期性刷新用
-`EventBindings::auto`（Rust 侧）或宿主函数。
+✅ 定时器：`setTimeout` / `setInterval` / `clearTimeout` / `clearInterval`——
+回调在脚本线程的消息间隙执行（`ScriptEngine::run_due_timers`），改 DOM 照常触发渲染。
 
 ## 4. 输入与交互（终端特有）
 
@@ -183,7 +185,6 @@
 | `calc()`、CSS 变量、媒体查询、`float`、多列 | ✗ |
 | `querySelector(All)`、`classList`、`innerHTML` | ✗ |
 | `fetch`、网络请求、完整 Promise 语义 | ✗ |
-| `setInterval` / `setTimeout` | ✗（用 `EventBindings::auto`） |
 | 系统剪贴板（OSC 52） | ✗ 拒绝项 |
 | 像素级渲染（除 `<img>`） | ✗ 拒绝项 |
 | 触摸 / 无障碍 / 多文档窗口 | ✗ 拒绝项 |

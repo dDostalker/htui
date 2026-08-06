@@ -4,13 +4,16 @@
 //! The editing tests drive `apply_input_key` directly (no terminal, no event
 //! loop); the render tests draw a small document and assert on the canvas.
 
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use htui::events::EventBindings;
 use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
 use htui::script::ScriptEngine;
 use htui::tdom::node::{NodeArena, NodeId, NodeType};
-use htui::tui::graph_api::{InputRenderState, TermLayout, apply_input_key, selection_range};
+use htui::tui::graph_api::{
+    InputRenderState, TermLayout, apply_input_key, apply_input_word_key, collect_input_ids,
+    is_input_field_key, key_event_info, next_word_boundary, prev_word_boundary, selection_range,
+};
 use htui::tui::graph_api::Block;
 
 fn init() {
@@ -78,20 +81,6 @@ fn select_renders_first_option_without_value() {
 
 /// Find the first node with `node_type == NodeType::Input`.
 fn find_input(arena: &NodeArena, root: NodeId) -> NodeId {
-    let mut stack = vec![root];
-    while let Some(id) = stack.pop() {
-        let node = &arena[id];
-        if node.node_type == NodeType::Input {
-            return id;
-        }
-        stack.extend(node.children.iter().copied());
-    }
-    panic!("no <input> in document");
-}
-
-/// Find the first node with `node_type == NodeType::Input` in a live-engine
-/// arena (mirrors [`find_input`] for standalone arenas).
-fn find_input_in_arena(arena: &NodeArena, root: NodeId) -> NodeId {
     let mut stack = vec![root];
     while let Some(id) = stack.pop() {
         let node = &arena[id];
@@ -205,28 +194,85 @@ fn input_renders_multibyte_values_at_display_width() {
 }
 
 #[test]
-fn set_value_commits_edited_value_to_the_dom() {
+fn set_value_commits_edited_value_to_the_dom_and_marks_dirty() {
     // The blur path writes the edited value back into the DOM `value`
-    // attribute (single source of truth) so a later focus reads it back. It
-    // does not mark the node dirty — the visible repaint is driven by
-    // `RenderCmd::RenderInput` (the field's layout is width-fixed).
+    // attribute (single source of truth) and marks the node dirty, so the
+    // commit always reaches the render thread as a `RenderArena` — a JS blur
+    // handler that rewrites the value (e.g. clearing a submitted box) is what
+    // ends up on screen. Committing an unchanged value is a no-op.
     init();
     let mut engine = ScriptEngine::new(
         r#"<div><input value="initial"></div>"#,
         EventBindings::default(),
     )
     .expect("engine");
-    let input_id = find_input_in_arena(&engine.arena(), engine.root_id());
+    let input_id = find_input(&engine.arena(), engine.root_id());
 
     engine.set_value(input_id, "edited");
 
-    assert!(engine.take_dirty().is_empty(), "set_value must not mark dirty");
+    assert!(
+        engine.take_dirty().nodes.contains(&input_id),
+        "set_value must mark the node dirty"
+    );
     let stored = engine
         .arena()
         .get(input_id)
         .and_then(|n| n.attributes.get("value"))
         .cloned();
     assert_eq!(stored.as_deref(), Some("edited"));
+
+    engine.set_value(input_id, "edited");
+    assert!(
+        engine.take_dirty().is_empty(),
+        "committing the same value again must not mark dirty"
+    );
+}
+
+#[test]
+fn layout_drops_unfocused_input_state_but_keeps_focused() {
+    init();
+    let (root_id, arena) = setup(r#"<div><input value="hi"></div>"#);
+    let input_id = find_input(&arena, root_id);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+
+    // A stale unfocused cache entry (the transient blur repaint) must not
+    // survive a fresh layout: the arena's `value` attribute is the display
+    // truth for unfocused fields.
+    tl.input_states.insert(
+        input_id,
+        InputRenderState {
+            value: "stale".to_string(),
+            cursor: 0,
+            focused: false,
+            selection: None,
+        },
+    );
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    assert!(
+        !tl.input_states.contains_key(&input_id),
+        "layout must drop stale unfocused entries"
+    );
+    let row: String = tl.layout.iter().take(8).map(|b| b.word.as_str()).collect();
+    assert_eq!(row, "[hi    ]", "unfocused field paints the DOM value");
+
+    // A focused entry holds the live edit buffer and must survive layout.
+    tl.input_states.insert(
+        input_id,
+        InputRenderState {
+            value: "typing".to_string(),
+            cursor: 5,
+            focused: true,
+            selection: None,
+        },
+    );
+    tl.draw(&arena, root_id, &term_map).unwrap();
+    assert!(
+        tl.input_states.contains_key(&input_id),
+        "focused edit state must survive layout"
+    );
+    let row: String = tl.layout.iter().take(8).map(|b| b.word.as_str()).collect();
+    assert_eq!(row, "[typing]", "focused field paints the live edit buffer");
 }
 
 #[test]
@@ -251,6 +297,27 @@ fn input_respects_width_attribute() {
     assert_eq!(rows[0].chars().nth(1), Some('a'));
     assert_eq!(rows[0].chars().nth(2), Some('b'));
     assert_eq!(rows[0].chars().nth(3), Some(']'), "close at width-1");
+}
+
+#[test]
+fn input_field_key_classifies_editing_keys() {
+    // A focused `<input>` owns the editing / caret keys — even when they are
+    // boundary no-ops (Home at the start) — but not page navigation (↓ / ↑ /
+    // PageDown / PageUp), which must fall through to scrolling while the
+    // field stays focused.
+    assert!(is_input_field_key(KeyCode::Char('a')));
+    assert!(is_input_field_key(KeyCode::Backspace));
+    assert!(is_input_field_key(KeyCode::Delete));
+    assert!(is_input_field_key(KeyCode::Left));
+    assert!(is_input_field_key(KeyCode::Right));
+    assert!(is_input_field_key(KeyCode::Home));
+    assert!(is_input_field_key(KeyCode::End));
+    assert!(!is_input_field_key(KeyCode::Down));
+    assert!(!is_input_field_key(KeyCode::Up));
+    assert!(!is_input_field_key(KeyCode::PageDown));
+    assert!(!is_input_field_key(KeyCode::PageUp));
+    assert!(!is_input_field_key(KeyCode::Enter));
+    assert!(!is_input_field_key(KeyCode::F(1)));
 }
 
 #[test]
@@ -351,4 +418,225 @@ fn engine_input_state_renders_value_and_caret() {
     assert_eq!(cell(1).fcolor, None);
     assert_eq!(cell(1).bcolor, None);
     assert_eq!(cell(2).bcolor, Some(crossterm::style::Color::White));
+}
+
+#[test]
+fn word_boundaries_match_browser_semantics() {
+    // `Ctrl`/`Alt`+←/→ word navigation: boundaries fall between word runs and
+    // non-word / whitespace runs (browser / vim `b` / `w` semantics).
+    let s = "hello brave new world";
+    assert_eq!(prev_word_boundary(s, 11), 6, "back to the previous word start");
+    assert_eq!(next_word_boundary(s, 0), 5, "forward to the next word end");
+    assert_eq!(
+        next_word_boundary(s, 5),
+        11,
+        "whitespace + the next word are covered in one step (browser semantics)"
+    );
+    assert_eq!(prev_word_boundary(s, 6), 0, "back over a leading word");
+
+    // Punctuation counts as a non-word run (a single boundary hop).
+    assert_eq!(prev_word_boundary("a,b", 2), 1, "stop before the comma");
+    assert_eq!(next_word_boundary("a,b", 0), 1, "stop after `a`");
+
+    // Clamping at the string ends.
+    assert_eq!(prev_word_boundary("ab", 0), 0);
+    assert_eq!(next_word_boundary("ab", 2), 2);
+    assert_eq!(prev_word_boundary("", 0), 0);
+    assert_eq!(next_word_boundary("", 0), 0);
+}
+
+#[test]
+fn apply_word_key_moves_caret_by_word() {
+    let mut value = String::from("hello brave new world");
+    let mut cursor = 0;
+    let mut anchor = None;
+
+    // Ctrl+Right jumps to the end of the next word.
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Right,
+        KeyModifiers::CONTROL,
+    ));
+    assert_eq!(cursor, 5);
+    // Ctrl+Left returns to the previous word start.
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Left,
+        KeyModifiers::CONTROL,
+    ));
+    assert_eq!(cursor, 0);
+    // Alt+Left is accepted as a word move too (mac muscle memory).
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Right,
+        KeyModifiers::ALT,
+    ));
+    assert_eq!(cursor, 5);
+    // Boundary no-ops report `false` (caret already at the start).
+    cursor = 0;
+    assert!(!apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Left,
+        KeyModifiers::ALT,
+    ));
+    assert_eq!(cursor, 0);
+}
+
+#[test]
+fn apply_word_key_deletes_by_word() {
+    // Ctrl+Backspace removes the word before the caret.
+    let mut value = String::from("hello world");
+    let mut cursor = 11;
+    let mut anchor = None;
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Backspace,
+        KeyModifiers::CONTROL,
+    ));
+    assert_eq!(value, "hello ");
+    assert_eq!(cursor, 6, "caret lands on the deleted word's start");
+
+    // Ctrl+Delete removes the word after the caret.
+    let mut value = String::from("hello world");
+    let mut cursor = 6;
+    let mut anchor = None;
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Delete,
+        KeyModifiers::CONTROL,
+    ));
+    assert_eq!(value, "hello ");
+    assert_eq!(cursor, 6);
+
+    // Ctrl+Home / Ctrl+End jump to the line edges (browser caret movement).
+    let mut value = String::from("abc def");
+    let mut cursor = 3;
+    let mut anchor = None;
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Home,
+        KeyModifiers::CONTROL,
+    ));
+    assert_eq!(cursor, 0);
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::End,
+        KeyModifiers::CONTROL,
+    ));
+    assert_eq!(cursor, 7);
+}
+
+#[test]
+fn apply_word_key_shift_extends_the_selection() {
+    // Shift+Ctrl+Right selects from the original caret to the next word end.
+    let mut value = String::from("hello brave");
+    let mut cursor = 0;
+    let mut anchor = None;
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Right,
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    ));
+    assert_eq!(cursor, 5);
+    assert_eq!(anchor, Some(0), "selection anchor stays at the start");
+
+    // A second word move extends the selection further: the whitespace run
+    // and the next word are covered in one step (browser semantics).
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Right,
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    ));
+    assert_eq!(cursor, 11);
+    assert_eq!(anchor, Some(0));
+
+    // A plain word move (no Shift) drops the selection.
+    assert!(apply_input_word_key(
+        &mut value,
+        &mut cursor,
+        &mut anchor,
+        KeyCode::Left,
+        KeyModifiers::CONTROL,
+    ));
+    assert_eq!(anchor, None, "plain navigation clears the selection");
+}
+
+#[test]
+fn collect_input_ids_returns_document_order() {
+    init();
+    let (root_id, arena) = setup(
+        r#"<div><input id="first"><p><input id="second"><input id="third"></p></div>"#,
+    );
+    let ids = collect_input_ids(&arena);
+    let labels: Vec<&str> = ids
+        .iter()
+        .map(|&id| arena[id].attributes.get("id").map(String::as_str).unwrap_or("?"))
+        .collect();
+    assert_eq!(labels, vec!["first", "second", "third"], "Tab order follows DOM order");
+    assert!(ids.iter().all(|&id| id != root_id), "root is not an input");
+}
+
+#[test]
+fn key_event_info_maps_every_key_to_browser_fields() {
+    // The crossterm → `KeyEventInfo` conversion keeps the browser vocabulary:
+    // pages branch on the same `key` / `code` / `keyCode` strings as in a real
+    // browser.
+    let mut info = key_event_info(&KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+    assert_eq!(info.key, "a");
+    assert_eq!(info.code, "KeyA");
+    assert_eq!(info.key_code, 'a' as u32);
+    assert!(!info.ctrl && !info.shift && !info.alt && !info.meta && !info.repeat);
+
+    info = key_event_info(&KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE));
+    assert_eq!(info.key, " ");
+    assert_eq!(info.code, "Space");
+    assert_eq!(info.key_code, 32);
+
+    info = key_event_info(&KeyEvent::new(KeyCode::Char('5'), KeyModifiers::NONE));
+    assert_eq!(info.code, "Digit5");
+
+    info = key_event_info(&KeyEvent::new(KeyCode::Up, KeyModifiers::SHIFT));
+    assert_eq!(info.key, "ArrowUp");
+    assert_eq!(info.key_code, 38);
+    assert!(info.shift);
+
+    info = key_event_info(&KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert_eq!((info.key.as_str(), info.key_code), ("Enter", 13));
+
+    info = key_event_info(&KeyEvent::new(KeyCode::F(5), KeyModifiers::NONE));
+    assert_eq!((info.key.as_str(), info.code.as_str(), info.key_code), ("F5", "F5", 116));
+
+    info = key_event_info(&KeyEvent::new(KeyCode::Esc, KeyModifiers::CONTROL));
+    assert_eq!(info.key, "Escape");
+    assert!(info.ctrl);
+
+    // A repeated press is flagged for JS (`event.repeat`).
+    let ev = KeyEvent {
+        code: KeyCode::Char('x'),
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Repeat,
+        state: KeyEventState::empty(),
+    };
+    info = key_event_info(&ev);
+    assert!(info.repeat, "repeat presses must be visible to JS listeners");
 }

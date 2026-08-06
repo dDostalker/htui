@@ -330,8 +330,6 @@ fn test_flex_align_items_stretch_with_explicit_height() {
     // (stretched) should paint all 3 rows red, with 'A' on the first
     // row (baseline = top in v1).
     let line0_has_a = rows[0].contains("A");
-    let red_row0 = rows[0].contains("AAAA") || rows[0].chars().any(|c| c == 'A');
-    let _ = red_row0;
     let line1_no_a = !rows[1].contains("A");
     let line2_no_a = !rows[2].contains("A");
     assert!(line0_has_a, "A text on row 0");
@@ -620,10 +618,8 @@ fn test_flex_align_self_overrides_align_items() {
         .bot { align-self: flex-end; }
     "#;
     let (rows, _) = render_rows(html, css);
-    let pos_a = rows[0].find("A").expect("A on row 0 (flex-start)");
-    let pos_b = rows[4].find("B").expect("B on row 4 (flex-end)");
-    let _ = pos_a;
-    let _ = pos_b;
+    rows[0].find("A").expect("A on row 0 (flex-start)");
+    rows[4].find("B").expect("B on row 4 (flex-end)");
     assert!(
         !rows[0].contains("B"),
         "B should not be on row 0 (its align-self is flex-end)"

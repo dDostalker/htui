@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head><title>Events</title></head>
-<body>
+<body onkeydown="onKey(event)">
   <script>
     // JS-driven demo: functions are defined in a `<script>` block (exactly
     // like a browser) and bound to elements via `on*` attributes or
@@ -28,9 +28,20 @@
 
     // Programmatic binding demo: this button has no `onclick` attribute.
     document.getElementById('btn-add').addEventListener('click', buy);
+
+    // Keyboard demo: every key is dispatched to the focused element (or the
+    // document `<body>` when nothing is focused — the `onkeydown` attribute
+    // above), with browser-style fields (`key` / `code` / `keyCode` /
+    // modifiers / `repeat`).
+    function onKey(e) {
+      var mods = (e.ctrlKey ? 'Ctrl+' : '') + (e.altKey ? 'Alt+' : '') +
+                 (e.shiftKey ? 'Shift+' : '') + (e.metaKey ? 'Meta+' : '');
+      log('keydown: ' + mods + e.key + ' (' + e.code + ')' + (e.repeat ? ' [repeat]' : ''));
+    }
   </script>
   <h1>Event test</h1>
   <p>Hover to see the CSS :hover highlight and fire mouseover/mouseout; click to run JS handlers (logged to the status line and %TEMP%/htui-visual-test.log).</p>
+  <p>Press any key — it is dispatched as a keydown to the body (browser-style fields), shown in the status line. j/k/arrows scroll, q/Esc quits, Tab cycles inputs.</p>
 
   <p id="count" onclick="increment()">Count: 0</p>
 
