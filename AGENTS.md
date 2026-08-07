@@ -20,20 +20,21 @@ htui/
 │   │   ├── src/
 │   │   │   ├── lib.rs              # 入口：render() / render_with_events()（主循环在 tui/run.rs）
 │   │   │   ├── logging.rs          # 文件 logger 初始化
+│   │   │   ├── resources.rs        # 资源层：mem:// 内存注册表（前缀可选），供 <script>/<link>/<img>/fetch
 │   │   │   ├── events/             # JS 风格事件系统（旁路，不参与渲染管线）
 │   │   │   │   ├── mod.rs          # EventType / HtmlEvent / ElementRef / EventBindings（宿主函数注册表）
 │   │   │   │   ├── geometry.rs     # Geometry（arena + boxes 快照，Arc 共享）
 │   │   │   │   ├── hit_map.rs      # HitRegion / HitMap / build / hit_test / resolve_by_id
 │   │   │   │   └── interaction.rs  # 纯逻辑鼠标交互（HoverState / on_move / on_click，脚本线程内调 ScriptEngine::fire）
 │   │   │   ├── script/             # JS 脚本层（旁路：Boa 引擎 + live DOM + 宿主函数）
-│   │   │   │   ├── mod.rs          # ScriptEngine：Context + ScriptState(thread_local) + 引导脚本 + fire/invoke_action/run_due_timers + on* 属性编译
+│   │   │   │   ├── mod.rs          # ScriptEngine：Context + ScriptState(thread_local) + 引导脚本 + fire/invoke_action/run_due_timers/poll_fetches + on* 属性编译
 │   │   │   │   ├── host.rs         # HostFn / HostCall（Rust 回调 → JS 可调用）+ arg/arg_required/ret 便捷方法
 │   │   │   │   ├── convert.rs      # IntoJs/FromJs 转换层 + js_obj! 宏 + JsObjectBuilder（Rust ↔ JS 值）
 │   │   │   │   ├── dom.rs          # DOM 绑定：document / element 包装 / style / addEventListener / console / alert / quit
 │   │   │   │   └── msg.rs          # 脚本线程桥：ScriptMsg/ScriptResponse + apply_message + run_script_thread（引擎独占线程）
 │   │   │   ├── html/
 │   │   │   │   ├── mod.rs
-│   │   │   │   ├── html_parse.rs   # HTML → tdom 树（html5ever）；提取 <style> CSS / <script> JS（含 <link rel=stylesheet> 与 <script src> 本地文件加载）
+│   │   │   │   ├── html_parse.rs   # HTML → tdom 树（html5ever）；提取 <style> CSS / <script> JS（含 <link rel=stylesheet> 与 <script src> 经 resources 加载）
 │   │   │   │   ├── box_edges.rs    # BoxEdges / Border / padding / margin / width
 │   │   │   │   └── css_parse/      # CSS 解析
 │   │   │   │       ├── mod.rs
@@ -184,6 +185,7 @@ htui/
 │       ├── position/     # CSS 定位演示（relative / absolute / fixed / z-index）
 │       ├── input/        # <input> 输入框演示（点击聚焦 + 键盘编辑 + focus/blur/input/change 事件）
 │       ├── configurator/ # 配置器设置表单演示（input + 原生 select 下拉 + JS 开关 + 实时预览 + 保存/重置）
+│       ├── fetch_demo/   # fetch 演示：<script src="mem://…"> 加载 + fetch 经 Promise 微任务事件循环写 DOM
 │       └── viewport_units/
 └── example/              # 完整交互示例（cargo run -p example -- codex|snake|sysmon|yazi）
     └── src/
@@ -315,6 +317,14 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
 `ScriptEngine::run_due_timers` 触发回调（监控器/时钟/动画用）。宿主函数在
 脚本线程执行，重活应放后台线程（参考 `example/src/sysmon.rs` 后台采样 +
 快照模式）。
+
+资源与异步：`crate::resources` 是内存资源层（`mem://` 注册表，前缀可选，不访问
+文件系统/网络），`<script src>` / `<link href>` / `<img src>` 与 JS `fetch` 都经
+它解析。`fetch` 返回真 `Promise`：注册表读取即时完成，结果经
+`ScriptState.fetch_rx` 回传，`ScriptEngine::poll_fetches` 从 GC-rooted 的
+`__htuiFetchResolvers` registry 取出 resolver settle promise，再 `run_jobs()`
+驱动微任务（`.then` / `await` 链）——这是事件循环的微任务半；
+`run_script_thread` 每轮循环都调用它。
 
 ## 渲染合并优化（避免无意义的重排）
 

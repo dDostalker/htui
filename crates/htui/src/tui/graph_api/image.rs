@@ -11,12 +11,21 @@ use super::{
     canvas::TermLayout,
     cell::{Block, FontStyle},
 };
+use crate::resources;
 
 /// Errors produced while loading or rasterizing an image.
 #[derive(Debug, thiserror::Error)]
 pub enum ImageError {
-    /// The image file could not be decoded (missing, corrupt, or unsupported
-    /// format).
+    /// The image source could not be resolved through the resource layer
+    /// (unregistered `mem://` key).
+    #[error("image load failed for {path}: {message}")]
+    Load {
+        /// The image path or virtual key that failed to load.
+        path: String,
+        /// The resource-layer error message.
+        message: String,
+    },
+    /// The image data could not be decoded (corrupt, or unsupported format).
     #[error("image decode failed for {path}: {source}")]
     Decode {
         /// The image path that failed to decode.
@@ -110,10 +119,18 @@ impl Img {
             return Ok(());
         }
 
-        let img = image::open(&self.path).map_err(|source| ImageError::Decode {
-            path: self.path.display().to_string(),
-            source,
+        // Resolve the source through the virtual resource layer (`mem://`
+        // key) and decode from the bytes.
+        let src = self.path.to_string_lossy().into_owned();
+        let resource = resources::load(&src).map_err(|e| ImageError::Load {
+            path: src.clone(),
+            message: e.to_string(),
         })?;
+        let img =
+            image::load_from_memory(&resource).map_err(|source| ImageError::Decode {
+                path: src,
+                source,
+            })?;
         // `term_size` is documented as `(cols, rows)` in terminal cells. Each
         // cell displays IMAGE_PIXELS_PER_CELL_COL x IMAGE_PIXELS_PER_CELL_ROW
         // source pixels (1 wide x 2 tall in half-block mode), so the pixel
@@ -182,16 +199,23 @@ static INTRINSIC_SIZES: OnceLock<Mutex<HashMap<String, (u32, u32)>>> = OnceLock:
 
 /// Return the intrinsic `(width, height)` in source pixels for `path`.
 ///
-/// Reads only the image header (`image::ImageReader::into_dimensions`) — no
-/// pixel decode — and caches the result per path. `None` when the file
-/// cannot be opened or carries no decodable dimensions.
+/// Resolves the source through [`resources::load`] (a `mem://` virtual key),
+/// reads only the image header
+/// (`image::ImageReader::into_dimensions`) — no pixel decode — and caches the
+/// result per path. `None` when the source cannot be resolved or carries no
+/// decodable dimensions.
 pub(crate) fn image_intrinsic_size(path: &str) -> Option<(u32, u32)> {
     let cache = INTRINSIC_SIZES.get_or_init(|| Mutex::new(HashMap::new()));
     let mut map = cache.lock().ok()?;
     if let Some(&size) = map.get(path) {
         return Some(size);
     }
-    let size = image::ImageReader::open(path).ok()?.into_dimensions().ok()?;
+    let resource = resources::load(path).ok()?;
+    let size = image::ImageReader::new(std::io::Cursor::new(resource.as_ref()))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()?;
     map.insert(path.to_string(), size);
     Some(size)
 }
@@ -223,8 +247,10 @@ impl ImageCache {
     }
 
     /// Return the rasterized image for `(path, size)`, decoding it on first
-    /// use. Failed decodes are not cached, so a temporarily missing file can
-    /// recover on a later frame instead of pinning the error forever.
+    /// use. The source is resolved through [`resources::load`] (an
+    /// unregistered `mem://` key is reported as an error). Failed decodes are
+    /// not cached, so a temporarily unavailable source can recover on a later
+    /// frame instead of pinning the error forever.
     pub fn get_or_decode(&mut self, path: &str, size: (u32, u32)) -> Result<&Img, ImageError> {
         let key = (path.to_string(), size.0, size.1);
         if !self.entries.contains_key(&key) {

@@ -14,7 +14,6 @@ indexmap = "2.14"
 log = { version = "0.4.29", features = ["release_max_level_warn"] }
 markup5ever_rcdom = "0.3"
 slotmap = "1.1.1"
-tendril = "0.4.3"
 unicode-segmentation = "1.12"
 unicode-width = "0.2"
 boa_engine = { version = "0.21.1", default-features = false }

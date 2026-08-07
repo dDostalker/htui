@@ -1036,7 +1036,6 @@ dependencies = [
  "log",
  "markup5ever_rcdom",
  "slotmap",
- "tendril",
  "thiserror",
  "unicode-segmentation",
  "unicode-width",

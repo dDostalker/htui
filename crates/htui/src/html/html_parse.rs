@@ -1,12 +1,11 @@
 use std::collections::HashMap;
-use std::fs;
-use std::path::Path;
 
 use html5ever::driver::ParseOpts;
 use html5ever::tendril::TendrilSink;
 use log::{debug, info, warn};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
+use crate::resources;
 use crate::tdom::node::{Node, NodeArena, NodeId, NodeType};
 
 /// Parsed HTML document: the DOM arena plus the `<style>` CSS and `<script>`
@@ -94,18 +93,18 @@ fn convert_children(
                 // becoming a DOM node: the script layer evaluates its source
                 // against the rendered document.
                 if tag.eq_ignore_ascii_case("script") {
-                    // `<script src="...">` loads an external JS file (local
-                    // filesystem path relative to the process CWD, like
-                    // `<link rel="stylesheet">`). A `src` attribute wins over
-                    // any inline content, mirroring the browser's rule that an
-                    // external script's body is ignored.
+                    // `<script src="...">` loads an external script through
+                    // [`resources::load`] (a `mem://` virtual key; prefix
+                    // optional). A `src` attribute wins over any inline
+                    // content, mirroring the browser's rule that an external
+                    // script's body is ignored.
                     let script_attrs = {
                         let ar = attrs.borrow();
                         convert_attributes(&ar)
                     };
                     if let Some(src) = script_attrs.get("src") {
                         info!("外部脚本: {}", src);
-                        match fs::read_to_string(Path::new(src)) {
+                        match load_text(src) {
                             Ok(js) if !js.trim().is_empty() => scripts.push(js),
                             Ok(_) => warn!("外部脚本 {} 为空", src),
                             Err(e) => warn!("读取 {} 失败: {}", src, e),
@@ -142,7 +141,7 @@ fn convert_children(
                                 && rel.to_lowercase().contains("stylesheet")
                             {
                                 info!("外部样式表: {}", href);
-                                match fs::read_to_string(Path::new(href)) {
+                                match load_text(href) {
                                     Ok(c) => {
                                         css_sources.push(c);
                                     }
@@ -195,6 +194,16 @@ fn extract_text_content(handle: &Handle) -> String {
         }
     }
     text
+}
+
+/// Load a `src` / `href` reference as UTF-8 text through [`resources::load`]
+/// (a `mem://` key; the prefix is optional).
+///
+/// Non-UTF-8 content yields an error, matching how a script or stylesheet
+/// body must be text.
+fn load_text(src: &str) -> Result<String, String> {
+    let bytes = resources::load(src).map_err(|e| e.to_string())?;
+    String::from_utf8(bytes.as_ref().to_vec()).map_err(|e| e.to_string())
 }
 
 /// Maps an HTML tag name to its corresponding [`NodeType`].

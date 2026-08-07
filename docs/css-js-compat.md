@@ -185,8 +185,10 @@
 | `globalThis` | ✅ | Boa 提供 |
 | `window` / `self` | ✗ | 未注册 |
 | `localStorage` `sessionStorage` `indexedDB` `cookie` | ✗ | 无 |
-| `fetch` `XMLHttpRequest` `WebSocket` | ✗ | 无网络 |
-| `setTimeout` `setInterval` `requestAnimationFrame` `queueMicrotask` | ✗ | 无计时器；用 `EventBindings::auto` |
+| `fetch` | ◐ | 异步资源加载（`mem://` 注册表，前缀可选），返回 `Promise`；Response: `status`/`ok`/`url`/`text()`；微任务事件循环可用；**不访问文件系统/网络** |
+| `XMLHttpRequest` `WebSocket` | ✗ | 无 |
+| `setTimeout` `setInterval` | ✅ | 脚本线程消息间隙调度（`ScriptEngine::run_due_timers`） |
+| `requestAnimationFrame` `queueMicrotask` | ✗ | 无（微任务由 `fetch` 的 job 队列间接提供） |
 
 ### B.2 Element 对象
 

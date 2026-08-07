@@ -172,53 +172,61 @@ fn test_script_inline_extract() {
 }
 
 #[test]
-fn test_script_src_loads_external_js() {
-    // `<script src>` reads the file like `<link rel="stylesheet">`: local
-    // filesystem path (absolute here so the test is CWD-independent).
-    init();
-    let path = std::env::temp_dir().join(format!(
-        "htui_script_src_{}.js",
-        std::process::id()
-    ));
-    std::fs::write(&path, "globalThis.__loaded = 42;").expect("write temp js");
-    let href = path.to_string_lossy();
-    let html = format!("<script src=\"{href}\"></script><p>x</p>");
-    let doc = Parser::new(&html).parse_with_scripts();
-    assert!(
-        doc.scripts.iter().any(|s| s.contains("__loaded = 42")),
-        "<script src> must load the external JS file"
-    );
-    match std::fs::remove_file(&path) {
-        Ok(()) => {}
-        Err(e) => eprintln!("temp js cleanup failed: {e}"),
-    }
-}
-
-#[test]
 fn test_script_src_wins_over_inline() {
     // A `src` attribute wins over the inline body (browser rule: external
-    // script content is ignored).
+    // script content is ignored). The external content now comes from a
+    // `mem://` resource (no file system).
     init();
-    let path = std::env::temp_dir().join(format!(
-        "htui_script_src_win_{}.js",
-        std::process::id()
-    ));
-    std::fs::write(&path, "globalThis.__ext = true;").expect("write temp js");
-    let href = path.to_string_lossy();
+    let key = format!("mem://script/srcwin_{}.js", std::process::id());
+    htui::resources::register(&key, b"globalThis.__ext = true;".to_vec())
+        .expect("register mem script");
     let html = format!(
-        "<script src=\"{href}\">globalThis.__inline = true;</script>"
+        "<script src=\"{key}\">globalThis.__inline = true;</script>"
     );
     let doc = Parser::new(&html).parse_with_scripts();
     assert!(
         doc.scripts.iter().any(|s| s.contains("__ext = true")),
-        "external file content must be extracted"
+        "external resource content must be extracted"
     );
     assert!(
         doc.scripts.iter().all(|s| !s.contains("__inline")),
         "inline body must be ignored when src is present"
     );
-    match std::fs::remove_file(&path) {
-        Ok(()) => {}
-        Err(e) => eprintln!("temp js cleanup failed: {e}"),
-    }
+    htui::resources::unregister(&key);
+}
+
+#[test]
+fn test_script_src_loads_mem_resource() {
+    // `<script src="mem://…">` resolves through the unified resource layer
+    // instead of the file system.
+    init();
+    let key = format!("mem://script/{}.js", std::process::id());
+    htui::resources::register(&key, b"globalThis.__memLoaded = 7;".to_vec())
+        .expect("register mem script");
+    let html = format!("<script src=\"{key}\"></script><p>x</p>");
+    let doc = Parser::new(&html).parse_with_scripts();
+    assert!(
+        doc.scripts.iter().any(|s| s.contains("__memLoaded = 7")),
+        "<script src> must load the mem:// resource"
+    );
+    htui::resources::unregister(&key);
+}
+
+#[test]
+fn test_link_href_loads_mem_stylesheet() {
+    // `<link rel="stylesheet" href="mem://…">` loads CSS from the resource
+    // layer.
+    init();
+    let key = format!("mem://css/{}.css", std::process::id());
+    htui::resources::register(&key, b"p { color: red; }".to_vec())
+        .expect("register mem css");
+    let html = format!(
+        "<link rel=\"stylesheet\" href=\"{key}\"><p>x</p>"
+    );
+    let (_root, _arena, css) = Parser::new(&html).parse();
+    assert!(
+        css.contains("color: red"),
+        "<link> must load the mem:// stylesheet"
+    );
+    htui::resources::unregister(&key);
 }

@@ -22,10 +22,10 @@
 | `html` `head` `body` | ✅ | ✅ | 结构骨架 |
 | `title` | ✅ | ✅ | 写入终端窗口标题 |
 | `meta` | ✅ | ✅ | 解析但忽略属性 |
-| `link` | ✅ | ◐ | 仅 `rel="stylesheet"`：`href` 按**本地文件路径**读取（相对进程 CWD，无 URL/网络），失败仅 warn 静默跳过 |
+| `link` | ✅ | ◐ | 仅 `rel="stylesheet"`：`href` 经资源层从 `mem://` 注册表读取（前缀可选，无 URL/文件系统/网络），失败仅 warn 静默跳过 |
 | `style` | ✅ | ✅ | `<style>` 内 CSS 参与级联 |
 | `script` | ✅ | ✅ | 执行内嵌脚本（Boa） |
-| `script src=...` | ✅ | ◐ | `src` 按**本地文件路径**读取（相对进程 CWD，无 URL/网络），失败仅 warn 静默跳过；有 `src` 时内联内容被忽略（对齐浏览器） |
+| `script src=...` | ✅ | ◐ | `src` 经资源层从 `mem://` 注册表读取（前缀可选，无 URL/文件系统/网络），失败仅 warn 静默跳过；有 `src` 时内联内容被忽略（对齐浏览器） |
 | `noscript` | ✅ | ✗ | 无 |
 
 ### 1.2 块级与文本
@@ -94,7 +94,7 @@
 
 | 标签 | 浏览器 | htui | 说明 |
 | ---- | :----: | :---: | ---- |
-| `img` | ✅ | ◐ | 静态光栅到字符格；`src` 读本地文件 |
+| `img` | ✅ | ◐ | 静态光栅到字符格；`src` 经资源层从 `mem://` 注册表解析 |
 | `img srcset` `gif` `svg` | ✅ | ✗ | 无 |
 | `audio` `video` `canvas` `picture` `iframe` | ✅ | ✗ | 无 |
 | `dialog` `menu` `progress` `meter` | ✅ | ✗ | 无 |
@@ -243,8 +243,8 @@
 | `document.querySelector(All)` | ✅ | ✗ | 无 |
 | `console.log/warn/error` | ✅ | ◐ | 写 htui 日志 |
 | `alert` `confirm` `prompt` | ✅ | ◐ | 仅 `alert`（写日志），无交互对话框 |
-| `setTimeout` `setInterval` `requestAnimationFrame` | ✅ | ✗ | 用 `EventBindings::auto` |
-| `fetch`/`XMLHttpRequest`/`WebSocket` | ✅ | ✗ | 无网络 |
+| `setTimeout` `setInterval` `requestAnimationFrame` | ✅ | ◐ | `setTimeout`/`setInterval` 有（脚本线程调度）；`requestAnimationFrame` 无 |
+| `fetch`/`XMLHttpRequest`/`WebSocket` | ✅ | ◐ | `fetch(url)` 经 `mem://` 注册表读取（前缀可选），返回 `Promise`（Response: `status`/`ok`/`url`/`text()`），微任务 settle；**无网络/文件系统**，`XMLHttpRequest` / `WebSocket` 无 |
 | `localStorage`/`sessionStorage`/`cookie` | ✅ | ✗ | 无 |
 | 宿主函数（`#[htui::command]`） | — | ✅ | htui 独有 |
 

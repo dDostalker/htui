@@ -8,8 +8,6 @@
 //!     `LayoutBox::cols`, while `rect.width` was clamped to the terminal
 //!     width, so painting could overflow the rect into neighboring boxes.
 
-use std::path::PathBuf;
-
 use htui::html::html_parse;
 use htui::layout::layout::TermMap;
 use htui::layout::inner_formatting_context::flow::layout_img;
@@ -149,8 +147,13 @@ fn image_sampling_constants_lock_in_1_by_2_ratio() {
 // Bug #1 — `_create_img` cell→pixel conversion
 // ============================================================
 
-/// Build a small in-memory PNG so the test does not depend on disk fixtures.
-fn write_test_png(path: &PathBuf) {
+/// Build a small 64×64 checkerboard PNG in memory and register it under a
+/// unique `mem://` key, returning the key. Tests use these instead of disk
+/// fixtures: the image pipeline resolves every source through the `mem://`
+/// registry, so byte-fed tests exercise the exact same decode path.
+fn register_test_png(tag: &str) -> String {
+    let key = format!("mem://img/{tag}_{}", std::process::id());
+    let mut bytes: Vec<u8> = Vec::new();
     let img = ImageBuffer::<Rgb<u8>, _>::from_fn(64, 64, |x, y| {
         // Alternating black/white pattern — every (2×4) cell will produce
         // a non-trivial braille/quarter-block glyph.
@@ -160,15 +163,30 @@ fn write_test_png(path: &PathBuf) {
             Rgb([0, 0, 0])
         }
     });
-    img.save(path).unwrap();
+    img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+        .expect("encode test png");
+    htui::resources::register(&key, bytes).expect("register mem image");
+    key
+}
+
+/// Build a 800×200 source PNG in memory and register it, returning the key.
+/// Four times wider than tall, so a default (no attributes) `<img>` must NOT
+/// lay out as a square.
+fn register_wide_test_png(tag: &str) -> String {
+    let key = format!("mem://img/{tag}_wide_{}", std::process::id());
+    let mut bytes: Vec<u8> = Vec::new();
+    let img = ImageBuffer::<Rgb<u8>, _>::from_fn(800, 200, |_, _| Rgb([200, 100, 50]));
+    img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+        .expect("encode wide test png");
+    htui::resources::register(&key, bytes).expect("register mem image");
+    key
 }
 
 #[test]
 fn paint_image_at_fills_requested_cell_area() {
     init();
 
-    let img_path = std::env::temp_dir().join("htui_layout_img_test.png");
-    write_test_png(&img_path);
+    let key = register_test_png("paint_fill");
 
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
@@ -179,13 +197,8 @@ fn paint_image_at_fills_requested_cell_area() {
     // and rasterized into 40×10 cells.
     let cell_w: u32 = 40;
     let cell_h: u32 = 10;
-    render_image_at(
-        &mut tl,
-        img_path.to_str().unwrap(),
-        (0, 0),
-        (cell_w, cell_h),
-    )
-    .expect("paint_image_at should succeed");
+    render_image_at(&mut tl, &key, (0, 0), (cell_w, cell_h))
+        .expect("paint_image_at should succeed");
 
     // Every cell the image requested must have been written — none should
     // still hold the default space. Before the fix only `cell_w/2 × cell_h/4`
@@ -221,20 +234,14 @@ fn paint_image_at_fills_requested_cell_area() {
 #[test]
 fn image_cells_store_half_block_glyph_and_colors_separately() {
     init();
-    let img_path = std::env::temp_dir().join("htui_img_cell_format.png");
-    write_test_png(&img_path);
+    let key = register_test_png("cell_format");
 
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
     let cell_w: u32 = 40;
     let cell_h: u32 = 10;
-    render_image_at(
-        &mut tl,
-        img_path.to_str().unwrap(),
-        (0, 0),
-        (cell_w, cell_h),
-    )
-    .expect("render_image_at should succeed");
+    render_image_at(&mut tl, &key, (0, 0), (cell_w, cell_h))
+        .expect("render_image_at should succeed");
 
     let cells_per_row = term_map.columns as usize;
     for row in 0..(cell_h as usize) {
@@ -266,23 +273,21 @@ fn image_cells_store_half_block_glyph_and_colors_separately() {
 #[test]
 fn image_cache_reuses_decoded_raster() {
     init();
-    let img_path = std::env::temp_dir().join("htui_img_cache_reuse.png");
-    write_test_png(&img_path);
-    let path = img_path.to_str().unwrap();
+    let key = register_test_png("cache_reuse");
     let mut cache = ImageCache::new();
 
     let first = cache
-        .get_or_decode(path, (40, 10))
+        .get_or_decode(&key, (40, 10))
         .expect("first decode should succeed");
     let (cols, rows, size) = (first.cloumns, first.rows, first.term_size);
 
-    // The raster is cached: removing the source must not break a second
-    // request, which would otherwise re-open the file and fail.
-    std::fs::remove_file(&img_path).expect("remove temp png");
+    // The raster is cached: unregistering the source must not break a second
+    // request, which would otherwise re-resolve the bytes and fail.
+    assert!(htui::resources::unregister(&key), "unregister mem image");
 
     let second = cache
-        .get_or_decode(path, (40, 10))
-        .expect("cached entry must serve the second request without re-reading the file");
+        .get_or_decode(&key, (40, 10))
+        .expect("cached entry must serve the second request without re-reading");
     assert_eq!(cols, second.cloumns);
     assert_eq!(rows, second.rows);
     assert_eq!(size, second.term_size);
@@ -291,20 +296,18 @@ fn image_cache_reuses_decoded_raster() {
 #[test]
 fn image_cache_keys_by_size() {
     init();
-    let img_path = std::env::temp_dir().join("htui_img_cache_sizes.png");
-    write_test_png(&img_path);
-    let path = img_path.to_str().unwrap();
+    let key = register_test_png("cache_sizes");
     let mut cache = ImageCache::new();
 
     let (small_cols, small_rows) = {
         let small = cache
-            .get_or_decode(path, (20, 5))
+            .get_or_decode(&key, (20, 5))
             .expect("decode small size");
         (small.cloumns, small.rows)
     };
     let (large_cols, large_rows) = {
         let large = cache
-            .get_or_decode(path, (40, 10))
+            .get_or_decode(&key, (40, 10))
             .expect("decode large size");
         (large.cloumns, large.rows)
     };
@@ -316,23 +319,12 @@ fn image_cache_keys_by_size() {
 // Intrinsic aspect ratio (default sizing without width/height attrs)
 // ============================================================
 
-/// Build a 800×200 source PNG: four times wider than tall, so a default
-/// (no attributes) `<img>` must NOT lay out as a square.
-fn write_wide_test_png(path: &PathBuf) {
-    let img = ImageBuffer::<Rgb<u8>, _>::from_fn(800, 200, |_, _| Rgb([200, 100, 50]));
-    img.save(path).unwrap();
-}
-
 #[test]
 fn layout_img_default_size_preserves_intrinsic_aspect_ratio() {
     init();
-    let img_path = std::env::temp_dir().join("htui_img_aspect.png");
-    write_wide_test_png(&img_path);
-    // Windows paths in an HTML attribute: forward slashes are accepted by
-    // `image::ImageReader` and avoid backslash-escaping concerns.
-    let src = img_path.to_str().unwrap().replace('\\', "/");
+    let key = register_wide_test_png("aspect");
 
-    let mut p = html_parse::Parser::new(&format!(r#"<img src="{src}">"#));
+    let mut p = html_parse::Parser::new(&format!(r#"<img src="{key}">"#));
     let (root_id, arena, _) = p.parse();
     let img_id = find_img_node(&arena, root_id);
 
@@ -369,7 +361,8 @@ fn render_image_at_slice_crops_to_clip_region() {
     // 64×64 source: the top 16 pixel rows are black, the rest white. At full
     // scale (64×32 cells, 2 source px per cell row) the top 8 cell rows are
     // all-black half-blocks.
-    let img_path = std::env::temp_dir().join("htui_img_clip.png");
+    let key = format!("mem://img/clip_{}", std::process::id());
+    let mut bytes: Vec<u8> = Vec::new();
     let img = ImageBuffer::<Rgb<u8>, _>::from_fn(64, 64, |_, y| {
         if y < 16 {
             Rgb([0, 0, 0])
@@ -377,7 +370,9 @@ fn render_image_at_slice_crops_to_clip_region() {
             Rgb([255, 255, 255])
         }
     });
-    img.save(&img_path).unwrap();
+    img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+        .expect("encode clip png");
+    htui::resources::register(&key, bytes).expect("register clip image");
 
     let term_map = mock_term_map();
     // The canvas now starts at one viewport (24 rows) but this unit test
@@ -397,7 +392,7 @@ fn render_image_at_slice_crops_to_clip_region() {
         &mut cache,
         &mut tl.layout,
         term_map.columns,
-        img_path.to_str().unwrap(),
+        &key,
         (0, 0),
         (64, 32),
         Some(ClipRect {

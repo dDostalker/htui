@@ -17,8 +17,8 @@
 ### 1.1 文档结构（不渲染为可视内容）
 
 `html` `head` `title` `meta` `link` `style`（`<style>` 内的 CSS 会级联）；
-`<link rel="stylesheet">` / `<script src="...">` 支持本地文件加载（`href`/`src`
-相对进程 CWD，无 URL/网络，失败仅 warn 静默跳过）
+`<link rel="stylesheet">` / `<script src="...">` 经资源层从 `mem://` 注册表加载
+（`mem://` 前缀可选，不访问文件系统/网络，失败仅 warn 静默跳过）
 
 ### 1.2 块级与文本（✅ 专用布局/渲染）
 
@@ -32,7 +32,7 @@
 | `aside` `header` `footer` | 块级 + 背景色带（chrome 语义） |
 | `figure` `figcaption` `details` `summary` | 按通用块渲染，无折叠/图注专用语义（◐） |
 | `ul` `ol` `li` | 列表（`li` 自带项目符号/序号 marker） |
-| `img` | 替换元素：加载图片光栅化到字符格 |
+| `img` | 替换元素：加载图片光栅化到字符格（`src` 经资源层从 `mem://` 注册表解析） |
 | `input` | 替换元素：可聚焦输入框（值/光标/选择/剪贴板/事件） |
 
 ### 1.3 表格（✅ 简化表格布局）
@@ -112,7 +112,7 @@
 
 - ✅ 继承属性表（`INHERITED_PROPS`）、内联 `style` 属性 > 选择器规则、
   相同优先级按出现顺序
-- ✅ 支持 `<style>` 标签内联 CSS；也支持 `<link rel="stylesheet">`（`href` 按本地文件路径读取，相对进程 CWD，失败静默跳过）
+- ✅ 支持 `<style>` 标签内联 CSS；也支持 `<link rel="stylesheet">`（`href` 经资源层从 `mem://` 注册表解析，失败静默跳过）
 
 ## 3. JavaScript / DOM
 
@@ -130,6 +130,7 @@
 | `console.log/warn/error(...)` | ✅ 写入 htui 日志 |
 | `alert(msg)` | ✅ `log::warn` |
 | `quit()` | ✅ 退出渲染循环 |
+| `fetch(url)` | ✅ 异步资源加载，返回 `Promise`（`mem://` 虚拟资源，前缀可选）；Response 含 `status`/`ok`/`url`/`text()`。注册表读取即时完成，Promise 经微任务队列 settle（`.then`/`await` 可用）。不访问文件系统/网络 |
 | 宿主函数 | ✅ `EventBindings.host` 注册的名字（`#[htui::command]` 生成） |
 
 ### 3.3 Element 包装对象
@@ -168,6 +169,9 @@
 ✅ 定时器：`setTimeout` / `setInterval` / `clearTimeout` / `clearInterval`——
 回调在脚本线程的消息间隙执行（`ScriptEngine::run_due_timers`），改 DOM 照常触发渲染。
 
+✅ 微任务事件循环：`fetch` 的 `.then` / `await` 回调经 Boa job 队列执行
+（`ScriptEngine::poll_fetches` + `Context::run_jobs`），与定时器同属脚本线程的消息循环。
+
 ## 4. 输入与交互（终端特有）
 
 - ✅ 鼠标：点击、hover、滚轮滚动、`Ctrl+滚轮/±/0` 缩放
@@ -184,7 +188,6 @@
 | CSS 完整 `grid` | ✗ 空壳预留 |
 | `calc()`、CSS 变量、媒体查询、`float`、多列 | ✗ |
 | `querySelector(All)`、`classList`、`innerHTML` | ✗ |
-| `fetch`、网络请求、完整 Promise 语义 | ✗ |
 | 系统剪贴板（OSC 52） | ✗ 拒绝项 |
 | 像素级渲染（除 `<img>`） | ✗ 拒绝项 |
 | 触摸 / 无障碍 / 多文档窗口 | ✗ 拒绝项 |

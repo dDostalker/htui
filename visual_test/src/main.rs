@@ -159,6 +159,7 @@ fn main() -> std::io::Result<()> {
         "position" => test_case!(position, no_css),
         "input" => test_case!(input, no_css),
         "configurator" => test_case!(configurator, no_css),
+        "fetch_demo" => test_case!(fetch_demo, no_css),
         "showcase" => test_case!(showcase, no_css),
         _ => {
             let available = [
@@ -188,6 +189,7 @@ fn main() -> std::io::Result<()> {
                 "position",
                 "input",
                 "configurator",
+                "fetch_demo",
                 "showcase",
             ];
             eprintln!(
@@ -240,6 +242,47 @@ fn main() -> std::io::Result<()> {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
+            render_with_events(html, css, EventBindings::default());
+        }
+        info!("Test '{test_name}' completed");
+        return Ok(());
+    }
+
+    // The `fetch_demo` case registers two `mem://` resources (the JS script
+    // and the data file) before rendering, so the page's
+    // `<script src="mem://…">` and `fetch('mem://…')` resolve from memory.
+    // Interaction + the fetch event loop need a real terminal; `--dump` falls
+    // back to the static preview.
+    if test_name == "fetch_demo" {
+        if dump_mode {
+            dump(html, css, cols, rows, bg_map);
+        } else {
+            htui::resources::register(
+                "mem://demo/app.js",
+                r#"
+                  function boot() {
+                    document.getElementById('status').textContent = 'fetching...';
+                    fetch('mem://demo/hello.txt')
+                      .then(function (r) { return r.text(); })
+                      .then(function (t) {
+                        document.getElementById('output').textContent = 'got: ' + t;
+                        document.getElementById('status').textContent = 'done';
+                      })
+                      .catch(function (e) {
+                        document.getElementById('status').textContent = 'error: ' + e;
+                      });
+                  }
+                  boot();
+                "#
+                .as_bytes()
+                .to_vec(),
+            )
+            .expect("register mem demo script");
+            htui::resources::register(
+                "mem://demo/hello.txt",
+                b"hello from the mem:// registry".to_vec(),
+            )
+            .expect("register mem demo data");
             render_with_events(html, css, EventBindings::default());
         }
         info!("Test '{test_name}' completed");

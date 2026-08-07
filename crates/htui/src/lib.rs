@@ -2,6 +2,7 @@ pub mod events;
 pub mod html;
 pub mod layout;
 pub mod logging;
+pub mod resources;
 pub mod script;
 pub mod tdom;
 pub mod tui;

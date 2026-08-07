@@ -15,6 +15,7 @@
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use crate::events::{ElementRef, EventBindings, EventType, HitMap, HitRegion, HoverState, KeyEventInfo, interaction};
 use crate::layout::Rect;
@@ -220,17 +221,17 @@ pub fn run_script_thread(
     loop {
         // Block for the next message; an active timer (JS `setTimeout` /
         // `setInterval`) bounds the wait so a due callback can fire even
-        // without user input.
-        let msg = match engine.next_timer_timeout() {
-            Some(d) => match rx.recv_timeout(d) {
-                Ok(msg) => Some(msg),
-                Err(RecvTimeoutError::Timeout) => None,
-                Err(RecvTimeoutError::Disconnected) => break,
-            },
-            None => match rx.recv() {
-                Ok(msg) => Some(msg),
-                Err(_) => break,
-            },
+        // without user input. A hard cap (50 ms) also wakes the loop for
+        // completed `fetch` loads, which report through a channel the input
+        // loop knows nothing about.
+        let wait = engine
+            .next_timer_timeout()
+            .unwrap_or(Duration::from_millis(50));
+        let wait = wait.min(Duration::from_millis(50));
+        let msg = match rx.recv_timeout(wait) {
+            Ok(msg) => Some(msg),
+            Err(RecvTimeoutError::Timeout) => None,
+            Err(RecvTimeoutError::Disconnected) => break,
         };
 
         let mut event = match msg {
@@ -258,6 +259,11 @@ pub fn run_script_thread(
         // Their callbacks may rewrite the DOM, so the dirty snapshot must
         // merge whatever they produced after the message's own batch.
         event.cmds.extend(engine.run_due_timers());
+
+        // Settle completed `fetch` loads and run the microtask queue. This
+        // must happen after timers so a timer callback that starts a fetch and
+        // the fetch's `.then` chain both drain in the same tick.
+        engine.poll_fetches();
         let extra = engine.take_dirty();
         if !extra.is_empty() {
             let snapshot = ScriptDirty {

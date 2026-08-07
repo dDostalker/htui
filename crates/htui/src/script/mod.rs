@@ -29,8 +29,10 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
+use boa_engine::object::builtins::JsFunction;
 use boa_engine::{Context, JsError, JsResult, JsValue, NativeFunction, Source, js_string};
 use boa_engine::object::ObjectInitializer;
 use boa_engine::property::Attribute;
@@ -38,6 +40,7 @@ use boa_engine::property::Attribute;
 use crate::{
     events::{EventBindings, EventType, HitRegion, HtmlEvent, KeyEventInfo},
     html::html_parse::Parser,
+    resources::AsyncResult,
     tdom::node::{NodeArena, NodeId},
     tui::graph_api::RenderCmd,
 };
@@ -52,7 +55,7 @@ pub use convert::{FromJs, IntoJs, JsObjectBuilder};
 pub use host::{HostCall, HostFn};
 pub use msg::{ScriptDirty, ScriptEvent, ScriptMsg, ScriptResponse, apply_message, run_script_thread};
 
-use dom::{add_listener, element_wrapper, get_listeners, install_builtins, with_state};
+use dom::{add_listener, element_wrapper, get_listeners, install_builtins, response_object, with_state};
 
 use crate::tui::graph_api::DirtyInfo;
 
@@ -79,6 +82,26 @@ pub(crate) struct ScriptState {
     pub timers: Vec<TimerEntry>,
     /// Monotonic id source for timer registrations.
     pub next_timer_id: u32,
+    /// In-flight `fetch` ids. The promise's `resolve` / `reject` functions
+    /// live in the GC-rooted `__htuiFetchResolvers` JS registry (storing them
+    /// in Rust would leave them invisible to Boa's collector); this set only
+    /// tracks which fetches are outstanding so a stale completion can be
+    /// detected.
+    pub active_fetches: std::collections::HashSet<u32>,
+    /// Monotonic id source for `fetch` registrations.
+    pub next_fetch_id: u32,
+    /// Receive end of the load channel (see [`resources::load_async`]).
+    pub fetch_rx: Receiver<AsyncResult>,
+    /// Send end handed to [`resources::load_async`] when a `fetch` starts.
+    pub fetch_tx: Sender<AsyncResult>,
+}
+
+impl ScriptState {
+    /// Create the fetch channel pair. `load_async` gets a clone of `tx`; the
+    /// script thread owns `rx` and drains it on every loop iteration.
+    fn fetch_channel() -> (Sender<AsyncResult>, Receiver<AsyncResult>) {
+        mpsc::channel()
+    }
 }
 
 /// A pending `setTimeout` / `setInterval` registration.
@@ -109,6 +132,7 @@ const BOOTSTRAP: &str = r#"
 globalThis.__htuiListeners = {};
 globalThis.__htuiElements = {};
 globalThis.__htuiTimers = {};
+globalThis.__htuiFetchResolvers = {};
 globalThis.__htuiAddListener = function (nodeId, type, fn) {
   var entry = globalThis.__htuiListeners[nodeId] || (globalThis.__htuiListeners[nodeId] = {});
   var arr = entry[type] || (entry[type] = []);
@@ -178,6 +202,7 @@ impl ScriptEngine {
         host_fns: HashMap<String, HostFn>,
     ) -> Result<(Context, Rc<RefCell<ScriptState>>), (JsError, HashMap<String, HostFn>)> {
         let doc = Parser::new(html).parse_with_scripts();
+        let (fetch_tx, fetch_rx) = ScriptState::fetch_channel();
         let state = Rc::new(RefCell::new(ScriptState {
             arena: doc.arena,
             root_id: doc.root_id,
@@ -187,6 +212,10 @@ impl ScriptEngine {
             host_fns,
             timers: Vec::new(),
             next_timer_id: 0,
+            active_fetches: std::collections::HashSet::new(),
+            next_fetch_id: 0,
+            fetch_rx,
+            fetch_tx,
         }));
         ENGINE_STATE.with(|s| *s.borrow_mut() = Some(Rc::clone(&state)));
 
@@ -307,6 +336,110 @@ impl ScriptEngine {
         let cmds = std::mem::take(&mut st.render_cmds);
         drop(st);
         self.intercept_render_html(cmds)
+    }
+
+    /// Drain completed loads and settle their `fetch` promises.
+    ///
+    /// Called on every script-thread loop iteration after message / timer
+    /// processing. Each completed [`AsyncResult`] carries a `{id}:{url}` key
+    /// (see [`crate::resources::load_async`]); the id looks up the promise's
+    /// `resolve` / `reject` functions stashed by `fetch`, which are invoked
+    /// with a `Response`-like object (or an error). Promise reaction callbacks
+    /// (`.then` / `await`) run through [`Context::run_jobs`], so this is the
+    /// microtask half of the engine's event loop.
+    pub fn poll_fetches(&mut self) {
+        loop {
+            let result = self.state.borrow().fetch_rx.try_recv();
+            match result {
+                Ok(AsyncResult { id, url, outcome }) => {
+                    self.settle_fetch(id, &url, outcome);
+                }
+                Err(e) => {
+                    if !matches!(e, std::sync::mpsc::TryRecvError::Empty) {
+                        log::debug!("fetch channel error: {e}");
+                    }
+                    break;
+                }
+            }
+        }
+        if let Err(e) = self.context.run_jobs() {
+            log::warn!("Microtask queue run failed: {e}");
+        }
+    }
+
+    /// Resolve or reject the promise for a single completed fetch.
+    ///
+    /// The resolvers live in the GC-rooted `__htuiFetchResolvers` JS registry
+    /// (keyed by fetch id); this method reads them out, settles the promise,
+    /// and removes the entry.
+    fn settle_fetch(
+        &mut self,
+        id: u32,
+        url: &str,
+        outcome: Result<std::sync::Arc<Vec<u8>>, String>,
+    ) {
+        if !self.state.borrow_mut().active_fetches.remove(&id) {
+            log::warn!("fetch result for unknown id {id} (url {url}) — dropped");
+            return;
+        }
+        let (resolve, reject) = match self.take_fetch_resolvers(id) {
+            Some(v) => v,
+            None => {
+                log::warn!("fetch id {id} has no JS resolvers — dropped");
+                return;
+            }
+        };
+        let value = match outcome {
+            Ok(resource) => response_object(&mut self.context, url.to_string(), resource),
+            Err(message) => Err(JsError::from_opaque(
+                js_string!(format!("fetch failed for {url}: {message}")).into(),
+            )),
+        };
+        let result = match value {
+            Ok(v) => resolve.call(&JsValue::undefined(), &[v], &mut self.context),
+            Err(e) => reject.call(
+                &JsValue::undefined(),
+                &[e.to_opaque(&mut self.context)],
+                &mut self.context,
+            ),
+        };
+        if let Err(e) = result {
+            log::warn!("fetch promise settlement failed: {e}");
+        }
+    }
+
+    /// Pull the `[resolve, reject]` array for a fetch id out of the JS
+    /// registry and delete the entry (each fetch settles at most once).
+    fn take_fetch_resolvers(&mut self, id: u32) -> Option<(JsFunction, JsFunction)> {
+        let global = self.context.global_object();
+        let registry = global
+            .get(js_string!("__htuiFetchResolvers"), &mut self.context)
+            .ok()?
+            .to_object(&mut self.context)
+            .ok()?;
+        let key = js_string!(id.to_string());
+        let entry = registry.get(key.clone(), &mut self.context).ok()?;
+        if entry.is_undefined() {
+            return None;
+        }
+        let obj = entry.to_object(&mut self.context).ok()?;
+        let resolve = obj
+            .get(js_string!("resolve"), &mut self.context)
+            .ok()
+            .and_then(|v| v.as_callable())
+            .and_then(JsFunction::from_object);
+        let reject = obj
+            .get(js_string!("reject"), &mut self.context)
+            .ok()
+            .and_then(|v| v.as_callable())
+            .and_then(JsFunction::from_object);
+        if let Err(e) = registry.delete_property_or_throw(key, &mut self.context) {
+            log::warn!("Failed to remove fetch resolver for id {id}: {e}");
+        }
+        match (resolve, reject) {
+            (Some(r), Some(j)) => Some((r, j)),
+            _ => None,
+        }
     }
 
     /// Clone of the live DOM arena.
