@@ -80,15 +80,11 @@ macro_rules! test_case {
     };
 }
 
-fn main() -> std::io::Result<()> {
+fn main() {
     let log_path = std::env::temp_dir().join("htui-visual-test.log");
     if let Err(e) = htui::logging::init_file_logger(&log_path, None) {
         eprintln!("warning: file logger init failed ({e}); logs will be dropped");
     }
-
-    // Set working dir to this crate root so relative paths in HTML
-    // (e.g., <img src="src/image/pic.png">) resolve correctly.
-    std::env::set_current_dir(env!("CARGO_MANIFEST_DIR"))?;
 
     let args: Vec<String> = std::env::args().collect();
 
@@ -196,7 +192,7 @@ fn main() -> std::io::Result<()> {
                 "Unknown test: '{test_name}'\nAvailable tests: {}",
                 available.join(", ")
             );
-            return Ok(());
+            return;
         }
     };
 
@@ -219,7 +215,7 @@ fn main() -> std::io::Result<()> {
             render_with_events(html, css, EventBindings::default());
         }
         info!("Test '{test_name}' completed");
-        return Ok(());
+        return;
     }
 
     // The `input` case runs through `render_with_events` so click-to-focus
@@ -232,7 +228,7 @@ fn main() -> std::io::Result<()> {
             render_with_events(html, css, EventBindings::default());
         }
         info!("Test '{test_name}' completed");
-        return Ok(());
+        return;
     }
 
     // The `configurator` case runs through `render_with_events` (interactive
@@ -245,7 +241,7 @@ fn main() -> std::io::Result<()> {
             render_with_events(html, css, EventBindings::default());
         }
         info!("Test '{test_name}' completed");
-        return Ok(());
+        return;
     }
 
     // The `fetch_demo` case registers two `mem://` resources (the JS script
@@ -286,14 +282,25 @@ fn main() -> std::io::Result<()> {
             render_with_events(html, css, EventBindings::default());
         }
         info!("Test '{test_name}' completed");
-        return Ok(());
+        return;
+    }
+
+    // The `image` and `all_in_one` cases reference `mem://image/pic.png` in
+    // their HTML. The image pipeline resolves every `<img src>` through the
+    // `mem://` registry (no file system), so register the bundled PNG bytes
+    // before rendering — for both the interactive and `--dump` paths.
+    if test_name == "image" || test_name == "all_in_one" {
+        htui::resources::register(
+            "mem://image/pic.png",
+            include_bytes!("image/pic.png").to_vec(),
+        )
+        .expect("register bundled pic.png");
     }
 
     if dump_mode {
         dump(html, css, cols, rows, bg_map);
-        return Ok(());
+        return;
     }
     render(html, css);
     info!("Test '{test_name}' completed");
-    Ok(())
 }

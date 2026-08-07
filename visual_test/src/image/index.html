@@ -2,10 +2,8 @@
 <!--
   htui 视觉测试 — 图片 image
   运行: cargo run -p visual_test -- image
-  浏览器直接打开本文件即可看到与终端渲染对应相同的样式
-  注：图片路径为相对 cargo cwd (visual_test/)；
-      浏览器直接打开时会找不到 src/image/pic.png，浏览器显示 broken 图占位。
-      推荐用 cargo run -p visual_test -- image 查看真实渲染。
+  图片经 mem:// 注册表加载（visual_test/src/main.rs 启动时注册 src/image/pic.png
+  到 mem://image/pic.png）；浏览器直接打开看不到图，推荐用 cargo run 查看。
 -->
 <html lang="en">
 <head>
@@ -19,33 +17,33 @@
 
         <h2>1. Default Size Image</h2>
         <p>Image at default terminal size (no width/height specified):</p>
-        <img src="src/image/pic.png" alt="pic.png">
+        <img src="mem://image/pic.png" alt="pic.png">
         <p>--- End of default size image ---</p>
 
         <h2>2. Small Image (80x40 pixels)</h2>
         <p>Tiny image:</p>
-        <img src="src/image/pic.png" width="80" height="40" alt="pic.png">
+        <img src="mem://image/pic.png" width="80" height="40" alt="pic.png">
         <p>--- End of small image ---</p>
 
         <h2>3. Medium Image (160x80 pixels)</h2>
         <p>Medium image:</p>
-        <img src="src/image/pic.png" width="160" height="80" alt="pic.png">
+        <img src="mem://image/pic.png" width="160" height="80" alt="pic.png">
         <p>--- End of medium image ---</p>
 
         <h2>4. Wide Image (320x80 pixels)</h2>
         <p>Wide format image:</p>
-        <img src="src/image/pic.png" width="320" height="80" alt="pic.png">
+        <img src="mem://image/pic.png" width="320" height="80" alt="pic.png">
         <p>--- End of wide image ---</p>
 
         <h2>5. Tall Image (80x160 pixels)</h2>
         <p>Tall format image:</p>
-        <img src="src/image/pic.png" width="80" height="160" alt="pic.png">
+        <img src="mem://image/pic.png" width="80" height="160" alt="pic.png">
         <p>--- End of tall image ---</p>
 
         <h2>6. Multiple Images in Sequence</h2>
-        <img src="src/image/pic.png" width="80" height="40" alt="pic.png">
-        <img src="src/image/pic.png" width="80" height="40" alt="pic.png">
-        <img src="src/image/pic.png" width="80" height="40" alt="pic.png">
+        <img src="mem://image/pic.png" width="80" height="40" alt="pic.png">
+        <img src="mem://image/pic.png" width="80" height="40" alt="pic.png">
+        <img src="mem://image/pic.png" width="80" height="40" alt="pic.png">
         <p>--- End of image sequence ---</p>
 
         <p>=== End of Image Test ===</p>
