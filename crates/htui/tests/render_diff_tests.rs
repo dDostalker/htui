@@ -43,6 +43,42 @@ fn term_map() -> TermMap {
 }
 
 #[test]
+fn fresh_canvas_max_scroll_requires_the_paint_pass() {
+    // The render thread publishes `max_scroll` right after `layout_only`, but
+    // `rendered_rows` (its basis) is only established by the paint pass — a
+    // fresh canvas (first frame / every resize) starts at 0. Publishing that
+    // 0 would clamp every scroll position and make the wheel / PageUp /
+    // PageDown appear dead, so the publication must happen after painting.
+    // This test pins down the pre/post-paint difference the ordering fix
+    // depends on.
+    let mut html = String::from("<div>");
+    for i in 0..60 {
+        html.push_str(&format!("<p>line {i}</p>"));
+    }
+    html.push_str("</div>");
+    let (root_id, arena) = setup(&html);
+    let map = term_map();
+
+    // Before the paint pass a brand-new canvas reports no content height.
+    let mut pre = TermLayout::new(&map, 1.0);
+    pre.layout_only(&arena, root_id, &map);
+    assert_eq!(
+        pre.max_scroll(),
+        0,
+        "pre-paint max_scroll on a fresh canvas must be 0 (this is the value \
+         the render thread used to publish, killing the wheel after a resize)"
+    );
+
+    // After the full draw the content height is known and scrollable.
+    let mut post = TermLayout::new(&map, 1.0);
+    post.draw(&arena, root_id, &map);
+    assert!(
+        post.max_scroll() > 0,
+        "post-paint max_scroll must reflect the document height"
+    );
+}
+
+#[test]
 fn unchanged_frame_emits_zero_bytes() {
     let (root_id, arena) = setup("<div>hello world</div>");
     let map = term_map();

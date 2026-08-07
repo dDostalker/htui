@@ -243,3 +243,39 @@ fn test_layout_p_text_align_default_left() {
         "default text-align should leave text at column 0, row={row}"
     );
 }
+
+// ============================================================
+// Terminal-size sanity bounds
+// ============================================================
+
+#[test]
+fn term_layout_caps_a_pathological_viewport_size() {
+    // A transiently-inverted Windows `SMALL_RECT` during a resize can make
+    // crossterm report ~65535 columns / rows (i16 → u16 wrap). Taking that
+    // literally would allocate `65535 × 65535` cells (~hundreds of GB) and
+    // freeze the render thread — `TermLayout::new` must cap the canvas.
+    let term_map = TermMap {
+        columns: u16::MAX,
+        rows: u16::MAX,
+    };
+    let tl = TermLayout::new(&term_map, 1.0);
+    let max_cells = htui::layout::layout::MAX_TERM_COLS as usize
+        * htui::layout::layout::MAX_TERM_ROWS as usize;
+    assert!(
+        tl.layout.len() <= max_cells,
+        "canvas must be bounded by the size clamps, got {}",
+        tl.layout.len()
+    );
+}
+
+#[test]
+fn term_layout_caps_an_extreme_but_plausible_viewport() {
+    // 3000 × 1000 would still be a ~96 MB allocation with 64-byte cells; the
+    // clamp must keep even an out-of-spec size within the sane bound.
+    let term_map = TermMap {
+        columns: 3000,
+        rows: 1000,
+    };
+    let tl = TermLayout::new(&term_map, 1.0);
+    assert!(tl.layout.len() <= 1000 * 500);
+}

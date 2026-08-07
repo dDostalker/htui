@@ -1205,6 +1205,171 @@ fn hover_fires_mouseover_and_mouseout_listeners() {
 }
 
 // ============================================================
+// Viewport change (terminal resize) resilience
+// ============================================================
+
+/// Re-lay-out the engine's live arena at `(columns, rows)` — the test-side
+/// counterpart of the render thread re-laying out after a terminal resize.
+/// The arena clone keeps the same node ids, exactly like the runtime's
+/// `RenderArena` path, so listeners / hover tracking survive the reflow.
+fn relayout(engine: &ScriptEngine, columns: u16, rows: u16) -> Geometry {
+    let arena = engine.arena();
+    let root_id = engine.root_id();
+    let term_map = TermMap { columns, rows };
+    let containing = BoxConstraint::root(&term_map);
+    let mut cursor = Cursor::new();
+    let boxes = layout_tree(
+        &arena,
+        root_id,
+        containing,
+        &mut cursor,
+        term_map.columns as usize,
+        term_map.rows as usize,
+    );
+    Geometry {
+        arena,
+        boxes,
+        root_id,
+    }
+}
+
+#[test]
+fn resize_relayout_keeps_node_ids_and_events_fire() {
+    let hits: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let hits2 = Arc::clone(&hits);
+    let html = r#"
+      <script>
+        document.getElementById('btn')
+          .addEventListener('click', function () { report('click'); });
+        document.getElementById('btn')
+          .addEventListener('mouseover', function () { report('over'); });
+      </script>
+      <div id="btn" style="padding: 1px 10px;">button</div>
+    "#;
+    let (mut engine, geo) = build_geometry(
+        html,
+        host_bindings("report", move |call| {
+            if let Some(s) = call.args.first().and_then(|v| v.as_string()) {
+                hits2.lock().unwrap().push(s.to_std_string_lossy());
+            }
+            JsValue::undefined()
+        }),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("btn").expect("btn region");
+    let (x, y) = center(region.rect);
+
+    let mut hover = HoverState::new();
+    on_move(&mut hover, &map, &mut engine, x, y);
+    assert_eq!(*hits.lock().unwrap(), vec!["over".to_string()]);
+
+    // A terminal resize re-lays-out the same live arena and rebuilds the hit
+    // map. Node ids are slotmap keys and survive the arena clone, so the
+    // listeners and hover tracking keep working against the fresh geometry.
+    let geo2 = relayout(&engine, 40, 10);
+    let map2 = HitMap::build(&geo2);
+    let region2 = map2.resolve_by_id("btn").expect("btn survives resize");
+    let (x2, y2) = center(region2.rect);
+    on_click(&mut hover, &map2, &mut engine, x2, y2);
+
+    assert_eq!(
+        *hits.lock().unwrap(),
+        vec!["over".to_string(), "click".to_string()]
+    );
+}
+
+#[test]
+fn resize_reflow_revalidates_hover_under_the_stationary_pointer() {
+    let hits: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let hits2 = Arc::clone(&hits);
+    let html = r#"
+      <script>
+        document.getElementById('a')
+          .addEventListener('mouseover', function () { report('over-a'); });
+        document.getElementById('a')
+          .addEventListener('mouseout', function () { report('out-a'); });
+        document.getElementById('b')
+          .addEventListener('mouseover', function () { report('over-b'); });
+        document.getElementById('b')
+          .addEventListener('mouseout', function () { report('out-b'); });
+      </script>
+      <div id="a" style="padding: 1px;">AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA</div>
+      <div id="b" style="padding: 1px;">bbbb</div>
+    "#;
+    let (mut engine, geo) = build_geometry(
+        html,
+        host_bindings("report", move |call| {
+            if let Some(s) = call.args.first().and_then(|v| v.as_string()) {
+                hits2.lock().unwrap().push(s.to_std_string_lossy());
+            }
+            JsValue::undefined()
+        }),
+    );
+    let map = HitMap::build(&geo);
+    let a_region = map.resolve_by_id("a").expect("a region");
+    let b_region = map.resolve_by_id("b").expect("b region");
+    let (bx, by) = center(b_region.rect);
+
+    let mut hover = HoverState::new();
+    on_move(&mut hover, &map, &mut engine, bx, by); // enter b
+    assert_eq!(*hits.lock().unwrap(), vec!["over-b".to_string()]);
+
+    // Narrow reflow: `a` wraps taller and pushes `b` down, so the cell under
+    // the stationary pointer now belongs to `a`. The synthetic `Move` the run
+    // loop queues after a resize (once the rebuilt hit map is published)
+    // re-validates hover: b must receive `mouseout`, a `mouseover`.
+    let geo2 = relayout(&engine, 20, 24);
+    let map2 = HitMap::build(&geo2);
+    // `b`'s top row in the wide layout falls inside the (taller) `a` once the
+    // text wraps; assert the reflow actually moved b away from that cell.
+    let px = 10;
+    let py = b_region.rect.y as u32 + 1;
+    let under = map2.hit_test(px, py).expect("cell under pointer");
+    assert_ne!(
+        under.node_id, b_region.node_id,
+        "the narrow reflow must push b below the stationary pointer"
+    );
+
+    on_move(&mut hover, &map2, &mut engine, px, py);
+
+    assert_eq!(
+        *hits.lock().unwrap(),
+        vec![
+            "over-b".to_string(),
+            "out-b".to_string(),
+            "over-a".to_string()
+        ]
+    );
+}
+
+#[test]
+fn stale_press_from_lost_release_does_not_kill_hover() {
+    // Simulate a resize that dropped the button release: `pressed` stays set
+    // (the console delivered the `Down` but lost the `Up`). The input loop
+    // clears it on the next button-free `Moved` event, so hover tracking
+    // (`ScriptMsg::Move`) resumes instead of every move being read as a drag.
+    let (mut engine, geo) = build_geometry("<div id='a'>a</div>", EventBindings::default());
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("a").expect("a region");
+    let (x, y) = center(region.rect);
+    let mut state = InputState::new();
+    state.pressed = Some((x as u16, y as u16));
+    state.drag_selecting = true;
+
+    assert!(state.drop_stale_press(), "stale press must be dropped");
+    assert!(state.pressed.is_none());
+    assert!(!state.drag_selecting);
+
+    let mut msgs = Vec::new();
+    let mut cmds = Vec::new();
+    handle_mouse_move(&mut state, &map, x, y, &mut msgs, &mut cmds);
+    assert!(
+        msgs.iter().any(|m| matches!(m, ScriptMsg::Move { .. })),
+        "hover tracking must resume after a stale press is cleared"
+    );
+}
+
+// ============================================================
 // invoke_action (manual JS global invocation)
 // ============================================================
 

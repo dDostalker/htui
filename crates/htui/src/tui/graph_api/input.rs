@@ -289,6 +289,14 @@ pub struct InputState {
     /// Whether the pointer is mid-drag inside a focused `<input>` (mouse
     /// selection as opposed to a plain click).
     pub drag_selecting: bool,
+    /// Screen coordinates of the last pointer event (any button state). Lets
+    /// the run loop re-validate hover against a freshly rebuilt hit map after
+    /// a viewport change by synthesising a `Move` at the known position.
+    pub last_mouse: Option<(u16, u16)>,
+    /// Set when the viewport changed (resize poll or `Event::Resize`) so the
+    /// run loop re-validates the pointer hover once the rebuilt hit map is in
+    /// place (consumed by [`InputState::take_resize_revalidation`]).
+    pub resize_pending: bool,
     /// Canvas-space anchor of the page text selection (start point; `None`
     /// when no text selection is active).
     pub text_sel_anchor: Option<(u32, u32)>,
@@ -327,6 +335,8 @@ impl InputState {
             input_sel_anchor: None,
             input_clipboard: String::new(),
             drag_selecting: false,
+            last_mouse: None,
+            resize_pending: false,
             text_sel_anchor: None,
             text_sel_end: None,
             text_sel_mode: SelectionMode::Flow,
@@ -335,6 +345,51 @@ impl InputState {
             next_key_id: 0,
             key_gate: None,
         }
+    }
+
+    /// A viewport change (terminal resize) invalidates every canvas coordinate
+    /// the input loop caches: a press whose release the console dropped would
+    /// otherwise stick and turn all later pointer motion into a drag (hover /
+    /// click events go permanently silent), and a stale text selection / open
+    /// dropdown overlay would highlight or paint stale cells. Resets that
+    /// state and emits the render commands that clear the render-side mirrors.
+    pub fn invalidate_viewport(&mut self, cmds: &mut Vec<RenderCmd>) {
+        self.pressed = None;
+        self.drag_selecting = false;
+        clear_text_selection(self, cmds);
+        if let Some(open) = self.open_select.take() {
+            cmds.push(RenderCmd::SelectClose {
+                node_id: open.node_id,
+            });
+        }
+    }
+
+    /// Drop a press whose release was never received: a button-free `Moved`
+    /// event proves no button is held, so any recorded press is stale. Without
+    /// this, a lost release (e.g. the console dropping the `Up` during a
+    /// resize) would make every later move look like a drag and hover / click
+    /// events would stay silent forever. Returns whether a press was dropped.
+    pub fn drop_stale_press(&mut self) -> bool {
+        if self.pressed.take().is_some() {
+            self.drag_selecting = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remember that the viewport changed; the run loop re-validates hover
+    /// after the rebuilt hit map is published (see
+    /// [`InputState::take_resize_revalidation`]).
+    pub fn request_resize_revalidation(&mut self) {
+        self.resize_pending = true;
+    }
+
+    /// Consume the pending viewport-change flag; `true` when the run loop
+    /// should synthesise a `Move` at [`InputState::last_mouse`] against the
+    /// fresh hit map.
+    pub fn take_resize_revalidation(&mut self) -> bool {
+        std::mem::take(&mut self.resize_pending)
     }
 
     /// Mirror the render thread's scroll clamp: after a terminal grow / a
@@ -1347,6 +1402,7 @@ pub fn trigger_refresh(
 
         Ok(Event::Mouse(mouse)) => {
             let ctrl = mouse.modifiers.contains(event::KeyModifiers::CONTROL);
+            state.last_mouse = Some((mouse.column, mouse.row));
             match mouse.kind {
                 MouseEventKind::ScrollUp => {
                     // Scrolling dismisses an open dropdown (focus loss).
@@ -1431,9 +1487,16 @@ pub fn trigger_refresh(
                 }
                 // crossterm reports button-held motion as `Drag` (SGR code
                 // 32..34) and button-free motion as `Moved` (SGR 64) — both
-                // must reach the drag / hover handler.
+                // must reach the drag / hover handler. A `Moved` event also
+                // proves no button is held: a press whose release was lost
+                // (the console can drop the `Up` during a resize) is dropped
+                // here, otherwise every later move is misread as a drag and
+                // hover / click events stay silent forever.
                 MouseEventKind::Drag(_) | MouseEventKind::Moved => {
                     if let (Some(hit_map), Some(_)) = (hit_map, arena) {
+                        if !matches!(mouse.kind, MouseEventKind::Drag(_)) {
+                            state.drop_stale_press();
+                        }
                         let (x, y) = canvas_pos(state, mouse.column, mouse.row);
                         handle_mouse_move(state, hit_map, x, y, msgs, &mut cmds);
                     }
@@ -1449,16 +1512,23 @@ pub fn trigger_refresh(
             // away. The run loop also polls the size every iteration as a
             // fallback for resize paths that emit no event.
             reapply_console_modes();
+            // A resize invalidates every canvas coordinate the input loop
+            // caches (a stuck press would kill hover / click, a stale
+            // selection or dropdown would paint wrong cells), and the hover
+            // target must be re-validated against the rebuilt hit map.
+            state.invalidate_viewport(&mut cmds);
+            state.request_resize_revalidation();
             // The render thread re-lays-out against the new size and clamps
             // its own scroll position; mirror the clamp here (to the last
             // known ceiling) so the scroll sent with the redraw matches, and
             // the run loop re-syncs to the freshly computed ceiling on the
             // next iteration.
             state.clamp_scroll_to(max_scroll);
-            vec![RenderCmd::Redraw {
+            cmds.push(RenderCmd::Redraw {
                 scroll_y: state.scroll_y,
                 zoom: state.zoom,
-            }]
+            });
+            cmds
         }
 
         _ => cmds,
@@ -1708,15 +1778,23 @@ fn canvas_pos(state: &InputState, column: u16, row: u16) -> (u32, u32) {
 /// input mode: mouse capture is dropped (`ENABLE_MOUSE_INPUT` cleared, quick-
 /// edit selection re-engages) and the keyboard falls back to cooked mode, so
 /// input appears completely dead until the app re-issues raw mode + mouse
-/// capture. Both calls are idempotent, so this is safe to run on every resize
-/// event. On other platforms a resize never touches the terminal modes, so
+/// capture. Both calls are idempotent, so this is safe to run on every loop
+/// iteration. On other platforms a resize never touches the terminal modes, so
 /// this is a no-op.
 #[cfg(windows)]
 pub(crate) fn reapply_console_modes() {
     if let Err(e) = crossterm::terminal::enable_raw_mode() {
         log::error!("Failed to re-enable raw mode after resize: {}", e);
     }
-    if let Err(e) = crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture) {
+    // Pass a *sink* writer: `EnableMouseCapture` is a WinAPI call (an
+    // input-handle `SetConsoleMode`) on Windows, but `execute!` flushes the
+    // passed writer first to preserve command ordering. Flushing
+    // `std::io::stdout()` would take the global stdout lock — which the
+    // render thread can hold while blocked on a slow console write — and a
+    // fast wheel scroll (large diffs every frame) makes that stall long
+    // enough to look like the whole app froze. A sink flushes nothing and
+    // still runs the WinAPI path.
+    if let Err(e) = crossterm::execute!(std::io::sink(), crossterm::event::EnableMouseCapture) {
         log::error!("Failed to re-enable mouse capture after resize: {}", e);
     }
 }

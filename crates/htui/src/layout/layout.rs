@@ -10,6 +10,19 @@ use crate::{
     tui::graph_api::{Block, FontStyle, ImageCache, TermLayout},
 };
 
+/// Upper bound for the terminal viewport width.
+///
+/// crossterm's Windows `size()` computes the viewport from a `SMALL_RECT`
+/// (`i16`) difference; while a console is being resized the window rect can
+/// transiently invert (Right < Left), which wraps to values like 65535 after
+/// the `as u16` cast. Without a clamp such a bogus size would make the canvas
+/// allocation (~64 bytes per cell) try to commit hundreds of GB and freeze the
+/// render thread. Real terminals never exceed ~1000 columns.
+pub const MAX_TERM_COLS: u16 = 1000;
+/// Upper bound for the terminal viewport height (see
+/// [`MAX_TERM_COLS`]); real terminals stay well below 500 rows.
+pub const MAX_TERM_ROWS: u16 = 500;
+
 #[derive(Debug)]
 pub struct TermMap {
     pub columns: u16,
@@ -17,13 +30,33 @@ pub struct TermMap {
 }
 
 impl TermMap {
-    /// Read the current terminal size from the tty, falling back to 80x24
-    /// when the reported size is 0 (no real terminal attached).
+    /// Read the current terminal size from the tty, clamped to sane bounds:
+    /// a 0 (no terminal) falls back to 80x24, and an out-of-range value from a
+    /// transiently-inverted Windows `SMALL_RECT` during a resize is clamped
+    /// instead of being taken literally (see [`MAX_TERM_COLS`] /
+    /// [`MAX_TERM_ROWS`]).
     pub fn get_ter_map() -> std::io::Result<TermMap> {
-        let (columns, rows) = terminal::size()?;
+        let (raw_c, raw_r) = terminal::size()?;
+        let columns = if raw_c == 0 {
+            80
+        } else {
+            raw_c.clamp(1, MAX_TERM_COLS)
+        };
+        let rows = if raw_r == 0 {
+            24
+        } else {
+            raw_r.clamp(1, MAX_TERM_ROWS)
+        };
+        if raw_c != columns || raw_r != rows {
+            log::warn!(
+                "终端尺寸 raw {}x{} 越界，已夹紧为 {}x{}",
+                raw_c,
+                raw_r,
+                columns,
+                rows
+            );
+        }
         log::info!("终端尺寸: {}x{}", columns, rows);
-        let columns = if columns == 0 { 80 } else { columns };
-        let rows = if rows == 0 { 24 } else { rows };
         Ok(TermMap { columns, rows })
     }
 }
@@ -35,7 +68,13 @@ impl TermLayout {
         // `MAX_SCROLL_MULTIPLIER` screens. A short document therefore keeps a
         // small buffer instead of pre-allocating the whole scroll capacity up
         // front (which is `columns × rows × 20` cells on a tall page).
-        let viewport_cells = map.columns as usize * map.rows as usize;
+        //
+        // `saturating_mul` guards against a pathological size slipping through
+        // the clamps in [`TermMap::get_ter_map`] (an allocation of billions of
+        // cells would hang the render thread).
+        let viewport_cells = (map.columns as usize)
+            .saturating_mul(map.rows as usize)
+            .min(MAX_TERM_COLS as usize * MAX_TERM_ROWS as usize);
         let layout = vec![Block::default(); viewport_cells];
         TermLayout {
             layout,
