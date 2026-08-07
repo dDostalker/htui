@@ -11,7 +11,7 @@ pub use cascade::{
 };
 pub use matcher::{selector_chain_matches, selector_chain_matches_with_hover};
 pub use properties::{AlignSelf, CssAttr};
-pub use selector::{Combinator, CompoundSelector, CssSelector, NthExpr, PseudoClass, Selector};
+pub use selector::{Combinator, CompoundSelector, CssSelector, NthExpr, PseudoClass, Selector, SelectorError};
 pub use stylesheet::{CssRule, Parser, parse_declaration_text};
 pub use values::{
     AlignItems, BoxSizing, CornerRadii, CssDisplay, FlexBasis, FlexDirection, FlexWrap,
