@@ -58,8 +58,8 @@ pub(super) fn prepare_flex_item(
                 }
             };
             match direction {
-                FlexDirection::Row => explicit.or_else(|| Some(natural.width)),
-                FlexDirection::Column => explicit.or_else(|| Some(natural.height)),
+                FlexDirection::Row => explicit.or(Some(natural.width)),
+                FlexDirection::Column => explicit.or(Some(natural.height)),
             }
         })
         .unwrap_or(FLEX_ITEM_MIN_CROSS);

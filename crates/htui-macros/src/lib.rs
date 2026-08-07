@@ -9,7 +9,7 @@
 //!   - a zero-argument function returning a [`HostFn`] is registered as-is,
 //!     letting the returned closure capture arbitrary Rust state.
 //!   Accepts an optional `name = "..."` to control the JS-side name used by
-//!   `#[htui::commands]`.
+//!       `#[htui::commands]`.
 //! - `#[htui::commands]` — collect every `#[htui::command]` function in a
 //!   module and generate one `register(&mut EventBindings)` entry point (plus
 //!   a `register(&mut EventBindings)` entry point), removing the per-command
@@ -413,25 +413,26 @@ fn command_js_name(attr: &Attribute, fallback: &Ident) -> syn::Result<String> {
         return Ok(fallback.to_string());
     }
     let metas = attr.parse_args_with(Punctuated::<Meta, syn::token::Comma>::parse_terminated)?;
-    for meta in metas {
-        match meta {
-            Meta::NameValue(nv) if nv.path.is_ident("name") => match &nv.value {
-                Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => return Ok(s.value()),
-                _ => {
+
+        if let Some(meta) = metas.into_iter().next() {
+                match meta{
+                Meta::NameValue(nv) if nv.path.is_ident("name") => match &nv.value {
+                    Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => return Ok(s.value()),
+                    _ => {
+                        return Err(syn::Error::new_spanned(
+                            nv,
+                            "`name` must be a string literal, e.g. #[htui::command(name = \"jsName\")]",
+                        ));
+                    }
+                },
+                other => {
                     return Err(syn::Error::new_spanned(
-                        nv,
-                        "`name` must be a string literal, e.g. #[htui::command(name = \"jsName\")]",
+                        other,
+                        "unsupported `#[htui::command]` attribute; expected `name = \"...\"`",
                     ));
                 }
-            },
-            other => {
-                return Err(syn::Error::new_spanned(
-                    other,
-                    "unsupported `#[htui::command]` attribute; expected `name = \"...\"`",
-                ));
             }
-        }
-    }
+        } 
     Ok(fallback.to_string())
 }
 

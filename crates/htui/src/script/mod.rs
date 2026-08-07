@@ -95,7 +95,7 @@ pub(crate) struct TimerEntry {
 
 thread_local! {
     /// The active engine state for the current thread (the input loop).
-    pub(crate) static ENGINE_STATE: RefCell<Option<Rc<RefCell<ScriptState>>>> = RefCell::new(None);
+    pub(crate) static ENGINE_STATE: RefCell<Option<Rc<RefCell<ScriptState>>>> = const {RefCell::new(None)} ;
 }
 
 /// Browser-aligned JS engine attached to a live DOM.
@@ -447,14 +447,12 @@ impl ScriptEngine {
         for element in &region.path {
             // `currentTarget` must track the element being dispatched.
             if let Ok(wrapper) = element_wrapper(&mut self.context, element.node_id)
-                && let Some(obj) = event.as_object()
-            {
-                if let Err(e) =
+                && let Some(obj) = event.as_object() && let Err(e) =
                     obj.set(js_string!("currentTarget"), wrapper, false, &mut self.context)
                 {
                     log::warn!("Failed to set event.currentTarget: {e}");
                 }
-            }
+            
             if let Some(ev) = &mut self.state.borrow_mut().current_event {
                 ev.current_target = element.id.clone();
             }
@@ -471,7 +469,7 @@ impl ScriptEngine {
             for listener in listeners {
                 let call = listener
                     .to_object(&mut self.context)
-                    .and_then(|f| f.call(&JsValue::undefined(), &[event.clone()], &mut self.context));
+                    .and_then(|f| f.call(&JsValue::undefined(), std::slice::from_ref(&event), &mut self.context));
                 if let Err(e) = call {
                     log::warn!("Listener threw: {e}");
                 }
@@ -617,7 +615,7 @@ impl Drop for ScriptEngine {
 
 /// `event.stopPropagation()` — marks the event as stopped.
 fn stop_propagation(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
-    if let Some(obj) = this.to_object(context).ok() {
+    if let Ok(obj) = this.to_object(context) {
         if let Err(e) = obj.set(js_string!("_stopped"), true, false, context) {
             log::warn!("Failed to mark event stopped: {e}");
         }
@@ -643,7 +641,7 @@ fn timer_callback(context: &mut Context, id: u32) -> JsValue {
 /// built-in shortcut for that key (the verdict is echoed back in the script
 /// thread's response; the input loop waits for it before acting).
 fn prevent_default(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
-    if let Some(obj) = this.to_object(context).ok() {
+    if let Ok(obj) = this.to_object(context) {
         for flag in ["_prevented", "defaultPrevented"] {
             if let Err(e) = obj.set(js_string!(flag), true, false, context) {
                 log::warn!("Failed to mark event prevented: {e}");

@@ -151,17 +151,15 @@ pub(crate) fn parse_border_side(
     font_ctx: FontContext,
     viewport: Viewport,
 ) -> Border {
-    if let Some(value) = side_raw {
-        if let Some(parsed) = parse_border_shorthand(value, containing_width, font_ctx, viewport) {
+    if let Some(value) = side_raw && let Some(parsed) = parse_border_shorthand(value, containing_width, font_ctx, viewport) {
             return parsed;
-        }
+        
         // `border-top` was present but unparseable — fall through to next
         // priority rather than dropping the side entirely.
     }
-    if let Some(value) = shorthand_raw {
-        if let Some(parsed) = parse_border_shorthand(value, containing_width, font_ctx, viewport) {
+    if let Some(value) = shorthand_raw && let Some(parsed) = parse_border_shorthand(value, containing_width, font_ctx, viewport) {
             return parsed;
-        }
+        
     }
     fallback
 }

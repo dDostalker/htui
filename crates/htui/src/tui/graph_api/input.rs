@@ -914,8 +914,7 @@ fn close_select(
     cmds.push(RenderCmd::SelectClose {
         node_id: open.node_id,
     });
-    if let Some(idx) = pick {
-        if idx < open.options.len() {
+    if let Some(idx) = pick && idx < open.options.len() {
             let value = open.options[idx].0.clone();
             let old = arena
                 .get(open.node_id)
@@ -928,7 +927,7 @@ fn close_select(
                     value,
                 });
             }
-        }
+        
     }
 }
 
@@ -983,8 +982,8 @@ pub fn handle_mouse_down(
                     // Position the caret (and the selection anchor) at the press
                     // point within the field.
                     if let Some(region) = clicked {
-                        let inner_x = region.rect.x.saturating_add(1) as usize;
-                        let inner_w = region.rect.width.saturating_sub(2) as usize;
+                        let inner_x = region.rect.x.saturating_add(1);
+                        let inner_w = region.rect.width.saturating_sub(2);
                         let idx = char_index_at_x(
                             &state.input_value,
                             state.input_cursor,
@@ -1060,14 +1059,12 @@ pub fn handle_mouse_move(
         .as_ref()
         .and_then(|open| hit_select_option(open, x, y))
         .filter(|&idx| state.open_select.as_ref().is_some_and(|o| o.highlight != idx))
-    {
-        if let Some(open) = &mut state.open_select {
+    &&  let Some(open) = &mut state.open_select {
             open.highlight = idx;
             cmds.push(RenderCmd::SelectMove {
                 node_id: open.node_id,
                 highlight: idx,
             });
-        }
     }
 
     if state.pressed.is_some() {
@@ -1077,8 +1074,8 @@ pub fn handle_mouse_move(
             if let Some(focused) = state.focused_input
                 && let Some(region) = hit_map.iter().find(|r| r.node_id == focused)
             {
-                let inner_x = region.rect.x.saturating_add(1) as usize;
-                let inner_w = region.rect.width.saturating_sub(2) as usize;
+                let inner_x = region.rect.x.saturating_add(1) ;
+                let inner_w = region.rect.width.saturating_sub(2) ;
                 let idx = char_index_at_x(
                     &state.input_value,
                     state.input_cursor,
@@ -1412,11 +1409,10 @@ pub fn trigger_refresh(
                         // Press-drag-release over a dropdown option picks it
                         // (the browser's native `<select>` interaction), even
                         // when the release lands off the press cell.
-                        if let Some(open) = state.open_select.clone() {
-                            if let Some(idx) = hit_select_option(&open, x, y) {
+                        if let Some(open) = state.open_select.clone() && let Some(idx) = hit_select_option(&open, x, y) {
                                 close_select(state, arena, Some(idx), msgs, &mut cmds);
                                 return cmds;
-                            }
+                            
                         }
                         if px == mouse.column && py == mouse.row {
                             handle_click(state, hit_map, arena, x, y, msgs, &mut cmds);
@@ -1516,10 +1512,10 @@ fn page_level_builtins(
             // shortcuts are handled earlier). `Ctrl+X` on read-only page text
             // degrades to a copy, like a browser.
             KeyCode::Char('c') | KeyCode::Char('x') => {
-                if state.focused_input.is_none() && state.text_sel_anchor.is_some() {
-                    if let Ok(guard) = state.selection_text.lock() {
+                if state.focused_input.is_none() && state.text_sel_anchor.is_some() && 
+                    let Ok(guard) = state.selection_text.lock() {
                         state.input_clipboard = guard.clone();
-                    }
+                    
                 }
             }
             // `Ctrl` + Home / End jump to the top / bottom of the page

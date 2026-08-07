@@ -67,7 +67,7 @@ impl NthExpr {
         if self.a == 0 {
             return index_1based == self.b;
         }
-        index_1based >= self.b && (index_1based - self.b) % self.a == 0
+        index_1based >= self.b && (index_1based - self.b).is_multiple_of(self.a)
     }
 }
 
@@ -359,10 +359,11 @@ fn parse_nth_child_arg(s: &str) -> Option<NthExpr> {
     }
     // Otherwise expect `<a>n[+|-<b>]`. Reject sign on `a`, implicit `1n`,
     // signed offsets, and trailing whitespace/junk.
-    let (coef_part, tail) = match lower.find('n') {
-        Some(idx) => lower.split_at(idx),
-        None => return None,
-    };
+    let (coef_part, tail) = {
+            let idx = lower.find('n')?;
+            lower.split_at(idx)
+        };
+        
     let tail = &tail[1..]; // skip the 'n' itself
     let a: usize = if coef_part.is_empty() {
         return None; // bare `n` is not supported

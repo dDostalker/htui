@@ -173,7 +173,7 @@ fn tokenize_run(
             pending_count += 1;
             pending_width += w;
         } else if word_break != WordBreak::KeepAll
-            && g.chars().next().map_or(false, is_cjk_break_opportunity)
+            && g.chars().next().is_some_and(is_cjk_break_opportunity)
         {
             // CJK (or full-width) grapheme under `normal` / `break-all`:
             // flush whatever is pending so the boundary before this
@@ -452,23 +452,9 @@ fn emit_preserving_newlines(runs: &[InlineRun]) -> Vec<Vec<InlineRun>> {
     lines
 }
 
-/// Wrap `runs` into a list of visual lines, each no wider than
-/// `max_width` cells (after font-size expansion). The returned
-/// `Vec<Vec<InlineRun>>` always has at least one entry; an empty
-/// input returns `vec![Vec::new()]` (a single empty visual line).
-pub fn wrap_runs(
-    runs: &[InlineRun],
-    max_width: usize,
-    font_size_cells: usize,
-    white_space: WhiteSpace,
-    word_break: WordBreak,
-    overflow_wrap: OverflowWrap,
-) -> Vec<Vec<InlineRun>> {
-    let result = wrap_runs_inner(runs, max_width, font_size_cells, white_space, word_break, overflow_wrap);
-    result
-}
 
-fn wrap_runs_inner(
+
+pub fn wrap_runs(
     runs: &[InlineRun],
     max_width: usize,
     font_size_cells: usize,

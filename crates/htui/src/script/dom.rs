@@ -181,7 +181,7 @@ fn native_get_attribute(
     context: &mut Context,
 ) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
-    let name = args.get(0).and_then(|v| v.as_string()).map(|s| s.to_std_string_lossy());
+    let name = args.first().and_then(|v| v.as_string()).map(|s| s.to_std_string_lossy());
     let Some(name) = name else {
         return Err(JsNativeError::typ().with_message("getAttribute expects a string").into());
     };
@@ -230,7 +230,7 @@ fn native_remove_attribute(
     context: &mut Context,
 ) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
-    let name = args.get(0).and_then(|v| v.as_string()).map(|s| s.to_std_string_lossy());
+    let name = args.first().and_then(|v| v.as_string()).map(|s| s.to_std_string_lossy());
     let Some(name) = name else {
         return Err(JsNativeError::typ().with_message("removeAttribute expects a string").into());
     };
@@ -268,7 +268,7 @@ fn native_get_value(this: &JsValue, _args: &[JsValue], context: &mut Context) ->
 fn native_set_value(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let value = args
-        .get(0)
+        .first()
         .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
         .transpose()?
         .unwrap_or_default();
@@ -305,7 +305,7 @@ fn native_get_text(this: &JsValue, _args: &[JsValue], context: &mut Context) -> 
 fn native_set_text(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let text = args
-        .get(0)
+        .first()
         .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
         .transpose()?
         .unwrap_or_default();
@@ -375,7 +375,7 @@ fn native_get_class(this: &JsValue, _args: &[JsValue], context: &mut Context) ->
 fn native_set_class(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let value = args
-        .get(0)
+        .first()
         .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
         .transpose()?
         .unwrap_or_default();
@@ -407,7 +407,7 @@ fn native_get_id(this: &JsValue, _args: &[JsValue], context: &mut Context) -> Js
 fn native_set_id(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let value = args
-        .get(0)
+        .first()
         .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
         .transpose()?
         .unwrap_or_default();
@@ -581,7 +581,7 @@ fn style_get_css_text(this: &JsValue, _args: &[JsValue], context: &mut Context) 
 fn style_set_css_text(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let value = args
-        .get(0)
+        .first()
         .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
         .transpose()?
         .unwrap_or_default();
@@ -637,10 +637,8 @@ fn native_append_child(
     let mut st = rc.borrow_mut();
     // Detach from any existing parent.
     let old_parent = st.arena.get(child_id).and_then(|c| c.parent);
-    if let Some(old_parent) = old_parent {
-        if let Some(op) = st.arena.get_mut(old_parent) {
+    if let Some(old_parent) = old_parent && let Some(op) = st.arena.get_mut(old_parent) {
             op.children.retain(|c| *c != child_id);
-        }
     }
     if let Some(child) = st.arena.get_mut(child_id) {
         child.parent = Some(parent_id);
@@ -896,7 +894,7 @@ fn native_set_interval(
 /// `__htuiTimers` JS registry; the deadline lives in the Rust timer table the
 /// script thread drives.
 fn schedule_timer(context: &mut Context, args: &[JsValue], repeat: bool) -> JsResult<JsValue> {
-    let callback = args.get(0).cloned().unwrap_or(JsValue::undefined());
+    let callback = args.first().cloned().unwrap_or(JsValue::undefined());
     if !callback.is_callable() {
         return Err(JsNativeError::typ()
             .with_message("setTimeout/setInterval expects a callable first argument")
@@ -953,7 +951,7 @@ fn native_clear_interval(
 /// registry, if present.
 fn clear_timer(context: &mut Context, args: &[JsValue]) -> JsResult<JsValue> {
     let id = args
-        .get(0)
+        .first()
         .map(|v| v.to_number(context))
         .transpose()?
         .unwrap_or(-1.0);
@@ -969,11 +967,9 @@ fn clear_timer(context: &mut Context, args: &[JsValue]) -> JsResult<JsValue> {
     let global = context.global_object();
     if let Ok(registry) = global
         .get(js_string!("__htuiTimers"), context)
-        .and_then(|v| v.to_object(context))
-    {
-        if let Err(e) = registry.delete_property_or_throw(js_string!(id.to_string()), context) {
+        .and_then(|v| v.to_object(context)) && let Err(e) = registry.delete_property_or_throw(js_string!(id.to_string()), context) {
             log::warn!("Failed to clear timer callback: {e}");
-        }
+        
     }
     Ok(JsValue::undefined())
 }
@@ -983,7 +979,7 @@ fn native_get_element_by_id(
     args: &[JsValue],
     context: &mut Context,
 ) -> JsResult<JsValue> {
-    let id = args.get(0).map(|v| v.to_string(context).map(|s| s.to_std_string_lossy())).transpose()?;
+    let id = args.first().map(|v| v.to_string(context).map(|s| s.to_std_string_lossy())).transpose()?;
     let Some(id) = id else {
         return Ok(JsValue::null());
     };
@@ -1007,7 +1003,7 @@ fn native_create_element(
     args: &[JsValue],
     context: &mut Context,
 ) -> JsResult<JsValue> {
-    let tag = args.get(0).map(|v| v.to_string(context).map(|s| s.to_std_string_lossy())).transpose()?;
+    let tag = args.first().map(|v| v.to_string(context).map(|s| s.to_std_string_lossy())).transpose()?;
     let tag = tag.unwrap_or_else(|| "div".to_string());
     let node_type = crate::html::html_parse::tag_name_to_node_type(&tag).unwrap_or(NodeType::Div);
     let Some(rc) = with_state() else {

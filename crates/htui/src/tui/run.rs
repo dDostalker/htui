@@ -690,7 +690,7 @@ fn apply_select_overlay(tl: &mut TermLayout, open: &OpenSelect) {
         .saturating_add(open.rect.width)
         .min(cols);
     for (i, (_, label)) in open.options.iter().enumerate() {
-        let row_start = (open.rect.y.saturating_add(i) as usize).saturating_mul(cols);
+        let row_start = open.rect.y.saturating_add(i).saturating_mul(cols);
         if row_start >= max {
             break;
         }
