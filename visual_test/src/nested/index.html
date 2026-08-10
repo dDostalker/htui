@@ -1,79 +1,72 @@
-<!DOCTYPE html>
-<!--
-  htui 视觉测试 — 嵌套结构 nested
-  运行: cargo run -p visual_test -- nested
-  浏览器直接打开本文件即可看到与终端渲染对应相同的样式
--->
-<html lang="en">
+<!doctype html>
+<html>
 <head>
-    <meta charset="UTF-8" />
-    <title>htui Nested Visual Test</title>
-    <style>
-        h1 { color: yellow; }
-        p  { color: white; }
-        .deep { color: cyan; }
-    </style>
+  <style>
+    /* Background per nesting level — without these, --dump bg can't
+       distinguish a wrapping div from plain text.  No foreground colours
+       or borders; the demo's purpose is layout depth, not theming. */
+    body                 { color: #eee; }
+    body > div            { background-color: #1a1a1a; color: #eee; padding: 1; margin: 1; }
+    body > div > div      { background-color: #2a2a2a; color: #eee; padding: 1; margin: 1; }
+    body > div > div > div{ background-color: #3a3a3a; color: #eee; padding: 1; margin: 1; }
+  </style>
 </head>
 <body>
+  <h1>Nested Structure Test</h1>
+
+  <p>=== Single Level ===</p>
+  <div>
+    <p>Level 1 content inside a single div.</p>
+  </div>
+
+  <p>=== Two Levels Deep ===</p>
+  <div>
+    <p>Level 1 outer.</p>
     <div>
-        <h1>Nested Structure Test</h1>
-
-        <p>=== Single Level ===</p>
-        <div>
-            <p>Level 1 content inside a single div.</p>
-        </div>
-
-        <p>=== Two Levels Deep ===</p>
-        <div>
-            <p>Level 1 outer.</p>
-            <div>
-                <p>Level 2 inner content.</p>
-            </div>
-            <p>Back to level 1 outer.</p>
-        </div>
-
-        <p>=== Three Levels Deep ===</p>
-        <div>
-            <p>Level 1 Start</p>
-            <div>
-                <p>Level 2 Middle</p>
-                <div>
-                    <p class="deep">Level 3 Deep (color: cyan)</p>
-                </div>
-                <p>Level 2 End</p>
-            </div>
-            <p>Level 1 End</p>
-        </div>
-
-        <p>=== Four Levels Deep ===</p>
-        <div>
-            <p>L1 - Top</p>
-            <div>
-                <p>L2</p>
-                <div>
-                    <p>L3</p>
-                    <div>
-                        <p class="deep">L4 - Deepest (color: cyan)</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <p>=== Mixed Nesting ===</p>
-        <div>
-            <h2>Nested Heading</h2>
-            <p>Paragraph after heading.</p>
-            <div>
-                <h3>Deeper Heading</h3>
-                <p>Deeper paragraph.</p>
-                <div>
-                    <h4>Even Deeper</h4>
-                    <p>Deepest paragraph in mixed nesting.</p>
-                </div>
-            </div>
-        </div>
-
-        <p>=== End of Nested Test ===</p>
+      <p>Level 2 inner content.</p>
     </div>
+    <p>Back to level 1 outer.</p>
+  </div>
+
+  <p>=== Three Levels Deep ===</p>
+  <div>
+    <p>Level 1 Start</p>
+    <div>
+      <p>Level 2 Middle</p>
+      <div>
+        <p>Level 3 Deep</p>
+      </div>
+      <p>Level 2 End</p>
+    </div>
+    <p>Level 1 End</p>
+  </div>
+
+  <p>=== Four Levels Deep ===</p>
+  <div>
+    <p>L1 - Top</p>
+    <div>
+      <p>L2</p>
+      <div>
+        <p>L3</p>
+        <div>
+          <p>L4 - Deepest</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p>=== Mixed Nesting ===</p>
+  <div>
+    <h2>Nested Heading</h2>
+    <p>Paragraph after heading.</p>
+    <div>
+      <h3>Deeper Heading</h3>
+      <p>Deeper paragraph.</p>
+      <div>
+        <h4>Even Deeper</h4>
+        <p>Deepest paragraph in mixed nesting.</p>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

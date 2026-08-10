@@ -295,6 +295,11 @@ fn main() {
             include_bytes!("image/pic.png").to_vec(),
         )
         .expect("register bundled pic.png");
+        htui::resources::register(
+            "mem://image/pic.svg",
+            include_bytes!("image/pic.svg").to_vec(),
+        )
+        .expect("register bundled pic.svg");
     }
 
     if dump_mode {

@@ -79,6 +79,57 @@ fn fresh_canvas_max_scroll_requires_the_paint_pass() {
 }
 
 #[test]
+fn scroll_bound_never_exceeds_the_canvas_buffer() {
+    // The canvas grows to the full content height (no screen cap), so a
+    // normally-painted document always has `rendered_rows <= canvas rows`.
+    // Two invariants protect the incremental diff renderer (which slices
+    // `layout[scroll_start..]`): the advertised scroll bound never points
+    // past the buffer end, and rendering at an out-of-range position is a
+    // safe no-op instead of an underflow panic (the old `max_scroll` once
+    // advertised the content height for buffer-capped documents and the
+    // render thread died on scroll — the `image` visual test reproduced it).
+    let mut html = String::from("<div>");
+    for _ in 0..120 {
+        html.push_str("<div>r</div>");
+    }
+    html.push_str("</div>");
+    let (root_id, arena) = setup(&html);
+    let map = TermMap { columns: 10, rows: 4 };
+    let mut tl = TermLayout::new(&map, 1.0);
+    tl.draw(&arena, root_id, &map);
+
+    let canvas_rows = tl.layout.len() / map.columns as usize;
+    // The advertised scroll bound stays inside the buffer.
+    assert!(
+        tl.max_scroll() + map.rows as u32 <= canvas_rows as u32,
+        "max_scroll must not point past the canvas end"
+    );
+
+    // Clamping a wild scroll position must land inside the buffer.
+    tl.scroll_y = u32::MAX;
+    tl.clamp_scroll();
+    assert!(
+        (tl.scroll_y as usize).saturating_mul(map.columns as usize) <= tl.layout.len(),
+        "clamped scroll must fit in the canvas"
+    );
+
+    // Even an out-of-range position (what the input loop used to send before
+    // the bound fix) must render as a safe no-op instead of panicking.
+    tl.scroll_y = 1000;
+    tl.render_diff_to_bytes();
+    tl.render_to_bytes();
+
+    // Simulate a stale oversized content-height report (`rendered_rows` is a
+    // monotonic high-water mark; a re-layout after a terminal grow can leave
+    // it above the canvas for one frame): the guards must still keep
+    // rendering safe.
+    tl.rendered_rows = (canvas_rows + 100) as u32;
+    tl.scroll_y = 1000;
+    tl.render_diff_to_bytes();
+    tl.render_to_bytes();
+}
+
+#[test]
 fn unchanged_frame_emits_zero_bytes() {
     let (root_id, arena) = setup("<div>hello world</div>");
     let map = term_map();
@@ -317,8 +368,7 @@ fn canvas_starts_at_one_viewport_and_grows_on_demand() {
         "short doc must keep the 1-viewport canvas"
     );
 
-    // A tall document grows the buffer exactly to its content height, capped
-    // at the scroll-buffer limit.
+    // A tall document grows the buffer exactly to its content height.
     let mut html = String::from("<div>");
     for i in 0..60 {
         html.push_str(&format!("<p>line {i}</p>"));
@@ -326,13 +376,14 @@ fn canvas_starts_at_one_viewport_and_grows_on_demand() {
     html.push_str("</div>");
     let (root_id, arena) = setup(&html);
     tl.draw(&arena, root_id, &map);
+    let layout_rows = tl.layout.len() / map.columns as usize;
     assert!(
-        tl.layout.len() >= 60 * map.columns as usize,
-        "tall doc must grow the canvas to its content height"
+        layout_rows > map.rows as usize,
+        "tall doc must grow the canvas beyond the viewport"
     );
-    assert!(
-        tl.layout.len() <= viewport * 20,
-        "growth must stay under the MAX_SCROLL_MULTIPLIER limit"
+    assert_eq!(
+        tl.rendered_rows as usize, layout_rows,
+        "canvas must grow to exactly the content height (no screen cap)"
     );
 }
 

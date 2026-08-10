@@ -1,26 +1,14 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8" />
-    <title>htui fetch demo</title>
-    <style>
-        body { background-color: #101418; color: #d0d8e0; }
-        h1 { background-color: #1a2733; color: #7fd0ff; }
-        .box { border: 1px solid #2a3a4a; padding: 1px; margin: 1px; }
-        #status { color: #ffb86c; }
-        #output { color: #6cf2a4; }
-    </style>
-</head>
+<!doctype html>
+<html>
+<head><title>htui fetch demo</title></head>
 <body>
-    <h1>fetch / event loop demo</h1>
-    <div class="box">
-        <p>This page loads its JS from a <code>mem://</code> resource
-        (<code>&lt;script src="mem://demo/app.js"&gt;</code>) and reads a text
-        file with <code>fetch('mem://demo/hello.txt')</code> — resolved through
-        the Promise microtask event loop.</p>
-        <p id="status">loading…</p>
-        <p id="output"></p>
-    </div>
-    <script src="mem://demo/app.js"></script>
+  <h1>fetch / event loop demo</h1>
+  <p>This page loads its JS from a <code>mem://</code> resource
+  (<code>&lt;script src="mem://demo/app.js"&gt;</code>) and reads a text
+  file with <code>fetch('mem://demo/hello.txt')</code> — resolved through
+  the Promise microtask event loop.</p>
+  <p id="status">loading…</p>
+  <p id="output"></p>
+  <script src="mem://demo/app.js"></script>
 </body>
 </html>

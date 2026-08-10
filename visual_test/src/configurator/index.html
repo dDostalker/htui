@@ -1,37 +1,34 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
 <head>
 <style>
-  body { background-color: #1a1b26; color: #c0caf5; }
-  h2 { margin: 1; }
+  body { margin: 0; }
+
+  /* Layout helpers — used by both text inputs and JS-built controls. */
   .card {
     width: 76;
-    border: 1px solid #565f89;
     padding: 1;
     margin: 1;
   }
   .row { display: flex; gap: 1; margin: 1; }
-  .label { width: 12; color: #a9b1d6; }
-  input { margin: 0; }
-  .muted { color: #565f89; }
+  .label { width: 12; }
+  .preview { padding: 1; white-space: pre-line; }
 
-  /* Radio-style option (click to select; no native <select>) */
+  /* Click-to-select option (no native <select>; hover / selected states
+     demonstrate :hover-driven cascade + class flipping via JS). */
   .opt { padding-left: 1; padding-right: 1; }
   .opt:hover { background-color: #28304d; }
-  .opt.sel { background-color: #3b4261; }
+  .opt.sel   { background-color: #3b4261; }
 
-  /* Toggle switch (click to flip; no native <checkbox>). Single-row
-     pill: the ON state gets an accent background, OFF a muted one. */
+  /* Toggle switch: ON / OFF states distinguished only by class — text
+     labels ([ ON ] / [ OFF ]) and the ON accent are the visible state. */
   .toggle { width: 9; text-align: center; }
-  .toggle.on { background-color: #2ac3de; color: #1a1b26; }
+  .toggle.on  { background-color: #2ac3de; color: #1a1b26; }
   .toggle.off { background-color: #24283b; color: #7aa2f7; }
 
-  /* Buttons */
-  .btn { padding-left: 1; padding-right: 1; border: 1px solid #7aa2f7; color: #7aa2f7; }
-  .btn:hover { background-color: #28304d; }
-
-  .preview { background-color: #24283b; padding: 1; white-space: pre-line; }
-  #status { color: #c0caf5; }
+  /* Buttons — bordered so they read as tappable; hover lights up. */
+  .btn        { padding-left: 1; padding-right: 1; border: 1px solid #7aa2f7; color: #7aa2f7; }
+  .btn:hover  { background-color: #28304d; }
 </style>
 </head>
 <body>
@@ -41,8 +38,8 @@
   <div class="card">
     <div class="row"><div class="label">Profile</div><input id="profile" width="20" value="My Monitor"></div>
     <div class="row"><div class="label">Host</div><input id="host" width="16" value="localhost"></div>
-    <div class="row"><div class="label">Port</div><input id="port" width="6" value="8080"><div class="muted">1–65535</div></div>
-    <div class="row"><div class="label">Refresh</div><input id="refresh" width="6" value="200"><div class="muted">ms</div></div>
+    <div class="row"><div class="label">Port</div><input id="port" width="6" value="8080"></div>
+    <div class="row"><div class="label">Refresh</div><input id="refresh" width="6" value="200">ms</div>
   </div>
 
   <!-- Custom controls built with JS (toggle switches); native <select> dropdown -->
@@ -138,7 +135,6 @@
       console.log('config saved: ' + JSON.stringify(cfg));
       var s = document.getElementById('status');
       s.textContent = 'Saved ✓ (see log)';
-      s.style.color = '#9ece6a';
     }
     function resetForm() {
       document.getElementById('profile').value = 'My Monitor';
@@ -153,7 +149,6 @@
       paintToggle('logging', true);
       var s = document.getElementById('status');
       s.textContent = 'Defaults restored';
-      s.style.color = '#c0caf5';
       updatePreview();
     }
 

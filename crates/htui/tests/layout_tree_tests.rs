@@ -268,9 +268,9 @@ fn layout_buffer_holds_full_document() {
     // Regression: `TermLayout::new` once allocated only `cols * rows * 2` cells,
     // so documents taller than two screens had their trailing rows silently
     // dropped at the layout boundary (paint_block / paint_text_row both clamp
-    // via `idx < cells.len()`). The canvas exposes
-    // `MAX_SCROLL_MULTIPLIER` precisely so the buffer matches `max_cells()` —
-    // assert that every rendered row fits inside the layout Vec.
+    // via `idx < cells.len()`). The canvas grows to the full content height
+    // (no screen multiplier) — assert that every rendered row fits inside the
+    // layout Vec.
     let (root_id, arena) = setup(IMAGE_TEST_HTML, "");
     let term_map = TermMap {
         columns: 120,

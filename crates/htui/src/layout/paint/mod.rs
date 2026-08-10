@@ -98,7 +98,7 @@ impl<'a> PaintCanvas<'a> {
 /// for typical documents (root → `<html>`), so task-per-box parallelism
 /// would spawn exactly one task and only pay `rayon` dispatch overhead;
 /// the workload itself is memory-bound cell writes on a buffer of at most
-/// `columns × rows × MAX_SCROLL_MULTIPLIER` cells. Top-level boxes occupy
+/// the content height × `columns` cells. Top-level boxes occupy
 /// disjoint `rect`s, so a sequential pass writes each cell at most once.
 /// Children are painted inside each box — the parent must paint its
 /// background before the child reads `effective_bg` for its own cells, so

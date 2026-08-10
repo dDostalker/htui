@@ -64,10 +64,9 @@ impl TermMap {
 impl TermLayout {
     pub fn new(map: &TermMap, zoom: f32) -> TermLayout {
         // The canvas starts at a single viewport and grows on demand (see
-        // [`ensure_capacity`](Self::ensure_capacity)) up to
-        // `MAX_SCROLL_MULTIPLIER` screens. A short document therefore keeps a
-        // small buffer instead of pre-allocating the whole scroll capacity up
-        // front (which is `columns × rows × 20` cells on a tall page).
+        // [`ensure_capacity`](Self::ensure_capacity)) to exactly the content
+        // height. A short document therefore keeps a small buffer instead of
+        // pre-allocating the whole scroll capacity up front.
         //
         // `saturating_mul` guards against a pathological size slipping through
         // the clamps in [`TermMap::get_ter_map`] (an allocation of billions of
@@ -189,11 +188,10 @@ impl TermLayout {
     ///
     /// The buffer starts at one viewport ([`new`](Self::new)) and only grows
     /// here, to exactly the height the layout needs — a short document never
-    /// pays for the full scroll capacity. Growth is clamped to the
-    /// `MAX_SCROLL_MULTIPLIER` limit so an unboundedly tall document cannot
-    /// exhaust memory, and the buffer never shrinks (content height is
-    /// monotonic within a session). Freshly added cells are blank, so the
-    /// subsequent paint pass fills them exactly like the rest of the buffer.
+    /// pays for the full scroll capacity. The buffer never shrinks (content
+    /// height is monotonic within a session). Freshly added cells are blank,
+    /// so the subsequent paint pass fills them exactly like the rest of the
+    /// buffer.
     fn ensure_capacity(&mut self, boxes: &[LayoutBox]) {
         fn walk(boxes: &[LayoutBox], bottom: &mut usize) {
             for b in boxes {
@@ -207,7 +205,6 @@ impl TermLayout {
         let cols = self.columns as usize;
         let needed = bottom
             .saturating_mul(cols)
-            .min(self.max_cells())
             .max(cols.saturating_mul(self.rows as usize));
         if needed > self.layout.len() {
             self.layout.resize(needed, Block::default());

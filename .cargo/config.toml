@@ -1,7 +1,0 @@
-# Project-scoped mirror: tuna mirrors the git index but not the crate files,
-# so crate downloads hang. rsproxy mirrors both index and downloads.
-[source.crates-io]
-replace-with = "rsproxy"
-
-[source.rsproxy]
-registry = "sparse+https://rsproxy.cn/index/"

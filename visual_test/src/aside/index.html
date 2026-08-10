@@ -1,16 +1,15 @@
-<!--
-  htui visual test - aside with CSS width/text-align
-  Run: cargo run -p test_html -- aside
--->
-<!DOCTYPE html>
+<!doctype html>
 <html>
 <head>
   <style>
-    aside { color: white; background-color: darkblue; }
-    .aside-half { width: 50%; background-color: darkgreen; }
-    .aside-center { width: 60%; text-align: center; background-color: darkred; color: yellow; }
-    .aside-right { width: 40%; text-align: right; background-color: magenta; color: black; }
-    .aside-fixed { width: 30px; text-align: center; background-color: cyan; color: black; }
+    /* Functional styles only:
+       - background fills reveal the rendered width in --dump bg / interactive
+       - text-align is the only styling exercised below. */
+    aside           { background-color: #222; color: #eee; padding: 1; margin: 1; }
+    .aside-half     { width: 50%; }
+    .aside-center   { width: 60%; text-align: center; }
+    .aside-right    { width: 40%; text-align: right; }
+    .aside-fixed    { width: 30px; text-align: center; }
   </style>
 </head>
 <body>

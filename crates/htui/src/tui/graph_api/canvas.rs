@@ -3,14 +3,6 @@ use std::collections::HashMap;
 use super::{cell::Block, image::ImageCache};
 use crate::tdom::node::NodeId;
 
-/// Upper bound (in screens) the canvas may grow to for scrollable content.
-///
-/// The canvas starts at one viewport and grows on demand (see
-/// [`TermLayout::ensure_capacity`](crate::layout::layout::TermLayout)) so a
-/// short document keeps a small buffer; this limit only caps how far tall
-/// documents can extend so an unbounded page cannot exhaust memory.
-pub(crate) const MAX_SCROLL_MULTIPLIER: usize = 20;
-
 /// Render-time state of one `<input>` field.
 ///
 /// The input loop updates this through [`RenderCmd::RenderInput`]
@@ -60,10 +52,6 @@ pub struct TermLayout {
 }
 
 impl TermLayout {
-    pub fn max_cells(&self) -> usize {
-        self.columns as usize * self.rows as usize * MAX_SCROLL_MULTIPLIER
-    }
-
     pub fn effective_columns(&self) -> u16 {
         (self.columns as f32 / self.zoom).round() as u16
     }
@@ -73,7 +61,16 @@ impl TermLayout {
     }
 
     pub fn max_scroll(&self) -> u32 {
-        self.rendered_rows.saturating_sub(self.rows as u32)
+        // The canvas grows to exactly the content height (see
+        // `ensure_capacity`), but `rendered_rows` is a monotonic high-water
+        // mark and can briefly exceed the buffer (e.g. a re-layout after a
+        // terminal grow). A scroll bound past the actual buffer would make
+        // the diff renderer slice `layout[scroll_start..]` past its end and
+        // underflow — killing the render thread — so the bound must respect
+        // the painted canvas height too.
+        let canvas_rows = self.layout.len() / (self.columns as usize).max(1);
+        let content = self.rendered_rows.saturating_sub(self.rows as u32) as usize;
+        canvas_rows.saturating_sub(self.rows as usize).min(content) as u32
     }
 
     pub fn clamp_scroll(&mut self) {

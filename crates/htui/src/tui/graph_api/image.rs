@@ -5,7 +5,7 @@ use std::{
 };
 
 use crossterm::style::Color;
-use image::{GenericImageView, imageops::FilterType};
+use image::imageops::FilterType;
 
 use super::{
     canvas::TermLayout,
@@ -33,6 +33,15 @@ pub enum ImageError {
         /// The underlying decode error.
         #[source]
         source: image::ImageError,
+    },
+    /// The SVG source could not be parsed or rasterized.
+    #[error("svg rasterize failed for {path}: {source}")]
+    SvgRasterize {
+        /// The image path that failed to rasterize.
+        path: String,
+        /// The SVG parse / render error.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
     /// A decoded image entry vanished from the cache between insertion and
     /// lookup.
@@ -126,18 +135,16 @@ impl Img {
             path: src.clone(),
             message: e.to_string(),
         })?;
-        let img =
-            image::load_from_memory(&resource).map_err(|source| ImageError::Decode {
-                path: src,
-                source,
-            })?;
+        let (width, height, rgba) = decode_rgba(&src, &resource)?;
+        let img = image::RgbaImage::from_raw(width, height, rgba)
+            .ok_or_else(|| ImageError::DataEmpty { path: src.clone() })?;
         // `term_size` is documented as `(cols, rows)` in terminal cells. Each
         // cell displays IMAGE_PIXELS_PER_CELL_COL x IMAGE_PIXELS_PER_CELL_ROW
         // source pixels (1 wide x 2 tall in half-block mode), so the pixel
-        // grid is `cols x (rows * 2)`. We must use `resize_exact` -- the
-        // default `resize` preserves aspect ratio and would shrink the long
-        // edge to fit the shorter one, breaking the cell-to-pixel
-        // correspondence.
+        // grid is `cols x (rows * 2)`. We must resize to exactly that grid:
+        // `imageops::resize` in image 0.25 scales to the exact target size
+        // (the old aspect-preserving behaviour moved to `thumbnail`), keeping
+        // the cell-to-pixel correspondence exact.
         let pixel_w = self
             .term_size
             .0
@@ -148,8 +155,13 @@ impl Img {
             .1
             .saturating_mul(IMAGE_PIXELS_PER_CELL_ROW)
             .max(IMAGE_PIXELS_PER_CELL_ROW);
-        let source = img.dimensions();
-        let img = img.resize_exact(pixel_w, pixel_h, resize_filter(source, (pixel_w, pixel_h)));
+        let source = (img.width(), img.height());
+        let img = image::imageops::resize(
+            &img,
+            pixel_w,
+            pixel_h,
+            resize_filter(source, (pixel_w, pixel_h)),
+        );
         let (width, height) = img.dimensions();
 
         self.cloumns = width.div_ceil(IMAGE_PIXELS_PER_CELL_COL);
@@ -182,6 +194,95 @@ impl Img {
     }
 }
 
+/// Decode `resource` into a plain (non-premultiplied) RGBA8 pixel buffer
+/// `(width, height, bytes)`.
+///
+/// Raster formats (png / jpeg / webp) are decoded through the `image` crate;
+/// when that fails and the bytes look like an SVG document, the source is
+/// rasterized through `resvg` instead. The reported error is the raster
+/// decoder's when the source is not an SVG, and the SVG rasterizer's when it
+/// is — a corrupt PNG reports a PNG decode error, not an SVG one.
+fn decode_rgba(path: &str, resource: &[u8]) -> Result<(u32, u32, Vec<u8>), ImageError> {
+    match image::load_from_memory(resource) {
+        Ok(img) => {
+            let rgba = img.to_rgba8();
+            Ok((rgba.width(), rgba.height(), rgba.into_raw()))
+        }
+        Err(raster_err) => match rasterize_svg(resource) {
+            Ok((width, height, data)) => Ok((width, height, data)),
+            Err(svg_err) => {
+                if looks_like_svg(resource) {
+                    Err(ImageError::SvgRasterize {
+                        path: path.to_string(),
+                        source: svg_err,
+                    })
+                } else {
+                    Err(ImageError::Decode {
+                        path: path.to_string(),
+                        source: raster_err,
+                    })
+                }
+            }
+        },
+    }
+}
+
+/// Cheap format probe: do the leading bytes look like an SVG document?
+///
+/// SVG has no magic number, so we skip a UTF-8 BOM and leading whitespace and
+/// check for an `<svg` root element, or the XML declaration / DOCTYPE a
+/// standalone `.svg` file may carry.
+fn looks_like_svg(bytes: &[u8]) -> bool {
+    let head = String::from_utf8_lossy(&bytes[..bytes.len().min(1024)]);
+    let head = head.trim_start_matches('\u{feff}').trim_start();
+    head.starts_with("<svg") || head.starts_with("<?xml") || head.starts_with("<!DOCTYPE")
+}
+
+/// Shared SVG parsing options with the system font database loaded once.
+///
+/// Reused across parses so text-bearing SVGs do not rescan system fonts on
+/// every decode (the first decode pays the scan, the rest are cached).
+fn svg_options() -> &'static resvg::usvg::Options<'static> {
+    static OPTIONS: OnceLock<resvg::usvg::Options<'static>> = OnceLock::new();
+    OPTIONS.get_or_init(|| {
+        let mut opt = resvg::usvg::Options::default();
+        opt.fontdb_mut().load_system_fonts();
+        opt
+    })
+}
+
+/// Rasterize an SVG document at its intrinsic size into a plain RGBA8 buffer
+/// `(width, height, bytes)`.
+fn rasterize_svg(
+    bytes: &[u8],
+) -> Result<(u32, u32, Vec<u8>), Box<dyn std::error::Error + Send + Sync>> {
+    use resvg::tiny_skia::Pixmap;
+    use resvg::usvg::{Transform, Tree};
+
+    let tree = Tree::from_data(bytes, svg_options())?;
+    let size = tree.size();
+    let width = size.width().ceil() as u32;
+    let height = size.height().ceil() as u32;
+    let mut pixmap = Pixmap::new(width, height).ok_or_else(|| {
+        Box::<dyn std::error::Error + Send + Sync>::from(
+            "svg rasterization failed: pixmap allocation too large",
+        )
+    })?;
+    resvg::render(&tree, Transform::default(), &mut pixmap.as_mut());
+    // `take_demultiplied` converts tiny-skia's premultiplied storage back to
+    // straight alpha, which is what the downstream resize / half-block
+    // sampling expects.
+    Ok((width, height, pixmap.take_demultiplied()))
+}
+
+/// Intrinsic `(width, height)` in source pixels of an SVG document, from its
+/// `width` / `height` / `viewBox` — no rasterization.
+fn svg_intrinsic_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    let tree = resvg::usvg::Tree::from_data(bytes, svg_options()).ok()?;
+    let size = tree.size();
+    Some((size.width().ceil() as u32, size.height().ceil() as u32))
+}
+
 /// Canvas-space clipping region for [`render_image_at_slice`]. Cells whose
 /// canvas position falls outside the region are not stamped. `None` means
 /// "no clip" — only the canvas bounds limit the stamping.
@@ -202,8 +303,9 @@ static INTRINSIC_SIZES: OnceLock<Mutex<HashMap<String, (u32, u32)>>> = OnceLock:
 /// Resolves the source through [`resources::load`] (a `mem://` virtual key),
 /// reads only the image header
 /// (`image::ImageReader::into_dimensions`) — no pixel decode — and caches the
-/// result per path. `None` when the source cannot be resolved or carries no
-/// decodable dimensions.
+/// result per path. SVG sources have no raster header, so their intrinsic
+/// size is taken from the parsed document instead. `None` when the source
+/// cannot be resolved or carries no decodable dimensions.
 pub(crate) fn image_intrinsic_size(path: &str) -> Option<(u32, u32)> {
     let cache = INTRINSIC_SIZES.get_or_init(|| Mutex::new(HashMap::new()));
     let mut map = cache.lock().ok()?;
@@ -215,9 +317,14 @@ pub(crate) fn image_intrinsic_size(path: &str) -> Option<(u32, u32)> {
         .with_guessed_format()
         .ok()?
         .into_dimensions()
-        .ok()?;
-    map.insert(path.to_string(), size);
-    Some(size)
+        .ok()
+        // SVG has no raster header to read; fall back to the document's own
+        // intrinsic size.
+        .or_else(|| svg_intrinsic_size(&resource));
+    if let Some(size) = size {
+        map.insert(path.to_string(), size);
+    }
+    size
 }
 
 /// Cache of decoded + half-block-rasterized images, keyed by

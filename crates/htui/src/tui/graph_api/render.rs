@@ -16,8 +16,11 @@ impl Display for TermLayout {
         let rows = self.rows as usize;
         let sy = self.scroll_y as usize;
         for r in 0..rows {
-            let start = (sy + r) * cols;
-            let end = (start + cols).min(self.layout.len());
+            let start = sy
+                .saturating_add(r)
+                .saturating_mul(cols)
+                .min(self.layout.len());
+            let end = start.saturating_add(cols).min(self.layout.len());
             for cell in self.layout[start..end].iter() {
                 if cell.word != " " {
                     write!(f, "{}", cell)?;
@@ -54,8 +57,16 @@ impl TermLayout {
         let mut out: Vec<u8> = Vec::new();
         let cols = self.columns as usize;
         let rows = self.rows as usize;
-        let scroll_start = self.scroll_y as usize * cols;
-        let scroll_end = (scroll_start + rows * cols).min(self.layout.len());
+        // The scroll position is normally clamped to the canvas, but guard the
+        // slice bounds anyway: a stale out-of-range position (sent before the
+        // clamp republished) must degrade to an empty frame instead of
+        // indexing past the buffer and panicking the render thread.
+        let scroll_start = (self.scroll_y as usize)
+            .saturating_mul(cols)
+            .min(self.layout.len());
+        let scroll_end = scroll_start
+            .saturating_add(rows.saturating_mul(cols))
+            .min(self.layout.len());
 
         let mut i = scroll_start;
 
@@ -132,9 +143,17 @@ impl TermLayout {
         let mut out: Vec<u8> = Vec::new();
         let cols = self.columns as usize;
         let rows = self.rows as usize;
-        let scroll_start = self.scroll_y as usize * cols;
-        let scroll_end = (scroll_start + rows * cols).min(self.layout.len());
-        let viewport_cells = scroll_end - scroll_start;
+        // Guarded the same way as `render_to_bytes`: a scroll position past
+        // the canvas end (which the old `max_scroll` could advertise for
+        // documents taller than the buffer cap) must not underflow the
+        // viewport slice.
+        let scroll_start = (self.scroll_y as usize)
+            .saturating_mul(cols)
+            .min(self.layout.len());
+        let scroll_end = scroll_start
+            .saturating_add(rows.saturating_mul(cols))
+            .min(self.layout.len());
+        let viewport_cells = scroll_end.saturating_sub(scroll_start);
 
         if self.last_frame.len() != viewport_cells {
             // First frame / resize: the screen is in an unknown state (fresh

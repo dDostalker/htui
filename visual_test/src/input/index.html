@@ -2,47 +2,30 @@
 <html>
 <head>
 <style>
-  body { background-color: #1a1b26; color: #c0caf5; }
-  h2 { margin: 1; }
-  .card {
-    width: 48;
-    border: 1px solid #565f89;
-    padding: 1;
-    margin: 1;
-  }
-  .row { margin: 1; }
-  label { margin: 1; }
-  input { margin: 1; }
-  #log { background-color: #24283b; padding: 1; margin: 1; }
+  body { margin: 0; }
 </style>
 </head>
 <body>
-  <h2>Input field demo</h2>
+  <h2>&lt;input&gt; demo</h2>
+  <p>Click a field, then type. Esc / Enter commit.</p>
+  <p>Shift+←/→ select · Ctrl+A select-all · Ctrl+C/X copy/cut · Ctrl+V paste.</p>
+  <p>Left-drag in a field selects by mouse · right-drag box-selects.</p>
 
-  <div class="card">
-    <div class="row">Click a field, then type. Esc / Enter commit.</div>
-    <div class="row"><label>Name:</label><input id="name" width="20" value="Ada"></div>
-    <div class="row"><label>City:</label><input id="city" width="20" value="Tokyo"></div>
-    <div class="row"><label>Empty:</label><input id="empty" width="20"></div>
-  </div>
+  <p>Name: <input id="name" width="20" value="Ada"></p>
+  <p>Empty: <input id="empty" width="20"></p>
 
-  <div class="card">
-    <div class="row">Shift+←/→ select · Ctrl+A all · Ctrl+C/X copy/cut · Ctrl+V paste</div>
-    <div class="row">Left-drag in a field selects by mouse · left-drag on text selects flow (browser-like) · right-drag box-selects</div>
-  </div>
-
-  <div id="log">—</div>
+  <p id="log">log: —</p>
 
   <script>
     // Browser-aligned field events: focus / blur / input / change fire along
     // the DOM chain; `el.value` reads & writes the committed DOM value.
     var log = document.getElementById('log');
-    function show(v) { log.textContent = v; }
+    function show(v) { log.textContent = 'log: ' + v; }
     var name = document.getElementById('name');
-    name.addEventListener('focus', function () { show('focus: Name'); });
-    name.addEventListener('input', function () { show('input: ' + name.value); });
-    name.addEventListener('change', function () { show('change: ' + name.value); });
-    name.addEventListener('blur', function () { show('blur: Name = ' + name.value); });
+    name.addEventListener('focus',  function () { show('focus'); });
+    name.addEventListener('input',  function () { show('input  = ' + name.value); });
+    name.addEventListener('change', function () { show('change = ' + name.value); });
+    name.addEventListener('blur',   function () { show('blur   = ' + name.value); });
   </script>
 </body>
 </html>

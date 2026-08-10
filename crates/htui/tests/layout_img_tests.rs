@@ -192,8 +192,8 @@ fn paint_image_at_fills_requested_cell_area() {
     let mut tl = TermLayout::new(&term_map, 1.0);
 
     // Request 40 cells wide × 10 cells tall. `_create_img` multiplies the
-    // vertical axis by IMAGE_PIXELS_PER_CELL_ROW (2) internally and uses
-    // `resize_exact` so the source 64×64 PNG is squashed to 40×20 pixels
+    // vertical axis by IMAGE_PIXELS_PER_CELL_ROW (2) internally and resizes
+    // exactly, so the source 64×64 PNG is squashed to 40×20 pixels
     // and rasterized into 40×10 cells.
     let cell_w: u32 = 40;
     let cell_h: u32 = 10;
@@ -425,4 +425,87 @@ fn render_image_at_slice_crops_to_clip_region() {
             assert_eq!(cell.word, " ", "rows outside the clip must stay blank");
         }
     }
+}
+
+// ============================================================
+// SVG sources (rasterized through resvg)
+// ============================================================
+
+/// Register a small 200×100 SVG (solid orange fill) under a unique `mem://`
+/// key and return the key. Byte-fed tests exercise the exact same decode path
+/// as a page `<img src="mem://…svg">`.
+fn register_test_svg(tag: &str) -> String {
+    let key = format!("mem://img/{tag}_svg_{}", std::process::id());
+    let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">
+      <rect x="0" y="0" width="200" height="100" fill="#ff8800"/>
+    </svg>"##;
+    htui::resources::register(&key, svg.as_bytes().to_vec()).expect("register mem svg");
+    key
+}
+
+#[test]
+fn svg_image_decodes_through_resvg() {
+    init();
+    let key = register_test_svg("decode");
+
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    // 200×100 source rendered into a 40×20-cell area (80×40 source pixels
+    // after the half-block vertical doubling).
+    render_image_at(&mut tl, &key, (0, 0), (40, 20)).expect("svg should decode and render");
+
+    // The solid fill survives the resize: every cell carries the half-block
+    // glyph with the source color in both fcolor and bcolor.
+    let cells_per_row = term_map.columns as usize;
+    for row in 0..20usize {
+        for col in 0..40usize {
+            let cell = &tl.layout[row * cells_per_row + col];
+            assert_eq!(
+                cell.word, "\u{2580}",
+                "svg cell at row={row} col={col} must hold the half-block glyph"
+            );
+            assert_eq!(
+                cell.fcolor,
+                Some(Color::Rgb { r: 0xff, g: 0x88, b: 0x00 }),
+                "svg solid fill must land in fcolor"
+            );
+            assert_eq!(
+                cell.bcolor,
+                Some(Color::Rgb { r: 0xff, g: 0x88, b: 0x00 }),
+                "svg solid fill must land in bcolor"
+            );
+        }
+    }
+}
+
+#[test]
+fn svg_intrinsic_aspect_ratio_drives_default_layout() {
+    init();
+    let key = register_test_svg("aspect");
+
+    let mut p = html_parse::Parser::new(&format!(r#"<img src="{key}">"#));
+    let (root_id, arena, _) = p.parse();
+    let img_id = find_img_node(&arena, root_id);
+
+    let containing = BoxConstraint { x: 0, width: 80 };
+    let mut cursor = Cursor::new();
+    let lb = layout_img(
+        &arena,
+        img_id,
+        containing,
+        &mut cursor,
+        LayoutContext {
+            font: htui::html::css_parse::FontContext::root(),
+            viewport: Viewport { cols: 80, rows: 24 },
+        },
+    )
+    .expect("<img> should produce a LayoutBox");
+
+    // 200×100 SVG capped to an 80-col container: 80 cols wide, height follows
+    // the 2:1 aspect -> 80 * 100 / 200 = 40 source px = 20 cells.
+    assert_eq!(lb.rect.width, 80, "default width = containing width");
+    assert_eq!(
+        lb.rect.height, 20,
+        "default height must follow the SVG intrinsic aspect ratio"
+    );
 }

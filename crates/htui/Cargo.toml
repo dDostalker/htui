@@ -9,7 +9,8 @@ crossterm = "0.29.0"
 env_logger = "0.11.9"
 cssparser = "0.31.2"
 html5ever = "0.27"
-image = "0.25.9"
+image = { version = "0.25.9", default-features = false, features = ["png", "jpeg", "webp"] }
+resvg = { version = "0.48.1", default-features = false, features = ["text", "system-fonts"] }
 indexmap = "2.14"
 log = { version = "0.4.29", features = ["release_max_level_warn"] }
 markup5ever_rcdom = "0.3"
