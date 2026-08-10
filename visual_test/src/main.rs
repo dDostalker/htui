@@ -7,9 +7,9 @@
 //! `--dump` renders headlessly (no raw mode / alternate screen) and prints
 //! the canvas as plain text rows — handy for previews in a pipe or log.
 //!
-//! Logs are written to `%TEMP%/htui-visual-test.log` via
-//! `htui::logging::init_file_logger`. If the file cannot be opened a warning
-//! is printed to stderr and logging is silently disabled for the run.
+//! Logging: htui emits all logs (including JS `console.*`) through the
+//! `log` crate and installs no recorder itself, so nothing is written unless
+//! the host installs a logger.
 //!
 //! Each test lives in its own folder under `src/`:
 //!   src/{name}/index.html    — HTML document
@@ -81,11 +81,6 @@ macro_rules! test_case {
 }
 
 fn main() {
-    let log_path = std::env::temp_dir().join("htui-visual-test.log");
-    if let Err(e) = htui::logging::init_file_logger(&log_path, None) {
-        eprintln!("warning: file logger init failed ({e}); logs will be dropped");
-    }
-
     let args: Vec<String> = std::env::args().collect();
 
     // `--dump` enables the headless preview (see `dump`); `--dump bg` prints

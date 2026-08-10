@@ -19,7 +19,6 @@ htui/
 │   │   ├── Cargo.toml
 │   │   ├── src/
 │   │   │   ├── lib.rs              # 入口：render() / render_with_events()（主循环在 tui/run.rs）
-│   │   │   ├── logging.rs          # 文件 logger 初始化
 │   │   │   ├── resources.rs        # 资源层：mem:// 内存注册表（前缀可选），供 <script>/<link>/<img>/fetch
 │   │   │   ├── events/             # JS 风格事件系统（旁路，不参与渲染管线）
 │   │   │   │   ├── mod.rs          # EventType / HtmlEvent / ElementRef / EventBindings（宿主函数注册表）
@@ -149,7 +148,6 @@ htui/
 │   │   │   ├── render_diff_tests.rs # 帧差增量渲染（不变零输出 / 滚动 diff / 全帧对比）
 │   │   │   │   ├── macro_tests.rs       # 注册宏测试（commands/host/command(name) 自动注册，纯内存）
 │   │   │   │   ├── script_loop_tests.rs # 脚本线程桥测试（apply_message 语义 + 阻塞宿主函数不阻塞输入，纯内存）
-│   │   │   │   └── logging_tests.rs
 │   │   └── benches/               # criterion 基准（parse / cascade / paint / render_to_bytes / full_redraw）
 │   └── htui-macros/             # 过程宏 crate：#[htui::command]/#[htui::commands] + #[derive(IntoJs/FromJs)]
 │       ├── Cargo.toml

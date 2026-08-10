@@ -1114,19 +1114,22 @@ fn native_create_element(
 
 fn console_log(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let msg = format_args(args, context)?;
-    log::info!("[console.log] {msg}");
+    // `target: "console"` separates JS console output from engine log
+    // records (hosts can filter on `record.target()`); the `[console.log]`
+    // prefix keeps it readable in plain-text streams.
+    log::info!(target: "console", "[console.log] {msg}");
     Ok(JsValue::undefined())
 }
 
 fn console_warn(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let msg = format_args(args, context)?;
-    log::warn!("[console.warn] {msg}");
+    log::warn!(target: "console", "[console.warn] {msg}");
     Ok(JsValue::undefined())
 }
 
 fn console_error(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let msg = format_args(args, context)?;
-    log::error!("[console.error] {msg}");
+    log::error!(target: "console", "[console.error] {msg}");
     Ok(JsValue::undefined())
 }
 

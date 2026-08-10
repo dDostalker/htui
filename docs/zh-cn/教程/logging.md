@@ -1,68 +1,49 @@
-# htui 日志（`htui::logging`）
+# htui 日志（`log` crate 契约）
 
-> 单一目标：把日志写到文件。TUI 模式下 stderr 会被终端抢走、窗口属于额外特性，所以这里只暴露一个 `init_file_logger`。
+> htui **自身不安装任何日志记录器、不写文件**（无 `env_logger` 依赖）。
+> 所有日志——包括 JS 的 `console.log`——都只通过 `log` crate 宏发出，
+> 由宿主应用决定是否安装记录器以及写到哪。
 
 ---
 
-## 1. 公开 API
+## 1. 日志来源与区分
 
-### `init_file_logger`
+| 来源 | 调用 | target | 消息前缀 |
+| --- | --- | --- | --- |
+| 引擎内部（布局/渲染/脚本/事件） | `log::debug!` / `log::info!` / `log::warn!` / `log::error!` | 模块路径（默认） | 无 |
+| JS `console.log` | `log::info!(target: "console", ...)` | **`"console"`** | `[console.log]` |
+| JS `console.warn` | `log::warn!(target: "console", ...)` | **`"console"`** | `[console.warn]` |
+| JS `console.error` | `log::error!(target: "console", ...)` | **`"console"`** | `[console.error]` |
+| JS `alert(msg)` | `log::warn!` | 模块路径 | `[alert]` |
+
+**区分方式**：`console.*` 记录的 `target` 固定为 `"console"`，宿主记录器可按
+`record.target()` 过滤（例如 `RUST_LOG=console=info`），或在纯文本流中按
+`[console.*]` 前缀识别。
+
+## 2. 宿主接入
 
 ```rust
-pub fn init_file_logger(
-    path: impl AsRef<Path>,
-    level: Option<LevelFilter>,
-) -> Result<()>
+// 示例：宿主用任意 log 记录器（env_logger 只是选项之一）
+env_logger::Builder::from_env(env_logger::Env::default()).init();
+
+// 之后 htui 的日志（含 console.*）都会进入该记录器
+let _ = htui::render(html, css);
 ```
 
-- append 模式打开文件，不存在则创建。
-- 自动创建父目录（`fs::create_dir_all`），所以 `"logs/htui.log"` 不需要先 `mkdir`。
-- `level = None` 时用 `default_level()`。
-- `RUST_LOG` 环境变量优先于 `level`。
-- 全局记录器每个进程只能装一次；重复调用返回 `Err("global logger is already initialized")`。
+不装记录器时 `log::*` 宏是 no-op，htui 不会向文件 / stderr / 终端写任何日志。
 
-### `default_level`
+## 3. release 行为
 
-| profile | 返回值 |
-| --- | --- |
-| `debug_assertions`（`cargo build` / `cargo test`） | `LevelFilter::Debug` |
-| release（`cargo build --release`） | `LevelFilter::Warn` |
-
----
-
-## 2. `release_max_level_warn` 的语义
-
-`Cargo.toml` 给 `log` 启用了 `release_max_level_warn` feature。效果：
+`Cargo.toml` 给 `log` 启用了 `release_max_level_warn` feature：
 
 | 调用 | release 构建 |
 | --- | --- |
-| `log::debug!(...)` | 调用点直接展开为 `if false { ... }`，**参数都不求值** |
-| `log::info!(...)` | 同上 |
-| `log::warn!` / `log::error!` | 正常编译 |
+| `log::debug!(...)` | 调用点展开为 `if false { ... }`，参数不求值 |
+| `log::info!(...)` | 同上（因此 JS `console.log` 在 release 下不可见） |
+| `log::warn!` / `log::error!` | 正常编译（`console.warn` / `console.error` 可见） |
 
-配合 `default_level() = Warn` 形成双重保险：即使有人忘记去掉 `info!`，运行期 filter 也会把它丢掉。
+## 4. 测试
 
----
-
-## 3. 用法
-
-```rust
-htui::logging::init_file_logger("logs/htui.log", None)?;
-log::info!("...");
-log::warn!("...");
-log::error!("...");
-```
-
-可视测试默认路径：`%TEMP%/htui-visual-test.log`（见 `visual_test/src/main.rs`）。
-
----
-
-## 4. 错误
-
-| 场景 | 行为 |
-| --- | --- |
-| 路径无效 / 权限不足 | `Err`（`failed to open log file: ...`） |
-| 父目录创建失败 | `Err`（`failed to create log directory: ...`） |
-| 重复初始化 | `Err`（`global logger is already initialized`） |
-
-可视测试在 `init_file_logger` 失败时打印 `warning:` 到 stderr 并继续运行（不阻断 TUI）。
+测试目录各 `init()` 用 dev-dependency 的 `env_logger`（`is_test(true)`）把
+`log::*` 输出接入测试捕获，`cargo test -- --nocapture` 可查看。这只是测试
+工具，不影响库的运行时行为。
