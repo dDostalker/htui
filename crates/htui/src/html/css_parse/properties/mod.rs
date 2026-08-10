@@ -499,7 +499,7 @@ impl CssAttr {
     ///
     /// `vw` / `vh` lengths resolve against the viewport passed in; percentage
     /// gap is still resolved against `usize::MAX` (intentional — see
-    /// `doc/layout.md`, "百分比 gap" — the flex container's actual axis
+    /// `doc/layout.md`, "percentage gap" — the flex container's actual axis
     /// size is not in scope here).
     pub fn get_gap(&self, font_ctx: FontContext, viewport: Viewport) -> GapSizes {
         let shorthand = self

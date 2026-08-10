@@ -1306,7 +1306,6 @@ fn resize_reflow_revalidates_hover_under_the_stationary_pointer() {
         }),
     );
     let map = HitMap::build(&geo);
-    let a_region = map.resolve_by_id("a").expect("a region");
     let b_region = map.resolve_by_id("b").expect("b region");
     let (bx, by) = center(b_region.rect);
 
@@ -1348,7 +1347,7 @@ fn stale_press_from_lost_release_does_not_kill_hover() {
     // (the console delivered the `Down` but lost the `Up`). The input loop
     // clears it on the next button-free `Moved` event, so hover tracking
     // (`ScriptMsg::Move`) resumes instead of every move being read as a drag.
-    let (mut engine, geo) = build_geometry("<div id='a'>a</div>", EventBindings::default());
+    let (_, geo) = build_geometry("<div id='a'>a</div>", EventBindings::default());
     let map = HitMap::build(&geo);
     let region = map.resolve_by_id("a").expect("a region");
     let (x, y) = center(region.rect);
