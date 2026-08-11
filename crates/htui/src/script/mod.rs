@@ -41,7 +41,7 @@ use crate::{
     events::{EventBindings, EventType, HitRegion, HtmlEvent, KeyEventInfo},
     html::html_parse::Parser,
     resources::AsyncResult,
-    tdom::node::{NodeArena, NodeId, NodeType},
+    tdom::node::{Node, NodeArena, NodeId, NodeType},
     tui::graph_api::RenderCmd,
 };
 
@@ -617,6 +617,35 @@ impl ScriptEngine {
         }
         st.dirty.nodes.push(node_id);
         true
+    }
+
+    /// Replace a `<textarea>`'s text content with `value` and mark the node
+    /// dirty. The textarea's DOM value lives in its child text nodes (unlike
+    /// `<input>`'s `value` attribute); committing an unchanged value is a
+    /// no-op.
+    pub fn set_textarea_value(&mut self, node_id: NodeId, value: &str) {
+        let mut st = self.state.borrow_mut();
+        let existing = st
+            .arena
+            .get(node_id)
+            .map(|n| n.text_content(&st.arena))
+            .unwrap_or_default();
+        if existing == value {
+            return;
+        }
+        let old_children: Vec<NodeId> = st
+            .arena
+            .get_mut(node_id)
+            .map(|n| n.children.drain(..).collect())
+            .unwrap_or_default();
+        for child in old_children {
+            if let Some(c) = st.arena.get_mut(child) {
+                c.parent = None;
+            }
+        }
+        let text_id = st.arena.insert(Node::text(value));
+        Node::append_child(&mut st.arena, node_id, text_id);
+        st.dirty.nodes.push(node_id);
     }
 
     /// Dispatch a DOM event along the hit region's ancestor path.

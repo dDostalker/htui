@@ -39,6 +39,11 @@ pub enum ReplacedContent {
     /// the node's `<option>` children (see `select_options`); the currently
     /// selected value lives in the `value` attribute.
     Select,
+    /// `<textarea>` — a multi-line editable field sized from its `cols` /
+    /// `rows` attributes. The value is the node's text content (edited state
+    /// lives in [`TermLayout::input_states`](crate::tui::graph_api::TermLayout::input_states));
+    /// the paint phase draws the framed box with a caret.
+    Textarea,
 }
 
 /// Distinguishes the rendering shape of a layout box.

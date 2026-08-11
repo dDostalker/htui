@@ -728,6 +728,25 @@ impl Node {
         self.children.iter().copied()
     }
 
+    /// Concatenated text of every descendant [`NodeType::Text`] node in
+    /// document order (the DOM `textContent` value). `<textarea>` uses this
+    /// as its initial value — textarea content lives in child text nodes,
+    /// not an attribute.
+    pub fn text_content(&self, arena: &NodeArena) -> String {
+        let mut out = String::new();
+        let mut stack: Vec<NodeId> = self.children.iter().rev().copied().collect();
+        while let Some(id) = stack.pop() {
+            let node = &arena[id];
+            if let NodeType::Text = node.node_type {
+                if let Some(s) = &node.data {
+                    out.push_str(s);
+                }
+            }
+            stack.extend(node.children.iter().rev().copied());
+        }
+        out
+    }
+
     /// Depth-first traversal of all descendants (including self).
     pub fn descendants<'a>(arena: &'a NodeArena, start_id: NodeId) -> Descendants<'a> {
         Descendants {

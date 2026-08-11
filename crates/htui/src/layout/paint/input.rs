@@ -78,6 +78,15 @@ pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintC
         let fg = node.css_attr.get_color().unwrap_or(Color::White);
         let bg = node.css_attr.get_bg_color();
         put(canvas, cell_index(canvas, r.x, r.y), Some(glyph), Some(fg), bg);
+        // The second cell is a spacing column so the toggle never glues onto
+        // adjacent text (checkbox `☐` followed directly by a label).
+        put(
+            canvas,
+            cell_index(canvas, r.x.saturating_add(1), r.y),
+            Some(' '),
+            Some(fg),
+            bg,
+        );
         return;
     }
 

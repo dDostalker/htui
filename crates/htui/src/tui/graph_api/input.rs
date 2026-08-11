@@ -13,8 +13,12 @@ use crate::{
     tui::graph_api::char_width,
 };
 use crate::events::HitMap;
+use crate::layout::Rect;
 use crate::layout::layoutbox::geometry::{select_options, select_overlay_rect};
-use crate::layout::paint::value_window;
+use crate::layout::paint::{
+    textarea_caret_position, textarea_char_at, textarea_scroll_row, textarea_visual_lines,
+    value_window,
+};
 
 const SCROLL_LINES_PER_TICK: u32 = 3;
 const ZOOM_STEP: f32 = 0.1;
@@ -272,8 +276,12 @@ pub struct InputState {
     /// Screen coordinates of the last left-button press; a click is only
     /// recognised when the release lands on the same cell.
     pub pressed: Option<(u16, u16)>,
-    /// The `<input>` node currently focused (receives typed characters).
+    /// The `<input>` / `<textarea>` node currently focused (receives typed
+    /// characters).
     pub focused_input: Option<NodeId>,
+    /// Whether the focused node is a `<textarea>` (multi-line editing:
+    /// Enter inserts a newline, ↑/↓ move the caret, click maps to rows).
+    pub focused_is_textarea: bool,
     /// Edit buffer of the focused input; the DOM `value` attribute is the
     /// initial content.
     pub input_value: String,
@@ -330,6 +338,7 @@ impl InputState {
             zoom: 1.0,
             pressed: None,
             focused_input: None,
+            focused_is_textarea: false,
             input_value: String::new(),
             input_cursor: 0,
             input_sel_anchor: None,
@@ -413,6 +422,70 @@ impl Default for InputState {
 
 /// Apply one text-editing key to an input field's value and caret.
 ///
+/// `cursor` is a character index into `value`. Returns `true` when the value
+/// or caret changed (the caller should repaint the field); `false` for keys
+/// the field does not consume (`Esc` / `Enter` are handled by the caller).
+pub fn apply_textarea_key(
+    value: &mut String,
+    cursor: &mut usize,
+    content_width: usize,
+    key: KeyCode,
+) -> bool {
+    match key {
+        KeyCode::Enter | KeyCode::Char('\n') | KeyCode::Char('\r') => {
+            let byte = char_to_byte(value, *cursor);
+            value.insert(byte, '\n');
+            *cursor = cursor.saturating_add(1);
+            true
+        }
+        KeyCode::Up => textarea_move_vertical(value, cursor, content_width, false),
+        KeyCode::Down => textarea_move_vertical(value, cursor, content_width, true),
+        _ => apply_input_key(value, cursor, key),
+    }
+}
+
+/// Move the caret one visual line up / down, keeping the current column
+/// (clamped to the target line's length). Returns `false` at the boundaries.
+fn textarea_move_vertical(
+    value: &mut String,
+    cursor: &mut usize,
+    content_width: usize,
+    down: bool,
+) -> bool {
+    let (row, col) = textarea_caret_position(value, content_width, *cursor);
+    let total = textarea_visual_lines(value, content_width).len();
+    if down {
+        if row.saturating_add(1) >= total {
+            return false;
+        }
+    } else if row == 0 {
+        return false;
+    }
+    let target_row = if down {
+        row.saturating_add(1)
+    } else {
+        row.saturating_sub(1)
+    };
+    let new_cursor = textarea_char_at(value, content_width, target_row, col);
+    if new_cursor == *cursor {
+        return false;
+    }
+    *cursor = new_cursor;
+    true
+}
+
+/// Content width (cells) of the focused textarea from its `cols` attribute
+/// (falling back to the browser default of 20), matching the geometry pass's
+/// sizing when the box is not clamped by the containing block.
+fn textarea_content_width(arena: Option<&NodeArena>, node_id: NodeId) -> usize {
+    arena
+        .and_then(|a| a.get(node_id))
+        .and_then(|n| n.attributes.get("cols"))
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20)
+        .max(1)
+}
+
 /// `cursor` is a character index into `value`. Returns `true` when the value
 /// or caret changed (the caller should repaint the field); `false` for keys
 /// the field does not consume (`Esc` / `Enter` are handled by the caller).
@@ -622,8 +695,42 @@ fn is_toggle_input(arena: &NodeArena, node_id: NodeId) -> bool {
     })
 }
 
-/// All `<input>` node ids in document order (depth-first), for `Tab` /
-/// `Shift`+`Tab` focus cycling. Reads the input loop's DOM snapshot; a
+/// `true` for a `<textarea>` node — the multi-line field whose caret
+/// placement uses visual row/col, not the single-line column mapping.
+fn is_textarea_node(arena: &NodeArena, node_id: NodeId) -> bool {
+    arena
+        .get(node_id)
+        .is_some_and(|n| n.node_type == NodeType::Textarea)
+}
+
+/// Map a pointer cell inside a `<textarea>` rect to a character index, using
+/// the same wrapped-line + caret-derived scroll the painter draws. The rect
+/// includes the top/bottom border rows; content starts one row in.
+fn textarea_index_at(state: &InputState, rect: Rect, x: u32, y: u32) -> usize {
+    let content_width = rect.width.saturating_sub(2).max(1);
+    let rows = rect.height.saturating_sub(2).max(1);
+    let scroll = textarea_scroll_row(
+        &state.input_value,
+        content_width,
+        rows,
+        state.input_cursor,
+    );
+    let local_row = (y as usize)
+        .saturating_sub(rect.y.saturating_add(1))
+        .saturating_add(scroll);
+    let local_col = (x as usize).saturating_sub(rect.x.saturating_add(1));
+    textarea_char_at(&state.input_value, content_width, local_row, local_col)
+}
+
+/// `true` for a focusable text field (`<input>` / `<textarea>`).
+fn is_text_field(arena: &NodeArena, node_id: NodeId) -> bool {
+    arena.get(node_id).is_some_and(|n| {
+        matches!(n.node_type, NodeType::Input | NodeType::Textarea)
+    })
+}
+
+/// All `<input>` / `<textarea>` node ids in document order (depth-first), for
+/// `Tab` / `Shift`+`Tab` focus cycling. Reads the input loop's DOM snapshot; a
 /// removed or not-yet-rendered field is simply not included. `hidden` inputs
 /// and checkbox/radio toggles (click-only in this engine) are skipped.
 pub fn collect_input_ids(arena: &NodeArena) -> Vec<NodeId> {
@@ -634,14 +741,18 @@ pub fn collect_input_ids(arena: &NodeArena) -> Vec<NodeId> {
     let mut stack = vec![root];
     while let Some(id) = stack.pop() {
         let node = &arena[id];
-        if node.node_type == NodeType::Input {
-            let t = node
-                .get_type()
-                .map(|t| t.to_ascii_lowercase())
-                .unwrap_or_default();
-            if t != "hidden" && t != "checkbox" && t != "radio" {
-                out.push(id);
+        match node.node_type {
+            NodeType::Textarea => out.push(id),
+            NodeType::Input => {
+                let t = node
+                    .get_type()
+                    .map(|t| t.to_ascii_lowercase())
+                    .unwrap_or_default();
+                if t != "hidden" && t != "checkbox" && t != "radio" {
+                    out.push(id);
+                }
             }
+            _ => {}
         }
         for child in node.children.iter().rev() {
             stack.push(*child);
@@ -770,6 +881,9 @@ fn focus_input(
     if state.focused_input == Some(node_id) {
         return;
     }
+    state.focused_is_textarea = arena
+        .get(node_id)
+        .is_some_and(|n| n.node_type == NodeType::Textarea);
     if let Some(prev) = state.focused_input.replace(node_id) {
         // Commit the previous field's edits back to the DOM before switching
         // focus, firing `blur` (+ `change` when the value differs).
@@ -786,11 +900,13 @@ fn focus_input(
             selection: None,
         });
     }
-    let value = arena
-        .get(node_id)
-        .and_then(|n| n.attributes.get("value"))
-        .cloned()
-        .unwrap_or_default();
+    // `<input>` fields read the DOM `value` attribute; a `<textarea>`'s
+    // initial value is its text content.
+    let value = match arena.get(node_id) {
+        Some(n) if n.node_type == NodeType::Textarea => n.text_content(arena),
+        Some(n) => n.attributes.get("value").cloned().unwrap_or_default(),
+        None => String::new(),
+    };
     let cursor = value.chars().count();
     state.input_value = value;
     state.input_cursor = cursor;
@@ -818,6 +934,7 @@ fn blur_input(
     let Some(focused) = state.focused_input.take() else {
         return;
     };
+    state.focused_is_textarea = false;
     state.input_sel_anchor = None;
     msgs.push(ScriptMsg::BlurInput {
         node_id: focused,
@@ -865,14 +982,10 @@ pub fn handle_click(
     cmds: &mut Vec<RenderCmd>,
 ) {
     msgs.push(ScriptMsg::Click { x, y });
-    // Clicking an `<input>` focuses it; any other click blurs the previously
-    // focused field.
+    // Clicking an `<input>` / `<textarea>` focuses it; any other click blurs
+    // the previously focused field.
     let clicked = hit_map.hit_test(x, y);
-    let clicked_input = clicked.is_some_and(|r| {
-        arena
-            .get(r.node_id)
-            .is_some_and(|n| n.node_type == NodeType::Input)
-    });
+    let clicked_input = clicked.is_some_and(|r| is_text_field(arena, r.node_id));
     if clicked_input {
         if let Some(node_id) = clicked.map(|r| r.node_id) {
             if is_toggle_input(arena, node_id) {
@@ -1048,11 +1161,7 @@ pub fn handle_mouse_down(
         }
     }
 
-    let clicked_input = clicked.is_some_and(|r| {
-        arena
-            .get(r.node_id)
-            .is_some_and(|n| n.node_type == NodeType::Input)
-    });
+    let clicked_input = clicked.is_some_and(|r| is_text_field(arena, r.node_id));
     match button {
         MouseButton::Left => {
             if clicked_input {
@@ -1066,14 +1175,18 @@ pub fn handle_mouse_down(
                         // Position the caret (and the selection anchor) at the press
                         // point within the field.
                         if let Some(region) = clicked {
-                            let inner_x = region.rect.x.saturating_add(1);
-                            let inner_w = region.rect.width.saturating_sub(2);
-                            let idx = char_index_at_x(
-                                &state.input_value,
-                                state.input_cursor,
-                                inner_w,
-                                (x as usize).saturating_sub(inner_x),
-                            );
+                            let idx = if is_textarea_node(arena, node_id) {
+                                textarea_index_at(state, region.rect, x, y)
+                            } else {
+                                let inner_x = region.rect.x.saturating_add(1);
+                                let inner_w = region.rect.width.saturating_sub(2);
+                                char_index_at_x(
+                                    &state.input_value,
+                                    state.input_cursor,
+                                    inner_w,
+                                    (x as usize).saturating_sub(inner_x),
+                                )
+                            };
                             state.input_sel_anchor = Some(idx);
                             state.input_cursor = idx;
                             push_input_render(state, node_id, cmds);
@@ -1159,14 +1272,18 @@ pub fn handle_mouse_move(
             if let Some(focused) = state.focused_input
                 && let Some(region) = hit_map.iter().find(|r| r.node_id == focused)
             {
-                let inner_x = region.rect.x.saturating_add(1) ;
-                let inner_w = region.rect.width.saturating_sub(2) ;
-                let idx = char_index_at_x(
-                    &state.input_value,
-                    state.input_cursor,
-                    inner_w,
-                    (x as usize).saturating_sub(inner_x),
-                );
+                let idx = if state.focused_is_textarea {
+                    textarea_index_at(state, region.rect, x, y)
+                } else {
+                    let inner_x = region.rect.x.saturating_add(1);
+                    let inner_w = region.rect.width.saturating_sub(2);
+                    char_index_at_x(
+                        &state.input_value,
+                        state.input_cursor,
+                        inner_w,
+                        (x as usize).saturating_sub(inner_x),
+                    )
+                };
                 state.input_cursor = idx;
                 push_input_render(state, focused, cmds);
             }
@@ -1327,18 +1444,23 @@ pub fn trigger_refresh(
 
             // A focused `<input>` consumes the keys it owns: text editing and
             // caret movement. `Esc` blurs it and `Enter` confirms (blur +
-            // commit) — both write the value back to the DOM. Keys the field
-            // does *not* own (page navigation such as ↓ / ↑ / PageDown /
-            // PageUp) fall through to the page-level handler below, matching
-            // a browser where an input only intercepts the keys it edits.
+            // commit) — both write the value back to the DOM. A focused
+            // `<textarea>` owns `Enter` (newline) and `↑`/`↓` (caret) too.
+            // Keys the field does *not* own (page navigation such as
+            // PageDown / PageUp) fall through to the page-level handler
+            // below, matching a browser where an input only intercepts the
+            // keys it edits.
             if state.focused_input.is_some() {
-                if key.code == KeyCode::Esc || key.code == KeyCode::Enter {
+                if key.code == KeyCode::Esc || (key.code == KeyCode::Enter && !state.focused_is_textarea)
+                {
                     blur_input(state, msgs, &mut cmds);
                     return cmds;
                 }
                 let Some(focused) = state.focused_input else {
                     return cmds;
                 };
+                let content_width =
+                    textarea_content_width(arena, focused);
 
                 // Word-level editing: Ctrl / Alt + ←/→/Home/End/Backspace/
                 // Delete, with optional Shift extending the selection. Must
@@ -1392,12 +1514,49 @@ pub fn trigger_refresh(
                     return cmds;
                 }
 
+                // `<textarea>`-owned keys: Enter inserts a newline, ↑ / ↓
+                // move the caret between visual lines (keeping the column).
+                if state.focused_is_textarea
+                    && matches!(
+                        key.code,
+                        KeyCode::Enter | KeyCode::Up | KeyCode::Down
+                    )
+                {
+                    if apply_textarea_key(
+                        &mut state.input_value,
+                        &mut state.input_cursor,
+                        content_width,
+                        key.code,
+                    ) {
+                        state.input_sel_anchor = None;
+                        push_input_render(state, focused, &mut cmds);
+                        if arena.is_some() {
+                            msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
+                        }
+                    }
+                    return cmds;
+                }
+
                 // Field-owned keys stay in the field even when they are
                 // boundary no-ops (Home at the start must not scroll the
                 // page). Everything else belongs to the page-level handler.
                 if is_input_field_key(key.code) {
                     // Plain editing keys clear the selection.
-                    if apply_input_key(&mut state.input_value, &mut state.input_cursor, key.code) {
+                    let changed = if state.focused_is_textarea {
+                        apply_textarea_key(
+                            &mut state.input_value,
+                            &mut state.input_cursor,
+                            content_width,
+                            key.code,
+                        )
+                    } else {
+                        apply_input_key(
+                            &mut state.input_value,
+                            &mut state.input_cursor,
+                            key.code,
+                        )
+                    };
+                    if changed {
                         state.input_sel_anchor = None;
                         push_input_render(state, focused, &mut cmds);
                         if arena.is_some() {

@@ -22,6 +22,7 @@ mod image;
 mod input;
 mod select;
 mod text;
+mod textarea;
 
 use std::collections::HashMap;
 
@@ -38,10 +39,17 @@ use self::block::paint_block;
 use self::image::paint_image;
 use self::input::paint_input;
 use self::select::paint_select;
+use self::textarea::paint_textarea;
 
 /// Shared caret-centred value-window computation for `<input>` fields, used by
 /// both the painter and the input loop's column→character mapping.
 pub(crate) use self::input::value_window;
+/// Shared `<textarea>` line math (visual lines / caret position / scroll /
+/// inverse mapping), used by the painter and the input loop's caret movement
+/// and click placement.
+pub(crate) use self::textarea::{
+    textarea_caret_position, textarea_char_at, textarea_scroll_row, textarea_visual_lines,
+};
 
 /// A borrow of the canvas that the painters actually need.
 ///
@@ -332,6 +340,9 @@ fn paint_box(
         }
         BoxKind::Replaced(ReplacedContent::Select) => {
             paint_select(lb, arena, canvas, own_clip);
+        }
+        BoxKind::Replaced(ReplacedContent::Textarea) => {
+            paint_textarea(lb, arena, canvas, own_clip);
         }
         BoxKind::Anonymous => {
             // Anonymous boxes have no chrome of their own; their visible

@@ -228,13 +228,13 @@ fn natural_intrinsic_size(
     // frame / chevron — without these, flex measurement reports the 1x1
     // floor and a control inside a flex row collapses to a sliver.
     if matches!(node.node_type, NodeType::Input) {
-        // Checkbox / radio are single-cell toggles; other kinds take the
-        // HTML `width` attribute (default 8 cells).
+        // Checkbox / radio are two-cell toggles (glyph + spacing); other
+        // kinds take the HTML `width` attribute (default 8 cells).
         let is_toggle = node
             .get_type()
             .is_some_and(|t| matches!(t.to_ascii_lowercase().as_str(), "checkbox" | "radio"));
         let w = if is_toggle {
-            1
+            2
         } else {
             node.get_width().map(|w| w as usize).unwrap_or(8)
         };

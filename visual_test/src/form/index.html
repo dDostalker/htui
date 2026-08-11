@@ -21,13 +21,18 @@
   <h2>password (masked input)</h2>
   <p><input type="password" id="pw" value="hunter2"></p>
 
+  <h2>textarea (multi-line editing)</h2>
+  <textarea id="note" cols="30" rows="4">First line
+Second line
+</textarea>
+
   <h2>hidden (renders nothing)</h2>
   <p>Before <input type="hidden" id="hid" value="token-123"> after.</p>
 
   <p>change events fired: <span id="count">0</span></p>
   <script>
     var n = 0;
-    var ids = ['remember', 'pw'];
+    var ids = ['remember', 'pw', 'note'];
     for (var i = 0; i < ids.length; i++) {
       document.getElementById(ids[i]).addEventListener('change', function () {
         n += 1;

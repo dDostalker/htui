@@ -235,7 +235,7 @@ fn test_checkbox_unchecked_renders_box_glyph() {
     let (boxes, arena) = layout_boxes(r#"<div><input id="c" type="checkbox"></div>"#);
     let c = find_node_by_id(&arena, "c");
     let b = find_box(&boxes, c).expect("checkbox box");
-    assert_eq!(b.rect.width, 1, "checkbox is a single cell");
+    assert_eq!(b.rect.width, 2, "checkbox is glyph + one spacing cell");
 
     let (_, tl) = draw(r#"<input type="checkbox">"#, "");
     assert!(

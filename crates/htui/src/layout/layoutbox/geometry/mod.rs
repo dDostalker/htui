@@ -158,6 +158,9 @@ fn layout_replaced(
         GeneratedPayload::Input => {
             layout_input(arena, generated, containing, cursor, pre_allocated_rect)
         }
+        GeneratedPayload::Textarea => {
+            layout_textarea(arena, generated, containing, cursor, pre_allocated_rect)
+        }
         GeneratedPayload::Select => {
             layout_select(arena, generated, containing, cursor, pre_allocated_rect)
         }
@@ -240,14 +243,15 @@ fn layout_input(
         Some(rect) => (rect.x, rect.y, rect.width.max(1), rect.height.max(1)),
         None => {
             let node = &arena[generated.node_id];
-            // `<input type=checkbox|radio>` is a single-cell toggle glyph;
-            // every other kind is a text field sized from the HTML `width`
+            // `<input type=checkbox|radio>` is a two-cell toggle (glyph +
+            // one spacing column so it never glues onto adjacent text); every
+            // other kind is a text field sized from the HTML `width`
             // attribute (cells) or a fixed default width when absent.
             let is_toggle = node.get_type().is_some_and(|t| {
                 matches!(t.to_ascii_lowercase().as_str(), "checkbox" | "radio")
             });
             let block_width = if is_toggle {
-                1
+                2
             } else {
                 match node.get_width() {
                     Some(w) => (w as usize).min(containing.width).max(1),
@@ -263,6 +267,49 @@ fn layout_input(
         generated.node_id,
         Rect::new(x, y, block_width, height),
         ReplacedContent::Input,
+        PaintStyle::default(),
+    ))
+}
+
+/// Geometry for `<textarea>`: a fixed multi-line field with a box-drawing
+/// border.
+///
+/// Width is `cols` (browser default 20) plus the two frame columns, height
+/// is `rows` (browser default 2) plus the top/bottom border rows. The size is
+/// independent of the value, so editing only repaints the field's rectangle
+/// — same as `<input>`.
+fn layout_textarea(
+    arena: &NodeArena,
+    generated: &GeneratedBox,
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+    pre_allocated_rect: Option<Rect>,
+) -> Option<LayoutBox> {
+    let (x, y, block_width, height) = match pre_allocated_rect {
+        Some(rect) => (rect.x, rect.y, rect.width.max(1), rect.height.max(1)),
+        None => {
+            let node = &arena[generated.node_id];
+            let cols: usize = node
+                .attributes
+                .get("cols")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(20);
+            let rows: usize = node
+                .attributes
+                .get("rows")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(2);
+            let block_width = (cols.saturating_add(2)).min(containing.width).max(1);
+            let content_rows = rows.max(1);
+            let x = containing.x;
+            let y = cursor.allocate(content_rows.saturating_add(2));
+            (x, y, block_width, content_rows.saturating_add(2))
+        }
+    };
+    Some(LayoutBox::new_replaced(
+        generated.node_id,
+        Rect::new(x, y, block_width, height),
+        ReplacedContent::Textarea,
         PaintStyle::default(),
     ))
 }

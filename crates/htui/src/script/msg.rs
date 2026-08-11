@@ -124,13 +124,29 @@ pub fn apply_message(
         }
         ScriptMsg::BlurInput { node_id, value } => {
             let arena = engine.arena();
-            let old = arena
+            let is_textarea = arena
                 .get(*node_id)
-                .and_then(|n| n.attributes.get("value"))
-                .cloned()
-                .unwrap_or_default();
-            engine.set_value(*node_id, value);
-            let region = region_for(&arena, *node_id);
+                .is_some_and(|n| n.node_type == NodeType::Textarea);
+            // `<input>` fields commit to the `value` attribute; a textarea's
+            // DOM value is its child text content.
+            let old = if is_textarea {
+                arena
+                    .get(*node_id)
+                    .map(|n| n.text_content(&arena))
+                    .unwrap_or_default()
+            } else {
+                arena
+                    .get(*node_id)
+                    .and_then(|n| n.attributes.get("value"))
+                    .cloned()
+                    .unwrap_or_default()
+            };
+            if is_textarea {
+                engine.set_textarea_value(*node_id, value);
+            } else {
+                engine.set_value(*node_id, value);
+            }
+            let region = region_for(&engine.arena(), *node_id);
             let mut cmds = engine.fire(&region, EventType::Blur, 0, 0);
             if old != *value {
                 cmds.extend(engine.fire(&region, EventType::Change, 0, 0));
