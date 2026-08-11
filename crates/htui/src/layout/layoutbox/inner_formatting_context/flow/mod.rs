@@ -56,7 +56,7 @@ pub use layout_block::{
     LayoutBlockOptions, OuterGeometry, block_left, build_border_rect, compute_outer_geometry,
     constrained_block_width, layout_block, reserve_border_box, resolve_block_width,
 };
-pub use list::{layout_li, layout_ol, layout_ul};
+pub use list::{layout_li, layout_menu, layout_ol, layout_ul};
 pub use table::{layout_row_group, layout_table, layout_td, layout_th, layout_tr};
 pub use crate::html::css_parse::FontContext;
 pub(crate) use tree::dispatch_flow_geometry;

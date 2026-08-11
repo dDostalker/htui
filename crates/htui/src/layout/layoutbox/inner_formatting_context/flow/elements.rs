@@ -73,6 +73,32 @@ fn blockquote_opts() -> LayoutBlockOptions {
     }
 }
 
+/// Browser UA default `margin-block: 1em` for `<dl>` — one blank row
+/// above/below the description list.
+const DL_MARGIN_BLOCK: usize = 1;
+
+/// Browser UA default `margin-inline-start: 40px` for `<dd>`, adapted to
+/// 4 terminal columns.
+const DD_MARGIN_INLINE: usize = 4;
+
+/// `<dl>` keeps the browser user-agent `margin-block: 1em` default: one
+/// blank row above/below the description list.
+fn dl_opts() -> LayoutBlockOptions {
+    LayoutBlockOptions {
+        ua_margins: Some(EdgeSizes::new(DL_MARGIN_BLOCK, 0, DL_MARGIN_BLOCK, 0)),
+        ..Default::default()
+    }
+}
+
+/// `<dd>` keeps the browser user-agent `margin-inline-start: 40px` default:
+/// a four-column indent that separates it from its `<dt>` term.
+fn dd_opts() -> LayoutBlockOptions {
+    LayoutBlockOptions {
+        ua_margins: Some(EdgeSizes::new(0, 0, 0, DD_MARGIN_INLINE)),
+        ..Default::default()
+    }
+}
+
 /// Plain block elements handled by [`layout_standard_block`].
 static STANDARD_BLOCK_ELEMENTS: &[BlockElementConfig] = &[
     BlockElementConfig {
@@ -114,6 +140,22 @@ static STANDARD_BLOCK_ELEMENTS: &[BlockElementConfig] = &[
     BlockElementConfig {
         node_type: NodeType::BlockQuote,
         opts: blockquote_opts,
+    },
+    BlockElementConfig {
+        node_type: NodeType::Dl,
+        opts: dl_opts,
+    },
+    BlockElementConfig {
+        node_type: NodeType::Dt,
+        opts: default_opts,
+    },
+    BlockElementConfig {
+        node_type: NodeType::Dd,
+        opts: dd_opts,
+    },
+    BlockElementConfig {
+        node_type: NodeType::Search,
+        opts: default_opts,
     },
 ];
 

@@ -143,6 +143,8 @@ pub enum NodeType {
     Section,
     Article,
     Aside,
+    /// `<search>` — search / filter landmark container. Plain block element.
+    Search,
     Figure,
     Figcaption,
     Details,
@@ -150,6 +152,17 @@ pub enum NodeType {
     Ul,
     Ol,
     Li,
+    /// `<menu>` — command / menu list. Rendered like `<ul>`: each `<li>`
+    /// child gets the `• ` marker and nesting indents per level.
+    Menu,
+    /// `<dl>` — description list container. Block element with browser UA
+    /// default `margin-block: 1em` (one blank row above/below).
+    Dl,
+    /// `<dt>` — a term in a description list. Plain block element.
+    Dt,
+    /// `<dd>` — a description in a description list. Block element with
+    /// browser UA default `margin-inline-start: 40px` (4 terminal columns).
+    Dd,
     Table,
     Thead,
     Tbody,
@@ -227,6 +240,7 @@ impl NodeType {
         NodeType::Section,
         NodeType::Article,
         NodeType::Aside,
+        NodeType::Search,
         NodeType::Figure,
         NodeType::Figcaption,
         NodeType::Details,
@@ -234,6 +248,10 @@ impl NodeType {
         NodeType::Ul,
         NodeType::Ol,
         NodeType::Li,
+        NodeType::Menu,
+        NodeType::Dl,
+        NodeType::Dt,
+        NodeType::Dd,
         NodeType::Table,
         NodeType::Thead,
         NodeType::Tbody,
@@ -402,6 +420,7 @@ impl NodeType {
             NodeType::Section => "section",
             NodeType::Article => "article",
             NodeType::Aside => "aside",
+            NodeType::Search => "search",
             NodeType::Figure => "figure",
             NodeType::Figcaption => "figcaption",
             NodeType::Details => "details",
@@ -409,6 +428,10 @@ impl NodeType {
             NodeType::Ul => "ul",
             NodeType::Ol => "ol",
             NodeType::Li => "li",
+            NodeType::Menu => "menu",
+            NodeType::Dl => "dl",
+            NodeType::Dt => "dt",
+            NodeType::Dd => "dd",
             NodeType::Table => "table",
             NodeType::Thead => "thead",
             NodeType::Tbody => "tbody",

@@ -36,6 +36,29 @@ pub fn layout_ul(
     )
 }
 
+/// Build a [`LayoutBox`] for a `<menu>` element.
+///
+/// `<menu>` is a command/menu list with the same layout shape as `<ul>`:
+/// each `<li>` child gets the `• ` marker and nesting indents per level.
+pub fn layout_menu(
+    arena: &NodeArena,
+    node_id: NodeId,
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+    context: LayoutContext,
+    pre_allocated_rect: Option<crate::layout::Rect>,
+) -> Option<LayoutBox> {
+    layout_list(
+        arena,
+        node_id,
+        containing,
+        cursor,
+        NodeType::Menu,
+        context,
+        pre_allocated_rect,
+    )
+}
+
 /// Build a [`LayoutBox`] for an `<ol>` element.
 ///
 /// Same container shape as `<ul>`; [`layout_li`] distinguishes the bullet
@@ -142,7 +165,7 @@ fn layout_list(
     ))
 }
 
-/// Count `<ul>`/`<ol>` ancestors of `node_id`.
+/// Count `<ul>`/`<ol>`/`<menu>` ancestors of `node_id`.
 ///
 /// A top-level list returns `0` so its items sit at `containing.x`; each level
 /// of nesting adds [`LIST_INDENT_PER_LEVEL`] columns to the items inside.
@@ -150,7 +173,10 @@ fn list_depth(arena: &NodeArena, node_id: NodeId) -> usize {
     let mut depth = 0usize;
     let mut current = arena[node_id].parent;
     while let Some(pid) = current {
-        if matches!(arena[pid].node_type, NodeType::Ul | NodeType::Ol) {
+        if matches!(
+            arena[pid].node_type,
+            NodeType::Ul | NodeType::Ol | NodeType::Menu
+        ) {
             depth = depth.saturating_add(1);
         }
         current = arena[pid].parent;
@@ -160,15 +186,15 @@ fn list_depth(arena: &NodeArena, node_id: NodeId) -> usize {
 
 /// Compute the marker string for an `<li>` based on its enclosing list.
 ///
-/// Returns `• ` inside `<ul>`, `<n>. ` inside `<ol>`, or `- ` for an orphan
-/// `<li>` (no list parent) so we still render a visible marker.
+/// Returns `• ` inside `<ul>`/`<menu>`, `<n>. ` inside `<ol>`, or `- ` for an
+/// orphan `<li>` (no list parent) so we still render a visible marker.
 fn list_marker_for_li(arena: &NodeArena, li_id: NodeId) -> String {
     let Some(parent_id) = arena[li_id].parent else {
         return "- ".to_string();
     };
     let parent = &arena[parent_id];
     match parent.node_type {
-        NodeType::Ul => "• ".to_string(),
+        NodeType::Ul | NodeType::Menu => "• ".to_string(),
         NodeType::Ol => {
             let ordinal = li_ordinal(arena, li_id, parent_id);
             format!("{ordinal}. ")
