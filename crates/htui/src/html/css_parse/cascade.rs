@@ -4,7 +4,7 @@ use crate::tdom::node::{NodeArena, NodeId};
 
 use super::{
     matcher::selector_chain_matches_with_hover, properties::CssAttr, selector::CssSelector,
-    stylesheet::{CssRule, parse_declaration_text},
+    stylesheet::{CssRule, CssRuleEntry, parse_declaration_splits},
 };
 
 fn apply_css_rule(
@@ -22,25 +22,37 @@ fn apply_css_rule(
         apply_css_rule(arena, child_id, selector, css, hovered);
     }
 }
-fn apply_inline_styles(arena: &mut NodeArena, node_id: NodeId) {
+/// Apply the `style` attribute of every node in the subtree, restricted to the
+/// `important` subset when `important` is true. Runs as two passes (normal then
+/// important) so inline normal declarations beat stylesheet normal ones while
+/// inline `!important` beats stylesheet `!important` — the browser cascade
+/// order within the author origin.
+fn apply_inline_styles(arena: &mut NodeArena, node_id: NodeId, important: bool) {
     let inline_style = arena[node_id].attributes.get("style").cloned();
     if let Some(style) = inline_style {
-        arena[node_id]
-            .css_attr
-            .add(CssAttr(parse_declaration_text(&style)));
+        let (normal, imp) = parse_declaration_splits(&style);
+        let subset = if important { imp } else { normal };
+        if !subset.0.is_empty() {
+            arena[node_id].css_attr.add(subset);
+        }
     }
 
     let children = arena[node_id].children.clone();
     for child_id in children {
-        apply_inline_styles(arena, child_id);
+        apply_inline_styles(arena, child_id, important);
     }
 }
-
-// css_into_node
 
 /// Apply all stylesheet rules, inline `style` attributes and inheritance to
 /// the arena, evaluating `:hover` pseudo-class rules against `hovered` (the
 /// session-local node currently under the pointer).
+///
+/// The cascade follows the browser's author-origin order:
+///   1. stylesheet normal declarations, ordered by (specificity, source order);
+///   2. inline `style` normal declarations;
+///   3. stylesheet `!important` declarations, ordered the same way;
+///   4. inline `style` `!important` declarations (highest priority).
+/// Each later pass overrides earlier ones per property.
 ///
 /// Callers that need a hover-aware cascade (the event system's hover
 /// highlight) use this; everything else should call [`css_into_node`], which
@@ -51,14 +63,31 @@ pub fn css_into_node_with_hover(
     css: &CssRule,
     hovered: Option<NodeId>,
 ) {
-    for (selector, attr) in css.0.iter() {
-        apply_css_rule(arena, root_id, selector, attr, hovered);
+    // Order every rule by (specificity, source order); the stable sort keeps
+    // same-specificity rules in stylesheet order so the last applied rule for
+    // a property wins, matching the browser cascade.
+    let mut rules: Vec<&CssRuleEntry> = css.0.iter().collect();
+    rules.sort_by_key(|entry| entry.selector.specificity());
+
+    // 1. Author stylesheet, normal declarations (lowest priority).
+    for entry in &rules {
+        if !entry.normal.0.is_empty() {
+            apply_css_rule(arena, root_id, &entry.selector, &entry.normal, hovered);
+        }
     }
-    // Inline declarations have higher author-level precedence than matching
-    // stylesheet rules and must be present before inheritance is resolved.
-    apply_inline_styles(arena, root_id);
+    // 2. Inline `style` attributes, normal declarations.
+    apply_inline_styles(arena, root_id, false);
+    // 3. Author stylesheet, `!important` declarations.
+    for entry in &rules {
+        if !entry.important.0.is_empty() {
+            apply_css_rule(arena, root_id, &entry.selector, &entry.important, hovered);
+        }
+    }
+    // 4. Inline `style` attributes, `!important` declarations (highest).
+    apply_inline_styles(arena, root_id, true);
     // Propagate inheritable CSS properties (color, text-align, font-weight,
-    // font-style, text-decoration)
+    // font-style, text-decoration, font-size, text-transform, line-height).
+    // Inheritance copies final values; the importance flag does not propagate.
     inherit_css(arena, root_id, &IndexMap::new());
 }
 

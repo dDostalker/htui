@@ -155,8 +155,8 @@ htui/
 ├── docs/
 │   ├── TODO.md            # 待办（querySelector / innerHTML / textarea / details 等，按优先级分组）
 │   └── zh-cn/
-│       ├── boundaries.md        # 边界文档（目标 / 核心承诺 / 拒绝清单 / 能力地图）
-│       ├── browser-compat.md    # 浏览器能力对比及差异清单（HTML / CSS / JS 全矩阵）
+│       ├── 边界文档.md           # 边界文档（目标 / 核心承诺 / 拒绝清单 / 能力地图）
+│       ├── 能力差异清单.md       # 浏览器能力对比及差异清单（HTML / CSS / JS 全矩阵）
 │       ├── 开发/                # （预留）
 │       └── 教程/
 │           ├── logging.md       # 日志使用说明

@@ -1532,7 +1532,8 @@ fn sysmon_refresh_renders_the_progress_bar() {
 fn hover_pseudo_class_parses() {
     let mut css_parser = CssParser::new("#panel:hover { background-color: #3a3a3a; }");
     let rules = css_parser.parse();
-    let (selector, _) = rules.0.iter().next().expect("one rule");
+    let entry = rules.0.first().expect("one rule");
+    let selector = &entry.selector;
     // `#panel:hover` → one compound `[Id, PseudoClass]`, no combinators.
     assert!(selector.combinators.is_empty());
     assert!(selector.compounds.iter().any(|c| c.iter().any(

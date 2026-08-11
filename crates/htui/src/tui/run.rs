@@ -853,7 +853,8 @@ fn hover_affected_region(
     while let Some(id) = cur {
         // Only a selector that contains `:hover` and matches `id` while
         // `hovered` is the pointer target can repaint `id`'s boxes.
-        let affected = rules.0.keys().any(|sel| {
+        let affected = rules.0.iter().any(|entry| {
+            let sel = &entry.selector;
             sel.compounds.iter().any(|compound| {
                 compound
                     .iter()
@@ -882,7 +883,8 @@ fn hover_affected_region(
 /// True when the stylesheet contains any `:hover` rule — the only case where
 /// moving the pointer can change the painted output.
 fn css_has_hover_rules(css_rules: &CssRule) -> bool {
-    css_rules.0.keys().any(|sel| {
+    css_rules.0.iter().any(|entry| {
+        let sel = &entry.selector;
         sel.compounds.iter().any(|compound| {
             compound
                 .iter()

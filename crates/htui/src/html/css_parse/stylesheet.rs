@@ -8,31 +8,44 @@ use log::{debug, warn};
 use super::{properties::CssAttr, selector::CssSelector};
 use std::str::FromStr;
 
+/// One qualified rule, with declarations already split by the `!important`
+/// marker at parse time. Rules are kept separate (no same-selector merging) so
+/// the cascade can order every rule by specificity and source position exactly
+/// as the stylesheet wrote it — merging identical selectors would collapse the
+/// source order of interleaved rules.
 #[derive(Debug, Clone)]
-pub struct CssRule(pub IndexMap<CssSelector, CssAttr>);
+pub struct CssRuleEntry {
+    pub selector: CssSelector,
+    /// Non-`!important` declarations.
+    pub normal: CssAttr,
+    /// `!important` declarations.
+    pub important: CssAttr,
+}
+
+#[derive(Debug, Clone)]
+pub struct CssRule(pub Vec<CssRuleEntry>);
 
 impl CssRule {
     pub fn new() -> Self {
-        CssRule(IndexMap::new())
+        CssRule(Vec::new())
     }
 
-    /// Insert a `(selector, declarations)` pair.
-    ///
-    /// If `sel` is already present, the new declarations are merged into the
-    /// existing rule instead of overwriting it — later rules with the same
-    /// selector win for any single property (matching the CSS cascade), but
-    /// properties only present in the earlier rule are preserved. Without
-    /// this merge, two rules like `.a, .grow { background: red }` and
-    /// `.grow { flex-grow: 1 }` would leave `.grow` with only `flex-grow`,
-    /// silently dropping `background`.
-    pub fn add(&mut self, sel: CssSelector, attr: IndexMap<String, String>) {
-        if let Some(existing) = self.0.get_mut(&sel) {
-            for (k, v) in attr {
-                existing.0.insert(k, v);
-            }
-        } else {
-            self.0.insert(sel, CssAttr(attr));
-        }
+    /// Append a rule with explicit normal / important declaration splits.
+    pub fn push(&mut self, selector: CssSelector, normal: CssAttr, important: CssAttr) {
+        self.0.push(CssRuleEntry {
+            selector,
+            normal,
+            important,
+        });
+    }
+
+    /// Append a rule whose declarations all have normal priority.
+    pub fn add(&mut self, selector: CssSelector, attr: CssAttr) {
+        self.0.push(CssRuleEntry {
+            selector,
+            normal: attr,
+            important: CssAttr::new(),
+        });
     }
 }
 
@@ -69,14 +82,16 @@ impl Parser {
             }
         }
         let mut css = CssRule::new();
-        for (sel_text, declarations) in state.rules.drain(..) {
+        for (sel_text, normal, important) in state.rules.drain(..) {
             // Split comma-separated selectors: `table, td { ... }` is two
             // independent rules targeting distinct node types. Each
             // sub-selector is parsed in isolation so it can stand on its
             // own when applied via the cascade.
             for sub_sel in split_top_level_commas(&sel_text) {
                 match CssSelector::from_str(sub_sel) {
-                    std::result::Result::Ok(sel) => css.add(sel, declarations.clone()),
+                    std::result::Result::Ok(sel) => {
+                        css.push(sel, normal.clone(), important.clone())
+                    }
                     std::result::Result::Err(e) => {
                         warn!("Selector parse fail: {}: {}", sub_sel, e);
                     }
@@ -89,7 +104,7 @@ impl Parser {
 }
 
 struct CssParseState {
-    rules: Vec<(String, IndexMap<String, String>)>,
+    rules: Vec<(String, CssAttr, CssAttr)>,
 }
 impl CssParseState {
     fn new() -> Self {
@@ -123,9 +138,10 @@ impl<'i> QualifiedRuleParser<'i> for CssParseState {
         _start: &ParserState,
         input: &mut CssParser<'i, 't>,
     ) -> std::result::Result<(), ParseError<'i, Self::Error>> {
-        let mut declarations = IndexMap::new();
-        parse_declarations_into(input, &mut declarations);
-        self.rules.push((prelude, declarations));
+        let mut normal = CssAttr::new();
+        let mut important = CssAttr::new();
+        parse_declarations_into(input, &mut normal, &mut important);
+        self.rules.push((prelude, normal, important));
         Ok(())
     }
 }
@@ -204,9 +220,10 @@ fn split_top_level_commas(s: &str) -> Vec<&str> {
     out
 }
 
-/// Parse a CSS declaration block text into key-value pairs.
+/// Parse a CSS declaration block text into key-value pairs (the `!important`
+/// marker is stripped from the values).
 ///
-/// Built on top of [`cssparser`]'s tokenizer via [`parse_declarations_into`]
+/// Built on top of [`cssparser`]'s tokenizer via [`parse_declaration_splits`]
 /// so it correctly handles:
 /// - `/* ... */` block comments (including those inside string literals)
 /// - the `!important` marker
@@ -215,19 +232,30 @@ fn split_top_level_commas(s: &str) -> Vec<&str> {
 /// - quoted string values with semicolons / colons inside
 #[doc(hidden)]
 pub fn parse_declaration_text(block: &str) -> IndexMap<String, String> {
-    let mut input_buf = ParserInput::new(block);
-    let mut input = CssParser::new(&mut input_buf);
-    let mut map = IndexMap::new();
-    parse_declarations_into(&mut input, &mut map);
-    map
+    let (mut normal, important) = parse_declaration_splits(block);
+    normal.0.extend(important.0);
+    normal.0
 }
 
-/// Walk every `name: value [!important]` declaration in `input` and store
-/// them in `out`. Tolerates malformed input by skipping to the next `;`
-/// rather than aborting the whole block.
+/// Parse a declaration block, splitting declarations by the `!important`
+/// marker into `(normal, important)` bags (the marker is stripped from the
+/// values). Used by the stylesheet parser and the inline-`style` cascade pass.
+pub(crate) fn parse_declaration_splits(block: &str) -> (CssAttr, CssAttr) {
+    let mut input_buf = ParserInput::new(block);
+    let mut input = CssParser::new(&mut input_buf);
+    let mut normal = CssAttr::new();
+    let mut important = CssAttr::new();
+    parse_declarations_into(&mut input, &mut normal, &mut important);
+    (normal, important)
+}
+
+/// Walk every `name: value [!important]` declaration in `input` and store it
+/// in `normal` or `important` accordingly. Tolerates malformed input by
+/// skipping to the next `;` rather than aborting the whole block.
 fn parse_declarations_into<'i, 't>(
     input: &mut CssParser<'i, 't>,
-    out: &mut IndexMap<String, String>,
+    normal: &mut CssAttr,
+    important: &mut CssAttr,
 ) {
     loop {
         input.skip_whitespace();
@@ -256,10 +284,15 @@ fn parse_declarations_into<'i, 't>(
         let _: Result<(), ParseError<()>> =
             input.parse_until_before(Delimiter::Semicolon | Delimiter::Bang, |_| Ok(()));
         let value_text = input.slice_from(value_start);
-        let _important = input.try_parse(parse_important).is_ok();
+        let is_important = input.try_parse(parse_important).is_ok();
         let cleaned = clean_value_text(value_text);
         if !name.is_empty() && !cleaned.is_empty() {
-            out.insert(name.to_string(), cleaned);
+            let target = if is_important {
+                &mut important.0
+            } else {
+                &mut normal.0
+            };
+            target.insert(name.to_string(), cleaned);
         }
         // Consume the trailing `;` if present. A missing `;` is not an
         // error here — the parser simply stops at the next boundary.

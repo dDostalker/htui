@@ -142,6 +142,34 @@ impl FromStr for CssSelector {
     }
 }
 
+impl CssSelector {
+    /// CSS specificity `(a, b, c)` of the selector chain, computed by summing
+    /// every compound part:
+    ///
+    /// - `a` — id selectors (`#id`);
+    /// - `b` — class selectors, attribute selectors and pseudo-classes
+    ///   (`.class`, `:hover`, `:nth-child(...)`);
+    /// - `c` — type selectors (`div`, `p`, …).
+    ///
+    /// Combinators contribute nothing. Used by the cascade to order rules so
+    /// the most specific rule wins for a property regardless of source order.
+    pub fn specificity(&self) -> (u32, u32, u32) {
+        let mut spec = (0u32, 0u32, 0u32);
+        for compound in &self.compounds {
+            for sel in compound {
+                match sel {
+                    Selector::Id(_) => spec.0 += 1,
+                    Selector::Class(_) | Selector::PseudoClass(_) | Selector::NthChild(_) => {
+                        spec.1 += 1
+                    }
+                    Selector::Tag(_) => spec.2 += 1,
+                }
+            }
+        }
+        spec
+    }
+}
+
 /// Split a selector chain into segments and the combinator that introduces each
 /// segment after the first.
 ///

@@ -65,6 +65,22 @@ fn build_test(arena: &mut NodeArena) -> (NodeId, NodeId) {
     (root, div_id)
 }
 
+/// Build `root -> div -> p(class="a b")`, returning `(root, p)`. Used by the
+/// cascade tests that need same-specificity class selectors matching one node.
+fn build_p_with_classes(arena: &mut NodeArena) -> (NodeId, NodeId) {
+    let root = arena.insert(Node::from(NodeType::Global));
+    let div_id = arena.insert(Node::from(NodeType::Div));
+    let p_id = arena.insert(Node::from(NodeType::P));
+    arena[p_id]
+        .attributes
+        .insert("class".to_string(), "a b".to_string());
+    let text_id = arena.insert(Node::text("x"));
+    Node::append_child(arena, p_id, text_id);
+    Node::append_child(arena, div_id, p_id);
+    Node::append_child(arena, root, div_id);
+    (root, p_id)
+}
+
 #[test]
 fn test_parse_simple() {
     init();
@@ -274,7 +290,7 @@ fn test_css_into_node() {
     let sel: CssSelector = "div p".parse().unwrap();
     let mut m = IndexMap::new();
     m.insert("color".into(), "red".into());
-    css.add(sel, m);
+    css.add(sel, CssAttr(m));
     css_into_node(&mut arena, root, &css);
     let div_id = arena[root].children[0];
     let p_id = arena[div_id].children[0];
@@ -557,6 +573,192 @@ fn test_missing_trailing_semicolon_is_ok() {
     assert_eq!(m.get("color").map(String::as_str), Some("blue"));
 }
 
+// ============================================================
+// Cascade rewrite: specificity ordering, `!important` and inline style
+// ============================================================
+
+#[test]
+fn test_parse_splits_important_declarations() {
+    init();
+    // The stylesheet parser records `!important` per property: normal and
+    // important declarations end up in separate bags on the rule entry.
+    let css = Parser::new("p { color: red !important; width: 10px }").parse();
+    assert_eq!(css.0.len(), 1);
+    let entry = &css.0[0];
+    assert_eq!(entry.normal.0.get("width").map(String::as_str), Some("10px"));
+    assert!(entry.normal.0.get("color").is_none());
+    assert_eq!(
+        entry.important.0.get("color").map(String::as_str),
+        Some("red")
+    );
+    assert!(entry.important.0.get("width").is_none());
+}
+
+#[test]
+fn test_cascade_specificity_units() {
+    init();
+    let spec = |s: &str| s.parse::<CssSelector>().unwrap().specificity();
+    assert_eq!(spec("p"), (0, 0, 1));
+    assert_eq!(spec(".a"), (0, 1, 0));
+    assert_eq!(spec("#i"), (1, 0, 0));
+    assert_eq!(spec("div p span"), (0, 0, 3));
+    assert_eq!(spec(".a .b"), (0, 2, 0));
+    assert_eq!(spec("div.active"), (0, 1, 1));
+    assert_eq!(spec("p:hover"), (0, 1, 1));
+    assert_eq!(spec("li:nth-child(2)"), (0, 1, 1));
+    assert_eq!(spec("div > p + span"), (0, 0, 3));
+}
+
+#[test]
+fn test_cascade_specificity_wins_regardless_of_order() {
+    init();
+    // `div p` (0,0,2) must beat `p` (0,0,1) no matter the source order.
+    for css_text in [
+        "div p { color: red } p { color: blue }",
+        "p { color: blue } div p { color: red }",
+    ] {
+        let mut arena = NodeArena::default();
+        let (root, div_id) = build_test(&mut arena);
+        let p_id = arena[div_id].children[0];
+        let css = Parser::new(css_text).parse();
+        css_into_node(&mut arena, root, &css);
+        assert_eq!(
+            arena[p_id].css_attr.get_color(),
+            Some(Color::Rgb {
+                r: 0xFF,
+                g: 0x00,
+                b: 0x00
+            }),
+            "css: {css_text}"
+        );
+    }
+}
+
+#[test]
+fn test_cascade_important_beats_normal() {
+    init();
+    // `!important` beats normal regardless of source order.
+    for css_text in [
+        "p { color: blue } p { color: red !important }",
+        "p { color: red !important } p { color: blue }",
+    ] {
+        let mut arena = NodeArena::default();
+        let (root, div_id) = build_test(&mut arena);
+        let p_id = arena[div_id].children[0];
+        let css = Parser::new(css_text).parse();
+        css_into_node(&mut arena, root, &css);
+        assert_eq!(
+            arena[p_id].css_attr.get_color(),
+            Some(Color::Rgb {
+                r: 0xFF,
+                g: 0x00,
+                b: 0x00
+            }),
+            "css: {css_text}"
+        );
+    }
+}
+
+#[test]
+fn test_cascade_important_beats_higher_specificity_normal() {
+    init();
+    // `!important` outranks specificity: `p { … !important }` beats
+    // `.b { … }` even though the class selector is more specific.
+    let mut arena = NodeArena::default();
+    let (root, p_id) = build_p_with_classes(&mut arena);
+    let css = Parser::new("p { color: red !important } .b { color: blue }").parse();
+    css_into_node(&mut arena, root, &css);
+    assert_eq!(
+        arena[p_id].css_attr.get_color(),
+        Some(Color::Rgb {
+            r: 0xFF,
+            g: 0x00,
+            b: 0x00
+        })
+    );
+}
+
+#[test]
+fn test_cascade_inline_style_beats_stylesheet_normal() {
+    init();
+    let mut arena = NodeArena::default();
+    let (root, div_id) = build_test(&mut arena);
+    let p_id = arena[div_id].children[0];
+    arena[p_id]
+        .attributes
+        .insert("style".to_string(), "color: blue".to_string());
+    let css = Parser::new("p { color: red }").parse();
+    css_into_node(&mut arena, root, &css);
+    assert_eq!(
+        arena[p_id].css_attr.get_color(),
+        Some(Color::Rgb {
+            r: 0x00,
+            g: 0x00,
+            b: 0xFF
+        })
+    );
+}
+
+#[test]
+fn test_cascade_important_precedence_with_inline_style() {
+    init();
+    // Stylesheet `!important` beats inline normal declarations.
+    let mut arena = NodeArena::default();
+    let (root, div_id) = build_test(&mut arena);
+    let p_id = arena[div_id].children[0];
+    arena[p_id]
+        .attributes
+        .insert("style".to_string(), "color: blue".to_string());
+    let css = Parser::new("p { color: red !important }").parse();
+    css_into_node(&mut arena, root, &css);
+    assert_eq!(
+        arena[p_id].css_attr.get_color(),
+        Some(Color::Rgb {
+            r: 0xFF,
+            g: 0x00,
+            b: 0x00
+        })
+    );
+
+    // Inline `!important` beats stylesheet `!important`.
+    let mut arena2 = NodeArena::default();
+    let (root2, div2) = build_test(&mut arena2);
+    let p2 = arena2[div2].children[0];
+    arena2[p2]
+        .attributes
+        .insert("style".to_string(), "color: blue !important".to_string());
+    let css2 = Parser::new("p { color: red !important }").parse();
+    css_into_node(&mut arena2, root2, &css2);
+    assert_eq!(
+        arena2[p2].css_attr.get_color(),
+        Some(Color::Rgb {
+            r: 0x00,
+            g: 0x00,
+            b: 0xFF
+        })
+    );
+}
+
+#[test]
+fn test_cascade_same_specificity_later_source_wins() {
+    init();
+    // `.a` appears before and after `.b` at equal specificity; the last
+    // declaration in source order wins (green). The old same-selector rule
+    // merging would have collapsed `.a`'s two occurrences and reported blue.
+    let mut arena = NodeArena::default();
+    let (root, p_id) = build_p_with_classes(&mut arena);
+    let css = Parser::new(".a { color: red } .b { color: blue } .a { color: green }").parse();
+    css_into_node(&mut arena, root, &css);
+    assert_eq!(
+        arena[p_id].css_attr.get_color(),
+        Some(Color::Rgb {
+            r: 0x00,
+            g: 0x80,
+            b: 0x00
+        })
+    );
+}
+
 #[test]
 fn test_background_color_does_not_inherit() {
     // End-to-end: even though `background-color` is in SUPPORTED_PROPERTIES,
@@ -569,7 +771,7 @@ fn test_background_color_does_not_inherit() {
     let sel: CssSelector = "div".parse().unwrap();
     let mut m = IndexMap::new();
     m.insert("background-color".into(), "yellow".into());
-    css.add(sel, m);
+    css.add(sel, CssAttr(m));
     css_into_node(&mut arena, root, &css);
 
     let div_id = arena[root].children[0];
@@ -601,7 +803,7 @@ fn test_color_does_inherit() {
     let sel: CssSelector = "div".parse().unwrap();
     let mut m = IndexMap::new();
     m.insert("color".into(), "red".into());
-    css.add(sel, m);
+    css.add(sel, CssAttr(m));
     css_into_node(&mut arena, root, &css);
 
     let div_id = arena[root].children[0];
@@ -649,7 +851,7 @@ fn test_full_parse_pipeline_handles_important_and_comments() {
     let mut decls = IndexMap::new();
     decls.insert("color".into(), "red".into());
     decls.insert("font-weight".into(), "bold".into());
-    css.add(sel_h1, decls);
+    css.add(sel_h1, CssAttr(decls));
     css_into_node(&mut arena, root, &css);
 
     assert_eq!(
