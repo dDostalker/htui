@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+<head>
+  <style>
+    /* Functional styles only:
+       - <q> synthesises quote marks (double, alternating to single when
+         nested); author colour reaches the quote runs
+       - <abbr title="..."> renders underlined (dotted-underline
+         approximation); plain <abbr> has no decoration. */
+    .q-red { color: red; }
+  </style>
+</head>
+<body>
+  <h2>Inline quotation (&lt;q&gt;)</h2>
+  <p>Alice said <q>the only rule is <q>be kind</q></q> and left.</p>
+  <p>A coloured quote: <q class="q-red">warning</q>.</p>
+
+  <h2>Abbreviation (&lt;abbr&gt;)</h2>
+  <p>The <abbr title="HyperText Markup Language">HTML</abbr> spec is long.</p>
+  <p>Plain <abbr>abbr</abbr> without a title stays undecorated.</p>
+  <p>End of Q / Abbr Test</p>
+</body>
+</html>

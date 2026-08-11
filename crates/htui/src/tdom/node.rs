@@ -81,6 +81,14 @@ pub enum NodeType {
     /// yellow background and black foreground (applied when neither property
     /// has been declared on the element).
     Mark,
+    /// `<q>` — short inline quotation. Inline element; the browser UA
+    /// `::before`/`::after` quote marks are synthesised around the content
+    /// (alternating double/single quotes by nesting depth).
+    Q,
+    /// `<abbr>` — abbreviation. Inline element; the browser UA `abbr[title]`
+    /// dotted underline is approximated with a solid underline when a `title`
+    /// attribute is present.
+    Abbr,
     /// `<cite>` — cited work title. Inline element with browser-default
     /// `font-style: italic`.
     Cite,
@@ -99,6 +107,14 @@ pub enum NodeType {
     /// `<samp>` — sample output. Inline element with browser-default
     /// monospace font.
     Samp,
+    /// `<data>` — machine-readable value. Inline element with no UA visual
+    /// default; the `value` attribute is machine-readable only and the text
+    /// content renders as-is.
+    Data,
+    /// `<time>` — date/time value. Inline element with no UA visual default;
+    /// the `datetime` attribute is machine-readable only and the text
+    /// content renders as-is.
+    Time,
     /// `<br>` — forced line break. Void element; the layout pass emits an
     /// unconditional break run that splits the visual line in every
     /// `white-space` mode.
@@ -211,12 +227,16 @@ impl NodeType {
         NodeType::Del,
         NodeType::Ins,
         NodeType::Mark,
+        NodeType::Q,
+        NodeType::Abbr,
         NodeType::Cite,
         NodeType::Dfn,
         NodeType::Var,
         NodeType::Code,
         NodeType::Kbd,
         NodeType::Samp,
+        NodeType::Data,
+        NodeType::Time,
         NodeType::Br,
         NodeType::Html,
         NodeType::Body,
@@ -314,12 +334,16 @@ impl NodeType {
             | NodeType::Del
             | NodeType::Ins
             | NodeType::Mark
+            | NodeType::Q
+            | NodeType::Abbr
             | NodeType::Cite
             | NodeType::Dfn
             | NodeType::Var
             | NodeType::Code
             | NodeType::Kbd
             | NodeType::Samp
+            | NodeType::Data
+            | NodeType::Time
             | NodeType::Br => CssDisplay::Inline,
             NodeType::Table => CssDisplay::Table,
             NodeType::Thead => CssDisplay::TableHeaderGroup,
@@ -391,12 +415,16 @@ impl NodeType {
             NodeType::Del => "del",
             NodeType::Ins => "ins",
             NodeType::Mark => "mark",
+            NodeType::Q => "q",
+            NodeType::Abbr => "abbr",
             NodeType::Cite => "cite",
             NodeType::Dfn => "dfn",
             NodeType::Var => "var",
             NodeType::Code => "code",
             NodeType::Kbd => "kbd",
             NodeType::Samp => "samp",
+            NodeType::Data => "data",
+            NodeType::Time => "time",
             NodeType::Br => "br",
             NodeType::Html => "html",
             NodeType::Body => "body",

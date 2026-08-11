@@ -12,7 +12,7 @@ use crossterm::style::Color;
 use super::InlineRun;
 use crate::{
     html::css_parse::{TextTransform, WhiteSpace},
-    tdom::node::{Node, NodeArena, NodeType},
+    tdom::node::{Node, NodeArena, NodeId, NodeType},
     tui::graph_api::{FontStyle, block_style},
 };
 
@@ -191,10 +191,50 @@ fn walk_runs(
                 let st = style | block_style(&child.css_attr);
                 walk_inline_children(arena, child, mark_fg, mark_bg, st, white_space, runs);
             }
+            NodeType::Q => {
+                // User-agent default: `<q>` wraps its content in generated
+                // quote marks (`q::before { content: open-quote }` /
+                // `::after { content: close-quote }`). The pair alternates
+                // with nesting depth like the CSS `quotes` property: even
+                // depth uses double quotes, odd depth single quotes.
+                let q_fg = child.css_attr.get_color().or(fg);
+                let q_bg = child.css_attr.get_bg_color().or(bg);
+                let q_style = style | block_style(&child.css_attr);
+                let (open, close) = q_quote_pair(arena, child_id);
+                runs.push(InlineRun::new(open.to_string(), q_style, q_fg, q_bg));
+                let q_transform = child.css_attr.get_text_transform();
+                let q_ws = child.white_space_or(white_space);
+                walk_runs(arena, child, q_fg, q_bg, q_style, q_transform, q_ws, runs);
+                runs.push(InlineRun::new(close.to_string(), q_style, q_fg, q_bg));
+            }
+            NodeType::Abbr => {
+                // User-agent default: `abbr[title]` carries a dotted underline
+                // as a tooltip affordance. The terminal has no dotted
+                // underline primitive, so the approximation is a solid
+                // underline; an explicit `text-decoration` (author or
+                // inherited) wins.
+                let fg = child.css_attr.get_color().or(fg);
+                let bg = child.css_attr.get_bg_color().or(bg);
+                let mut st = style | block_style(&child.css_attr);
+                if child.attributes.get("title").is_some()
+                    && !child.css_attr.is_set("text-decoration")
+                {
+                    st |= FontStyle::UNDERLINED;
+                }
+                walk_inline_children(arena, child, fg, bg, st, white_space, runs);
+            }
             NodeType::Code | NodeType::Kbd | NodeType::Samp => {
                 // User-agent default `font-family: monospace` is already the
                 // terminal's native font, so no style bit applies — the
                 // element is kept for CSS / DOM addressing.
+                let fg = child.css_attr.get_color().or(fg);
+                let bg = child.css_attr.get_bg_color().or(bg);
+                walk_inline_children(arena, child, fg, bg, style | block_style(&child.css_attr), white_space, runs);
+            }
+            NodeType::Data | NodeType::Time => {
+                // No UA visual default: plain inline containers like `<span>`.
+                // The `value` / `datetime` attributes are machine-readable
+                // only and carry no visual effect, matching browsers.
                 let fg = child.css_attr.get_color().or(fg);
                 let bg = child.css_attr.get_bg_color().or(bg);
                 walk_inline_children(arena, child, fg, bg, style | block_style(&child.css_attr), white_space, runs);
@@ -226,6 +266,25 @@ fn walk_inline_children(
     let transform = child.css_attr.get_text_transform();
     let ws = child.white_space_or(parent_ws);
     walk_runs(arena, child, fg, bg, style, transform, ws, runs);
+}
+
+/// Quote pair for a `<q>` element based on its nesting depth, mirroring the
+/// CSS `quotes` alternation: even depth uses double quotes (`“`/`”`), odd
+/// depth single quotes (`‘`/`’`).
+fn q_quote_pair(arena: &NodeArena, node_id: NodeId) -> (&'static str, &'static str) {
+    let mut depth = 0usize;
+    let mut current = arena[node_id].parent;
+    while let Some(pid) = current {
+        if arena[pid].node_type == NodeType::Q {
+            depth = depth.saturating_add(1);
+        }
+        current = arena[pid].parent;
+    }
+    if depth % 2 == 0 {
+        ("\u{201C}", "\u{201D}")
+    } else {
+        ("\u{2018}", "\u{2019}")
+    }
 }
 
 /// Apply a [`TextTransform`] to a text node's content.

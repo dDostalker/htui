@@ -176,6 +176,7 @@ htui/
 │       ├── aside/
 │       ├── blockquote/  # 块级引用演示（UA 默认 margin：上下 1 行、左右 4 列；嵌套/边框/背景/作者覆盖）
 │       ├── menu_dl/     # 菜单/描述列表演示（menu 同 ul：`• ` 前缀；dl 上下 1 行；dd 左缩 4 列）
+│       ├── q_abbr/      # 行内引用/缩写演示（q 自动引号嵌套交替；abbr[title] 下划线）
 │       ├── helloworld/
 │       ├── font_styles/  # bold / italic / underline / line-through
 │       ├── list/
