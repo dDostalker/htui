@@ -14,7 +14,9 @@ use std::time::{Duration, Instant};
 
 use crossterm::{
     cursor::{Hide, Show},
-    event::{DisableMouseCapture, EnableMouseCapture},
+    event::{
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    },
     execute,
     style::Color,
     terminal::{
@@ -1304,7 +1306,13 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
         log::error!("Failed to enable raw mode: {}", e);
         return;
     }
-    if let Err(e) = execute!(stdout(), EnterAlternateScreen, EnableMouseCapture, Hide) {
+    if let Err(e) = execute!(
+        stdout(),
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        EnableBracketedPaste,
+        Hide
+    ) {
         log::error!("Failed to enter alternate screen: {}", e);
         if let Err(e2) = disable_raw_mode() {
             log::error!("Failed to disable raw mode during cleanup: {}", e2);
@@ -1747,7 +1755,13 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
         log::error!("Render thread panicked: {}", panic_message(payload.as_ref()));
     }
 
-    if let Err(e) = execute!(stdout(), LeaveAlternateScreen, DisableMouseCapture, Show) {
+    if let Err(e) = execute!(
+        stdout(),
+        LeaveAlternateScreen,
+        DisableMouseCapture,
+        DisableBracketedPaste,
+        Show
+    ) {
         log::error!("Failed to leave alternate screen: {}", e);
     }
     if let Err(e) = disable_raw_mode() {

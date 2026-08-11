@@ -292,7 +292,9 @@ pub struct InputState {
     /// selection.
     pub input_sel_anchor: Option<usize>,
     /// Session clipboard used by `Ctrl+C` / `Ctrl+X` / `Ctrl+V`. Terminal-
-    /// local only (no OSC 52 / system clipboard integration).
+    /// local only: copy stores a selection, paste inserts it (single-line
+    /// fields collapse newlines). System-clipboard paste arrives separately
+    /// through bracketed paste (`Event::Paste`).
     pub input_clipboard: String,
     /// Whether the pointer is mid-drag inside a focused `<input>` (mouse
     /// selection as opposed to a plain click).
@@ -826,6 +828,19 @@ fn apply_ctrl_shortcut(state: &mut InputState, key: KeyCode) -> bool {
         }
         KeyCode::Char('v') => {
             let text = state.input_clipboard.clone();
+            if text.is_empty() {
+                return false;
+            }
+            // Single-line fields collapse newlines from the internal
+            // clipboard (e.g. copied page text) — same rule as bracketed
+            // paste; a `<textarea>` keeps them.
+            let text = if state.focused_is_textarea {
+                text
+            } else {
+                text.chars()
+                    .filter(|c| *c != '\r' && *c != '\n')
+                    .collect::<String>()
+            };
             if text.is_empty() {
                 return false;
             }
@@ -1720,8 +1735,53 @@ pub fn trigger_refresh(
             cmds
         }
 
+        Ok(Event::Paste(pasted)) => {
+            // Bracketed paste (enabled at startup): the terminal delivers the
+            // system clipboard verbatim. Insert it at the caret of the focused
+            // field — `<textarea>` keeps newlines, single-line fields collapse
+            // them — then fire `input` and repaint. Nothing to do when no
+            // field is focused (the terminal already showed the pasted text).
+            if let Some(focused) = state.focused_input {
+                if paste_into_field(state, &pasted, focused, &mut cmds) && arena.is_some() {
+                    msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
+                }
+            }
+            cmds
+        }
+
         _ => cmds,
     }
+}
+
+/// Insert pasted text into the focused field's edit buffer at the caret,
+/// collapsing newlines for single-line fields (kept for `<textarea>`), then
+/// repaint the field. Returns `true` when the value changed (the caller
+/// queues the `input` event). Shared by bracketed paste (`Event::Paste`) and
+/// the internal `Ctrl+V`, so both paths behave identically.
+pub fn paste_into_field(
+    state: &mut InputState,
+    text: &str,
+    focused: NodeId,
+    cmds: &mut Vec<RenderCmd>,
+) -> bool {
+    let text = if state.focused_is_textarea {
+        text.to_string()
+    } else {
+        text.chars()
+            .filter(|c| *c != '\r' && *c != '\n')
+            .collect::<String>()
+    };
+    if text.is_empty() {
+        return false;
+    }
+    let byte = char_to_byte(&state.input_value, state.input_cursor);
+    state.input_value.insert_str(byte, &text);
+    state.input_cursor = state
+        .input_cursor
+        .saturating_add(text.chars().count());
+    state.input_sel_anchor = None;
+    push_input_render(state, focused, cmds);
+    true
 }
 
 /// The page-level built-in action for a key that no `<select>` dropdown or
@@ -1982,9 +2042,14 @@ pub(crate) fn reapply_console_modes() {
     // render thread can hold while blocked on a slow console write — and a
     // fast wheel scroll (large diffs every frame) makes that stall long
     // enough to look like the whole app froze. A sink flushes nothing and
-    // still runs the WinAPI path.
-    if let Err(e) = crossterm::execute!(std::io::sink(), crossterm::event::EnableMouseCapture) {
-        log::error!("Failed to re-enable mouse capture after resize: {}", e);
+    // still runs the WinAPI path. Bracketed paste is re-sent too so a
+    // terminal reset does not silently drop it.
+    if let Err(e) = crossterm::execute!(
+        std::io::sink(),
+        crossterm::event::EnableMouseCapture,
+        crossterm::event::EnableBracketedPaste
+    ) {
+        log::error!("Failed to re-enable input modes after resize: {}", e);
     }
 }
 

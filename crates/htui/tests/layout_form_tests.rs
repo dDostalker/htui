@@ -13,7 +13,7 @@ use htui::layout::layout::TermMap;
 use htui::layout::{BoxConstraint, Cursor, Rect, layout_tree};
 use htui::script::{ScriptEngine, ScriptMsg, apply_message};
 use htui::tdom::node::{NodeArena, NodeId, NodeType};
-use htui::tui::graph_api::{InputState, RenderCmd, TermLayout, handle_click};
+use htui::tui::graph_api::{InputState, RenderCmd, TermLayout, handle_click, paste_into_field};
 
 const COLS: u16 = 80;
 const ROWS: u16 = 24;
@@ -268,6 +268,68 @@ fn test_radio_renders_circle_glyphs() {
         tl.layout.iter().any(|b| b.word == "\u{25C9}"),
         "checked radio must paint `◉`"
     );
+}
+
+// ============================================================
+// bracketed paste
+// ============================================================
+
+#[test]
+fn test_paste_into_single_line_input_collapses_newlines() {
+    // Bracketed paste into a focused `<input>`: `\r` / `\n` collapse so the
+    // single-line field never shows a raw newline.
+    let mut state = InputState::new();
+    state.focused_input = Some(NodeId::default());
+    state.focused_is_textarea = false;
+    state.input_value = "ab".to_string();
+    state.input_cursor = 2;
+    let mut cmds = Vec::new();
+    assert!(paste_into_field(&mut state, "xy\nz", NodeId::default(), &mut cmds));
+    assert_eq!(state.input_value, "abxyz");
+    assert_eq!(state.input_cursor, 5, "caret advances past the pasted text");
+    assert!(
+        cmds.iter().any(|c| matches!(c, RenderCmd::RenderInput { .. })),
+        "paste must repaint the field"
+    );
+}
+
+#[test]
+fn test_paste_into_textarea_keeps_newlines() {
+    let mut state = InputState::new();
+    state.focused_input = Some(NodeId::default());
+    state.focused_is_textarea = true;
+    state.input_value = "ab".to_string();
+    state.input_cursor = 2;
+    let mut cmds = Vec::new();
+    assert!(paste_into_field(&mut state, "xy\nz", NodeId::default(), &mut cmds));
+    assert_eq!(state.input_value, "abxy\nz", "textarea keeps pasted newlines");
+    assert_eq!(state.input_cursor, 6);
+}
+
+#[test]
+fn test_paste_at_caret_inserts_in_middle() {
+    let mut state = InputState::new();
+    state.focused_input = Some(NodeId::default());
+    state.input_value = "abcd".to_string();
+    state.input_cursor = 2;
+    let mut cmds = Vec::new();
+    assert!(paste_into_field(&mut state, "XY", NodeId::default(), &mut cmds));
+    assert_eq!(state.input_value, "abXYcd");
+    assert_eq!(state.input_cursor, 4);
+}
+
+#[test]
+fn test_paste_only_newlines_into_input_is_noop() {
+    let mut state = InputState::new();
+    state.input_value = "ab".to_string();
+    state.input_cursor = 1;
+    state.focused_is_textarea = false;
+    let mut cmds = Vec::new();
+    assert!(
+        !paste_into_field(&mut state, "\r\n", NodeId::default(), &mut cmds),
+        "all-collapsed paste must not touch the value"
+    );
+    assert_eq!(state.input_value, "ab");
 }
 
 // ============================================================
