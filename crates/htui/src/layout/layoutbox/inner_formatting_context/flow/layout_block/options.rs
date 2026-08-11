@@ -7,7 +7,7 @@
 //! [`LayoutBlockOptions`]. The default value is "no special behaviour", so
 //! the common case is `LayoutBlockOptions::default()`.
 
-use crate::layout::InlineRun;
+use crate::layout::{EdgeSizes, InlineRun};
 
 /// Per-element differences layered on top of the shared block-layout pipeline.
 ///
@@ -50,4 +50,9 @@ pub struct LayoutBlockOptions {
     /// `─` glyphs spanning the content-box width — used by `<hr>` to paint a
     /// horizontal rule (the element has no inline content of its own).
     pub hr_rule: bool,
+    /// Browser user-agent default margins applied only when the author has
+    /// not declared a `margin` for that side (mirroring the cascade where
+    /// the UA stylesheet loses to any author declaration). `<blockquote>`
+    /// uses this for its `margin-block: 1em; margin-inline: 40px` default.
+    pub ua_margins: Option<EdgeSizes>,
 }

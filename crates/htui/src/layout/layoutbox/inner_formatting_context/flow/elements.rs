@@ -9,7 +9,7 @@
 
 use crate::{
     layout::{
-        BoxConstraint, Cursor, LayoutBox, LayoutContext,
+        BoxConstraint, Cursor, EdgeSizes, LayoutBox, LayoutContext,
         inner_formatting_context::flow::{LayoutBlockOptions, layout_block},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
@@ -53,6 +53,26 @@ fn address_opts() -> LayoutBlockOptions {
     }
 }
 
+/// Browser UA default margins for `<blockquote>` (`margin-block: 1em`,
+/// `margin-inline: 40px`), adapted to terminal cells: 1 blank row above /
+/// below and 4 columns on each side.
+const BLOCKQUOTE_MARGIN_BLOCK: usize = 1;
+const BLOCKQUOTE_MARGIN_INLINE: usize = 4;
+
+/// `<blockquote>` keeps the browser user-agent margin defaults: one blank
+/// row above/below and a four-column indent on each side.
+fn blockquote_opts() -> LayoutBlockOptions {
+    LayoutBlockOptions {
+        ua_margins: Some(EdgeSizes::new(
+            BLOCKQUOTE_MARGIN_BLOCK,
+            BLOCKQUOTE_MARGIN_INLINE,
+            BLOCKQUOTE_MARGIN_BLOCK,
+            BLOCKQUOTE_MARGIN_INLINE,
+        )),
+        ..Default::default()
+    }
+}
+
 /// Plain block elements handled by [`layout_standard_block`].
 static STANDARD_BLOCK_ELEMENTS: &[BlockElementConfig] = &[
     BlockElementConfig {
@@ -90,6 +110,10 @@ static STANDARD_BLOCK_ELEMENTS: &[BlockElementConfig] = &[
     BlockElementConfig {
         node_type: NodeType::Address,
         opts: address_opts,
+    },
+    BlockElementConfig {
+        node_type: NodeType::BlockQuote,
+        opts: blockquote_opts,
     },
 ];
 

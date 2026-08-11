@@ -8,7 +8,7 @@
 //! right [`LayoutBlockOptions`].
 
 use crate::{
-    html::box_edges::BoxEdges,
+    html::box_edges::{BoxEdges, EdgeSizes},
     html::css_parse::BoxSizing,
     layout::{
         BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext, PaintStyle, Rect,
@@ -61,6 +61,12 @@ pub fn layout_block(
     let edges: BoxEdges =
         node.css_attr
             .get_box_edges(containing.width, child_context.font, child_context.viewport);
+    // Layer the browser UA default margins (`opts.ua_margins`) on top of
+    // the author CSS edges. Each side keeps its UA value only while neither
+    // the `margin` shorthand nor that side's longhand is declared by the
+    // author — the same precedence an author stylesheet has over the UA
+    // stylesheet in the browser cascade.
+    let edges = merge_ua_margins(node, edges, opts.ua_margins);
     let sizing = node.css_attr.get_box_sizing();
     let line_height_cells = resolve_line_height_cells(
         node.css_attr.get_line_height(),
@@ -312,4 +318,29 @@ pub fn layout_block(
         node.css_attr.outer_display(&node.node_type),
         children,
     )
+}
+
+/// Layer the browser UA default margins (`opts.ua_margins`) onto the
+/// resolved CSS edges.
+///
+/// Each side keeps its UA value only while neither the `margin` shorthand
+/// nor that side's longhand is declared by the author — the same precedence
+/// an author stylesheet has over the UA stylesheet in the browser cascade.
+fn merge_ua_margins(node: &Node, mut edges: BoxEdges, ua_margins: Option<EdgeSizes>) -> BoxEdges {
+    let Some(ua) = ua_margins else {
+        return edges;
+    };
+    if !node.css_attr.is_set("margin") && !node.css_attr.is_set("margin-top") {
+        edges.margin.top = ua.top;
+    }
+    if !node.css_attr.is_set("margin") && !node.css_attr.is_set("margin-right") {
+        edges.margin.right = ua.right;
+    }
+    if !node.css_attr.is_set("margin") && !node.css_attr.is_set("margin-bottom") {
+        edges.margin.bottom = ua.bottom;
+    }
+    if !node.css_attr.is_set("margin") && !node.css_attr.is_set("margin-left") {
+        edges.margin.left = ua.left;
+    }
+    edges
 }

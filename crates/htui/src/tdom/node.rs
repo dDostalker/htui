@@ -131,6 +131,11 @@ pub enum NodeType {
     /// that the layout pass applies when neither the element nor an ancestor
     /// has declared an explicit `font-style`.
     Address,
+    /// `<blockquote>` — extended quotation. Block element with browser UA
+    /// default margins (`margin-block: 1em`, `margin-inline: 40px`, adapted
+    /// to 1 row / 4 terminal columns) that are dropped on any side the
+    /// author overrides with an explicit `margin` declaration.
+    BlockQuote,
     Header,
     Footer,
     Nav,
@@ -214,6 +219,7 @@ impl NodeType {
         NodeType::H6,
         NodeType::HGroup,
         NodeType::Address,
+        NodeType::BlockQuote,
         NodeType::Header,
         NodeType::Footer,
         NodeType::Nav,
@@ -388,6 +394,7 @@ impl NodeType {
             NodeType::H6 => "h6",
             NodeType::HGroup => "hgroup",
             NodeType::Address => "address",
+            NodeType::BlockQuote => "blockquote",
             NodeType::Header => "header",
             NodeType::Footer => "footer",
             NodeType::Nav => "nav",

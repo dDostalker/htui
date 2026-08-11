@@ -174,6 +174,7 @@ htui/
 │       ├── events/       # 事件系统交互演示（onclick / hover / 动态重渲染，render_with_events）
 │       ├── header_footer/
 │       ├── aside/
+│       ├── blockquote/  # 块级引用演示（UA 默认 margin：上下 1 行、左右 4 列；嵌套/边框/背景/作者覆盖）
 │       ├── helloworld/
 │       ├── font_styles/  # bold / italic / underline / line-through
 │       ├── list/
