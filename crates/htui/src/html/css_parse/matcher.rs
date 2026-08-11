@@ -1,10 +1,20 @@
-use crate::tdom::node::{NodeArena, NodeId};
+use crate::tdom::node::{NodeArena, NodeId, NodeType};
 
 use super::selector::{Combinator, CompoundSelector, CssSelector, NthExpr, PseudoClass, Selector};
 
 fn matches_css(arena: &NodeArena, node_id: NodeId, sel: &Selector, hovered: Option<NodeId>) -> bool {
     let node = &arena[node_id];
     match sel {
+        // `*` matches every element node, never non-element nodes (text,
+        // comment, document, doctype, document-fragment).
+        Selector::Universal => !matches!(
+            node.node_type,
+            NodeType::Document
+                | NodeType::DocumentType
+                | NodeType::DocumentFragment
+                | NodeType::Text
+                | NodeType::Comment
+        ),
         Selector::Tag(nt) => node.node_type == *nt,
         Selector::Class(name) => node.has_class(name),
         Selector::Id(id) => node

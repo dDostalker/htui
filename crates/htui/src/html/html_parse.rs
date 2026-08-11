@@ -212,59 +212,10 @@ fn load_text(src: &str) -> Result<String, String> {
 /// Maps an HTML tag name to its corresponding [`NodeType`].
 ///
 /// Returns `None` for unsupported tags (they are flattened).
+///
+/// Delegates to [`NodeType::from_tag_name`] — the single tag table shared
+/// with CSS selector parsing — so both mappings can never drift apart.
 #[doc(hidden)]
 pub fn tag_name_to_node_type(tag: &str) -> Option<NodeType> {
-    match tag.to_ascii_lowercase().as_str() {
-        "a" => Some(NodeType::A),
-        "article" => Some(NodeType::Article),
-        "aside" => Some(NodeType::Aside),
-        "body" => Some(NodeType::Body),
-        "caption" => Some(NodeType::Caption),
-        "button" => Some(NodeType::Button),
-        "col" => Some(NodeType::Col),
-        "colgroup" => Some(NodeType::Colgroup),
-        "details" => Some(NodeType::Details),
-        "td" => Some(NodeType::Td),
-        "th" => Some(NodeType::Th),
-        "tr" => Some(NodeType::Tr),
-        "thead" => Some(NodeType::Thead),
-        "tbody" => Some(NodeType::Tbody),
-        "tfoot" => Some(NodeType::Tfoot),
-        "div" => Some(NodeType::Div),
-        "em" => Some(NodeType::Em),
-        "figcaption" => Some(NodeType::Figcaption),
-        "figure" => Some(NodeType::Figure),
-        "footer" => Some(NodeType::Footer),
-        "form" => Some(NodeType::Form),
-        "h1" => Some(NodeType::H1),
-        "h2" => Some(NodeType::H2),
-        "h3" => Some(NodeType::H3),
-        "h4" => Some(NodeType::H4),
-        "h5" => Some(NodeType::H5),
-        "head" => Some(NodeType::Head),
-        "header" => Some(NodeType::Header),
-        "html" => Some(NodeType::Html),
-        "img" => Some(NodeType::Img),
-        "input" => Some(NodeType::Input),
-        "label" => Some(NodeType::Label),
-        "li" => Some(NodeType::Li),
-        "link" => Some(NodeType::Link),
-        "main" => Some(NodeType::Main),
-        "meta" => Some(NodeType::Meta),
-        "nav" => Some(NodeType::Nav),
-        "ol" => Some(NodeType::Ol),
-        "option" => Some(NodeType::HtmlOption),
-        "p" => Some(NodeType::P),
-        "pre" => Some(NodeType::Pre),
-        "section" => Some(NodeType::Section),
-        "select" => Some(NodeType::Select),
-        "span" => Some(NodeType::Span),
-        "style" => Some(NodeType::Style),
-        "summary" => Some(NodeType::Summary),
-        "table" => Some(NodeType::Table),
-        "textarea" => Some(NodeType::Textarea),
-        "title" => Some(NodeType::Title),
-        "ul" => Some(NodeType::Ul),
-        _ => None,
-    }
+    NodeType::from_tag_name(tag)
 }

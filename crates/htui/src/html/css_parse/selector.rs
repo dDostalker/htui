@@ -81,6 +81,9 @@ pub enum PseudoClass {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Selector {
+    /// `*` — the universal selector: matches any element (never text,
+    /// comment or document nodes). Contributes nothing to specificity.
+    Universal,
     Tag(NodeType),
     Class(String),
     Id(String),
@@ -158,6 +161,9 @@ impl CssSelector {
         for compound in &self.compounds {
             for sel in compound {
                 match sel {
+                    // The universal selector contributes nothing to
+                    // specificity (CSS spec: `*` is worth `(0,0,0)`).
+                    Selector::Universal => {}
                     Selector::Id(_) => spec.0 += 1,
                     Selector::Class(_) | Selector::PseudoClass(_) | Selector::NthChild(_) => {
                         spec.1 += 1
@@ -346,7 +352,11 @@ fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, SelectorErro
                 if tag.is_empty() {
                     return Err(SelectorError::InvalidTag);
                 }
-                out.push(Selector::Tag(tag_str_to_node_type(&tag)?));
+                if tag == "*" {
+                    out.push(Selector::Universal);
+                } else {
+                    out.push(Selector::Tag(tag_str_to_node_type(&tag)?));
+                }
             }
         }
     }
@@ -425,58 +435,8 @@ fn parse_nth_child_arg(s: &str) -> Option<NthExpr> {
 }
 
 fn tag_str_to_node_type(tag: &str) -> std::result::Result<NodeType, SelectorError> {
-    let t = tag.to_ascii_lowercase();
-    match t.as_str() {
-        "a" => Ok(NodeType::A),
-        "article" => Ok(NodeType::Article),
-        "aside" => Ok(NodeType::Aside),
-        "body" => Ok(NodeType::Body),
-        "button" => Ok(NodeType::Button),
-        "caption" => Ok(NodeType::Caption),
-        "col" => Ok(NodeType::Col),
-        "colgroup" => Ok(NodeType::Colgroup),
-        "details" => Ok(NodeType::Details),
-        "td" => Ok(NodeType::Td),
-        "th" => Ok(NodeType::Th),
-        "tr" => Ok(NodeType::Tr),
-        "thead" => Ok(NodeType::Thead),
-        "tbody" => Ok(NodeType::Tbody),
-        "tfoot" => Ok(NodeType::Tfoot),
-        "div" => Ok(NodeType::Div),
-        "em" => Ok(NodeType::Em),
-        "figcaption" => Ok(NodeType::Figcaption),
-        "figure" => Ok(NodeType::Figure),
-        "footer" => Ok(NodeType::Footer),
-        "form" => Ok(NodeType::Form),
-        "header" => Ok(NodeType::Header),
-        "h1" => Ok(NodeType::H1),
-        "h2" => Ok(NodeType::H2),
-        "h3" => Ok(NodeType::H3),
-        "h4" => Ok(NodeType::H4),
-        "h5" => Ok(NodeType::H5),
-        "head" => Ok(NodeType::Head),
-        "option" => Ok(NodeType::HtmlOption),
-        "html" => Ok(NodeType::Html),
-        "img" => Ok(NodeType::Img),
-        "input" => Ok(NodeType::Input),
-        "label" => Ok(NodeType::Label),
-        "li" => Ok(NodeType::Li),
-        "link" => Ok(NodeType::Link),
-        "main" => Ok(NodeType::Main),
-        "meta" => Ok(NodeType::Meta),
-        "nav" => Ok(NodeType::Nav),
-        "ol" => Ok(NodeType::Ol),
-        "p" => Ok(NodeType::P),
-        "pre" => Ok(NodeType::Pre),
-        "section" => Ok(NodeType::Section),
-        "select" => Ok(NodeType::Select),
-        "span" => Ok(NodeType::Span),
-        "style" => Ok(NodeType::Style),
-        "summary" => Ok(NodeType::Summary),
-        "table" => Ok(NodeType::Table),
-        "textarea" => Ok(NodeType::Textarea),
-        "title" => Ok(NodeType::Title),
-        "ul" => Ok(NodeType::Ul),
-        _ => Err(SelectorError::UnsupportedTag(tag.to_string())),
-    }
+    // Reverse lookup against the single tag table on [`NodeType`] — see
+    // [`NodeType::from_tag_name`]. Keeps the selector mapping in sync with
+    // the HTML parser and the DOM's `tag_name` by construction.
+    NodeType::from_tag_name(tag).ok_or_else(|| SelectorError::UnsupportedTag(tag.to_string()))
 }

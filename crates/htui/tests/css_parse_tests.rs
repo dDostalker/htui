@@ -4,10 +4,11 @@ use crossterm::style::Color;
 use htui::html::css_parse::{
     BorderStyle, BoxSizing, Combinator, CornerRadii, CssAttr, CssRule, CssSelector, EdgeSizes,
     FontContext, FontWeight, INHERITED_PROPS, Length, LengthContext, LineHeight, NthExpr,
-    PX_PER_CELL, Parser, SUPPORTED_PROPERTIES, TextDecoration, TextTransform, Viewport,
+    PX_PER_CELL, Parser, SUPPORTED_PROPERTIES, Selector, TextDecoration, TextTransform, Viewport,
     css_into_node, parse_color_str, parse_declaration_text, resolve_line_height_cells,
     selector_chain_matches,
 };
+use htui::html::html_parse;
 use htui::tdom::node::{Node, NodeArena, NodeId, NodeType};
 use indexmap::IndexMap;
 
@@ -319,6 +320,135 @@ fn test_css_selector_matches_title_and_meta() {
     // Cross-tag sanity: the wrong selector must not match.
     assert!(!selector_chain_matches(&arena, meta_id, &title_sel));
     assert!(!selector_chain_matches(&arena, title_id, &meta_sel));
+}
+
+#[test]
+fn test_universal_selector_parses_and_matches_elements_only() {
+    // `*` must parse to the `Universal` variant, match every element node,
+    // and never match non-element nodes (text / comment / document).
+    init();
+    let mut arena = NodeArena::default();
+    let (root, div_id) = build_test(&mut arena);
+    let sel: CssSelector = "*".parse().unwrap();
+    assert_eq!(sel.compounds.len(), 1);
+    assert_eq!(sel.compounds[0], vec![Selector::Universal]);
+
+    let p_id = arena[div_id].children[0];
+    let text_id = arena[p_id].children[0];
+    // Elements match the universal selector.
+    assert!(selector_chain_matches(&arena, div_id, &sel));
+    assert!(selector_chain_matches(&arena, p_id, &sel));
+    // Non-element nodes never match.
+    assert!(!selector_chain_matches(&arena, root, &sel));
+    assert!(!selector_chain_matches(&arena, text_id, &sel));
+}
+
+#[test]
+fn test_universal_selector_in_compound_and_descendant() {
+    // `*.foo` and `div *` are the standard ways the universal selector
+    // combines with classes and combinators.
+    init();
+    let mut arena = NodeArena::default();
+    let (root, div_id) = build_test(&mut arena);
+    let compound_sel: CssSelector = "*.active".parse().unwrap();
+    assert!(selector_chain_matches(&arena, div_id, &compound_sel));
+
+    let descendant_sel: CssSelector = "div *".parse().unwrap();
+    let p_id = arena[div_id].children[0];
+    assert!(selector_chain_matches(&arena, p_id, &descendant_sel));
+    // The div itself is not a descendant of itself.
+    assert!(!selector_chain_matches(&arena, div_id, &descendant_sel));
+}
+
+#[test]
+fn test_universal_selector_specificity_is_zero() {
+    // Per the CSS spec `*` contributes (0,0,0), so `* div` and `div` tie;
+    // a rule combining the two must not outrank the plain type selector.
+    init();
+    let univ: CssSelector = "*".parse().unwrap();
+    let tag: CssSelector = "div".parse().unwrap();
+    let chain: CssSelector = "* div".parse().unwrap();
+    assert_eq!(univ.specificity(), (0, 0, 0));
+    assert_eq!(chain.specificity(), tag.specificity());
+}
+
+#[test]
+fn test_universal_selector_cascades_to_elements_not_text() {
+    // A `* { background-color: red }` rule must paint every element but leave
+    // text nodes untouched — the cascade visits the whole subtree, so the
+    // matcher's element-only guard is what keeps text unstyled. (An inheritable
+    // property like `color` would reach text nodes through inheritance, so the
+    // test uses `background-color`, which does not inherit.)
+    init();
+    let mut arena = NodeArena::default();
+    let (root, _) = build_test(&mut arena);
+    let mut css = CssRule::new();
+    let sel: CssSelector = "*".parse().unwrap();
+    let mut m = IndexMap::new();
+    m.insert("background-color".into(), "red".into());
+    css.add(sel, CssAttr(m));
+    css_into_node(&mut arena, root, &css);
+
+    let div_id = arena[root].children[0];
+    let p_id = arena[div_id].children[0];
+    let text_id = arena[p_id].children[0];
+    assert!(arena[div_id].css_attr.get_bg_color().is_some());
+    assert!(arena[p_id].css_attr.get_bg_color().is_some());
+    assert!(arena[text_id].css_attr.get_bg_color().is_none());
+}
+
+#[test]
+fn test_e_type_selector_covers_every_element_tag() {
+    // Completeness: every element `NodeType` must be addressable by a CSS
+    // type selector, and the three tag lookups (DOM `tag_name`, HTML parser
+    // map, selector parser) must agree. `NodeType::ALL` is the single
+    // enumeration — a new element variant that forgets `tag_name` /
+    // `from_tag_name` fails here instead of silently matching nothing.
+    init();
+    let mut arena = NodeArena::default();
+    for nt in NodeType::ALL {
+        match nt.tag_name() {
+            Some(tag) => {
+                // Round-trip through the shared reverse lookup.
+                assert_eq!(NodeType::from_tag_name(tag), Some(*nt));
+                assert_eq!(html_parse::tag_name_to_node_type(tag), Some(*nt));
+                // The selector parser must accept the tag as a type selector
+                // and match a node of exactly that type.
+                let sel: CssSelector = tag
+                    .parse()
+                    .unwrap_or_else(|e| panic!("tag {tag} failed as a selector: {e}"));
+                let node_id = arena.insert(Node::from(*nt));
+                assert!(
+                    selector_chain_matches(&arena, node_id, &sel),
+                    "selector `{tag}` must match its node type"
+                );
+            }
+            None => {
+                // Document-structure nodes have no tag name and must not be
+                // creatable from a tag string.
+                assert!(
+                    matches!(
+                        nt,
+                        NodeType::Document
+                            | NodeType::DocumentType
+                            | NodeType::DocumentFragment
+                            | NodeType::Text
+                            | NodeType::Comment
+                    ),
+                    "{nt:?} is an element but has no tag name"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_e_type_selector_rejects_unknown_tag() {
+    // Unknown tags must still fail to parse (the rule is dropped), never
+    // silently matching nothing.
+    init();
+    assert!("madeup".parse::<CssSelector>().is_err());
+    assert!("div strong".parse::<CssSelector>().is_err());
 }
 
 #[test]

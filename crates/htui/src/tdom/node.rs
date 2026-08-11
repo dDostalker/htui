@@ -99,6 +99,68 @@ pub enum NodeType {
 }
 
 impl NodeType {
+    /// Every [`NodeType`] variant, in declaration order. The single
+    /// enumeration used by [`NodeType::from_tag_name`] and by completeness
+    /// tests that prove every element variant is addressable (CSS type
+    /// selector, HTML parser, …).
+    pub const ALL: &[NodeType] = &[
+        NodeType::Document,
+        NodeType::DocumentType,
+        NodeType::DocumentFragment,
+        NodeType::Text,
+        NodeType::Comment,
+        NodeType::Span,
+        NodeType::Div,
+        NodeType::P,
+        NodeType::Pre,
+        NodeType::Img,
+        NodeType::A,
+        NodeType::Em,
+        NodeType::Html,
+        NodeType::Body,
+        NodeType::Head,
+        NodeType::Title,
+        NodeType::Meta,
+        NodeType::H1,
+        NodeType::H2,
+        NodeType::H3,
+        NodeType::H4,
+        NodeType::H5,
+        NodeType::Header,
+        NodeType::Footer,
+        NodeType::Nav,
+        NodeType::Main,
+        NodeType::Section,
+        NodeType::Article,
+        NodeType::Aside,
+        NodeType::Figure,
+        NodeType::Figcaption,
+        NodeType::Details,
+        NodeType::Summary,
+        NodeType::Ul,
+        NodeType::Ol,
+        NodeType::Li,
+        NodeType::Table,
+        NodeType::Thead,
+        NodeType::Tbody,
+        NodeType::Tfoot,
+        NodeType::Tr,
+        NodeType::Th,
+        NodeType::Td,
+        NodeType::Caption,
+        NodeType::Colgroup,
+        NodeType::Col,
+        NodeType::Input,
+        NodeType::Form,
+        NodeType::Select,
+        NodeType::HtmlOption,
+        NodeType::Button,
+        NodeType::Textarea,
+        NodeType::Label,
+        NodeType::Style,
+        NodeType::Link,
+    ];
+
     pub fn is_self_closing(&self) -> bool {
         matches!(self, NodeType::Img | NodeType::Input | NodeType::Meta)
     }
@@ -226,6 +288,23 @@ impl NodeType {
             NodeType::Link => "link",
             _ => return None,
         })
+    }
+
+    /// Reverse of [`NodeType::tag_name`]: the element variant whose lowercase
+    /// tag name is `tag`, or `None` when `tag` does not name a supported
+    /// element (document-structure nodes have no tag name and never match).
+    ///
+    /// Derived from [`NodeType::ALL`] + [`NodeType::tag_name`] so there is
+    /// exactly one tag table to keep in sync. The CSS selector parser
+    /// ([`crate::html::css_parse::selector`]) and the HTML parser
+    /// ([`crate::html::html_parse::tag_name_to_node_type`]) both delegate
+    /// here.
+    pub fn from_tag_name(tag: &str) -> Option<NodeType> {
+        let t = tag.to_ascii_lowercase();
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|nt| nt.tag_name() == Some(t.as_str()))
     }
 }
 

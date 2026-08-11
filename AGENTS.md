@@ -360,9 +360,8 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
 `layoutbox/inner_formatting_context/flow/` 增加 `LayoutFn` 并注册到
 `DEFAULT_LAYOUT`；flex、table、replaced element 由 geometry 分类分派。
 不要用字符串匹配代替 `NodeType` 枚举。新增标签必须：
-- 在 `tdom::node::NodeType` 枚举中添加变体
-- 在 `html_parse::tag_name_to_node_type()` 中添加映射
-- 在 `css_parse::tag_str_to_node_type()` 中添加 CSS 选择器映射
+- 在 `tdom::node::NodeType` 枚举中添加变体，并同步加入 `NodeType::ALL`
+- 在 `NodeType::tag_name()` 中登记标签名（`from_tag_name()`、`html_parse::tag_name_to_node_type()`、CSS 选择器类型映射均派生自它，无需重复维护）
 
 通过 `Node.css_attr`（类型 `CssAttr`）访问已解析的 CSS 属性。不要直接解析 style 属性字符串。
 使用 `log::debug! / info! / warn! / error!`，不要使用 `println!` 进行调试输出。
@@ -400,13 +399,12 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
 ## 添加新 HTML 元素支持 — 操作清单
 
 当你需要支持一个新的 HTML 标签时，
-1. **`tdom/node.rs`** — 在 `NodeType` 枚举中加入变体
-2. **`html/html_parse.rs`** — 在 `tag_name_to_node_type()` 中添加映射
-3. **`html/css_parse/stylesheet.rs`** — 在 `tag_str_to_node_type()` 中添加 CSS 选择器映射
-4. **`layout/layoutbox/generation/`** — 添加盒类型与 display/formatting-context 分类
-5. **`layout/layoutbox/geometry/`** — 如需专用几何算法，添加分类分派
-6. **`layout/layoutbox/inner_formatting_context/flow/`** — 仅特殊 normal-flow 元素新增 `LayoutFn`
-7. **`layout/mod.rs`** — 仅 normal-flow 标签适配器加入 `DEFAULT_LAYOUT`
+1. **`tdom/node.rs`** — 在 `NodeType` 枚举中加入变体，并同步加入 `NodeType::ALL`
+2. **`tdom/node.rs`** — 在 `NodeType::tag_name()` 中登记标签名（`from_tag_name` / `html_parse::tag_name_to_node_type` / CSS 选择器类型映射均派生自它，测试 `css_parse_tests::test_e_type_selector_covers_every_element_tag` 锁完备性）
+3. **`layout/layoutbox/generation/`** — 添加盒类型与 display/formatting-context 分类
+4. **`layout/layoutbox/geometry/`** — 如需专用几何算法，添加分类分派
+5. **`layout/layoutbox/inner_formatting_context/flow/`** — 仅特殊 normal-flow 元素新增 `LayoutFn`
+6. **`layout/mod.rs`** — 仅 normal-flow 标签适配器加入 `DEFAULT_LAYOUT`
 
 
 ## 关键类型速查
