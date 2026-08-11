@@ -349,7 +349,7 @@ fn test_universal_selector_in_compound_and_descendant() {
     // combines with classes and combinators.
     init();
     let mut arena = NodeArena::default();
-    let (root, div_id) = build_test(&mut arena);
+    let (_, div_id) = build_test(&mut arena);
     let compound_sel: CssSelector = "*.active".parse().unwrap();
     assert!(selector_chain_matches(&arena, div_id, &compound_sel));
 
