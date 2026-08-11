@@ -2,7 +2,7 @@ use htui::html::html_parse::Parser;
 use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
 use htui::tdom::node::{NodeArena, NodeId};
-use htui::tui::graph_api::TermLayout;
+use htui::tui::graph_api::{FontStyle, TermLayout};
 
 fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
@@ -278,4 +278,128 @@ fn term_layout_caps_an_extreme_but_plausible_viewport() {
     };
     let tl = TermLayout::new(&term_map, 1.0);
     assert!(tl.layout.len() <= 1000 * 500);
+}
+
+// ============================================================
+// <h6> / <hgroup> / <address>
+// ============================================================
+
+#[test]
+fn test_layout_h6_prefix_renders() {
+    init();
+    let html = "<h6>Small</h6>";
+    let css = "";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let cols = term_map.columns as usize;
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    // h6's default `0.67em` rounds to 1 cell per char (like h4/h5), so the
+    // `###### ` prefix paints six plain '#' glyphs followed by a space.
+    let hash_idx = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "#")
+        .expect("h6 '######' prefix should render");
+    let row = hash_idx / cols;
+    let rstart = row * cols;
+    let row_cells = &tl.layout[rstart..rstart + cols];
+    let prefix: String = row_cells[0..7].iter().map(|b| b.word.as_str()).collect();
+    assert_eq!(prefix, "###### ", "h6 must render the 6-level markdown prefix");
+    let text: String = row_cells[7..12].iter().map(|b| b.word.as_str()).collect();
+    assert_eq!(text, "Small", "heading text must follow the prefix on the same row");
+}
+
+#[test]
+fn test_layout_hgroup_renders_heading_children() {
+    init();
+    // `<hgroup>` is a plain block container: its members (headings, and a
+    // trailing <p>) keep their own block rendering. h4 defaults to 1 cell
+    // per char so the canvas string is unambiguous.
+    let html = "<hgroup><h4>Grouped</h4><p>tagline</p></hgroup>";
+    let css = "";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
+    assert!(
+        canvas.contains("#### Grouped"),
+        "hgroup member heading must render with its own prefix"
+    );
+    assert!(
+        canvas.contains("tagline"),
+        "hgroup's trailing <p> child must render"
+    );
+}
+
+#[test]
+fn test_layout_address_italic_default() {
+    init();
+    // Browser UA default: unstyled `<address>` renders italic.
+    let html = "<address>Contact</address>";
+    let css = "";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let idx = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "C")
+        .expect("address text must render");
+    let cell = &tl.layout[idx];
+    assert!(
+        cell.style.contains(FontStyle::ITALIC),
+        "default <address> rendering must be italic (got style {:?})",
+        cell.style
+    );
+}
+
+#[test]
+fn test_layout_address_font_style_normal_disables_italic() {
+    init();
+    // Author CSS resetting the UA default must take effect.
+    let html = "<address>Contact</address>";
+    let css = "address { font-style: normal; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let idx = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "C")
+        .expect("address text must render");
+    let cell = &tl.layout[idx];
+    assert!(
+        !cell.style.contains(FontStyle::ITALIC),
+        "`address {{ font-style: normal }}` must suppress the UA italic default (got {:?})",
+        cell.style
+    );
+}
+
+#[test]
+fn test_layout_address_inherits_italic_from_ancestor() {
+    init();
+    // font-style is inherited: an ancestor rule must win over (and satisfy)
+    // the UA default without an explicit rule on the address itself.
+    let html = "<div><address>Contact</address></div>";
+    let css = "div { font-style: italic; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let idx = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "C")
+        .expect("address text must render");
+    let cell = &tl.layout[idx];
+    assert!(
+        cell.style.contains(FontStyle::ITALIC),
+        "<address> must inherit font-style from its ancestor (got {:?})",
+        cell.style
+    );
 }

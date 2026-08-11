@@ -63,6 +63,19 @@ pub enum NodeType {
     H3,
     H4,
     H5,
+    /// `<h6>` — the smallest heading level. Block element with browser
+    /// default `font-size: 0.67em` and a `###### ` markdown prefix, rendered
+    /// through the same heading pipeline as `<h1>`–`<h5>`.
+    H6,
+    /// `<hgroup>` — a heading group (`<h1>`–`<h6>` members, possibly with a
+    /// single `<p>`). Rendered as a plain block container; the members keep
+    /// their own heading styling.
+    HGroup,
+    /// `<address>` — contact information for the nearest article or body
+    /// ancestor. Block element with browser default `font-style: italic`
+    /// that the layout pass applies when neither the element nor an ancestor
+    /// has declared an explicit `font-style`.
+    Address,
     Header,
     Footer,
     Nav,
@@ -126,6 +139,9 @@ impl NodeType {
         NodeType::H3,
         NodeType::H4,
         NodeType::H5,
+        NodeType::H6,
+        NodeType::HGroup,
+        NodeType::Address,
         NodeType::Header,
         NodeType::Footer,
         NodeType::Nav,
@@ -201,8 +217,8 @@ impl NodeType {
     ///
     /// Browser defaults for headings (CSS 2.1 / user-agent stylesheet):
     /// `h1 = 2em`, `h2 = 1.5em`, `h3 = 1.17em`, `h4 = 1em`,
-    /// `h5 = 0.83em`. Every other element inherits the parent's font-size
-    /// (returns `None`).
+    /// `h5 = 0.83em`, `h6 = 0.67em`. Every other element inherits the
+    /// parent's font-size (returns `None`).
     ///
     /// Values are rounded toward the nearest integer cell when applied
     /// (`1.5em` → 2 cells, `0.83em` → 1 cell); see
@@ -214,6 +230,7 @@ impl NodeType {
             NodeType::H3 => Some(1.17),
             NodeType::H4 => Some(1.0),
             NodeType::H5 => Some(0.83),
+            NodeType::H6 => Some(0.67),
             _ => None,
         }
     }
@@ -253,6 +270,9 @@ impl NodeType {
             NodeType::H3 => "h3",
             NodeType::H4 => "h4",
             NodeType::H5 => "h5",
+            NodeType::H6 => "h6",
+            NodeType::HGroup => "hgroup",
+            NodeType::Address => "address",
             NodeType::Header => "header",
             NodeType::Footer => "footer",
             NodeType::Nav => "nav",

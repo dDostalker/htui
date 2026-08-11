@@ -16,7 +16,7 @@ use crate::{
         layoutbox::{collect_runs, wrap_runs},
     },
     tdom::node::{Node, NodeArena, NodeId, effective_font_size_cells},
-    tui::graph_api::block_style,
+    tui::graph_api::{FontStyle, block_style},
 };
 
 use crate::html::css_parse::resolve_line_height_cells;
@@ -120,7 +120,14 @@ pub fn layout_block(
     };
     let block_fg = node.css_attr.get_color();
     let block_bg = node.css_attr.get_bg_color();
-    let block_font_style = block_style(&node.css_attr);
+    let mut block_font_style = block_style(&node.css_attr);
+    // User-agent default: `<address>` renders italic. Anything the author
+    // (or an ancestor rule) declared for `font-style` takes precedence —
+    // `address { font-style: normal }` is honoured (same cascade-precedence
+    // rule the `<em>` UA default follows).
+    if opts.ua_italic && !node.css_attr.is_set("font-style") {
+        block_font_style |= FontStyle::ITALIC;
+    }
     let body_runs = collect_runs(arena, node, block_fg, block_bg, block_font_style);
     let fill_bg = block_bg.is_some() || opts.fill_bg_default;
 

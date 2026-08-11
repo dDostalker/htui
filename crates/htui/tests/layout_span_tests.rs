@@ -1,6 +1,6 @@
 //! Tests for `<span>` layout + run-level rendering.
 //!
-//! Each block-level layout function (p, div, h1-h5, header, footer, aside)
+//! Each block-level layout function (p, div, h1-h6, header, footer, aside)
 //! splits its inline children into one `InlineRun` per `<span>` boundary so
 //! the paint phase can apply each run's own `FontStyle` / colour. These
 //! tests lock down the run-level behaviour by inspecting the rendered canvas

@@ -9,8 +9,8 @@ use crate::{
 
 /// Markdown-style prefix prepended to every heading level.
 ///
-/// `<h1>` → `# `, `<h2>` → `## `, etc. Up to 5 levels match the supported
-/// `NodeType::H1..H5` variants.
+/// `<h1>` → `# `, `<h2>` → `## `, etc. Up to 6 levels match the supported
+/// `NodeType::H1..H6` variants.
 fn heading_prefix(node_type: &NodeType) -> Option<&'static str> {
     match node_type {
         NodeType::H1 => Some("# "),
@@ -18,18 +18,19 @@ fn heading_prefix(node_type: &NodeType) -> Option<&'static str> {
         NodeType::H3 => Some("### "),
         NodeType::H4 => Some("#### "),
         NodeType::H5 => Some("##### "),
+        NodeType::H6 => Some("###### "),
         _ => None,
     }
 }
 
-/// Build a [`LayoutBox`] for an `<h1>`–`<h5>` element.
+/// Build a [`LayoutBox`] for an `<h1>`–`<h6>` element.
 ///
 /// Headings are block elements with a font-size that defaults to
-/// `2em / 1.5em / 1.17em / 1em / 0.83em` (see
+/// `2em / 1.5em / 1.17em / 1em / 0.83em / 0.67em` (see
 /// [`NodeType::default_font_size_em`]) and a markdown-style prefix (`# `,
-/// `## `, …) that paints in the heading's own foreground so visual nesting
-/// mirrors the source level. `text-align`, `color`, and `background-color`
-/// are applied the same way as on `<p>` / `<div>`.
+/// `## `, … `###### `) that paints in the heading's own foreground so visual
+/// nesting mirrors the source level. `text-align`, `color`, and
+/// `background-color` are applied the same way as on `<p>` / `<div>`.
 pub fn layout_hn(
     arena: &NodeArena,
     node_id: NodeId,

@@ -45,6 +45,14 @@ fn header_footer_opts() -> LayoutBlockOptions {
     }
 }
 
+/// `<address>` keeps the browser user-agent `font-style: italic` default.
+fn address_opts() -> LayoutBlockOptions {
+    LayoutBlockOptions {
+        ua_italic: true,
+        ..Default::default()
+    }
+}
+
 /// Plain block elements handled by [`layout_standard_block`].
 static STANDARD_BLOCK_ELEMENTS: &[BlockElementConfig] = &[
     BlockElementConfig {
@@ -74,6 +82,14 @@ static STANDARD_BLOCK_ELEMENTS: &[BlockElementConfig] = &[
     BlockElementConfig {
         node_type: NodeType::Footer,
         opts: header_footer_opts,
+    },
+    BlockElementConfig {
+        node_type: NodeType::HGroup,
+        opts: default_opts,
+    },
+    BlockElementConfig {
+        node_type: NodeType::Address,
+        opts: address_opts,
     },
 ];
 

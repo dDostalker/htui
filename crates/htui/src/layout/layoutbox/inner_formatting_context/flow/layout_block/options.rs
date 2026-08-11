@@ -42,4 +42,8 @@ pub struct LayoutBlockOptions {
     /// into the same semantics via `fill_bg_default` (currently just the
     /// chrome trio).
     pub chrome: bool,
+    /// Applies the browser user-agent `font-style: italic` default when no
+    /// rule (author CSS or inherited value) has set `font-style` on the
+    /// element — used by `<address>` the same way `<em>` does inline.
+    pub ua_italic: bool,
 }

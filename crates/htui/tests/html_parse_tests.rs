@@ -49,6 +49,65 @@ fn test_tag_map_metadata() {
 }
 
 #[test]
+fn test_tag_map_heading_group_and_address() {
+    // `<h6>` / `<hgroup>` / `<address>` must map to their own `NodeType`
+    // (they used to be flattened by the HTML parser), and the case
+    // normalisation must match the browser's tag-name handling.
+    init();
+    assert_eq!(
+        html_parse::tag_name_to_node_type("h6"),
+        Some(NodeType::H6)
+    );
+    assert_eq!(
+        html_parse::tag_name_to_node_type("H6"),
+        Some(NodeType::H6)
+    );
+    assert_eq!(
+        html_parse::tag_name_to_node_type("hgroup"),
+        Some(NodeType::HGroup)
+    );
+    assert_eq!(
+        html_parse::tag_name_to_node_type("address"),
+        Some(NodeType::Address)
+    );
+}
+
+#[test]
+fn test_parse_h6_hgroup_address_keeps_dom_tree() {
+    // The three tags must survive parsing as real element nodes (not be
+    // flattened), so CSS selectors and the layout pass can address them.
+    init();
+    let html = "<h6>Small</h6><hgroup><h2>Grouped</h2></hgroup><address>Contact</address>";
+    let (root, arena, _) = Parser::new(html).parse();
+    // html5ever hoists flow content into an implicit <body>.
+    let html_id = arena[root].children[0];
+    let body_id = arena[html_id]
+        .children
+        .iter()
+        .copied()
+        .find(|&id| arena[id].node_type == NodeType::Body)
+        .expect("flow content must land in <body>");
+    let body = &arena[body_id];
+    let node_types: Vec<NodeType> = body
+        .children
+        .iter()
+        .map(|&id| arena[id].node_type)
+        .collect();
+    assert_eq!(
+        node_types,
+        vec![NodeType::H6, NodeType::HGroup, NodeType::Address],
+        "h6/hgroup/address must not be flattened"
+    );
+    let hgroup_id = body.children[1];
+    assert_eq!(arena[hgroup_id].children.len(), 1);
+    assert_eq!(
+        arena[arena[hgroup_id].children[0]].node_type,
+        NodeType::H2,
+        "<hgroup> must keep its heading members as children"
+    );
+}
+
+#[test]
 fn test_parse_basic() {
     init();
     let mut p = Parser::new("<div><p>Hello</p></div>");
