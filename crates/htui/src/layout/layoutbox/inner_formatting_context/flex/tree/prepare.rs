@@ -384,7 +384,7 @@ fn natural_intrinsic_size(
         // Mirror the block layout's inline-run walker: whitespace-only text
         // that the walker drops (collapsing `white-space`) must not add a
         // phantom inline row to the intrinsic height.
-        let has_inline = !collect_runs(arena, node, None, None, FontStyle::empty()).is_empty()
+        let has_inline = !collect_runs(arena, node_id, node, None, None, FontStyle::empty()).is_empty()
             || text_w > 0;
         if has_inline {
             // Intrinsic (max-content) measurement does not wrap, so a

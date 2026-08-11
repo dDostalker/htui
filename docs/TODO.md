@@ -5,7 +5,6 @@
 - <textarea> !
 - focus()/blur()
 - document.createTextNode
-- <details>/<summary>
 
 # B
 - <dl>/<dt>/<dd>

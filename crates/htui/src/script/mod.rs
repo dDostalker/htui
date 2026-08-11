@@ -648,6 +648,25 @@ impl ScriptEngine {
         st.dirty.nodes.push(node_id);
     }
 
+    /// Toggle the `open` attribute of a `<details>` element and mark it dirty.
+    ///
+    /// The native disclosure-widget default action (clicking the `<summary>`)
+    /// calls this: the presence of `open` decides whether the element renders
+    /// its content, so the dirty marker routes a re-render through the usual
+    /// `RenderArena` path.
+    pub fn toggle_details(&mut self, node_id: NodeId) {
+        let mut st = self.state.borrow_mut();
+        let Some(node) = st.arena.get_mut(node_id) else {
+            return;
+        };
+        if node.attributes.contains_key("open") {
+            node.attributes.remove("open");
+        } else {
+            node.attributes.insert("open".to_string(), String::new());
+        }
+        st.dirty.nodes.push(node_id);
+    }
+
     /// Dispatch a DOM event along the hit region's ancestor path.
     ///
     /// Builds a JS `Event` object, walks `region.path` target-first and fires
@@ -849,6 +868,7 @@ impl ScriptEngine {
             EventType::KeyUp => "keyup",
             EventType::Submit => "submit",
             EventType::Reset => "reset",
+            EventType::Toggle => "toggle",
         };
 
         let mut init = ObjectInitializer::new(&mut self.context);
@@ -997,6 +1017,7 @@ fn compile_attribute_listeners(
                     ("onkeyup", EventType::KeyUp),
                     ("onsubmit", EventType::Submit),
                     ("onreset", EventType::Reset),
+                    ("ontoggle", EventType::Toggle),
                 ]
                 .iter()
                 .filter_map(|(attr, et)| n.attributes.get(*attr).cloned().map(|b| (b, *et)))

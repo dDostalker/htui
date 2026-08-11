@@ -10,6 +10,7 @@
 use crossterm::style::Color;
 
 use super::InlineRun;
+use super::generation::visible_children;
 use crate::{
     html::css_parse::{TextTransform, WhiteSpace},
     tdom::node::{Node, NodeArena, NodeId, NodeType},
@@ -34,6 +35,7 @@ use crate::{
 /// double-render them or wrap them in an unintended inline context.
 pub fn collect_runs(
     arena: &NodeArena,
+    node_id: NodeId,
     node: &Node,
     fg: Option<Color>,
     bg: Option<Color>,
@@ -42,12 +44,13 @@ pub fn collect_runs(
     let transform = node.css_attr.get_text_transform();
     let white_space = node.css_attr.get_white_space(&node.node_type);
     let mut runs = Vec::new();
-    walk_runs(arena, node, fg, bg, style, transform, white_space, None, &mut runs);
+    walk_runs(arena, node_id, node, fg, bg, style, transform, white_space, None, &mut runs);
     runs
 }
 
 fn walk_runs(
     arena: &NodeArena,
+    node_id: NodeId,
     node: &Node,
     fg: Option<Color>,
     bg: Option<Color>,
@@ -57,7 +60,10 @@ fn walk_runs(
     owner: Option<NodeId>,
     runs: &mut Vec<InlineRun>,
 ) {
-    for child_id in node.child_ids() {
+    // A closed `<details>` shows only its first `<summary>` child, so its own
+    // inline content (text / spans directly inside the element) stays hidden
+    // too — the same filter the box generation and block layout apply.
+    for child_id in visible_children(arena, node_id) {
         let child = &arena[child_id];
         match &child.node_type {
             NodeType::Text => {
@@ -80,7 +86,7 @@ fn walk_runs(
                 let span_style = style | block_style(&child.css_attr);
                 let span_transform = child.css_attr.get_text_transform();
                 let span_ws = child.white_space_or(white_space);
-                walk_runs(arena, child, span_fg, span_bg, span_style, span_transform, span_ws, owner, runs);
+                walk_runs(arena, child_id, child, span_fg, span_bg, span_style, span_transform, span_ws, owner, runs);
             }
             NodeType::A => {
                 // A block-level anchor is painted by its own `LayoutBox`
@@ -122,7 +128,7 @@ fn walk_runs(
                 }
                 let a_transform = child.css_attr.get_text_transform();
                 let a_ws = child.white_space_or(white_space);
-                walk_runs(arena, child, a_fg, a_bg, a_style, a_transform, a_ws, owner, runs);
+                walk_runs(arena, child_id, child, a_fg, a_bg, a_style, a_transform, a_ws, owner, runs);
             }
             NodeType::Em => {
                 // User-agent default: `<em>` renders italic. Anything the
@@ -137,7 +143,7 @@ fn walk_runs(
                 }
                 let em_transform = child.css_attr.get_text_transform();
                 let em_ws = child.white_space_or(white_space);
-                walk_runs(arena, child, em_fg, em_bg, em_style, em_transform, em_ws, owner, runs);
+                walk_runs(arena, child_id, child, em_fg, em_bg, em_style, em_transform, em_ws, owner, runs);
             }
             NodeType::Strong | NodeType::B => {
                 // User-agent default: bold. Anything the author (or an
@@ -146,7 +152,7 @@ fn walk_runs(
                 if !child.css_attr.is_set("font-weight") {
                     st |= FontStyle::BOLD;
                 }
-                walk_inline_children(arena, child, fg, bg, st, white_space, owner, runs);
+                walk_inline_children(arena, child_id, child, fg, bg, st, white_space, owner, runs);
             }
             NodeType::I | NodeType::Cite | NodeType::Dfn | NodeType::Var => {
                 // User-agent default: italic (same precedence rule as `<em>`).
@@ -154,7 +160,7 @@ fn walk_runs(
                 if !child.css_attr.is_set("font-style") {
                     st |= FontStyle::ITALIC;
                 }
-                walk_inline_children(arena, child, fg, bg, st, white_space, owner, runs);
+                walk_inline_children(arena, child_id, child, fg, bg, st, white_space, owner, runs);
             }
             NodeType::Label => {
                 // `<label>` is a plain inline container (like `<span>`), but
@@ -165,6 +171,7 @@ fn walk_runs(
                 let label_bg = child.css_attr.get_bg_color().or(bg);
                 walk_inline_children(
                     arena,
+                    child_id,
                     child,
                     label_fg,
                     label_bg,
@@ -181,7 +188,7 @@ fn walk_runs(
                 if !child.css_attr.is_set("text-decoration") {
                     st |= FontStyle::UNDERLINED;
                 }
-                walk_inline_children(arena, child, fg, bg, st, white_space, owner, runs);
+                walk_inline_children(arena, child_id, child, fg, bg, st, white_space, owner, runs);
             }
             NodeType::S | NodeType::Del => {
                 // User-agent default: line-through. An explicit
@@ -190,7 +197,7 @@ fn walk_runs(
                 if !child.css_attr.is_set("text-decoration") {
                     st |= FontStyle::CROSSED_OUT;
                 }
-                walk_inline_children(arena, child, fg, bg, st, white_space, owner, runs);
+                walk_inline_children(arena, child_id, child, fg, bg, st, white_space, owner, runs);
             }
             NodeType::Mark => {
                 // User-agent default: yellow background + black foreground
@@ -208,7 +215,7 @@ fn walk_runs(
                     Some(Color::Yellow)
                 };
                 let st = style | block_style(&child.css_attr);
-                walk_inline_children(arena, child, mark_fg, mark_bg, st, white_space, owner, runs);
+                walk_inline_children(arena, child_id, child, mark_fg, mark_bg, st, white_space, owner, runs);
             }
             NodeType::Q => {
                 // User-agent default: `<q>` wraps its content in generated
@@ -223,7 +230,7 @@ fn walk_runs(
                 runs.push(InlineRun::owned(open.to_string(), q_style, q_fg, q_bg, owner));
                 let q_transform = child.css_attr.get_text_transform();
                 let q_ws = child.white_space_or(white_space);
-                walk_runs(arena, child, q_fg, q_bg, q_style, q_transform, q_ws, owner, runs);
+                walk_runs(arena, child_id, child, q_fg, q_bg, q_style, q_transform, q_ws, owner, runs);
                 runs.push(InlineRun::owned(close.to_string(), q_style, q_fg, q_bg, owner));
             }
             NodeType::Abbr => {
@@ -240,7 +247,7 @@ fn walk_runs(
                 {
                     st |= FontStyle::UNDERLINED;
                 }
-                walk_inline_children(arena, child, fg, bg, st, white_space, owner, runs);
+                walk_inline_children(arena, child_id, child, fg, bg, st, white_space, owner, runs);
             }
             NodeType::Code | NodeType::Kbd | NodeType::Samp => {
                 // User-agent default `font-family: monospace` is already the
@@ -248,7 +255,7 @@ fn walk_runs(
                 // element is kept for CSS / DOM addressing.
                 let fg = child.css_attr.get_color().or(fg);
                 let bg = child.css_attr.get_bg_color().or(bg);
-                walk_inline_children(arena, child, fg, bg, style | block_style(&child.css_attr), white_space, owner, runs);
+                walk_inline_children(arena, child_id, child, fg, bg, style | block_style(&child.css_attr), white_space, owner, runs);
             }
             NodeType::Data | NodeType::Time => {
                 // No UA visual default: plain inline containers like `<span>`.
@@ -256,7 +263,7 @@ fn walk_runs(
                 // only and carry no visual effect, matching browsers.
                 let fg = child.css_attr.get_color().or(fg);
                 let bg = child.css_attr.get_bg_color().or(bg);
-                walk_inline_children(arena, child, fg, bg, style | block_style(&child.css_attr), white_space, owner, runs);
+                walk_inline_children(arena, child_id, child, fg, bg, style | block_style(&child.css_attr), white_space, owner, runs);
             }
             NodeType::Br => {
                 // `<br>` forces a line break in every `white-space` mode.
@@ -276,6 +283,7 @@ fn walk_runs(
 /// element (`owner`) for hit-map attribution.
 fn walk_inline_children(
     arena: &NodeArena,
+    child_id: NodeId,
     child: &Node,
     fg: Option<Color>,
     bg: Option<Color>,
@@ -286,7 +294,7 @@ fn walk_inline_children(
 ) {
     let transform = child.css_attr.get_text_transform();
     let ws = child.white_space_or(parent_ws);
-    walk_runs(arena, child, fg, bg, style, transform, ws, owner, runs);
+    walk_runs(arena, child_id, child, fg, bg, style, transform, ws, owner, runs);
 }
 
 /// Quote pair for a `<q>` element based on its nesting depth, mirroring the

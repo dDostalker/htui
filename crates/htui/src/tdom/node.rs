@@ -196,6 +196,11 @@ pub enum NodeType {
     Button,
     Textarea,
     Label,
+    /// `<noscript>` — content shown only when scripting is disabled. This
+    /// engine always runs its script layer, so the element never renders
+    /// (mirroring a browser with JavaScript enabled); the content stays in
+    /// the DOM and remains addressable by JS / CSS.
+    Noscript,
     Style,
     Link,
 }
@@ -289,6 +294,7 @@ impl NodeType {
         NodeType::Button,
         NodeType::Textarea,
         NodeType::Label,
+        NodeType::Noscript,
         NodeType::Style,
         NodeType::Link,
     ];
@@ -478,6 +484,7 @@ impl NodeType {
             NodeType::Button => "button",
             NodeType::Textarea => "textarea",
             NodeType::Label => "label",
+            NodeType::Noscript => "noscript",
             NodeType::Style => "style",
             NodeType::Link => "link",
             _ => return None,

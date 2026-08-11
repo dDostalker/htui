@@ -200,11 +200,29 @@ pub fn generate_node(arena: &NodeArena, node_id: NodeId) -> Option<GeneratedBox>
     })
 }
 
+/// Children of `parent_id` that participate in layout, in document order.
+///
+/// A `<details>` element without an `open` attribute renders only its first
+/// `<summary>` child — the browser's closed disclosure widget hides every
+/// other child (and everything when no `<summary>` exists) until opened. Any
+/// other element returns all of its children unchanged.
+pub fn visible_children(arena: &NodeArena, parent_id: NodeId) -> Vec<NodeId> {
+    let parent = &arena[parent_id];
+    let ids = parent.children.clone();
+    if parent.node_type != NodeType::Details || parent.attributes.contains_key("open") {
+        return ids;
+    }
+    match ids.iter().position(|&id| arena[id].node_type == NodeType::Summary) {
+        Some(pos) => vec![ids[pos]],
+        None => Vec::new(),
+    }
+}
+
 fn generate_children(arena: &NodeArena, parent_id: NodeId) -> Vec<GeneratedBox> {
     let mut children = Vec::new();
     let mut inline_group = Vec::new();
 
-    for &child_id in &arena[parent_id].children {
+    for &child_id in &visible_children(arena, parent_id) {
         // `display: contents` flattens the element's own children into
         // `parent_id`. We can't do that inside `generate_node` because
         // the wrapper is needed to *detect* the case here.
@@ -272,6 +290,7 @@ fn is_non_rendered(node_type: &NodeType) -> bool {
             | NodeType::Link
             | NodeType::Meta
             | NodeType::Base
+            | NodeType::Noscript
             | NodeType::Comment
             | NodeType::DocumentType
             | NodeType::DocumentFragment

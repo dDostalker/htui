@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head><title>Details / Summary</title></head>
+<body>
+  <script>
+    // The disclosure widget is engine-native (browser-style): clicking a
+    // summary row toggles the owning <details>'s `open` attribute and fires a
+    // `toggle` event on it. This page only observes those events and reports
+    // them on the status line — no host functions are needed.
+    function log(msg) {
+      document.getElementById('status').textContent = msg;
+    }
+    document.getElementById('d1').addEventListener('toggle', function () {
+      var open = document.getElementById('d1').getAttribute('open') !== null;
+      log('d1 ' + (open ? 'opened' : 'closed'));
+    });
+    document.getElementById('d2').addEventListener('toggle', function () {
+      var open = document.getElementById('d2').getAttribute('open') !== null;
+      log('d2 ' + (open ? 'opened' : 'closed'));
+    });
+  </script>
+  <h1>details / summary</h1>
+  <p>Click a summary row (the ▸ / ▾ marker) to open / close it. Content is hidden
+     while closed; each flip fires a `toggle` event reported on the status line.</p>
+
+  <details id="d1">
+    <summary>Closed by default</summary>
+    <p>This paragraph is hidden until the summary is clicked.</p>
+    <p>So is this one — both belong to the hidden content.</p>
+  </details>
+
+  <details id="d2" open>
+    <summary>Starts open</summary>
+    <p>This one ships with the <code>open</code> attribute, so everything is
+       visible from the start (marker ▾, click the summary to collapse it).</p>
+  </details>
+
+  <details>
+    <summary>Nested disclosure</summary>
+    <p>Outer hidden content.</p>
+    <details>
+      <summary>Inner disclosure</summary>
+      <p>Deep hidden content inside the inner details.</p>
+    </details>
+  </details>
+
+  <details>
+    <summary>Block content</summary>
+    <ul>
+      <li>First item</li>
+      <li>Second item</li>
+    </ul>
+    <p>Text after the list.</p>
+  </details>
+
+  <details>
+    <summary>Author styling</summary>
+    <p style="color: blue;">Blue text inside the disclosure.</p>
+    <div style="background-color: yellow;">A yellow band, still hidden until opened.</div>
+  </details>
+
+  <noscript>
+    <p>You should never see this line: scripting is always enabled in htui,
+       so <noscript> content never renders (like a browser with JS on).</p>
+  </noscript>
+
+  <p id="status">— click a summary —</p>
+</body>
+</html>

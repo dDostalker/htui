@@ -87,7 +87,7 @@ pub mod inner_formatting_context;
 
 pub use box_kind::{BoxKind, ReplacedContent};
 pub use cursor::Cursor;
-pub use generation::{GeneratedBox, GeneratedBoxKind, generate_box_tree, generate_node};
+pub use generation::{GeneratedBox, GeneratedBoxKind, generate_box_tree, generate_node, visible_children};
 pub use geometry::{layout_generated_box, layout_generated_tree};
 pub use inline::collect_runs;
 pub use inline_run::InlineRun;

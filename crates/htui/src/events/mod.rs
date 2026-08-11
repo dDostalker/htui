@@ -105,6 +105,10 @@ pub enum EventType {
     /// (`onreset`). The engine does not restore control defaults itself;
     /// pages handle the reset in JS.
     Reset,
+    /// Fired on a `<details>` element after its `open` attribute changes
+    /// (`ontoggle`). Dispatched by the engine's native disclosure-widget
+    /// default action when its `<summary>` is clicked.
+    Toggle,
 }
 
 /// Terminal-agnostic keyboard payload carried by [`EventType::KeyDown`] /

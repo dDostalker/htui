@@ -100,6 +100,25 @@ pub enum ScriptResponse {
     Event(ScriptEvent),
 }
 
+/// The `<details>` a click on `node_id` should toggle, if any.
+///
+/// The browser's disclosure-widget default action: clicking a `<summary>`
+/// (or one of its descendants) toggles the `open` attribute of the summary's
+/// parent `<details>`. Anything else produces no default action.
+fn summary_details(arena: &NodeArena, node_id: NodeId) -> Option<NodeId> {
+    let mut current = Some(node_id);
+    while let Some(id) = current {
+        let node = &arena[id];
+        if node.node_type == NodeType::Summary {
+            return node
+                .parent
+                .filter(|p| arena[*p].node_type == NodeType::Details);
+        }
+        current = node.parent;
+    }
+    None
+}
+
 /// The form event a `<button type=submit|reset>` click should produce:
 /// `(form_id, EventType::Submit | EventType::Reset)`. Buttons default to
 /// `submit`; `type=button` and disabled buttons produce nothing, and a button
@@ -140,6 +159,18 @@ pub fn apply_message(
         ScriptMsg::Move { x, y } => (interaction::on_move(hover, hit_map, engine, *x, *y), None),
         ScriptMsg::Click { x, y } => {
             let mut cmds = interaction::on_click(hover, hit_map, engine, *x, *y);
+            // `<summary>` default action: after the click handlers, clicking
+            // a summary (or its content) toggles the owning `<details>`'s
+            // `open` attribute and fires a `toggle` event on it — the
+            // browser's disclosure widget.
+            if let Some(details_id) = hit_map
+                .hit_test(*x, *y)
+                .and_then(|r| summary_details(&engine.arena(), r.node_id))
+            {
+                engine.toggle_details(details_id);
+                let region = region_for(&engine.arena(), details_id);
+                cmds.extend(engine.fire(&region, EventType::Toggle, 0, 0));
+            }
             // `<button type=submit|reset>` default action: after the click
             // handlers, fire the matching event on the containing `<form>`.
             // The engine performs no default navigation / control reset —

@@ -9,6 +9,7 @@ use crate::{
         layoutbox::{
             collect_runs,
             generation::{GeneratedBoxKind, generate_node},
+            visible_children,
             wrap_runs,
         },
     },
@@ -141,7 +142,7 @@ pub(super) fn layout_flex_container(
     let block_fg = node.css_attr.get_color();
     let block_bg = node.css_attr.get_bg_color();
     let block_font_style = block_style(&node.css_attr);
-    let body_runs = collect_runs(arena, node, block_fg, block_bg, block_font_style);
+    let body_runs = collect_runs(arena, node_id, node, block_fg, block_bg, block_font_style);
 
     // Wrap the container's own inline text so its rect grows to fit
     // the wrapped line count, and so the flex items are pushed down
@@ -166,10 +167,10 @@ pub(super) fn layout_flex_container(
     // 6. Flex items: the container's `BoxKind::Normal` children in document
     //    order. Inline and text nodes are already wrapped by the generator
     //    into anonymous boxes that contribute their runs to the container
-    //    itself rather than participating as flex items.
+    //    itself rather than participating as flex items. A closed `<details>`
+    //    only offers its first `<summary>` child (see [`visible_children`]).
     let mut positioned_boxes: Vec<LayoutBox> = Vec::new();
-    let block_child_ids: Vec<NodeId> = node
-        .children
+    let block_child_ids: Vec<NodeId> = visible_children(arena, node_id)
         .iter()
         .copied()
         .filter(|&id| {

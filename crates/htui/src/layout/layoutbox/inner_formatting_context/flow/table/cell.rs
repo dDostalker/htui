@@ -47,7 +47,7 @@ pub fn cell_required_height(
     let block_fg = node.css_attr.get_color();
     let block_bg = node.css_attr.get_bg_color();
     let block_font_style = block_style(&node.css_attr);
-    let body_runs = collect_runs(arena, node, block_fg, block_bg, block_font_style);
+    let body_runs = collect_runs(arena, cell_id, node, block_fg, block_bg, block_font_style);
     let line_count = if body_runs.is_empty() {
         1
     } else {
@@ -93,7 +93,7 @@ pub fn layout_cell(
     let block_fg = node.css_attr.get_color();
     let block_bg = node.css_attr.get_bg_color();
     let block_font_style = block_style(&node.css_attr);
-    let body_runs = collect_runs(arena, node, block_fg, block_bg, block_font_style);
+    let body_runs = collect_runs(arena, cell_id, node, block_fg, block_bg, block_font_style);
 
     let fill_bg = block_bg.is_some();
 

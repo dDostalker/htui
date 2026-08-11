@@ -13,7 +13,7 @@ use crate::{
     layout::{
         BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext, PaintStyle, Rect,
         inner_formatting_context::flow::layout_children,
-        layoutbox::{collect_runs, wrap_runs},
+        layoutbox::{collect_runs, visible_children, wrap_runs},
     },
     tdom::node::{Node, NodeArena, NodeId, effective_font_size_cells},
     tui::graph_api::{FontStyle, block_style},
@@ -138,7 +138,7 @@ pub fn layout_block(
     let body_runs = if opts.hr_rule {
         Vec::new()
     } else {
-        collect_runs(arena, node, block_fg, block_bg, block_font_style)
+        collect_runs(arena, node_id, node, block_fg, block_bg, block_font_style)
     };
     let fill_bg = block_bg.is_some() || opts.fill_bg_default;
 
@@ -208,7 +208,7 @@ pub fn layout_block(
     let mut child_cursor = Cursor {
         y: content_top.saturating_add(inline_rows),
     };
-    let block_children = node.children.clone();
+    let block_children = visible_children(arena, node_id);
     let children = layout_children(
         arena,
         &block_children,

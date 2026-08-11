@@ -136,6 +136,7 @@ fn main() {
         "blockquote" => test_case!(blockquote, no_css),
         "menu_dl" => test_case!(menu_dl, no_css),
         "q_abbr" => test_case!(q_abbr, no_css),
+        "details" => test_case!(details),
         "helloworld" => test_case!(helloworld, no_css),
         "font_styles" => test_case!(font_styles, no_css),
         "list" => test_case!(list, no_css),
@@ -170,6 +171,7 @@ fn main() {
                 "blockquote",
                 "menu_dl",
                 "q_abbr",
+                "details",
                 "helloworld",
                 "font_styles",
                 "list",
@@ -251,6 +253,20 @@ fn main() {
     // settings form: text inputs + JS-built toggle / radio controls, live
     // preview, save/reset). `--dump` falls back to the static preview.
     if test_name == "configurator" {
+        if dump_mode {
+            dump(html, css, cols, rows, bg_map);
+        } else {
+            render_with_events(html, css, EventBindings::default());
+        }
+        info!("Test '{test_name}' completed");
+        return;
+    }
+
+    // The `details` case runs through `render_with_events` so clicking a
+    // `<summary>` natively toggles the disclosure widget (the default action
+    // flips `open` and fires `toggle`; interaction needs a real terminal).
+    // `--dump` falls back to the static preview.
+    if test_name == "details" {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
