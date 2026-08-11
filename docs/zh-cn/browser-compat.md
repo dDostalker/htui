@@ -5,216 +5,224 @@
 
 > 状态图例：✅ 支持 · ◐ 部分/近似 · ✗ 不支持 · — 无对应
 
+
 # HTML 特性清单
 
 ## 1. 文档结构与元数据
 
 | 标签    | htui | 说明                                         |
 | ------- | :--: | -------------------------------------------- |
-| `html`  |      | 文档根元素                                   |
-| `head`  |      | 文档元数据容器                               |
-| `body`  |      | 文档主体内容                                 |
-| `title` |      | 文档标题                                     |
-| `base`  |      | 文档基准 URL 与默认跳转目标                  |
-| `link`  |      | 外部资源链接(样式表、图标、预加载、预连接等) |
-| `meta`  |      | 元数据(字符编码、视口、描述、CSP 等)         |
-| `style` |      | 内嵌 CSS,参与级联                            |
+| `html`  |  ✅  | 文档根元素（解析为块级根容器）               |
+| `head`  |  ✅  | 文档元数据容器（解析但不渲染，sink）         |
+| `body`  |  ✅  | 文档主体内容（块级容器）                     |
+| `title` |  ✅  | 设为终端标题，不渲染正文（sink）             |
+| `base`  |  ✗   | 文档基准 URL 与默认跳转目标（被压平）        |
+| `link`  |  ◐   | 仅 `rel=stylesheet` 经 `mem://` 资源层加载；其余 rel 忽略，元素不渲染 |
+| `meta`  |  ✅  | 元数据（解析但不渲染，sink）                 |
+| `style` |  ✅  | 内嵌 CSS，参与级联                           |
 
 ## 2. 章节(Sections)
 
 | 标签                          | htui | 说明                                   |
 | ----------------------------- | :--: | -------------------------------------- |
-| `article`                     |      | 独立的可分发内容(文章、帖子、卡片)     |
-| `section`                     |      | 主题相关的内容分组,通常带标题          |
-| `nav`                         |      | 导航链接区域                           |
-| `aside`                       |      | 与主内容松散关联的侧边内容(旁注、广告) |
-| `h1` `h2` `h3` `h4` `h5` `h6` |      | 六级标题                               |
-| `hgroup`                      |      | 标题组(主标题 + 副标题)                |
-| `header`                      |      | 区段或页面头部(导航/标题/搜索框)       |
-| `footer`                      |      | 区段或页面尾部(版权/链接/作者)         |
-| `address`                     |      | 文章/文档作者的联系信息                |
+| `article`                     |  ✅  | 独立的可分发内容（按通用块渲染）       |
+| `section`                     |  ✅  | 主题相关的内容分组（按通用块渲染）     |
+| `nav`                         |  ✅  | 导航链接区域（按通用块渲染）           |
+| `aside`                       |  ✅  | 侧边内容（块渲染，默认填充背景色）     |
+| `h1` `h2` `h3` `h4` `h5` `h6` |  ◐   | 仅 h1–h5；带 markdown 前缀（`# `…）与 2em/1.5em/1.17em/1em/0.83em 默认字号；**h6 被压平** |
+| `hgroup`                      |  ✗   | 标题组（被压平）                       |
+| `header`                      |  ✅  | 区段或页面头部（块渲染 + 色带）        |
+| `footer`                      |  ✅  | 区段或页面尾部（块渲染 + 色带）        |
+| `address`                     |  ✗   | 联系信息（被压平）                     |
 
 ## 3. 分组内容(Grouping content)
 
 | 标签         | htui | 说明                                       |
 | ------------ | :--: | ------------------------------------------ |
-| `p`          |      | 段落                                       |
-| `hr`         |      | 主题级分隔线                               |
-| `pre`        |      | 预格式化文本,保留空白与换行                |
-| `blockquote` |      | 块级引用                                   |
-| `ol`         |      | 有序列表                                   |
-| `ul`         |      | 无序列表                                   |
-| `menu`       |      | 命令/菜单列表                              |
-| `li`         |      | 列表项(属于 `ol`/`ul`/`menu`)              |
-| `dl`         |      | 描述列表容器                               |
-| `dt`         |      | 描述术语                                   |
-| `dd`         |      | 描述内容                                   |
-| `figure`     |      | 带可选标题的独立内容单元(图表、代码、媒体) |
-| `figcaption` |      | `figure` 的标题/说明                       |
-| `main`       |      | 文档的主内容(每页最多一个)                 |
-| `search`     |      | 搜索/过滤区域容器                          |
-| `div`        |      | 通用块级容器,无语义                        |
+| `p`          |  ✅  | 段落                                       |
+| `hr`         |  ✗   | 主题级分隔线（被压平，无分隔线）           |
+| `pre`        |  ✅  | 预格式化文本（UA `white-space: pre`）      |
+| `blockquote` |  ✗   | 块级引用（被压平）                         |
+| `ol`         |  ✅  | 有序列表（`<n>. ` 前缀）                   |
+| `ul`         |  ✅  | 无序列表（`• ` 前缀）                      |
+| `menu`       |  ✗   | 命令/菜单列表（被压平）                    |
+| `li`         |  ✅  | 列表项（属于 `ol`/`ul`）                   |
+| `dl`         |  ✗   | 描述列表容器（被压平）                     |
+| `dt`         |  ✗   | 描述术语（被压平）                         |
+| `dd`         |  ✗   | 描述内容（被压平）                         |
+| `figure`     |  ✅  | 独立内容单元（按通用块渲染）               |
+| `figcaption` |  ✅  | `figure` 的标题（按通用块渲染）            |
+| `main`       |  ✅  | 文档主内容（按通用块渲染）                 |
+| `search`     |  ✗   | 搜索/过滤区域容器（被压平）                |
+| `div`        |  ✅  | 通用块级容器                               |
 
 ## 4. 文本级语义(Text-level semantics)
 
+> 说明：未列入 `NodeType` 的行内标签在解析时被**压平**——子文本仍渲染，
+> 但元素语义、CSS 选择器匹配与浏览器默认样式（粗体/斜体/删除线等）全部丢失。
+
 | 标签        | htui | 说明                                |
 | ----------- | :--: | ----------------------------------- |
-| `a`         |      | 超链接或占位锚点                    |
-| `em`        |      | 语义强调(通常斜体)                  |
-| `strong`    |      | 重要性强调(通常粗体)                |
-| `small`     |      | 旁注/细则(版权、免责声明)           |
-| `s`         |      | 不再准确或不再相关(删除线)          |
-| `cite`      |      | 作品标题引用(书名、文章名)          |
-| `q`         |      | 行内引用(自动加引号)                |
-| `dfn`       |      | 定义术语的首次出现                  |
-| `abbr`      |      | 缩写或首字母缩略词(配 `title` 全称) |
-| `ruby`      |      | 注音容器(主要用于中日韩文字)        |
-| `rt`        |      | 注音文本                            |
-| `rp`        |      | 不支持 `ruby` 时的回退括号          |
-| `data`      |      | 机器可读数据(`value` 属性)          |
-| `time`      |      | 日期/时间(`datetime` 属性)          |
-| `code`      |      | 计算机代码片段                      |
-| `var`       |      | 数学/程序中的变量                   |
-| `samp`      |      | 程序或系统的示例输出                |
-| `kbd`       |      | 用户键盘输入                        |
-| `sub` `sup` |      | 下标 / 上标                         |
-| `i`         |      | 不同语态/习语(技术术语、外语,斜体)  |
-| `b`         |      | 引人注意(关键词、产品名,粗体)       |
-| `u`         |      | 未表达清楚的标注(下划线)            |
-| `mark`      |      | 高亮/标记(搜索结果命中)             |
-| `bdi`       |      | 双向文本隔离                        |
-| `bdo`       |      | 双向文本方向覆盖                    |
-| `span`      |      | 通用行内容器,无语义                 |
-| `br`        |      | 强制换行                            |
-| `wbr`       |      | 可选换行点(长单词断行提示)          |
+| `a`         |  ✅  | 超链接；UA 默认蓝色 + 下划线，可块化 |
+| `em`        |  ✅  | 语义强调（UA 默认斜体）             |
+| `strong`    |  ✗   | 压平（文本可见，无粗体）            |
+| `small`     |  ✗   | 压平                                |
+| `s`         |  ✗   | 压平（无删除线）                    |
+| `cite`      |  ✗   | 压平                                |
+| `q`         |  ✗   | 压平（无自动引号）                  |
+| `dfn`       |  ✗   | 压平                                |
+| `abbr`      |  ✗   | 压平                                |
+| `ruby`      |  ✗   | 压平                                |
+| `rt`        |  ✗   | 压平                                |
+| `rp`        |  ✗   | 压平                                |
+| `data`      |  ✗   | 压平                                |
+| `time`      |  ✗   | 压平                                |
+| `code`      |  ✗   | 压平                                |
+| `var`       |  ✗   | 压平                                |
+| `samp`      |  ✗   | 压平                                |
+| `kbd`       |  ✗   | 压平                                |
+| `sub` `sup` |  ✗   | 压平（无上下标）                    |
+| `i`         |  ✗   | 压平（无斜体）                      |
+| `b`         |  ✗   | 压平（无粗体）                      |
+| `u`         |  ✗   | 压平（无下划线）                    |
+| `mark`      |  ✗   | 压平                                |
+| `bdi`       |  ✗   | 压平                                |
+| `bdo`       |  ✗   | 压平                                |
+| `span`      |  ✅  | 行内容器（支持 color/背景/字重/装饰）|
+| `br`        |  ✗   | 压平（**无强制换行**）              |
+| `wbr`       |  ✗   | 压平                                |
 
 ## 5. 编辑(Edits)
 
 | 标签  | htui | 说明       |
 | ----- | :--: | ---------- |
-| `ins` |      | 新增的内容 |
-| `del` |      | 删除的内容 |
+| `ins` |  ✗   | 被压平     |
+| `del` |  ✗   | 被压平     |
 
 ## 6. 嵌入内容(Embedded content)
 
 | 标签      | htui | 说明                                        |
 | --------- | :--: | ------------------------------------------- |
-| `picture` |      | 多源图片容器,按条件选择 `source`            |
-| `source`  |      | 为 `picture`/`video`/`audio` 指定替代媒体源 |
-| `img`     |      | 位图图片                                    |
-| `iframe`  |      | 内嵌独立浏览上下文                          |
-| `embed`   |      | 外部内容嵌入点(插件)                        |
-| `object`  |      | 外部资源/插件(可含回退内容)                 |
-| `video`   |      | 视频播放器                                  |
-| `audio`   |      | 音频播放器                                  |
-| `track`   |      | 媒体的定时文本轨道(字幕、章节)              |
-| `map`     |      | 客户端图像映射容器                          |
-| `area`    |      | 图像映射中的可点击热点                      |
+| `picture` |  —   | 终端无响应式图片源选择                      |
+| `source`  |  —   | 无对应媒体源概念                            |
+| `img`     |  ✅  | 位图图片：`mem://` 资源 + 栅格化（半块渲染），`width`/`height` 属性 + 宽高比 |
+| `iframe`  |  —   | 单文档会话，无内嵌浏览上下文                |
+| `embed`   |  —   | 无插件模型                                  |
+| `object`  |  —   | 无外部资源嵌入                              |
+| `video`   |  —   | 无视频播放                                  |
+| `audio`   |  —   | 无音频播放                                  |
+| `track`   |  —   | 无媒体轨道                                  |
+| `map`     |  —   | 无图像映射                                  |
+| `area`    |  —   | 无图像映射热点                              |
 
 ## 7. 表格(Tabular data)
 
 | 标签       | htui | 说明                  |
 | ---------- | :--: | --------------------- |
-| `table`    |      | 二维表格容器          |
-| `caption`  |      | 表格标题              |
-| `colgroup` |      | 列分组                |
-| `col`      |      | 列属性定义(跨列样式)  |
-| `thead`    |      | 表头行分组            |
-| `tbody`    |      | 表格主体行分组        |
-| `tfoot`    |      | 表尾行分组            |
-| `tr`       |      | 表格行                |
-| `td`       |      | 数据单元格            |
-| `th`       |      | 头部单元格(行/列表头) |
+| `table`    |  ✅  | 二维表格容器          |
+| `caption`  |  ✅  | 表格标题              |
+| `colgroup` |  ✅  | 列分组（占位盒）      |
+| `col`      |  ✅  | 列定义（占位盒）      |
+| `thead`    |  ✅  | 表头行分组            |
+| `tbody`    |  ✅  | 表格主体行分组        |
+| `tfoot`    |  ✅  | 表尾行分组            |
+| `tr`       |  ✅  | 表格行                |
+| `td`       |  ✅  | 数据单元格            |
+| `th`       |  ✅  | 头部单元格            |
 
 ## 8. 表单(Forms)
 
 | 标签              | htui | 说明                             |
 | ----------------- | :--: | -------------------------------- |
-| `form`            |      | 表单容器,管理提交                |
-| `label`           |      | 控件的文字标签                   |
-| `input`           |      | 通用输入控件(见下表各 `type`)    |
-| `button`          |      | 按钮(submit/reset/button)        |
-| `select`          |      | 下拉选择框                       |
-| `datalist`        |      | `input` 的自动补全候选值列表     |
-| `optgroup`        |      | `select` 内的选项分组            |
-| `option`          |      | `select`/`datalist` 中的一个选项 |
-| `textarea`        |      | 多行文本输入                     |
-| `output`          |      | 计算结果输出                     |
-| `progress`        |      | 进度条(`value`/`max`)            |
-| `meter`           |      | 标量度量(磁盘用量、评分)         |
-| `fieldset`        |      | 表单控件分组                     |
-| `legend`          |      | `fieldset` 的标题                |
-| `selectedcontent` |      | `select` 选中项的显示内容投射    |
+| `form`            |  ◐   | 表单容器：按块级容器渲染子内容；**无提交/校验语义** |
+| `label`           |  ◐   | 按块级容器渲染；**无 label→控件焦点关联** |
+| `input`           |  ✅  | 单行文本输入框（见 8.1 各 type） |
+| `button`          |  ◐   | 按块级容器渲染其文本，可绑定 click 事件；**无 submit/reset 默认行为** |
+| `select`          |  ✅  | 原生单行下拉：点击展开、↑/↓/Enter/Esc 键盘导航、change 事件 |
+| `datalist`        |  ✗   | 被压平（无自动补全）             |
+| `optgroup`        |  ✗   | 被压平；其 `<option>` 子项仍会成为 select 选项，但无分组标签 |
+| `option`          |  ✅  | `select` 选项（`value` 缺省回退文本） |
+| `textarea`        |  ◐   | 按块级容器渲染默认文本；**无多行编辑/光标** |
+| `output`          |  ✗   | 被压平                           |
+| `progress`        |  ✗   | 被压平                           |
+| `meter`           |  ✗   | 被压平                           |
+| `fieldset`        |  ✗   | 被压平                           |
+| `legend`          |  ✗   | 被压平                           |
+| `selectedcontent` |  ✗   | 被压平                           |
 
 ## 8.1 `input` 的 `type` 状态
 
+> 说明：当前实现**不读取 `type` 属性**——所有 type 一律按单行文本框
+> （`[value]` 框 + 光标）渲染与编辑。下表仅 `text` 与浏览器一致，其余均为
+> 「渲染为文本框，type 语义忽略」。
+
 | type             | htui | 说明                     |
 | ---------------- | :--: | ------------------------ |
-| `hidden`         |      | 隐藏值,不渲染            |
-| `text`           |      | 单行文本输入             |
-| `search`         |      | 搜索词输入               |
-| `tel`            |      | 电话号码输入             |
-| `url`            |      | URL 输入                 |
-| `email`          |      | 邮箱输入                 |
-| `password`       |      | 密码输入(掩码)           |
-| `date`           |      | 日期选择(无时区)         |
-| `month`          |      | 年月选择                 |
-| `week`           |      | 年周选择                 |
-| `time`           |      | 时间选择(无时区)         |
-| `datetime-local` |      | 本地日期时间选择(无时区) |
-| `number`         |      | 数字输入                 |
-| `range`          |      | 滑块选择数值区间         |
-| `color`          |      | 颜色选择器               |
-| `checkbox`       |      | 复选框                   |
-| `radio`          |      | 单选按钮                 |
-| `file`           |      | 文件上传                 |
-| `submit`         |      | 提交按钮                 |
-| `image`          |      | 图片提交按钮             |
-| `reset`          |      | 重置按钮                 |
-| `button`         |      | 自定义按钮(无默认行为)   |
+| `hidden`         |  ✗   | 按文本框渲染（本应隐藏） |
+| `text`           |  ✅  | 单行文本输入             |
+| `search`         |  ✗   | 按文本框渲染             |
+| `tel`            |  ✗   | 按文本框渲染             |
+| `url`            |  ✗   | 按文本框渲染             |
+| `email`          |  ✗   | 按文本框渲染             |
+| `password`       |  ✗   | 按文本框渲染（无掩码）   |
+| `date`           |  ✗   | 按文本框渲染             |
+| `month`          |  ✗   | 按文本框渲染             |
+| `week`           |  ✗   | 按文本框渲染             |
+| `time`           |  ✗   | 按文本框渲染             |
+| `datetime-local` |  ✗   | 按文本框渲染             |
+| `number`         |  ✗   | 按文本框渲染             |
+| `range`          |  ✗   | 按文本框渲染             |
+| `color`          |  ✗   | 按文本框渲染             |
+| `checkbox`       |  ✗   | 按文本框渲染             |
+| `radio`          |  ✗   | 按文本框渲染             |
+| `file`           |  ✗   | 按文本框渲染             |
+| `submit`         |  ✗   | 按文本框渲染（无提交）   |
+| `image`          |  ✗   | 按文本框渲染             |
+| `reset`          |  ✗   | 按文本框渲染（无重置）   |
+| `button`         |  ✗   | 按文本框渲染             |
 
 ## 9. 交互元素(Interactive elements)
 
 | 标签      | htui | 说明                      |
 | --------- | :--: | ------------------------- |
-| `details` |      | 可展开/折叠的详细信息区块 |
-| `summary` |      | `details` 的可见摘要      |
-| `dialog`  |      | 对话框/模态框             |
+| `details` |  ✗   | 按普通块渲染，内容恒展开；**无折叠/展开交互** |
+| `summary` |  ✗   | 按普通块渲染其文本；**无切换行为** |
+| `dialog`  |  ✗   | 被压平                    |
 
 ## 10. 脚本(Scripting)
 
 | 标签             | htui | 说明                    |
 | ---------------- | :--: | ----------------------- |
-| `script`         |      | 内嵌或外部脚本          |
-| `script src=...` |      | 外部脚本(经资源层加载)  |
-| `noscript`       |      | 脚本禁用时的替代内容    |
-| `template`       |      | 模板内容(不渲染,可克隆) |
-| `slot`           |      | Shadow DOM 中的内容插槽 |
-| `canvas`         |      | 位图绘图画布(2D/WebGL)  |
+| `script`         |  ✅  | 内嵌脚本（Boa 引擎，脚本线程执行） |
+| `script src=...` |  ✅  | 外部脚本（经 `mem://` 资源层加载） |
+| `noscript`       |  ✗   | 被压平；**内容恒渲染**（与浏览器「脚本启用时不渲染」相反） |
+| `template`       |  ✗   | 被压平                  |
+| `slot`           |  ✗   | 无 Shadow DOM           |
+| `canvas`         |  —   | 终端无位图画布          |
 
 ## 11. 全局属性(所有元素可用)
 
 | 属性              | htui | 说明                   |
 | ----------------- | :--: | ---------------------- |
-| `class`           |      | 类名(用于 CSS/JS 选择) |
-| `id`              |      | 文档内唯一标识         |
-| `style`           |      | 行内 CSS               |
-| `title`           |      | 提示信息/语义化标题    |
-| `lang` `xml:lang` |      | 内容语言代码           |
-| `dir`             |      | 文本方向(ltr/rtl/auto) |
-| `translate`       |      | 是否参与翻译           |
-| `data-*`          |      | 自定义私有数据         |
-| `tabindex`        |      | 焦点顺序控制           |
-| `accesskey`       |      | 快捷键分配             |
-| `hidden`          |      | 隐藏元素               |
-| `contenteditable` |      | 内容是否可编辑         |
-| `draggable`       |      | 是否可拖拽             |
-| `spellcheck`      |      | 是否启用拼写检查       |
-| `enterkeyhint`    |      | 软键盘回车键提示       |
-| `inert`           |      | 使区域不可交互         |
-| `popover`         |      | 声明式弹出层           |
-| `autofocus`       |      | 页面加载时自动聚焦     |
-| `role` `aria-*`   |      | ARIA 无障碍语义        |
+| `class`           |  ✅  | 类名（CSS `.class` + `el.className`） |
+| `id`              |  ✅  | 文档内唯一标识（CSS `#id` + `getElementById`） |
+| `style`           |  ✅  | 行内 CSS（优先级最高） |
+| `title`           |  ◐   | 属性保留（`getAttribute` 可读）；**无悬浮提示** |
+| `lang` `xml:lang` |  ✗   | 解析但不参与任何逻辑    |
+| `dir`             |  ✗   | 文本方向无效果          |
+| `translate`       |  ✗   | 无翻译管线              |
+| `data-*`          |  ◐   | 属性保留，可经 `getAttribute('data-*')` 读取；**无 `dataset` API** |
+| `tabindex`        |  ✗   | 焦点顺序仅由 `Tab` 遍历 `<input>`，属性不生效 |
+| `accesskey`       |  ✗   | 无快捷键分配            |
+| `hidden`          |  ✗   | 属性解析但**不生效**；隐藏请用 `display: none` |
+| `contenteditable` |  ✗   | 无内容编辑              |
+| `draggable`       |  ✗   | 无拖拽                  |
+| `spellcheck`      |  ✗   | 无拼写检查              |
+| `enterkeyhint`    |  ✗   | 无软键盘                |
+| `inert`           |  ✗   | 无惰性区域              |
+| `popover`         |  ✗   | 无声明式弹出层          |
+| `autofocus`       |  ✗   | 无自动聚焦              |
+| `role` `aria-*`   |  ✗   | 无 ARIA（不做无障碍承诺）|
 
 # CSS 特性清单 (CSS Snapshot 2024)
 
@@ -222,173 +230,177 @@
 
 | 特性                          | htui | 说明                                                   |
 | ----------------------------- | :--: | ------------------------------------------------------ |
-| `display`                     |      | 显示类型(block/inline/flex/grid/flow/none/contents 等) |
-| `position`                    |      | 定位方式(static/relative/absolute/fixed/sticky)        |
-| `top` `right` `bottom` `left` |      | 定位偏移量                                             |
-| `float`                       |      | 浮动(left/right/none)                                  |
-| `clear`                       |      | 清除浮动                                               |
-| `z-index`                     |      | 层叠顺序                                               |
-| `contain`                     |      | 隔离优化(layout/style/paint/size/strict)               |
-| `isolation`                   |      | 强制创建层叠上下文                                     |
-| `will-change`                 |      | 性能提示,预告将变化的属性                              |
-| `visibility`                  |      | 可见性(visible/hidden/collapse)                        |
-| `overflow`                    |      | 溢出处理(visible/hidden/scroll/auto)                   |
-| `box-sizing`                  |      | 盒模型计算(content-box/border-box)                     |
+| `display`                     |  ◐   | block/flow/flow-root/inline/inline-block/list-item/flex/inline-flex/table 家族/none/contents 均可解析；**grid/inline-grid 解析但布局未实现（geometry 阶段跳过）** |
+| `position`                    |  ◐   | static/relative/absolute/fixed；**sticky 不支持**      |
+| `top` `right` `bottom` `left` |  ◐   | relative 偏移 / absolute+fixed 定位（含 right/bottom 锚定）；对 static 无效 |
+| `float`                       |  ✗   | 不支持                                               |
+| `clear`                       |  ✗   | 不支持                                               |
+| `z-index`                     |  ✅  | 整数；仅影响定位盒的绘制顺序（非定位盒恒在定位盒之下） |
+| `contain`                     |  ✗   | 不支持                                               |
+| `isolation`                   |  ✗   | 不支持                                               |
+| `will-change`                 |  ✗   | 不支持                                               |
+| `visibility`                  |  ✗   | 不支持（隐藏请用 `display: none`）                    |
+| `overflow`                    |  ✗   | 不支持（内容溢出终端画布以整文档滚动处理）            |
+| `box-sizing`                  |  ✅  | 默认 `border-box`；`content-box` 已支持                |
 
 ## 2. Flex 弹性布局
 
 | 特性                          | htui | 说明                                                         |
 | ----------------------------- | :--: | ------------------------------------------------------------ |
-| `display: flex`/`inline-flex` |      | 启用 flex 容器(见 §1 display)                                |
-| `flex`                        |      | 简写(grow shrink basis)                                      |
-| `flex-direction`              |      | 主轴方向(row/column/row-reverse/column-reverse)              |
-| `flex-wrap`                   |      | 换行(nowrap/wrap/wrap-reverse)                               |
-| `flex-flow`                   |      | direction + wrap 简写                                        |
-| `justify-content`             |      | 主轴对齐(flex-start/center/space-between/space-around/space-evenly) |
-| `align-items`                 |      | 交叉轴对齐                                                   |
-| `align-self`                  |      | 单个项目交叉轴对齐                                           |
-| `align-content`               |      | 多行交叉轴对齐                                               |
-| `order`                       |      | 项目排列顺序                                                 |
-| `flex-grow`                   |      | 放大比例                                                     |
-| `flex-shrink`                 |      | 缩小比例                                                     |
-| `flex-basis`                  |      | 初始主轴尺寸                                                 |
+| `display: flex`/`inline-flex` |  ✅  | 启用 flex 容器（见 §1 display）                              |
+| `flex`                        |  ✗   | 简写未支持；请用 `flex-grow`/`flex-shrink`/`flex-basis` 长写 |
+| `flex-direction`              |  ◐   | row/column；**`*-reverse` 不支持**                           |
+| `flex-wrap`                   |  ◐   | nowrap/wrap；**`wrap-reverse` 不支持**                       |
+| `flex-flow`                   |  ✗   | 简写未支持                                                   |
+| `justify-content`             |  ✅  | flex-start/flex-end/center/space-between/space-around/space-evenly |
+| `align-items`                 |  ◐   | stretch/flex-start/flex-end/center；**baseline 不支持**；stretch 需容器显式交叉轴尺寸 |
+| `align-self`                  |  ◐   | 同 `align-items` 取值；`auto` 支持（回退父容器 `align-items`）|
+| `align-content`               |  ◐   | 复用 `justify-content` 取值；**stretch 不支持**              |
+| `order`                       |  ✅  | 支持（含负整数）                                             |
+| `flex-grow`                   |  ✅  | 支持                                                         |
+| `flex-shrink`                 |  ✅  | 支持                                                         |
+| `flex-basis`                  |  ◐   | auto/长度；**`content` 关键字不支持**                        |
 
 ## 3. Grid 网格布局
 
+> 说明：`display: grid` / `inline-grid` 关键字可解析、可匹配选择器，但
+> **grid 布局算法未实现**——geometry 阶段记录 debug 日志后跳过该盒。
+> 下表全部 ✗。
+
 | 特性                                  | htui | 说明                                              |
 | ------------------------------------- | :--: | ------------------------------------------------- |
-| `grid`                                |      | 简写(template + auto-flow)                        |
-| `grid-template`                       |      | rows + columns + areas 简写                       |
-| `grid-template-columns`               |      | 列轨道定义                                        |
-| `grid-template-rows`                  |      | 行轨道定义                                        |
-| `grid-template-areas`                 |      | 命名网格区域                                      |
-| `grid-area`                           |      | 项目区域定位(row-start/col-start/row-end/col-end) |
-| `grid-column` `grid-row`              |      | 项目起止线简写                                    |
-| `grid-column-start` `grid-column-end` |      | 列起止线                                          |
-| `grid-row-start` `grid-row-end`       |      | 行起止线                                          |
-| `grid-auto-columns`                   |      | 隐式列轨道宽度                                    |
-| `grid-auto-rows`                      |      | 隐式行轨道高度                                    |
-| `grid-auto-flow`                      |      | 自动放置算法(row/column/dense)                    |
+| `grid`                                |  ✗   | 简写未实现                                        |
+| `grid-template`                       |  ✗   | 未实现                                            |
+| `grid-template-columns`               |  ✗   | 未实现                                            |
+| `grid-template-rows`                  |  ✗   | 未实现                                            |
+| `grid-template-areas`                 |  ✗   | 未实现                                            |
+| `grid-area`                           |  ✗   | 未实现                                            |
+| `grid-column` `grid-row`              |  ✗   | 未实现                                            |
+| `grid-column-start` `grid-column-end` |  ✗   | 未实现                                            |
+| `grid-row-start` `grid-row-end`       |  ✗   | 未实现                                            |
+| `grid-auto-columns`                   |  ✗   | 未实现                                            |
+| `grid-auto-rows`                      |  ✗   | 未实现                                            |
+| `grid-auto-flow`                      |  ✗   | 未实现                                            |
 
 ## 4. 间距 / 多列布局
 
 | 特性                                                        | htui | 说明                    |
 | ----------------------------------------------------------- | :--: | ----------------------- |
-| `gap`                                                       |      | flex/grid 行列间距简写  |
-| `row-gap` `column-gap`                                      |      | 行间距 / 列间距         |
-| `place-content` `place-items` `place-self`                  |      | align + justify 简写    |
-| `columns`                                                   |      | 多列简写(width + count) |
-| `column-width` `column-count`                               |      | 列宽 / 列数             |
-| `column-gap`                                                |      | 列间距                  |
-| `column-rule`                                               |      | 列分隔线简写            |
-| `column-rule-color` `column-rule-style` `column-rule-width` |      | 分隔线颜色/样式/宽度    |
-| `column-fill`                                               |      | 填充方式(auto/balance)  |
-| `column-span`                                               |      | 跨列(none/all)          |
+| `gap`                                                       |  ✅  | flex 容器行列间距简写（1/2 值长度） |
+| `row-gap` `column-gap`                                      |  ✅  | 行间距 / 列间距（长度值；百分比 gap 参照 `usize::MAX` 解析） |
+| `place-content` `place-items` `place-self`                  |  ✗   | 简写未支持              |
+| `columns`                                                   |  ✗   | 多列未实现              |
+| `column-width` `column-count`                               |  ✗   | 未实现                  |
+| `column-gap`                                                |  ✗   | 未实现（仅 flex gap 生效）|
+| `column-rule`                                               |  ✗   | 未实现                  |
+| `column-rule-color` `column-rule-style` `column-rule-width` |  ✗   | 未实现                  |
+| `column-fill`                                               |  ✗   | 未实现                  |
+| `column-span`                                               |  ✗   | 未实现                  |
 
 ## 5. 盒模型 / 尺寸
 
 | 特性                                                         | htui | 说明                            |
 | ------------------------------------------------------------ | :--: | ------------------------------- |
-| `width` `height`                                             |      | 宽 / 高                         |
-| `min-width` `min-height` `max-width` `max-height`            |      | 最小/最大尺寸                   |
-| `margin` `margin-top` `margin-right` `margin-bottom` `margin-left` |      | 外边距                          |
-| `padding` `padding-top` `padding-right` `padding-bottom` `padding-left` |      | 内边距                          |
-| `border`                                                     |      | 边框简写                        |
-| `border-width` `border-style` `border-color`                 |      | 边框宽/样式/颜色                |
-| `border-top/right/bottom/left`                               |      | 各方向边框                      |
-| `border-top/right/bottom/left-width/style/color`             |      | 各方向边框分量                  |
-| `border-radius`                                              |      | 圆角简写                        |
-| `border-top-left/right-radius` `border-bottom-left/right-radius` |      | 各角圆角                        |
-| `border-image` 及 `-source/-slice/-width/-outset/-repeat`    |      | 图片边框                        |
-| `border-collapse`                                            |      | 表格边框合并(collapse/separate) |
-| `border-spacing`                                             |      | 表格边框间距                    |
-| `box-shadow`                                                 |      | 盒阴影                          |
-| `box-decoration-break`                                       |      | 分片时装饰处理(slice/clone)     |
-| `outline` `outline-width` `outline-style` `outline-color` `outline-offset` |      | 轮廓(不占空间)                  |
+| `width` `height`                                             |  ✅  | 支持                            |
+| `min-width` `min-height` `max-width` `max-height`            |  ✅  | 支持                            |
+| `margin` `margin-top` `margin-right` `margin-bottom` `margin-left` |  ◐   | 长度/百分比支持；**`auto` 视为 0**（无居中原语） |
+| `padding` `padding-top` `padding-right` `padding-bottom` `padding-left` |  ✅  | 支持（长度/百分比）             |
+| `border`                                                     |  ✅  | 简写（width style color 任意序）|
+| `border-width` `border-style` `border-color`                 |  ✅  | 全局分量                        |
+| `border-top/right/bottom/left`                               |  ✅  | 各方向简写                      |
+| `border-top/right/bottom/left-width/style/color`             |  ✗   | **仅支持 `border-{side}` 简写**与全局分量；`border-{side}-{prop}` 长写未实现 |
+| `border-radius`                                              |  ◐   | 1–4 值简写；任意角非 0 渲染圆角字符（>1 与 1 无差别，终端无更细圆角原语）|
+| `border-top-left/right-radius` `border-bottom-left/right-radius` |  ✗   | 仅简写，四角分量未实现         |
+| `border-image` 及 `-source/-slice/-width/-outset/-repeat`    |  ✗   | 未实现                          |
+| `border-collapse`                                            |  ✗   | 未实现                          |
+| `border-spacing`                                             |  ✗   | 未实现                          |
+| `box-shadow`                                                 |  ✗   | 未实现                          |
+| `box-decoration-break`                                       |  ✗   | 未实现                          |
+| `outline` `outline-width` `outline-style` `outline-color` `outline-offset` |  ✗   | 未实现                          |
 
 ## 6. 颜色与背景
 
 | 特性                    | htui | 说明                                 |
 | ----------------------- | :--: | ------------------------------------ |
-| `color`                 |      | 前景文字色                           |
-| `opacity`               |      | 不透明度(0–1)                        |
-| `background`            |      | 背景简写                             |
-| `background-color`      |      | 背景色                               |
-| `background-image`      |      | 背景图                               |
-| `background-repeat`     |      | 平铺方式                             |
-| `background-position`   |      | 位置                                 |
-| `background-size`       |      | 尺寸(cover/contain/长度)             |
-| `background-attachment` |      | 滚动方式(scroll/fixed/local)         |
-| `background-clip`       |      | 绘制区域(border/padding/content-box) |
-| `background-origin`     |      | 定位参考区                           |
-| `background-blend-mode` |      | 背景混合模式                         |
-| `mix-blend-mode`        |      | 元素与下层混合模式                   |
-| `caret-color`           |      | 光标颜色                             |
+| `color`                 |  ✅  | hex(`#RGB`/`#RRGGBB`)/`rgb()`/148 个命名色 |
+| `opacity`               |  ✗   | 未实现（拒绝清单）                   |
+| `background`            |  ◐   | 仅接受颜色值（作为 `background-color` 的兼容别名）|
+| `background-color`      |  ✅  | 支持                                 |
+| `background-image`      |  ✗   | 未实现                               |
+| `background-repeat`     |  ✗   | 未实现                               |
+| `background-position`   |  ✗   | 未实现                               |
+| `background-size`       |  ✗   | 未实现                               |
+| `background-attachment` |  ✗   | 未实现                               |
+| `background-clip`       |  ✗   | 未实现                               |
+| `background-origin`     |  ✗   | 未实现                               |
+| `background-blend-mode` |  ✗   | 未实现                               |
+| `mix-blend-mode`        |  ✗   | 未实现                               |
+| `caret-color`           |  ✗   | 输入框焦点框颜色固定（`#2ac3de`）    |
 
 ## 7. 字体
 
 | 特性                                                         | htui | 说明                                |
 | ------------------------------------------------------------ | :--: | ----------------------------------- |
-| `font`                                                       |      | 字体简写                            |
-| `font-family`                                                |      | 字体族                              |
-| `font-size`                                                  |      | 字号                                |
-| `font-size-adjust`                                           |      | 字号调节(按 x-height)               |
-| `font-weight`                                                |      | 字重(100–900)                       |
-| `font-style`                                                 |      | 字形(normal/italic/oblique)         |
-| `font-stretch` `font-width`                                  |      | 字宽(condensed/expanded 等)         |
-| `font-variant`                                               |      | 字体变体简写                        |
-| `font-variant-alternates`                                    |      | 备选字形                            |
-| `font-variant-caps`                                          |      | 大写形式(small-caps 等)             |
-| `font-variant-east-asian`                                    |      | 东亚字形变体                        |
-| `font-variant-emoji`                                         |      | emoji 表现(text/emoji)              |
-| `font-variant-ligatures`                                     |      | 连字                                |
-| `font-variant-numeric`                                       |      | 数字形式(tnum, frac 等)             |
-| `font-variant-position`                                      |      | 上下标字形                          |
-| `font-feature-settings`                                      |      | OpenType 特性开关                   |
-| `font-variation-settings`                                    |      | 可变字体轴                          |
-| `font-kerning`                                               |      | 字偶距调整                          |
-| `font-language-override`                                     |      | 语言专用字形                        |
-| `font-optical-sizing`                                        |      | 光学尺寸                            |
-| `font-palette`                                               |      | colored font 调色板                 |
-| `font-synthesis` `font-synthesis-weight/style/small-caps/position` |      | 合成字体(加粗/斜体/小型大写/上下标) |
+| `font`                                                       |  ✗   | 简写未支持                          |
+| `font-family`                                                |  ✗   | 未支持（终端只有等宽字体）          |
+| `font-size`                                                  |  ◐   | px/裸数/em/rem/vw/vh；**百分比不支持**；h1–h5 有 UA 默认 |
+| `font-size-adjust`                                           |  ✗   | 未实现                              |
+| `font-weight`                                                |  ◐   | bold/bolder/700–900 → 粗；其余 → 常规（无细分字重）|
+| `font-style`                                                 |  ✅  | normal/italic/oblique               |
+| `font-stretch` `font-width`                                  |  ✗   | 未实现                              |
+| `font-variant`                                               |  ✗   | 未实现                              |
+| `font-variant-alternates`                                    |  ✗   | 未实现                              |
+| `font-variant-caps`                                          |  ✗   | 未实现                              |
+| `font-variant-east-asian`                                    |  ✗   | 未实现                              |
+| `font-variant-emoji`                                         |  ✗   | 未实现                              |
+| `font-variant-ligatures`                                     |  ✗   | 未实现                              |
+| `font-variant-numeric`                                       |  ✗   | 未实现                              |
+| `font-variant-position`                                      |  ✗   | 未实现                              |
+| `font-feature-settings`                                      |  ✗   | 未实现                              |
+| `font-variation-settings`                                    |  ✗   | 未实现                              |
+| `font-kerning`                                               |  ✗   | 未实现                              |
+| `font-language-override`                                     |  ✗   | 未实现                              |
+| `font-optical-sizing`                                        |  ✗   | 未实现                              |
+| `font-palette`                                               |  ✗   | 未实现                              |
+| `font-synthesis` `font-synthesis-weight/style/small-caps/position` |  ✗   | 未实现                              |
 
 ## 8. 文本
 
 | 特性                                                         | htui | 说明                                   |
 | ------------------------------------------------------------ | :--: | -------------------------------------- |
-| `text-align` `text-align-all` `text-align-last`              |      | 对齐(左/右/中/两端)                    |
-| `text-decoration` `text-decoration-line` `text-decoration-style` `text-decoration-color` |      | 文本装饰线                             |
-| `text-underline-position`                                    |      | 下划线位置                             |
-| `text-emphasis` `text-emphasis-style` `text-emphasis-color` `text-emphasis-position` |      | 着重号                                 |
-| `text-indent`                                                |      | 首行缩进                               |
-| `text-justify`                                               |      | 两端对齐方式                           |
-| `text-orientation`                                           |      | 文字朝向(mixed/upright/sideways)       |
-| `text-overflow`                                              |      | 溢出省略(ellipsis/clip)                |
-| `text-shadow`                                                |      | 文字阴影                               |
-| `text-transform`                                             |      | 大小写(uppercase/lowercase/capitalize) |
-| `text-combine-upright`                                       |      | 竖排中横排组合                         |
-| `letter-spacing`                                             |      | 字母间距                               |
-| `word-spacing`                                               |      | 词间距                                 |
-| `word-break` `line-break`                                    |      | 换行规则                               |
-| `word-wrap` `overflow-wrap`                                  |      | 溢出换行                               |
-| `line-height`                                                |      | 行高                                   |
-| `white-space`                                                |      | 空白处理(normal/pre/nowrap/pre-wrap)   |
-| `hyphens`                                                    |      | 连字符断行                             |
-| `tab-size`                                                   |      | 制表符宽度                             |
-| `hanging-punctuation`                                        |      | 标点悬挂                               |
-| `quotes`                                                     |      | 引号字符                               |
-| `direction`                                                  |      | 文字方向(ltr/rtl)                      |
-| `writing-mode`                                               |      | 书写模式(horizontal-tb/vertical-rl/lr) |
-| `unicode-bidi`                                               |      | 双向算法覆盖                           |
-| `vertical-align`                                             |      | 垂直对齐(baseline/top/middle/bottom)   |
+| `text-align` `text-align-all` `text-align-last`              |  ◐   | left/center/right；**justify 按 left 处理**；all/last 未实现 |
+| `text-decoration` `text-decoration-line` `text-decoration-style` `text-decoration-color` |  ◐   | 仅简写 `text-decoration`（underline/line-through 组合）；**line/style/color 分量未实现** |
+| `text-underline-position`                                    |  ✗   | 未实现                                 |
+| `text-emphasis` `text-emphasis-style` `text-emphasis-color` `text-emphasis-position` |  ✗   | 未实现                                 |
+| `text-indent`                                                |  ✗   | 未实现                                 |
+| `text-justify`                                               |  ✗   | 未实现                                 |
+| `text-orientation`                                           |  ✗   | 未实现                                 |
+| `text-overflow`                                              |  ✗   | 未实现                                 |
+| `text-shadow`                                                |  ✗   | 未实现                                 |
+| `text-transform`                                             |  ✅  | uppercase/lowercase/capitalize          |
+| `text-combine-upright`                                       |  ✗   | 未实现                                 |
+| `letter-spacing`                                             |  ✗   | 未实现                                 |
+| `word-spacing`                                               |  ✗   | 未实现                                 |
+| `word-break` `line-break`                                    |  ◐   | `word-break`: normal/break-all/keep-all；**line-break 未实现** |
+| `word-wrap` `overflow-wrap`                                  |  ✅  | normal/break-word/anywhere；`word-wrap` 作为兼容别名 |
+| `line-height`                                                |  ✅  | normal/数值/长度                       |
+| `white-space`                                                |  ✅  | normal/pre/nowrap/pre-wrap/pre-line     |
+| `hyphens`                                                    |  ✗   | 未实现                                 |
+| `tab-size`                                                   |  ✗   | 未实现                                 |
+| `hanging-punctuation`                                        |  ✗   | 未实现                                 |
+| `quotes`                                                     |  ✗   | 未实现                                 |
+| `direction`                                                  |  ✗   | 未实现                                 |
+| `writing-mode`                                               |  ✗   | 未实现                                 |
+| `unicode-bidi`                                               |  ✗   | 未实现                                 |
+| `vertical-align`                                             |  ✗   | 未实现（行内盒无基线对齐）             |
 
 ## 9. 表格
 
 | 特性           | htui | 说明                    |
 | -------------- | :--: | ----------------------- |
-| `table-layout` |      | 布局算法(auto/fixed)    |
-| `caption-side` |      | 标题位置(top/bottom)    |
-| `empty-cells`  |      | 空单元格边框(show/hide) |
+| `table-layout` |  ✗   | 未实现（固定列宽算法）  |
+| `caption-side` |  ✗   | 未实现（标题恒在表上）  |
+| `empty-cells`  |  ✗   | 未实现                  |
 
 (border-collapse / border-spacing 见 §5)
 
@@ -396,119 +408,136 @@
 
 | 特性                                | htui | 说明                                  |
 | ----------------------------------- | :--: | ------------------------------------- |
-| `list-style`                        |      | 列表样式简写                          |
-| `list-style-type`                   |      | 标记类型(disc/circle/decimal/none 等) |
-| `list-style-position`               |      | 标记位置(inside/outside)              |
-| `list-style-image`                  |      | 标记图片                              |
-| `counter-reset` `counter-increment` |      | 计数器重置/递增                       |
-| `content`                           |      | 生成内容(::before/::after 用)         |
+| `list-style`                        |  ✗   | 简写未支持                            |
+| `list-style-type`                   |  ✗   | 标记固定为 `• `（ul）/ `<n>. `（ol）/ `- `（孤儿 li） |
+| `list-style-position`               |  ✗   | 未实现                                |
+| `list-style-image`                  |  ✗   | 未实现                                |
+| `counter-reset` `counter-increment` |  ✗   | 未实现                                |
+| `content`                           |  ✗   | 未实现（无 `::before`/`::after`）     |
 
 ## 11. 动画与过渡
 
+> 说明：CSS 动画 / 过渡在 `boundaries.md` 拒绝清单中，**永不进入实现范围**。
+> 下表全部 ✗。动态效果由 JS `setInterval` / `setTimeout` 重建 DOM 驱动。
+
 | 特性                         | htui | 说明                                     |
 | ---------------------------- | :--: | ---------------------------------------- |
-| `animation`                  |      | 动画简写                                 |
-| `animation-name`             |      | @keyframes 名称                          |
-| `animation-duration`         |      | 持续时间                                 |
-| `animation-timing-function`  |      | 时间函数(ease/linear/cubic-bezier/steps) |
-| `animation-delay`            |      | 延迟                                     |
-| `animation-iteration-count`  |      | 循环次数(infinite)                       |
-| `animation-direction`        |      | 方向(normal/reverse/alternate)           |
-| `animation-fill-mode`        |      | 填充模式(forwards/backwards/both)        |
-| `animation-play-state`       |      | 播放状态(running/paused)                 |
-| `transition`                 |      | 过渡简写                                 |
-| `transition-property`        |      | 参与过渡的属性                           |
-| `transition-duration`        |      | 持续时间                                 |
-| `transition-timing-function` |      | 时间函数                                 |
-| `transition-delay`           |      | 延迟                                     |
+| `animation`                  |  ✗   | 拒绝清单                                 |
+| `animation-name`             |  ✗   | 拒绝清单                                 |
+| `animation-duration`         |  ✗   | 拒绝清单                                 |
+| `animation-timing-function`  |  ✗   | 拒绝清单                                 |
+| `animation-delay`            |  ✗   | 拒绝清单                                 |
+| `animation-iteration-count`  |  ✗   | 拒绝清单                                 |
+| `animation-direction`        |  ✗   | 拒绝清单                                 |
+| `animation-fill-mode`        |  ✗   | 拒绝清单                                 |
+| `animation-play-state`       |  ✗   | 拒绝清单                                 |
+| `transition`                 |  ✗   | 拒绝清单                                 |
+| `transition-property`        |  ✗   | 拒绝清单                                 |
+| `transition-duration`        |  ✗   | 拒绝清单                                 |
+| `transition-timing-function` |  ✗   | 拒绝清单                                 |
+| `transition-delay`           |  ✗   | 拒绝清单                                 |
 
 ## 12. 变换
 
+> 说明：`transform` 属拒绝清单，全部 ✗。
+
 | 特性               | htui | 说明                                           |
 | ------------------ | :--: | ---------------------------------------------- |
-| `transform`        |      | 2D/3D 变换(translate/scale/rotate/skew/matrix) |
-| `transform-origin` |      | 变换原点                                       |
-| `transform-box`    |      | 变换参考盒                                     |
+| `transform`        |  ✗   | 拒绝清单                                       |
+| `transform-origin` |  ✗   | 拒绝清单                                       |
+| `transform-box`    |  ✗   | 拒绝清单                                       |
 
 ## 13. 滤镜 / 遮罩 / 形状
 
+> 说明：像素级滤镜 / 遮罩 / 形状环绕不在终端渲染范围，全部 ✗。
+
 | 特性                                                         | htui | 说明                                                |
 | ------------------------------------------------------------ | :--: | --------------------------------------------------- |
-| `filter`                                                     |      | 滤镜(blur/brightness/contrast/drop-shadow/sepia 等) |
-| `flood-color` `flood-opacity`                                |      | 滤镜泛光色/不透明度                                 |
-| `lighting-color`                                             |      | 滤镜光照色                                          |
-| `color-interpolation-filters`                                |      | 滤镜颜色插值空间                                    |
-| `clip`                                                       |      | 旧裁剪(已被 clip-path 取代)                         |
-| `clip-path`                                                  |      | 裁剪路径                                            |
-| `clip-rule`                                                  |      | 裁剪填充规则                                        |
-| `mask` `mask-image` `mask-mode` `mask-repeat` `mask-position` `mask-size` `mask-clip` `mask-composite` `mask-origin` `mask-type` |      | 遮罩                                                |
-| `mask-border` 及 `-source/-slice/-width/-outset/-repeat/-mode` |      | 边框遮罩                                            |
-| `shape-outside`                                              |      | 文字环绕形状                                        |
-| `shape-margin`                                               |      | 环绕边距                                            |
-| `shape-image-threshold`                                      |      | 图像形状阈值                                        |
-| `image-rendering`                                            |      | 图片缩放算法                                        |
-| `image-orientation`                                          |      | 图片方向校正                                        |
+| `filter`                                                     |  ✗   | 未实现                                              |
+| `flood-color` `flood-opacity`                                |  ✗   | 未实现                                              |
+| `lighting-color`                                             |  ✗   | 未实现                                              |
+| `color-interpolation-filters`                                |  ✗   | 未实现                                              |
+| `clip`                                                       |  ✗   | 未实现                                              |
+| `clip-path`                                                  |  ✗   | 未实现                                              |
+| `clip-rule`                                                  |  ✗   | 未实现                                              |
+| `mask` 家族                                                   |  ✗   | 未实现                                              |
+| `mask-border` 家族                                            |  ✗   | 未实现                                              |
+| `shape-outside`                                              |  ✗   | 未实现                                              |
+| `shape-margin`                                               |  ✗   | 未实现                                              |
+| `shape-image-threshold`                                      |  ✗   | 未实现                                              |
+| `image-rendering`                                            |  ✗   | 未实现                                              |
+| `image-orientation`                                          |  ✗   | 未实现                                              |
 
 ## 14. 滚动与吸附
 
+> 说明：终端滚动由引擎整文档滚动（`scroll_y`）驱动，无容器级滚动，全部 ✗。
+
 | 特性                                                         | htui | 说明                           |
 | ------------------------------------------------------------ | :--: | ------------------------------ |
-| `scroll-snap-type`                                           |      | 吸附类型与轴向                 |
-| `scroll-snap-align`                                          |      | 项目吸附对齐(start/end/center) |
-| `scroll-snap-stop`                                           |      | 强制停留(always/normal)        |
-| `scroll-padding` 及 `-top/-right/-bottom/-left/-block/-inline` 等 |      | 滚动容器内边距(吸附偏移)       |
-| `scroll-margin` 及 `-top/-right/-bottom/-left/-block/-inline` 等 |      | 滚动子项外边距                 |
+| `scroll-snap-type`                                           |  ✗   | 未实现                         |
+| `scroll-snap-align`                                          |  ✗   | 未实现                         |
+| `scroll-snap-stop`                                           |  ✗   | 未实现                         |
+| `scroll-padding` 家族                                         |  ✗   | 未实现                         |
+| `scroll-margin` 家族                                          |  ✗   | 未实现                         |
 
 ## 15. UI 与光标
 
 | 特性                | htui | 说明               |
 | ------------------- | :--: | ------------------ |
-| `cursor`            |      | 鼠标光标           |
-| `resize`            |      | 是否可拖拽调整大小 |
-| `user-select`(原型) |      | 文字可选           |
+| `cursor`            |  ✗   | 终端无 CSS 光标控制|
+| `resize`            |  ✗   | 未实现             |
+| `user-select`(原型) |  ✗   | 拖选/复制为引擎内置交互，**不受 CSS 控制** |
 
 ## 16. 分页 / 分片
 
+> 说明：终端输出不分页，全部 ✗。
+
 | 特性                                                       | htui | 说明                        |
 | ---------------------------------------------------------- | :--: | --------------------------- |
-| `break-before` `break-after` `break-inside`                |      | 分片控制(page/column/avoid) |
-| `page-break-before` `page-break-after` `page-break-inside` |      | 旧版分页(已被 break-* 取代) |
-| `orphans` `widows`                                         |      | 页底/页顶最少行数           |
+| `break-before` `break-after` `break-inside`                |  ✗   | 未实现                      |
+| `page-break-before` `page-break-after` `page-break-inside` |  ✗   | 未实现                      |
+| `orphans` `widows`                                         |  ✗   | 未实现                      |
 
 ## 17. 语音 / 听觉(CSS2 遗留,大多未实现)
 
+> 说明：终端无听觉渲染模型，全部 ✗。
+
 | 特性                                                         | htui | 说明                    |
 | ------------------------------------------------------------ | :--: | ----------------------- |
-| `azimuth` `elevation`                                        |      | 声源水平/垂直角度       |
-| `cue` `cue-before` `cue-after`                               |      | 提示音                  |
-| `pause` `pause-before` `pause-after`                         |      | 停顿                    |
-| `rest` `rest-before` `rest-after`                            |      | 间歇                    |
-| `speak` `speak-as`                                           |      | 是否/如何朗读           |
-| `speak-header` `speak-numeral` `speak-punctuation`           |      | 表头/数字/标点朗读      |
-| `speech-rate` `voice-rate`                                   |      | 语速                    |
-| `pitch` `pitch-range` `voice-pitch` `voice-range`            |      | 音调                    |
-| `voice-family`                                               |      | 朗读语音族              |
-| `voice-balance` `voice-duration` `voice-stress` `voice-volume` |      | 声道平衡/时长/重音/音量 |
-| `volume`                                                     |      | 音量                    |
-| `richness` `stress`                                          |      | 声音丰富度 / 重音强度   |
-| `play-during`                                                |      | 背景音                  |
-| `glyph-orientation-vertical`                                 |      | 竖排字形朝向(遗留)      |
+| `azimuth` `elevation`                                        |  ✗   | 未实现                  |
+| `cue` `cue-before` `cue-after`                               |  ✗   | 未实现                  |
+| `pause` `pause-before` `pause-after`                         |  ✗   | 未实现                  |
+| `rest` `rest-before` `rest-after`                            |  ✗   | 未实现                  |
+| `speak` `speak-as`                                           |  ✗   | 未实现                  |
+| `speak-header` `speak-numeral` `speak-punctuation`           |  ✗   | 未实现                  |
+| `speech-rate` `voice-rate`                                   |  ✗   | 未实现                  |
+| `pitch` `pitch-range` `voice-pitch` `voice-range`            |  ✗   | 未实现                  |
+| `voice-family`                                               |  ✗   | 未实现                  |
+| `voice-balance` `voice-duration` `voice-stress` `voice-volume` |  ✗   | 未实现                  |
+| `volume`                                                     |  ✗   | 未实现                  |
+| `richness` `stress`                                          |  ✗   | 未实现                  |
+| `play-during`                                                |  ✗   | 未实现                  |
+| `glyph-orientation-vertical`                                 |  ✗   | 未实现                  |
 
 ## 18. At-Rule(规则)
 
+> 说明：CSS 解析器（`css_parse::stylesheet`）对**所有 at-rule 一律跳过**
+> （`AtRuleParser` 记录 debug 日志后丢弃 prelude/block，不产生任何规则）。
+> 下表全部 ✗。
+
 | 规则                                                         | htui | 说明                                   |
 | ------------------------------------------------------------ | :--: | -------------------------------------- |
-| `@import`                                                    |      | 导入外部样式表                         |
-| `@charset`                                                   |      | 样式表字符编码                         |
-| `@namespace`                                                 |      | XML 命名空间前缀                       |
-| `@media`                                                     |      | 媒体查询条件块                         |
-| `@supports`                                                  |      | 特性支持查询条件块                     |
-| `@keyframes`                                                 |      | 动画关键帧定义                         |
-| `@font-face`                                                 |      | 自定义字体资源                         |
-| `@font-feature-values`                                       |      | 字体特性命名预设                       |
-| `@font-palette-values`                                       |      | colored font 调色板预设                |
-| `@counter-style`                                             |      | 自定义列表计数器样式                   |
-| `@stylistic` `@styleset` `@character-variant` `@swash` `@ornaments` `@annotation` `@historical-forms` |      | font-feature-values 下的字形变体子规则 |
+| `@import`                                                    |  ✗   | 解析时跳过（不加载外部样式表；外部样式表请用 `<link rel=stylesheet>`）|
+| `@charset`                                                   |  ✗   | 跳过                                   |
+| `@namespace`                                                 |  ✗   | 跳过                                   |
+| `@media`                                                     |  ✗   | 跳过（无媒体查询）                     |
+| `@supports`                                                  |  ✗   | 跳过                                   |
+| `@keyframes`                                                 |  ✗   | 跳过（动画在拒绝清单）                 |
+| `@font-face`                                                 |  ✗   | 跳过（无自定义字体）                   |
+| `@font-feature-values`                                       |  ✗   | 跳过                                   |
+| `@font-palette-values`                                       |  ✗   | 跳过                                   |
+| `@counter-style`                                             |  ✗   | 跳过（列表标记固定）                   |
+| `@stylistic` 等 font-feature-values 子规则                    |  ✗   | 跳过                                   |
 
 ## 19. 选择器(Selector Level 3 官方定义)
 
@@ -516,80 +545,435 @@
 
 | 选择器     | htui | 说明     |
 | ---------- | :--: | -------- |
-| `*`        |      | 通用     |
-| `E` (类型) |      | 元素类型 |
-| `.class`   |      | 类       |
-| `#id`      |      | id       |
-| `E F`      |      | 后代     |
-| `E > F`    |      | 子代     |
-| `E + F`    |      | 相邻兄弟 |
-| `E ~ F`    |      | 后续兄弟 |
-| `E,A`      |      | 分组     |
+| `*`        |  ✗   | 通用选择器未支持（解析报错，规则丢弃） |
+| `E` (类型) |  ◐   | 仅支持已映射 `NodeType` 的标签（见 `css_parse::selector::tag_str_to_node_type`） |
+| `.class`   |  ✅  | 类       |
+| `#id`      |  ✅  | id       |
+| `E F`      |  ✅  | 后代     |
+| `E > F`    |  ✅  | 子代     |
+| `E + F`    |  ✅  | 相邻兄弟 |
+| `E ~ F`    |  ✅  | 后续兄弟 |
+| `E,A`      |  ✅  | 分组（顶层逗号拆分，括号内逗号保留） |
 
 ### 19.2 伪类
 
 | 伪类                                             | htui | 说明                   |
 | ------------------------------------------------ | :--: | ---------------------- |
-| `:root`                                          |      | 文档根                 |
-| `:empty`                                         |      | 无子节点               |
-| `:first-child` `:last-child` `:only-child`       |      | 第一个/最后/唯一子元素 |
-| `:first-of-type` `:last-of-type` `:only-of-type` |      | 同类型首/末/唯一       |
-| `:nth-child()` `:nth-last-child()`               |      | 第 n 个子元素(正/倒序) |
-| `:nth-of-type()` `:nth-last-of-type()`           |      | 同类型第 n 个          |
-| `:not()`                                         |      | 反选                   |
-| `:lang()`                                        |      | 语言匹配               |
-| `:link` `:visited`                               |      | 未访问/已访问链接      |
-| `:active` `:hover` `:focus`                      |      | 用户交互状态           |
-| `:target`                                        |      | URL 锚点目标           |
-| `:enabled` `:disabled`                           |      | 表单启用/禁用          |
-| `:checked`                                       |      | 勾选状态               |
+| `:root`                                          |  ✗   | 未支持                 |
+| `:empty`                                         |  ✗   | 未支持                 |
+| `:first-child` `:last-child` `:only-child`       |  ✗   | 未支持                 |
+| `:first-of-type` `:last-of-type` `:only-of-type` |  ✗   | 未支持                 |
+| `:nth-child()` `:nth-last-child()`               |  ◐   | 仅 `:nth-child`，支持 even/odd/整数/`an+b` 子集（`n`、`-n+3`、负偏移被拒）; `:nth-last-child` 未支持 |
+| `:nth-of-type()` `:nth-last-of-type()`           |  ✗   | 未支持                 |
+| `:not()`                                         |  ✗   | 未支持                 |
+| `:lang()`                                        |  ✗   | 未支持                 |
+| `:link` `:visited`                               |  ✗   | 未支持（链接恒为 UA 默认蓝） |
+| `:active` `:hover` `:focus`                      |  ◐   | **仅 `:hover`**（配合 `RenderCmd::Hover` 重级联；样式表无 `:hover` 规则时无视觉变化）|
+| `:target`                                        |  ✗   | 未支持                 |
+| `:enabled` `:disabled`                           |  ✗   | 未支持                 |
+| `:checked`                                       |  ✗   | 未支持                 |
 
 ### 19.3 伪元素
 
+> 说明：伪元素全部 ✗（解析器将 `::` 当作不支持伪类丢弃规则）。
+
 | 伪元素               | htui | 说明     |
 | -------------------- | :--: | -------- |
-| `::before` `::after` |      | 生成内容 |
-| `::first-line`       |      | 首行     |
-| `::first-letter`     |      | 首字母   |
+| `::before` `::after` |  ✗   | 未支持（无生成内容） |
+| `::first-line`       |  ✗   | 未支持   |
+| `::first-letter`     |  ✗   | 未支持   |
 
 ## 20. 值类型与函数
 
 | 类型/函数                                                    | htui | 说明                                           |
 | ------------------------------------------------------------ | :--: | ---------------------------------------------- |
-| `<length>`                                                   |      | 长度(px/em/rem/vw/vh/cm…)                      |
-| `<percentage>`                                               |      | 百分比                                         |
-| `<color>`                                                    |      | 颜色(named/hex/rgb()/hsl()/oklch()/color()…)   |
-| `<angle>`                                                    |      | 角度(deg/turn/rad/grad)                        |
-| `<time>` `<frequency>`                                       |      | 时间 / 频率                                    |
-| `<resolution>`                                               |      | 分辨率(dpi/dpcm/dppx)                          |
-| `<url>`                                                      |      | 资源引用                                       |
-| `<integer>` `<number>`                                       |      | 整数 / 数值                                    |
-| `calc()`                                                     |      | 数学运算                                       |
-| `min()` `max()` `clamp()`                                    |      | 比较取值                                       |
-| `var()`                                                      |      | 自定义属性变量                                 |
-| `--*`                                                        |      | 自定义属性                                     |
-| `attr()`                                                     |      | 取 HTML 属性值                                 |
-| `linear-gradient()` `radial-gradient()` `conic-gradient()`   |      | 渐变                                           |
-| `image()` `image-set()`                                      |      | 图像选择                                       |
-| `cross-fade()`                                               |      | 图像混合                                       |
-| `transform` 函数                                             |      | translate/scale/rotate/skew/matrix/perspective |
-| `blur()` `brightness()` `contrast()` `drop-shadow()` `grayscale()` `hue-rotate()` `invert()` `opacity()` `saturate()` `sepia()` |      | filter 滤镜函数                                |
-| `color-mix()` `relative color`                               |      | 颜色混合 / 相对颜色                            |
-| `easing` `linear()` `cubic-bezier()` `steps()`               |      | 缓动函数                                       |
-| `env()`                                                      |      | 环境变量(safe-area-inset 等)                   |
-| `counter()` `counters()`                                     |      | 计数器值                                       |
-| `symbols()`                                                  |      | 符号计数                                       |
-| `ray()` `offset-path`                                        |      | motion path 路径                               |
-| `toggle()`                                                   |      | 循环值                                         |
-| `local()` `format()`                                         |      | @font-face 字体引用                            |
+| `<length>`                                                   |  ◐   | px/裸数/em/rem/vw/vh/%；**pt/cm/mm/in/pc/vmin/vmax 不支持**（无 DPI，px = 单元格） |
+| `<percentage>`                                               |  ◐   | 尺寸/盒模型/inset 类属性支持；**font-size 百分比不支持** |
+| `<color>`                                                    |  ◐   | hex(`#RGB`/`#RRGGBB`)、`rgb(r,g,b)`、148 个命名色；**hsl()/hwb()/lab()/oklch()/color() 不支持** |
+| `<angle>`                                                    |  ✗   | 无属性消费                                  |
+| `<time>` `<frequency>`                                       |  ✗   | 无属性消费（动画未实现）                    |
+| `<resolution>`                                               |  ✗   | 无属性消费                                  |
+| `<url>`                                                      |  ◐   | 经 `mem://` 资源层（`<img src>`/`<script src>`/`<link href>`/JS `fetch`）；CSS `url()` 无属性消费 |
+| `<integer>` `<number>`                                       |  ◐   | `flex-grow`/`flex-shrink`/`order`/`z-index`/`line-height` 数值等 |
+| `calc()`                                                     |  ✗   | 未实现                                    |
+| `min()` `max()` `clamp()`                                    |  ✗   | 未实现                                    |
+| `var()`                                                      |  ✗   | 未实现（无自定义属性）                     |
+| `--*`                                                        |  ✗   | 未实现                                    |
+| `attr()`                                                     |  ✗   | 未实现                                    |
+| `linear-gradient()` `radial-gradient()` `conic-gradient()`   |  ✗   | 未实现                                    |
+| `image()` `image-set()`                                      |  ✗   | 未实现                                    |
+| `cross-fade()`                                               |  ✗   | 未实现                                    |
+| `transform` 函数                                             |  ✗   | 未实现（变换在拒绝清单）                  |
+| `filter` 滤镜函数                                             |  ✗   | 未实现                                    |
+| `color-mix()` `relative color`                               |  ✗   | 未实现                                    |
+| `easing` `linear()` `cubic-bezier()` `steps()`               |  ✗   | 未实现（动画在拒绝清单）                  |
+| `env()`                                                      |  ✗   | 未实现                                    |
+| `counter()` `counters()`                                     |  ✗   | 未实现                                    |
+| `symbols()`                                                  |  ✗   | 未实现                                    |
+| `ray()` `offset-path`                                        |  ✗   | 未实现                                    |
+| `toggle()`                                                   |  ✗   | 未实现                                    |
+| `local()` `format()`                                         |  ✗   | 未实现（@font-face 在跳过清单）           |
 
 ## 21. 全局关键字(可用于任意属性)
 
+> 说明：四个全局关键字均**不被识别**——作为普通值写入后大多解析失败被丢弃。
+> 属性继承由引擎级联自动完成（`INHERITED_PROPS`），与显式 `inherit` 无关。
+
 | 关键字         | htui | 说明                              |
 | -------------- | :--: | --------------------------------- |
-| `initial`      |      | 重置为规范初始值                  |
-| `inherit`      |      | 强制继承父值                      |
-| `unset`        |      | 继承属性取 inherit,否则取 initial |
-| `revert`       |      | 回退到浏览器默认                  |
-| `revert-layer` |      | 回退到上一层 cascade layer        |
-| `all`          |      | 一次性重置所有属性                |
+| `initial`      |  ✗   | 未识别                            |
+| `inherit`      |  ✗   | 未识别（继承靠级联自动完成）      |
+| `unset`        |  ✗   | 未识别                            |
+| `revert`       |  ✗   | 未识别                            |
+| `revert-layer` |  ✗   | 未识别（无 cascade layer）        |
+| `all`          |  ✗   | 未识别                            |
+
+
+# DOM API 清单
+
+> 来源:DOM Living Standard — https://dom.spec.whatwg.org/  
+> 列说明:`API` | `htui`(待填 ✅/◐/✗) | `说明`
+
+## 1. 继承关系总览
+
+| 接口                    | 继承自             | htui | 说明                          |
+| ----------------------- | ------------------ | :--: | ----------------------------- |
+| `EventTarget`           | —                  |  ◐   | 元素包装上支持 addEventListener/removeEventListener；无 dispatchEvent/构造器 |
+| `Node`                  | `EventTarget`      |  ◐   | 无独立 Node 对象；元素包装实现 parentNode/textContent 子集 |
+| `Document`              | `Node`             |  ◐   | 仅 document.getElementById/createElement |
+| `DocumentFragment`      | `Node`             |  ✗   | 未实现                        |
+| `ShadowRoot`            | `DocumentFragment` |  ✗   | 未实现                        |
+| `DocumentType`          | `Node`             |  ✗   | 未实现                        |
+| `Element`               | `Node`             |  ◐   | 见 §4 子集                    |
+| `CharacterData`         | `Node`             |  ✗   | 未实现                        |
+| `Text`                  | `CharacterData`    |  ✗   | 未实现（无 createTextNode）   |
+| `CDATASection`          | `Text`             |  ✗   | 未实现                        |
+| `Comment`               | `CharacterData`    |  ✗   | 未实现                        |
+| `ProcessingInstruction` | `CharacterData`    |  ✗   | 未实现                        |
+| `Attr`                  | `Node`             |  ✗   | 未实现                        |
+
+## 2. Node(节点基类)
+
+### 2.1 常量
+
+| 常量                                                         | 值        | htui | 说明                               |
+| ------------------------------------------------------------ | --------- | :--: | ---------------------------------- |
+| `ELEMENT_NODE`                                               | 1         |  ✗   | 未暴露常量                         |
+| `ATTRIBUTE_NODE`                                             | 2         |  ✗   | 未暴露常量                         |
+| `TEXT_NODE`                                                  | 3         |  ✗   | 未暴露常量                         |
+| `CDATA_SECTION_NODE`                                         | 4         |  ✗   | 未暴露常量                         |
+| `PROCESSING_INSTRUCTION_NODE`                                | 7         |  ✗   | 未暴露常量                         |
+| `COMMENT_NODE`                                               | 8         |  ✗   | 未暴露常量                         |
+| `DOCUMENT_NODE`                                              | 9         |  ✗   | 未暴露常量                         |
+| `DOCUMENT_TYPE_NODE`                                         | 10        |  ✗   | 未暴露常量                         |
+| `DOCUMENT_FRAGMENT_NODE`                                     | 11        |  ✗   | 未暴露常量                         |
+| `DOCUMENT_POSITION_DISCONNECTED/PRECEDING/FOLLOWING/CONTAINS/CONTAINED_BY/IMPLEMENTATION_SPECIFIC` | 0x01–0x20 |  ✗   | `compareDocumentPosition` 的位掩码（未实现） |
+
+### 2.2 属性与方法
+
+| API                                                          | htui | 说明                         |
+| ------------------------------------------------------------ | :--: | ---------------------------- |
+| `nodeType` `nodeName`                                        |  ✗   | 未实现（TODO B）             |
+| `baseURI`                                                    |  ✗   | 未实现                       |
+| `isConnected`                                                |  ✗   | 未实现                       |
+| `ownerDocument`                                              |  ✗   | 未实现                       |
+| `getRootNode(options)`                                       |  ✗   | 未实现                       |
+| `parentNode` `parentElement`                                 |  ◐   | `parentNode` 只读支持；`parentElement` 无 |
+| `childNodes`                                                 |  ✗   | 未实现                       |
+| `firstChild` `lastChild` `previousSibling` `nextSibling`     |  ✗   | 未实现                       |
+| `hasChildNodes()`                                            |  ✗   | 未实现                       |
+| `nodeValue` `textContent`                                    |  ◐   | `textContent` 读写支持；`nodeValue` 无 |
+| `normalize()`                                                |  ✗   | 未实现                       |
+| `cloneNode(deep)`                                            |  ✗   | 未实现                       |
+| `isEqualNode()` `isSameNode()`                               |  ✗   | 未实现                       |
+| `compareDocumentPosition(other)`                             |  ✗   | 未实现                       |
+| `contains(other)`                                            |  ✗   | 未实现                       |
+| `lookupPrefix()` `lookupNamespaceURI()` `isDefaultNamespace()` |  ✗   | 未实现                       |
+| `insertBefore(node, child)`                                  |  ✗   | 未实现                       |
+| `appendChild(node)`                                          |  ✅  | 支持（自动从旧父节点脱离）   |
+| `replaceChild(node, child)`                                  |  ✗   | 未实现                       |
+| `removeChild(child)`                                         |  ✅  | 支持                         |
+
+## 3. Document(文档)
+
+| API                                                          | htui | 说明                             |
+| ------------------------------------------------------------ | :--: | -------------------------------- |
+| `documentElement`                                            |  ✗   | 未实现                           |
+| `implementation`                                             |  ✗   | 未实现                           |
+| `URL` `documentURI`                                          |  ✗   | 未实现                           |
+| `origin`                                                     |  ✗   | 未实现                           |
+| `compatMode`                                                 |  ✗   | 未实现                           |
+| `characterSet` `charset` `inputEncoding`                     |  ✗   | 未实现                           |
+| `contentType`                                                |  ✗   | 未实现                           |
+| `doctype`                                                    |  ✗   | 未实现                           |
+| `head` `body`                                                |  ✗   | 未实现                           |
+| `activeElement`                                              |  ✗   | 未实现                           |
+| `fullscreenEnabled` `fullscreenElement`                      |  ✗   | 未实现                           |
+| `pictureInPictureElement`                                    |  ✗   | 未实现                           |
+| `visibilityState` `hidden`                                   |  ✗   | 未实现                           |
+| `fonts` `locks` `pictureInPictureEnabled`                    |  ✗   | 未实现                           |
+| `getElementById(id)`                                         |  ✅  | 按 id 取元素（首个匹配）         |
+| `getElementsByTagName(name)` `getElementsByTagNameNS(ns, name)` |  ✗   | 未实现（TODO B）                |
+| `getElementsByClassName(classes)`                            |  ✗   | 未实现                           |
+| `createElement(name)` `createElementNS(ns, name)`            |  ◐   | `createElement` 支持（标签未识别回退 div）；`createElementNS` 无 |
+| `createDocumentFragment()`                                   |  ✗   | 未实现                           |
+| `createTextNode(data)` `createComment(data)`                 |  ✗   | 未实现（TODO A）                |
+| `createCDATASection(data)` `createProcessingInstruction(target, data)` |  ✗   | 未实现                           |
+| `createAttribute(name)` `createAttributeNS(ns, name)`        |  ✗   | 未实现                           |
+| `createEvent(type)`                                          |  ✗   | 未实现                           |
+| `createRange()`                                              |  ✗   | 未实现                           |
+| `createNodeIterator(root, whatToShow, filter)`               |  ✗   | 未实现                           |
+| `createTreeWalker(root, whatToShow, filter)`                 |  ✗   | 未实现                           |
+| `importNode(node, deep)` `adoptNode(node)`                   |  ✗   | 未实现                           |
+| `evaluate(expr, context, resolver, type, result)`            |  ✗   | 未实现                           |
+| `querySelector(sel)` `querySelectorAll(sel)`                 |  ✗   | 未实现（TODO A）                |
+| `elementsFromPoint(x, y)` `elementFromPoint(x, y)`           |  ✗   | 未实现（命中检测为引擎内部 HitMap） |
+| `caretPositionFromPoint(x, y)` `caretRangeFromPoint(x, y)`   |  ✗   | 未实现                           |
+| `hasFocus()`                                                 |  ✗   | 未实现                           |
+| `exitFullscreen()`                                           |  ✗   | 未实现                           |
+| `exitPictureInPicture()`                                     |  ✗   | 未实现                           |
+| `open()` `close()` `write()` `writeln()`                     |  ✗   | 未实现                           |
+| `prepend()` `append()` `replaceChildren()`                   |  ✗   | 未实现（ParentNode mixin 无）   |
+
+## 4. Element(元素)
+
+| API                                                          | htui | 说明                                                    |
+| ------------------------------------------------------------ | :--: | ------------------------------------------------------- |
+| `namespaceURI` `prefix` `localName` `tagName`                |  ✗   | 未实现（TODO B）                                       |
+| `id`                                                         |  ✅  | 读写 `id` 属性                                          |
+| `className` `classList`                                      |  ◐   | `className` 读写支持；`classList` 无（TODO A）          |
+| `slot`                                                       |  ✗   | 未实现                                                  |
+| `part`                                                       |  ✗   | 未实现                                                  |
+| `attributes`                                                 |  ✗   | 未实现（NamedNodeMap 无）                               |
+| `innerHTML` `outerHTML`                                      |  ✗   | 未实现（TODO A）                                        |
+| `getAttribute(name)` `getAttributeNS(ns, name)`              |  ◐   | `getAttribute` 支持；NS 变体无                          |
+| `setAttribute(name, value)` `setAttributeNS(ns, name, value)` |  ◐   | `setAttribute` 支持（标记重渲染）；NS 变体无            |
+| `removeAttribute(name)` `removeAttributeNS(ns, name)`        |  ◐   | `removeAttribute` 支持；NS 变体无                       |
+| `hasAttribute(name)` `hasAttributeNS(ns, name)`              |  ✗   | 未实现                                                  |
+| `toggleAttribute(name, force)`                               |  ✗   | 未实现                                                  |
+| `getAttributeNode()` `setAttributeNode()` `removeAttributeNode()` |  ✗   | 未实现                                                  |
+| `getElementsByTagName*()` `getElementsByClassName()`         |  ✗   | 未实现                                                  |
+| `closest(selector)`                                          |  ✗   | 未实现                                                  |
+| `matches(selector)` `webkitMatchesSelector()`                |  ✗   | 未实现                                                  |
+| `querySelector()` `querySelectorAll()`                       |  ✗   | 未实现（TODO A）                                        |
+| `insertAdjacentElement(where, el)` `insertAdjacentText(where, text)` `insertAdjacentHTML(where, html)` |  ✗   | 未实现                                                  |
+| `prepend()` `append()`                                       |  ✗   | 未实现（ParentNode mixin 无）                           |
+| `before()` `after()` `replaceWith()` `remove()`              |  ✗   | 未实现（ChildNode mixin 无）                            |
+| `scroll(x,y)` `scrollTo()` `scrollBy()`                      |  ✗   | 未实现（滚动为引擎整文档行为）                          |
+| `scrollIntoView(arg)`                                        |  ✗   | 未实现                                                  |
+| `scrollTop` `scrollLeft` `scrollWidth` `scrollHeight`        |  ✗   | 未实现                                                  |
+| `clientTop` `clientLeft` `clientWidth` `clientHeight`        |  ✗   | 未实现                                                  |
+| `getBoundingClientRect()` `getClientRects()`                 |  ✗   | 未实现（布局几何为引擎内部）                            |
+| `attachShadow(init)`                                         |  ✗   | 未实现（无 Shadow DOM）                                 |
+| `attachInternals()`                                          |  ✗   | 未实现                                                  |
+| `focus()` `blur()`                                           |  ✗   | 未实现（聚焦仅由点击 / Tab 引擎侧驱动）                 |
+| `click()`                                                    |  ✗   | 未实现                                                  |
+| `animate(keyframes, options)`                                |  ✗   | 未实现（动画在拒绝清单）                                |
+| `requestFullscreen()` `requestPointerLock()`                 |  ✗   | 未实现                                                  |
+| `requestPictureInPicture()`                                  |  ✗   | 未实现                                                  |
+
+## 5. 文本类节点(CharacterData / Text / Comment 等)
+
+| API                                                          | htui | 说明                               |
+| ------------------------------------------------------------ | :--: | ---------------------------------- |
+| `data` `length`                                              |  ✗   | 未实现                             |
+| `previousElementSibling` `nextElementSibling`                |  ✗   | 未实现                             |
+| `substringData(offset, count)`                               |  ✗   | 未实现                             |
+| `appendData(data)` `insertData(offset, data)`                |  ✗   | 未实现                             |
+| `deleteData(offset, count)` `replaceData(offset, count, data)` |  ✗   | 未实现                             |
+| `wholeText`                                                  |  ✗   | 未实现                             |
+| `splitText(offset)`                                          |  ✗   | 未实现                             |
+| `assignedSlot`                                               |  ✗   | 未实现                             |
+
+## 6. DocumentFragment / ShadowRoot
+
+| API                  | htui | 说明                   |
+| -------------------- | :--: | ---------------------- |
+| `DocumentFragment()` |  ✗   | 未实现                 |
+| `host`               |  ✗   | 未实现                 |
+| `mode`               |  ✗   | 未实现                 |
+| `delegatesFocus`     |  ✗   | 未实现                 |
+| `slotAssignment`     |  ✗   | 未实现                 |
+| `styleSheets`        |  ✗   | 未实现                 |
+
+## 7. DOMImplementation
+
+| API                                                     | htui | 说明                |
+| ------------------------------------------------------- | :--: | ------------------- |
+| `createDocument(ns, qualifiedName, doctype)`            |  ✗   | 未实现              |
+| `createDocumentType(qualifiedName, publicId, systemId)` |  ✗   | 未实现              |
+| `createHTMLDocument(title)`                             |  ✗   | 未实现              |
+| `hasFeature()`                                          |  ✗   | 未实现              |
+
+## 8. 集合类型
+
+| 接口             | htui | 说明                                                         |
+| ---------------- | :--: | ------------------------------------------------------------ |
+| `NodeList`       |  ✗   | 未实现                                                     |
+| `HTMLCollection` |  ✗   | 未实现                                                     |
+| `DOMTokenList`   |  ✗   | 未实现（`classList` 无，TODO A）                            |
+| `NamedNodeMap`   |  ✗   | 未实现                                                     |
+
+### 8.1 DOMTokenList 方法
+
+| API                                         | htui | 说明              |
+| ------------------------------------------- | :--: | ----------------- |
+| `length` `value`                            |  ✗   | 未实现            |
+| `item(i)`                                   |  ✗   | 未实现            |
+| `add()` `remove()`                          |  ✗   | 未实现            |
+| `toggle(token, force)`                      |  ✗   | 未实现            |
+| `replace(old, new)`                         |  ✗   | 未实现            |
+| `contains(token)`                           |  ✗   | 未实现            |
+| `supports(token)`                           |  ✗   | 未实现            |
+| `entries()` `keys()` `values()` `forEach()` |  ✗   | 未实现            |
+
+## 9. Mixin(混入,多处复用)
+
+| Mixin                      | htui | 说明                                                         |
+| -------------------------- | :--: | ------------------------------------------------------------ |
+| `ParentNode`               |  ✗   | mixin 无；`appendChild`/`removeChild` 由元素包装直接提供     |
+| `NonDocumentTypeChildNode` |  ✗   | 未实现                                                     |
+| `ChildNode`                |  ✗   | 未实现                                                     |
+| `Slotable`                 |  ✗   | 未实现                                                     |
+| `DocumentOrShadowRoot`     |  ✗   | 未实现                                                     |
+| `NonElementParentNode`     |  ✗   | `getElementById` 直接挂在 `document` 上，非 mixin           |
+
+## 10. 事件(Event / CustomEvent / EventTarget)
+
+| API                                              | htui | 说明                      |
+| ------------------------------------------------ | :--: | ------------------------- |
+| `Event(type, init)`                              |  ◐   | 无构造器；事件对象在派发时由引擎构造（见下） |
+| `type`                                           |  ✅  | 事件类型名                |
+| `target` `currentTarget`                         |  ✅  | 触发源 / 当前监听者（冒泡途中变化） |
+| `eventPhase`                                     |  ✗   | 未实现                    |
+| `bubbles` `cancelable` `composed`                |  ◐   | `bubbles` 恒 `true`；`cancelable`/`composed` 无 |
+| `defaultPrevented` `returnValue`                 |  ◐   | `defaultPrevented` 在 keydown 门控中反映；`returnValue` 无 |
+| `isTrusted`                                      |  ✗   | 未实现                    |
+| `timeStamp`                                      |  ✗   | 未实现                    |
+| `stopPropagation()` `stopImmediatePropagation()` |  ◐   | `stopPropagation` 支持；`stopImmediatePropagation` 无 |
+| `preventDefault()`                               |  ◐   | 仅 `keydown` 可取消内置快捷键（`KeyGate`，见 `tui::graph_api`）；其余事件为无操作 |
+| `composedPath()`                                 |  ✗   | 未实现                    |
+| `CustomEvent(type, init)` `detail`               |  ✗   | 未实现                    |
+| `EventTarget()`                                  |  ✗   | 无构造器                  |
+| `addEventListener(type, callback, options)`      |  ◐   | 元素包装上支持；`options`（capture/once 等）忽略 |
+| `removeEventListener(type, callback, options)`   |  ◐   | 元素包装上支持（身份匹配删除） |
+| `dispatchEvent(event)`                           |  ✗   | 未实现                    |
+
+## 11. AbortController / AbortSignal(中止)
+
+| API                                                          | htui | 说明         |
+| ------------------------------------------------------------ | :--: | ------------ |
+| `AbortController()`                                          |  ✗   | 未实现       |
+| `controller.signal`                                          |  ✗   | 未实现       |
+| `controller.abort(reason)`                                   |  ✗   | 未实现       |
+| `signal.aborted`                                             |  ✗   | 未实现       |
+| `signal.reason`                                              |  ✗   | 未实现       |
+| `signal.throwIfAborted()`                                    |  ✗   | 未实现       |
+| `AbortSignal.abort(reason)` `AbortSignal.timeout(ms)` `AbortSignal.any(signals)` |  ✗   | 未实现       |
+
+## 12. MutationObserver(变更观察)
+
+| API                                                          | htui | 说明                                                         |
+| ------------------------------------------------------------ | :--: | ------------------------------------------------------------ |
+| `MutationObserver(callback)`                                 |  ✗   | 未实现（DOM 变更由引擎 dirty 机制跟踪，不对 JS 暴露）        |
+| `observe(target, options)`                                   |  ✗   | 未实现                                                     |
+| `disconnect()`                                               |  ✗   | 未实现                                                     |
+| `takeRecords()`                                              |  ✗   | 未实现                                                     |
+| `MutationRecord.type`                                        |  ✗   | 未实现                                                     |
+| `MutationRecord.target`                                      |  ✗   | 未实现                                                     |
+| `MutationRecord.addedNodes` `removedNodes`                   |  ✗   | 未实现                                                     |
+| `MutationRecord.previousSibling` `nextSibling`               |  ✗   | 未实现                                                     |
+| `MutationRecord.attributeName` `attributeNamespace` `oldValue` |  ✗   | 未实现                                                     |
+
+## 13. Range(范围)
+
+| API                                                          | htui | 说明                        |
+| ------------------------------------------------------------ | :--: | --------------------------- |
+| `AbstractRange`                                              |  ✗   | 未实现                      |
+| `StaticRange`                                                |  ✗   | 未实现                      |
+| `Range`                                                      |  ✗   | 未实现                      |
+| `startContainer` `startOffset` `endContainer` `endOffset`    |  ✗   | 未实现                      |
+| `collapsed` `commonAncestorContainer`                        |  ✗   | 未实现                      |
+| `setStart()` `setEnd()` `setStartBefore()` `setStartAfter()` `setEndBefore()` `setEndAfter()` |  ✗   | 未实现                      |
+| `collapse(toStart)`                                          |  ✗   | 未实现                      |
+| `selectNode()` `selectNodeContents()`                        |  ✗   | 未实现                      |
+| `compareBoundaryPoints(how, other)`                          |  ✗   | 未实现                      |
+| `cloneContents()` `extractContents()` `deleteContents()`     |  ✗   | 未实现                      |
+| `insertNode()` `surroundContents()`                          |  ✗   | 未实现                      |
+| `createContextualFragment(html)`                             |  ✗   | 未实现                      |
+| `cloneRange()` `detach()`                                    |  ✗   | 未实现                      |
+| `getBoundingClientRect()` `getClientRects()` `toString()`    |  ✗   | 未实现                      |
+
+## 14. 遍历(Traversal)
+
+| API            | htui | 说明                                                         |
+| -------------- | :--: | ------------------------------------------------------------ |
+| `NodeIterator` |  ✗   | 未实现                                                     |
+| `TreeWalker`   |  ✗   | 未实现                                                     |
+| `NodeFilter`   |  ✗   | 未实现                                                     |
+
+## 15. XPath
+
+| 接口              | htui | 说明                                                      |
+| ----------------- | :--: | --------------------------------------------------------- |
+| `XPathEvaluator`  |  ✗   | 未实现                                                    |
+| `XPathExpression` |  ✗   | 未实现                                                    |
+| `XPathResult`     |  ✗   | 未实现                                                    |
+| `XPathNSResolver` |  ✗   | 未实现                                                    |
+
+## 16. XSLT / DOMParser / XMLSerializer
+
+| 接口            | htui | 说明                                                         |
+| --------------- | :--: | ------------------------------------------------------------ |
+| `XSLTProcessor` |  ✗   | 未实现                                                     |
+| `DOMParser`     |  ✗   | 未实现                                                     |
+| `XMLSerializer` |  ✗   | 未实现                                                     |
+
+## 17. 常用事件类型(type 字符串)
+
+| 类别        | htui | 事件                                                         |
+| ----------- | :--: | ------------------------------------------------------------ |
+| 鼠标        |  ◐   | `click` `mouseover` `mouseout` 支持；`dblclick` `mousedown` `mouseup` `mousemove` `mouseenter` `mouseleave` `contextmenu` `wheel` 无 |
+| 键盘        |  ◐   | `keydown` `keyup` 支持（`keyup` 仅终端报告释放时）；`keypress` 无 |
+| 输入        |  ◐   | `input` `change` 支持（仅 `<input>` 产生）；`beforeinput` `composition*` 无 |
+| 焦点        |  ◐   | `focus` `blur` 支持（仅 `<input>`）；`focusin` `focusout` 无 |
+| 表单        |  ✗   | 未实现（无 submit/reset 语义）                                |
+| 视图        |  ✗   | 未实现                                                        |
+| 拖放        |  ✗   | 未实现                                                        |
+| 剪贴板      |  ✗   | 未实现（复制为引擎内置 Ctrl+C）                               |
+| 加载        |  ✗   | 未实现                                                        |
+| DOM 变更    |  ✗   | 未实现                                                        |
+| 动画/过渡   |  ✗   | 未实现（动画在拒绝清单）                                      |
+| 全屏/可见性 |  ✗   | 未实现                                                        |
+| 影子 DOM    |  ✗   | 未实现（无 Shadow DOM）                                       |
+| 中止        |  ✗   | 未实现                                                        |
+| 选择        |  ✗   | 未实现（拖选为引擎内置交互）                                  |
+| 触摸/指针   |  ✗   | 未实现（不做触摸承诺）                                        |
+
+## 18. 事件接口子类(继承 Event)
+
+| 接口                               | htui | 说明                                                         |
+| ---------------------------------- | :--: | ------------------------------------------------------------ |
+| `UIEvent`                          |  ✗   | 未实现                                                     |
+| `MouseEvent`                       |  ✗   | 未实现                                                     |
+| `WheelEvent`                       |  ✗   | 未实现                                                     |
+| `KeyboardEvent`                    |  ◐   | 无接口/构造器；keydown/keyup 事件对象携带 `key`/`code`/`keyCode`/`shiftKey`/`ctrlKey`/`altKey`/`metaKey`/`repeat` 字段 |
+| `InputEvent`                       |  ✗   | 未实现                                                     |
+| `FocusEvent`                       |  ✗   | 未实现                                                     |
+| `CompositionEvent`                 |  ✗   | 未实现                                                     |
+| `DragEvent`                        |  ✗   | 未实现                                                     |
+| `PointerEvent`                     |  ✗   | 未实现                                                     |
+| `TransitionEvent` `AnimationEvent` |  ✗   | 未实现（动画在拒绝清单）                                    |
+| `CustomEvent`                      |  ✗   | 未实现                                                     |
+
+## 19. 浏览器全局(BOM/Window 关联,常与 DOM 配合)
+
+| 全局                                                       | htui | 说明                                  |
+| ---------------------------------------------------------- | :--: | ------------------------------------- |
+| `window.document`                                          |  ✗   | 无 `window` 全局（只有 `document`）   |
+| `window`                                                   |  ✗   | 无 window 对象                       |
+| `getSelection()`                                           |  ✗   | 未实现（拖选为引擎内置交互）          |
+| `queueMicrotask(cb)`                                       |  ✗   | 未暴露（fetch 微任务由引擎内部 `run_jobs` 驱动） |
+| `structuredClone(value)`                                   |  ✗   | 未实现                              |
+| `customElements`                                           |  ✗   | 未实现                              |
+| `IntersectionObserver` `ResizeObserver` `MutationObserver` |  ✗   | 未实现                              |

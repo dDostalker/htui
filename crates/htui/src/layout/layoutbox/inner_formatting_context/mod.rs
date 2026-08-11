@@ -36,7 +36,8 @@ pub enum FormattingContext {
     Flex,
     /// Table formatting context used by generated `<table>` boxes.
     Table,
-    /// Grid formatting context. Reserved for future support; the layout
-    /// pipeline does not yet produce boxes with this context.
+    /// Grid formatting context. Reserved for future support; the generation
+    /// phase classifies `display: grid` boxes with this context but the
+    /// geometry phase drops them (no grid layout algorithm yet).
     Grid,
 }

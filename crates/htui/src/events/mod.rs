@@ -84,11 +84,14 @@ pub enum EventType {
     /// from the value it had when it gained focus (`onchange`).
     Change,
     /// Fired when a key is pressed (`onkeydown`). Dispatched to the focused
-    /// `<input>` (or the document root when none) and bubbles along the DOM
-    /// ancestor chain. Built-in shortcuts (scrolling / zoom / quit) run on the
-    /// input loop before this event reaches scripts; `preventDefault()` is
-    /// accepted for parity but cannot cancel them yet (see the plan in
-    /// `docs/browser-compat.md` §6.5.5).
+    /// `<input>` (or the document `<body>`, falling back to the root, when
+    /// none) and bubbles along the DOM ancestor chain. Page-level built-in
+    /// shortcuts (scrolling / zoom / quit) are gated on this event: the input
+    /// loop dispatches `keydown` to the script layer first and runs the
+    /// built-in only when no listener called `preventDefault()` (see
+    /// [`KeyGate`](crate::tui::graph_api::KeyGate)). Input-editing keys,
+    /// `<select>` navigation and `Tab` focus cycling are input-control
+    /// behaviour and are never gated.
     KeyDown,
     /// Fired when a key is released (`onkeyup`). Only emitted by terminals
     /// that report key releases (kitty keyboard protocol / Windows console

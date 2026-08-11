@@ -153,8 +153,14 @@ htui/
 │       ├── Cargo.toml
 │       └── src/lib.rs           # proc-macro：命令包装（纯 fn + 返回 HostFn）/ 模块自动注册 / 结构体 ↔ JS 对象 derive
 ├── docs/
-│   ├── script-layer.md    # 脚本层完整使用与架构文档（脚本 / on* / 宿主函数 / RenderArena）
-│   └── examples-notes.md  # 交互示例（codex/yazi/snake）与遇到的问题记录（键盘事件/input 值滞后等）
+│   ├── TODO.md            # 待办（querySelector / innerHTML / textarea / details 等，按优先级分组）
+│   └── zh-cn/
+│       ├── boundaries.md        # 边界文档（目标 / 核心承诺 / 拒绝清单 / 能力地图）
+│       ├── browser-compat.md    # 浏览器能力对比及差异清单（HTML / CSS / JS 全矩阵）
+│       ├── 开发/                # （预留）
+│       └── 教程/
+│           ├── logging.md       # 日志使用说明
+│           └── script-layer.md  # 脚本层完整使用与架构文档（脚本 / on* / 宿主函数 / RenderArena）
 ├── visual_test/          # 可视化测试工具（cargo run -p visual_test；渲染/布局/事件能力验证）
 │   └── src/
 │       ├── main.rs
