@@ -46,4 +46,8 @@ pub struct LayoutBlockOptions {
     /// rule (author CSS or inherited value) has set `font-style` on the
     /// element — used by `<address>` the same way `<em>` does inline.
     pub ua_italic: bool,
+    /// When `true`, the body runs are replaced with a single synthetic run of
+    /// `─` glyphs spanning the content-box width — used by `<hr>` to paint a
+    /// horizontal rule (the element has no inline content of its own).
+    pub hr_rule: bool,
 }

@@ -3,6 +3,7 @@ use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
 use htui::tdom::node::{NodeArena, NodeId};
 use htui::tui::graph_api::{FontStyle, TermLayout};
+use crossterm::style::Color;
 
 fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
@@ -401,5 +402,254 @@ fn test_layout_address_inherits_italic_from_ancestor() {
         cell.style.contains(FontStyle::ITALIC),
         "<address> must inherit font-style from its ancestor (got {:?})",
         cell.style
+    );
+}
+
+// ============================================================
+// <hr> + text-level semantics (strong/b/i/u/s/mark/…, code/kbd/samp, br)
+// ============================================================
+
+#[test]
+fn test_layout_hr_renders_rule_across_width() {
+    init();
+    let html = "<hr>";
+    let css = "";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let cols = term_map.columns as usize;
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let idx = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "─")
+        .expect("hr rule must render");
+    let row = idx / cols;
+    let rstart = row * cols;
+    let rule_len = tl.layout[rstart..rstart + cols]
+        .iter()
+        .take_while(|b| b.word == "─")
+        .count();
+    assert_eq!(
+        rule_len, cols,
+        "hr must span the full content width (got {rule_len} cells)"
+    );
+}
+
+#[test]
+fn test_layout_strong_b_bold() {
+    init();
+    let html = "<p>alpha <strong>sbold</strong> <b>bravo</b></p>";
+    let css = "";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let strong_idx = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "s")
+        .expect("strong text must render");
+    let b_idx = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "b")
+        .expect("b text must render");
+    let plain_idx = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "a")
+        .expect("plain text must render");
+    assert!(
+        tl.layout[strong_idx].style.contains(FontStyle::BOLD),
+        "<strong> must be bold (got {:?})",
+        tl.layout[strong_idx].style
+    );
+    assert!(
+        tl.layout[b_idx].style.contains(FontStyle::BOLD),
+        "<b> must be bold (got {:?})",
+        tl.layout[b_idx].style
+    );
+    assert!(
+        !tl.layout[plain_idx].style.contains(FontStyle::BOLD),
+        "plain text must not be bold"
+    );
+}
+
+#[test]
+fn test_layout_text_semantics_styles() {
+    init();
+    // i → italic, u → underline, s → line-through, mark → yellow/black.
+    // Each tag uses a distinct leading letter so the cell lookup is
+    // unambiguous.
+    let html = "<p><i>italic</i> <u>under</u> <s>strike</s> <mark>mark</mark></p>";
+    let css = "";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let find = |word: &str| {
+        tl.layout
+            .iter()
+            .position(|b| b.word == word)
+            .unwrap_or_else(|| panic!("cell {word:?} must render"))
+    };
+    assert!(
+        tl.layout[find("i")].style.contains(FontStyle::ITALIC),
+        "<i> must be italic"
+    );
+    assert!(
+        tl.layout[find("u")].style.contains(FontStyle::UNDERLINED),
+        "<u> must be underlined"
+    );
+    assert!(
+        tl.layout[find("s")].style.contains(FontStyle::CROSSED_OUT),
+        "<s> must be line-through"
+    );
+    let mark_idx = find("m");
+    assert_eq!(
+        tl.layout[mark_idx].bcolor,
+        Some(Color::Yellow),
+        "<mark> must paint a yellow background"
+    );
+    assert_eq!(
+        tl.layout[mark_idx].fcolor,
+        Some(Color::Black),
+        "<mark> must paint black foreground"
+    );
+}
+
+#[test]
+fn test_layout_edits_and_citation_styles() {
+    init();
+    // ins → underline, del → line-through, cite/dfn/var → italic.
+    let html = "<p><ins>1</ins><del>2</del><cite>3</cite><dfn>4</dfn><var>5</var></p>";
+    let css = "";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let find = |word: &str| {
+        tl.layout
+            .iter()
+            .position(|b| b.word == word)
+            .unwrap_or_else(|| panic!("cell {word:?} must render"))
+    };
+    assert!(
+        tl.layout[find("1")].style.contains(FontStyle::UNDERLINED),
+        "<ins> must be underlined"
+    );
+    assert!(
+        tl.layout[find("2")].style.contains(FontStyle::CROSSED_OUT),
+        "<del> must be line-through"
+    );
+    for word in ["3", "4", "5"] {
+        assert!(
+            tl.layout[find(word)].style.contains(FontStyle::ITALIC),
+            "<cite>/<dfn>/<var> must be italic ({word})"
+        );
+    }
+}
+
+#[test]
+fn test_layout_strong_font_weight_normal_disables_bold() {
+    init();
+    // Author CSS resetting the UA default must take effect.
+    let html = "<p><strong>word</strong></p>";
+    let css = "strong { font-weight: normal; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let idx = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "w")
+        .expect("strong text must render");
+    assert!(
+        !tl.layout[idx].style.contains(FontStyle::BOLD),
+        "`strong {{ font-weight: normal }}` must suppress the UA bold (got {:?})",
+        tl.layout[idx].style
+    );
+}
+
+#[test]
+fn test_layout_code_kbd_samp_render_plain() {
+    init();
+    // code / kbd / samp keep their text (UA monospace = the terminal's
+    // native font, so no style flag applies).
+    let html = "<p><code>fn main()</code> <kbd>ctrl</kbd> <samp>out</samp></p>";
+    let css = "";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
+    assert!(canvas.contains("fn main()"), "code text must render");
+    assert!(canvas.contains("ctrl"), "kbd text must render");
+    assert!(canvas.contains("out"), "samp text must render");
+}
+
+#[test]
+fn test_layout_code_css_color_applies() {
+    init();
+    // The tag is addressable by CSS even though its UA style is a no-op in
+    // the terminal.
+    let html = "<p><code>x</code></p>";
+    let css = "code { color: magenta; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let idx = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "x")
+        .expect("code text must render");
+    assert_eq!(
+        tl.layout[idx].fcolor,
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 255
+        }),
+        "code {{ color: magenta }} must paint the cell magenta"
+    );
+}
+
+#[test]
+fn test_layout_br_forces_line_break() {
+    init();
+    // `<br>` must force a line break even under the default `white-space:
+    // normal` (where a plain newline would collapse).
+    let html = "<p>aaa<br>bbb</p>";
+    let css = "";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let cols = term_map.columns as usize;
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let a_idx = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "a")
+        .expect("pre-br text must render");
+    let b_idx = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "b")
+        .expect("post-br text must render");
+    assert!(
+        b_idx / cols > a_idx / cols,
+        "<br> must break the line"
+    );
+    assert_eq!(
+        b_idx % cols,
+        a_idx % cols,
+        "post-br text must start at the same column"
     );
 }

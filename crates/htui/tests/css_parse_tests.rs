@@ -448,7 +448,8 @@ fn test_e_type_selector_rejects_unknown_tag() {
     // silently matching nothing.
     init();
     assert!("madeup".parse::<CssSelector>().is_err());
-    assert!("div strong".parse::<CssSelector>().is_err());
+    // `strong` is a supported element today; use a genuinely unknown tag.
+    assert!("div blink".parse::<CssSelector>().is_err());
 }
 
 #[test]

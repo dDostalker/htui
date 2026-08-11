@@ -46,6 +46,9 @@ pub enum NodeType {
     Span,
     Div,
     P,
+    /// `<hr>` — thematic break / horizontal rule. Block element that paints
+    /// a single row of `─` glyphs spanning the content-box width.
+    Hr,
     Pre,
     Img,
     A,
@@ -53,6 +56,53 @@ pub enum NodeType {
     /// italic` that the layout pass applies when neither the element nor an
     /// ancestor has declared an explicit `font-style`.
     Em,
+    /// `<strong>` — strong importance. Inline element with browser-default
+    /// `font-weight: bold`.
+    Strong,
+    /// `<b>` — attention without extra importance. Inline element with
+    /// browser-default `font-weight: bold`.
+    B,
+    /// `<i>` — idiomatic text / voice. Inline element with browser-default
+    /// `font-style: italic`.
+    I,
+    /// `<u>` — unarticulated annotation. Inline element with browser-default
+    /// `text-decoration: underline`.
+    U,
+    /// `<s>` — no-longer-accurate text. Inline element with browser-default
+    /// `text-decoration: line-through`.
+    S,
+    /// `<del>` — removed content (edits). Inline element with browser-default
+    /// `text-decoration: line-through`.
+    Del,
+    /// `<ins>` — inserted content (edits). Inline element with browser-default
+    /// `text-decoration: underline`.
+    Ins,
+    /// `<mark>` — highlighted reference. Inline element with browser-default
+    /// yellow background and black foreground (applied when neither property
+    /// has been declared on the element).
+    Mark,
+    /// `<cite>` — cited work title. Inline element with browser-default
+    /// `font-style: italic`.
+    Cite,
+    /// `<dfn>` — defining instance. Inline element with browser-default
+    /// `font-style: italic`.
+    Dfn,
+    /// `<var>` — variable. Inline element with browser-default
+    /// `font-style: italic`.
+    Var,
+    /// `<code>` — computer code. Inline element with browser-default
+    /// monospace font (the terminal's native font, so no extra styling).
+    Code,
+    /// `<kbd>` — keyboard input. Inline element with browser-default
+    /// monospace font.
+    Kbd,
+    /// `<samp>` — sample output. Inline element with browser-default
+    /// monospace font.
+    Samp,
+    /// `<br>` — forced line break. Void element; the layout pass emits an
+    /// unconditional break run that splits the visual line in every
+    /// `white-space` mode.
+    Br,
     Html,
     Body,
     Head,
@@ -130,10 +180,26 @@ impl NodeType {
         NodeType::Span,
         NodeType::Div,
         NodeType::P,
+        NodeType::Hr,
         NodeType::Pre,
         NodeType::Img,
         NodeType::A,
         NodeType::Em,
+        NodeType::Strong,
+        NodeType::B,
+        NodeType::I,
+        NodeType::U,
+        NodeType::S,
+        NodeType::Del,
+        NodeType::Ins,
+        NodeType::Mark,
+        NodeType::Cite,
+        NodeType::Dfn,
+        NodeType::Var,
+        NodeType::Code,
+        NodeType::Kbd,
+        NodeType::Samp,
+        NodeType::Br,
         NodeType::Html,
         NodeType::Body,
         NodeType::Head,
@@ -186,7 +252,13 @@ impl NodeType {
     pub fn is_self_closing(&self) -> bool {
         matches!(
             self,
-            NodeType::Img | NodeType::Input | NodeType::Meta | NodeType::Base | NodeType::Link
+            NodeType::Img
+                | NodeType::Input
+                | NodeType::Meta
+                | NodeType::Base
+                | NodeType::Link
+                | NodeType::Hr
+                | NodeType::Br
         )
     }
 
@@ -207,7 +279,24 @@ impl NodeType {
             // in the parent's inline flow. Classifying them block-level would
             // make intrinsic measurement sum each one as a full block row and
             // inflate flex-item / column heights.
-            NodeType::Span | NodeType::A | NodeType::Em => CssDisplay::Inline,
+            NodeType::Span
+            | NodeType::A
+            | NodeType::Em
+            | NodeType::Strong
+            | NodeType::B
+            | NodeType::I
+            | NodeType::U
+            | NodeType::S
+            | NodeType::Del
+            | NodeType::Ins
+            | NodeType::Mark
+            | NodeType::Cite
+            | NodeType::Dfn
+            | NodeType::Var
+            | NodeType::Code
+            | NodeType::Kbd
+            | NodeType::Samp
+            | NodeType::Br => CssDisplay::Inline,
             NodeType::Table => CssDisplay::Table,
             NodeType::Thead => CssDisplay::TableHeaderGroup,
             NodeType::Tbody => CssDisplay::TableRowGroup,
@@ -265,10 +354,26 @@ impl NodeType {
             NodeType::Span => "span",
             NodeType::Div => "div",
             NodeType::P => "p",
+            NodeType::Hr => "hr",
             NodeType::Pre => "pre",
             NodeType::Img => "img",
             NodeType::A => "a",
             NodeType::Em => "em",
+            NodeType::Strong => "strong",
+            NodeType::B => "b",
+            NodeType::I => "i",
+            NodeType::U => "u",
+            NodeType::S => "s",
+            NodeType::Del => "del",
+            NodeType::Ins => "ins",
+            NodeType::Mark => "mark",
+            NodeType::Cite => "cite",
+            NodeType::Dfn => "dfn",
+            NodeType::Var => "var",
+            NodeType::Code => "code",
+            NodeType::Kbd => "kbd",
+            NodeType::Samp => "samp",
+            NodeType::Br => "br",
             NodeType::Html => "html",
             NodeType::Body => "body",
             NodeType::Head => "head",

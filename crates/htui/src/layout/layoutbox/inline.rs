@@ -138,12 +138,94 @@ fn walk_runs(
                 let em_ws = child.white_space_or(white_space);
                 walk_runs(arena, child, em_fg, em_bg, em_style, em_transform, em_ws, runs);
             }
+            NodeType::Strong | NodeType::B => {
+                // User-agent default: bold. Anything the author (or an
+                // ancestor rule) declared for `font-weight` takes precedence.
+                let mut st = style | block_style(&child.css_attr);
+                if !child.css_attr.is_set("font-weight") {
+                    st |= FontStyle::BOLD;
+                }
+                walk_inline_children(arena, child, fg, bg, st, white_space, runs);
+            }
+            NodeType::I | NodeType::Cite | NodeType::Dfn | NodeType::Var => {
+                // User-agent default: italic (same precedence rule as `<em>`).
+                let mut st = style | block_style(&child.css_attr);
+                if !child.css_attr.is_set("font-style") {
+                    st |= FontStyle::ITALIC;
+                }
+                walk_inline_children(arena, child, fg, bg, st, white_space, runs);
+            }
+            NodeType::U | NodeType::Ins => {
+                // User-agent default: underline. An explicit
+                // `text-decoration` (author or inherited) wins.
+                let mut st = style | block_style(&child.css_attr);
+                if !child.css_attr.is_set("text-decoration") {
+                    st |= FontStyle::UNDERLINED;
+                }
+                walk_inline_children(arena, child, fg, bg, st, white_space, runs);
+            }
+            NodeType::S | NodeType::Del => {
+                // User-agent default: line-through. An explicit
+                // `text-decoration` (author or inherited) wins.
+                let mut st = style | block_style(&child.css_attr);
+                if !child.css_attr.is_set("text-decoration") {
+                    st |= FontStyle::CROSSED_OUT;
+                }
+                walk_inline_children(arena, child, fg, bg, st, white_space, runs);
+            }
+            NodeType::Mark => {
+                // User-agent default: yellow background + black foreground
+                // (the highlight). Explicit declarations win.
+                let child_fg = child.css_attr.get_color().or(fg);
+                let child_bg = child.css_attr.get_bg_color().or(bg);
+                let mark_fg = if child.css_attr.is_set("color") {
+                    child_fg
+                } else {
+                    Some(Color::Black)
+                };
+                let mark_bg = if child.css_attr.is_set("background-color") {
+                    child_bg
+                } else {
+                    Some(Color::Yellow)
+                };
+                let st = style | block_style(&child.css_attr);
+                walk_inline_children(arena, child, mark_fg, mark_bg, st, white_space, runs);
+            }
+            NodeType::Code | NodeType::Kbd | NodeType::Samp => {
+                // User-agent default `font-family: monospace` is already the
+                // terminal's native font, so no style bit applies — the
+                // element is kept for CSS / DOM addressing.
+                let fg = child.css_attr.get_color().or(fg);
+                let bg = child.css_attr.get_bg_color().or(bg);
+                walk_inline_children(arena, child, fg, bg, style | block_style(&child.css_attr), white_space, runs);
+            }
+            NodeType::Br => {
+                // `<br>` forces a line break in every `white-space` mode.
+                runs.push(InlineRun::forced_break(style, fg, bg));
+            }
             // Block-level nested elements live in their own LayoutBox;
             // unknown inline tags are flattened by the HTML parser so they
             // never reach here as an unknown NodeType.
             _ => {}
         }
     }
+}
+
+/// Recurse into an inline element's children, carrying the resolved `fg` /
+/// `bg` / `style` (already merged with the element's own CSS) and the
+/// element's own `text-transform` / `white-space` overrides.
+fn walk_inline_children(
+    arena: &NodeArena,
+    child: &Node,
+    fg: Option<Color>,
+    bg: Option<Color>,
+    style: FontStyle,
+    parent_ws: WhiteSpace,
+    runs: &mut Vec<InlineRun>,
+) {
+    let transform = child.css_attr.get_text_transform();
+    let ws = child.white_space_or(parent_ws);
+    walk_runs(arena, child, fg, bg, style, transform, ws, runs);
 }
 
 /// Apply a [`TextTransform`] to a text node's content.

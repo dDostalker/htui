@@ -108,6 +108,52 @@ fn test_parse_h6_hgroup_address_keeps_dom_tree() {
 }
 
 #[test]
+fn test_parse_text_semantics_keeps_dom_tree() {
+    // `<hr>` plus the text-level semantic tags must survive parsing as real
+    // elements (not be flattened), so CSS selectors and the layout pass can
+    // address them.
+    init();
+    let html = "<hr><strong>s</strong><b>b</b><i>i</i><cite>c</cite><dfn>d</dfn>\
+<var>v</var><u>u</u><ins>n</ins><s>x</s><del>e</del><mark>m</mark><code>k</code>\
+<kbd>q</kbd><samp>p</samp><br>";
+    let (root, arena, _) = Parser::new(html).parse();
+    let html_id = arena[root].children[0];
+    let body_id = arena[html_id]
+        .children
+        .iter()
+        .copied()
+        .find(|&id| arena[id].node_type == NodeType::Body)
+        .expect("flow content must land in <body>");
+    let node_types: Vec<NodeType> = arena[body_id]
+        .children
+        .iter()
+        .map(|&id| arena[id].node_type)
+        .collect();
+    assert_eq!(
+        node_types,
+        vec![
+            NodeType::Hr,
+            NodeType::Strong,
+            NodeType::B,
+            NodeType::I,
+            NodeType::Cite,
+            NodeType::Dfn,
+            NodeType::Var,
+            NodeType::U,
+            NodeType::Ins,
+            NodeType::S,
+            NodeType::Del,
+            NodeType::Mark,
+            NodeType::Code,
+            NodeType::Kbd,
+            NodeType::Samp,
+            NodeType::Br,
+        ],
+        "hr + text semantics must not be flattened"
+    );
+}
+
+#[test]
 fn test_parse_basic() {
     init();
     let mut p = Parser::new("<div><p>Hello</p></div>");

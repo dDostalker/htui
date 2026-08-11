@@ -11,7 +11,7 @@ use crate::{
     html::box_edges::BoxEdges,
     html::css_parse::BoxSizing,
     layout::{
-        BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, Rect,
+        BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext, PaintStyle, Rect,
         inner_formatting_context::flow::layout_children,
         layoutbox::{collect_runs, wrap_runs},
     },
@@ -128,7 +128,12 @@ pub fn layout_block(
     if opts.ua_italic && !node.css_attr.is_set("font-style") {
         block_font_style |= FontStyle::ITALIC;
     }
-    let body_runs = collect_runs(arena, node, block_fg, block_bg, block_font_style);
+    // `<hr>` has no inline content of its own; skip the (empty) walk.
+    let body_runs = if opts.hr_rule {
+        Vec::new()
+    } else {
+        collect_runs(arena, node, block_fg, block_bg, block_font_style)
+    };
     let fill_bg = block_bg.is_some() || opts.fill_bg_default;
 
     let child_containing = match opts.child_containing_shift {
@@ -151,7 +156,19 @@ pub fn layout_block(
     // The marker / hash prefix belongs to the first visual line. Prepend
     // it to the flat run list so the line-breaker treats it as part of
     // the first "word" group and renders it on the top row only.
-    let mut all_runs = body_runs;
+    let mut all_runs = if opts.hr_rule {
+        // `<hr>` paints a horizontal rule: one `─` glyph per content cell,
+        // synthesised at layout time so it always spans the available width.
+        let width = geom.content_constraint.width.max(1);
+        vec![InlineRun::new(
+            "─".repeat(width),
+            block_font_style,
+            block_fg,
+            block_bg,
+        )]
+    } else {
+        body_runs
+    };
     if let Some(prefix) = opts.prefix.clone() {
         all_runs.insert(0, prefix);
     }

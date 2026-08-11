@@ -17,6 +17,10 @@ pub struct InlineRun {
     pub style: FontStyle,
     pub fg: Option<Color>,
     pub bg: Option<Color>,
+    /// `true` for a `<br>` marker run (text is a single `\n` of zero cell
+    /// width): the line breaker treats it as an unconditional forced break
+    /// in every `white-space` mode, where a plain newline would collapse.
+    pub force_break: bool,
 }
 
 impl InlineRun {
@@ -31,6 +35,19 @@ impl InlineRun {
             style,
             fg,
             bg,
+            force_break: false,
+        }
+    }
+
+    /// A forced line break run (`<br>`): text is a single `\n` (zero cell
+    /// width), `force_break` set so wrapping splits on it unconditionally.
+    pub fn forced_break(style: FontStyle, fg: Option<Color>, bg: Option<Color>) -> Self {
+        Self {
+            text: "\n".to_string(),
+            style,
+            fg,
+            bg,
+            force_break: true,
         }
     }
 

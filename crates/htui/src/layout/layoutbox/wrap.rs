@@ -32,8 +32,12 @@ enum Token {
     /// after the `apply_white_space` collapsing phase but is kept on
     /// the variant for symmetry with `width` and future use.
     Space { width: usize, _count: usize },
-    /// A forced break (`'\n'`).
+    /// A forced break (`'\n'`) in the source text.
     Newline,
+    /// An unconditional forced break (`<br>`). Unlike [`Token::Newline`],
+    /// it splits the line even under `white-space: normal` (where a text
+    /// newline collapses as a space boundary).
+    Break,
     /// A maximal non-whitespace grapheme run lifted from one source
     /// `InlineRun`. The styling is carried alongside so the output
     /// lines preserve span boundaries.
@@ -158,9 +162,15 @@ fn tokenize_run(
     for g in run.text.graphemes(true) {
         if g == "\n" {
             // Close whatever is pending, then push the forced break.
+            // A `<br>` marker run (force_break) is unconditional — it
+            // splits the line even under `white-space: normal`.
             flush(pending_kind, &mut pending_text, &mut pending_count, &mut pending_width, run, out);
             pending_kind = None;
-            out.push(Token::Newline);
+            out.push(if run.force_break {
+                Token::Break
+            } else {
+                Token::Newline
+            });
             continue;
         }
         let w = grapheme_width(g).max(font);
@@ -210,10 +220,10 @@ fn tokenize_run(
 fn apply_white_space(tokens: Vec<Token>, ws: WhiteSpace) -> Vec<Vec<Token>> {
     if ws.preserves_whitespace() {
         // `pre` / `pre-wrap`: every Newline is a forced break; spaces
-        // are preserved as-is.
+        // are preserved as-is. `<br>` breaks are unconditional.
         let mut lines: Vec<Vec<Token>> = vec![Vec::new()];
         for t in tokens {
-            if matches!(t, Token::Newline) {
+            if matches!(t, Token::Newline | Token::Break) {
                 lines.push(Vec::new());
             } else if let Some(line) = lines.last_mut() {
                 line.push(t);
@@ -223,7 +233,7 @@ fn apply_white_space(tokens: Vec<Token>, ws: WhiteSpace) -> Vec<Vec<Token>> {
     }
     // `normal` / `nowrap` / `pre-line`: collapse runs of Space (and
     // any Newlines they contain, except `pre-line` where standalone
-    // newlines are forced breaks).
+    // newlines are forced breaks). A `<br>` Break is forced in every mode.
     let mut lines: Vec<Vec<Token>> = vec![Vec::new()];
     for t in tokens {
         match t {
@@ -233,6 +243,10 @@ fn apply_white_space(tokens: Vec<Token>, ws: WhiteSpace) -> Vec<Vec<Token>> {
                 }
                 // `normal` / `nowrap` swallow the newline as a
                 // collapsible-space boundary.
+            }
+            Token::Break => {
+                // `<br>` forces a line break regardless of `white-space`.
+                lines.push(Vec::new());
             }
             Token::Space { .. } => {
                 if let Some(line) = lines.last_mut() {
@@ -281,6 +295,7 @@ fn wrap_logical_line(
     for token in logical {
         match token {
             Token::Newline => unreachable!("Newline should have split logical lines"),
+            Token::Break => unreachable!("Break should have split logical lines"),
             Token::Space { width, .. } => {
                 if current_line.is_empty() {
                     continue; // skip leading spaces
@@ -477,14 +492,19 @@ pub fn wrap_runs(
             return emit_preserving_newlines(runs);
         }
         // `nowrap`: collapse whitespace (still happens in apply_white_space)
-        // and never wrap. A single visual line; newlines collapse.
-        let mut out: Vec<InlineRun> = Vec::with_capacity(runs.len());
+        // and never wrap. A single visual line; text newlines collapse —
+        // except `<br>` breaks, which split the line unconditionally.
+        let mut out: Vec<Vec<InlineRun>> = vec![Vec::new()];
         for r in runs {
-            if !r.is_empty() {
-                out.push(r.clone());
+            if r.force_break {
+                out.push(Vec::new());
+            } else if !r.is_empty()
+                && let Some(line) = out.last_mut()
+            {
+                line.push(r.clone());
             }
         }
-        return vec![out];
+        return out;
     }
     if max_width == 0 {
         // Defensive: avoid infinite loops in the splitter. Render
