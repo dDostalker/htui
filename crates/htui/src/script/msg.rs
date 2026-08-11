@@ -44,6 +44,10 @@ pub enum ScriptMsg {
     /// A `<select>` option was picked: `set_value_dirty` + fire `change` when
     /// the value actually changed.
     SelectPick { node_id: NodeId, value: String },
+    /// An `<input type=checkbox|radio>` was clicked: toggle its `checked`
+    /// attribute (clearing same-`name` radio siblings), then fire `input` /
+    /// `change`.
+    ToggleCheck { node_id: NodeId },
     /// A key was pressed (`KeyDown`). `target` is the focused `<input>` node
     /// (the browser's key event target); `None` means the document `<body>`.
     /// `key_id` correlates the response back to the input loop's gate wait, so
@@ -144,6 +148,33 @@ pub fn apply_message(
                 engine.set_value_dirty(*node_id, value);
                 let region = region_for(&engine.arena(), *node_id);
                 (engine.fire(&region, EventType::Change, 0, 0), None)
+            } else {
+                (Vec::new(), None)
+            }
+        }
+        ScriptMsg::ToggleCheck { node_id } => {
+            // Checkbox toggles every click; a radio always checks (clicking an
+            // already-selected radio is a no-op). Only actual state flips fire
+            // `input` / `change`, matching browser default-action timing (the
+            // `Click` dispatch ran first).
+            let node_id = *node_id;
+            let is_radio = engine.arena().get(node_id).is_some_and(|n| {
+                n.get_type().is_some_and(|t| t.eq_ignore_ascii_case("radio"))
+            });
+            let should_check = if is_radio {
+                true
+            } else {
+                !engine
+                    .arena()
+                    .get(node_id)
+                    .is_some_and(|n| n.attributes.contains_key("checked"))
+            };
+            let changed = engine.set_checked(node_id, should_check);
+            if changed {
+                let region = region_for(&engine.arena(), node_id);
+                let mut cmds = engine.fire(&region, EventType::Input, 0, 0);
+                cmds.extend(engine.fire(&region, EventType::Change, 0, 0));
+                (cmds, None)
             } else {
                 (Vec::new(), None)
             }

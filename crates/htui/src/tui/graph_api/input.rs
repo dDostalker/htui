@@ -613,9 +613,19 @@ pub fn apply_input_word_key(
     }
 }
 
+/// `true` for an `<input type=checkbox|radio>` node — a click toggles the
+/// control instead of focusing a text field.
+fn is_toggle_input(arena: &NodeArena, node_id: NodeId) -> bool {
+    arena.get(node_id).is_some_and(|n| {
+        n.get_type()
+            .is_some_and(|t| matches!(t.to_ascii_lowercase().as_str(), "checkbox" | "radio"))
+    })
+}
+
 /// All `<input>` node ids in document order (depth-first), for `Tab` /
 /// `Shift`+`Tab` focus cycling. Reads the input loop's DOM snapshot; a
-/// removed or not-yet-rendered field is simply not included.
+/// removed or not-yet-rendered field is simply not included. `hidden` inputs
+/// and checkbox/radio toggles (click-only in this engine) are skipped.
 pub fn collect_input_ids(arena: &NodeArena) -> Vec<NodeId> {
     let mut out = Vec::new();
     let Some(root) = arena.iter().find(|(_, n)| n.parent.is_none()).map(|(id, _)| id) else {
@@ -625,7 +635,13 @@ pub fn collect_input_ids(arena: &NodeArena) -> Vec<NodeId> {
     while let Some(id) = stack.pop() {
         let node = &arena[id];
         if node.node_type == NodeType::Input {
-            out.push(id);
+            let t = node
+                .get_type()
+                .map(|t| t.to_ascii_lowercase())
+                .unwrap_or_default();
+            if t != "hidden" && t != "checkbox" && t != "radio" {
+                out.push(id);
+            }
         }
         for child in node.children.iter().rev() {
             stack.push(*child);
@@ -859,7 +875,16 @@ pub fn handle_click(
     });
     if clicked_input {
         if let Some(node_id) = clicked.map(|r| r.node_id) {
-            focus_input(state, node_id, arena, msgs, cmds);
+            if is_toggle_input(arena, node_id) {
+                // A checkbox / radio toggle: no text focus, but clicking it
+                // still blurs any previously focused text field.
+                if state.focused_input.is_some() {
+                    blur_input(state, msgs, cmds);
+                }
+                msgs.push(ScriptMsg::ToggleCheck { node_id });
+            } else {
+                focus_input(state, node_id, arena, msgs, cmds);
+            }
         }
     } else if state.focused_input.is_some() {
         blur_input(state, msgs, cmds);
@@ -1032,22 +1057,27 @@ pub fn handle_mouse_down(
         MouseButton::Left => {
             if clicked_input {
                 if let Some(node_id) = clicked.map(|r| r.node_id) {
-                    focus_input(state, node_id, arena, msgs, cmds);
-                    state.drag_selecting = true;
-                    // Position the caret (and the selection anchor) at the press
-                    // point within the field.
-                    if let Some(region) = clicked {
-                        let inner_x = region.rect.x.saturating_add(1);
-                        let inner_w = region.rect.width.saturating_sub(2);
-                        let idx = char_index_at_x(
-                            &state.input_value,
-                            state.input_cursor,
-                            inner_w,
-                            (x as usize).saturating_sub(inner_x),
-                        );
-                        state.input_sel_anchor = Some(idx);
-                        state.input_cursor = idx;
-                        push_input_render(state, node_id, cmds);
+                    if is_toggle_input(arena, node_id) {
+                        // Checkbox / radio: the click handler performs the
+                        // toggle — no text focus or drag selection here.
+                    } else {
+                        focus_input(state, node_id, arena, msgs, cmds);
+                        state.drag_selecting = true;
+                        // Position the caret (and the selection anchor) at the press
+                        // point within the field.
+                        if let Some(region) = clicked {
+                            let inner_x = region.rect.x.saturating_add(1);
+                            let inner_w = region.rect.width.saturating_sub(2);
+                            let idx = char_index_at_x(
+                                &state.input_value,
+                                state.input_cursor,
+                                inner_w,
+                                (x as usize).saturating_sub(inner_x),
+                            );
+                            state.input_sel_anchor = Some(idx);
+                            state.input_cursor = idx;
+                            push_input_render(state, node_id, cmds);
+                        }
                     }
                 }
             } else {

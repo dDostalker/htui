@@ -152,6 +152,15 @@ pub fn generate_node(arena: &NodeArena, node_id: NodeId) -> Option<GeneratedBox>
         };
         (GeneratedBoxKind::Replaced, GeneratedPayload::Image { src })
     } else if matches!(node.node_type, NodeType::Input) {
+        // `<input type=hidden>` carries form data but never renders — the
+        // browser UA stylesheet treats it like `display: none`, so no box
+        // is generated (the element stays in the DOM, addressable by CSS/JS).
+        if node
+            .get_type()
+            .is_some_and(|t| t.eq_ignore_ascii_case("hidden"))
+        {
+            return None;
+        }
         (GeneratedBoxKind::Replaced, GeneratedPayload::Input)
     } else if matches!(node.node_type, NodeType::Select) {
         (GeneratedBoxKind::Replaced, GeneratedPayload::Select)

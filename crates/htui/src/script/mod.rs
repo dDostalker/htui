@@ -41,7 +41,7 @@ use crate::{
     events::{EventBindings, EventType, HitRegion, HtmlEvent, KeyEventInfo},
     html::html_parse::Parser,
     resources::AsyncResult,
-    tdom::node::{NodeArena, NodeId},
+    tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::RenderCmd,
 };
 
@@ -553,6 +553,70 @@ impl ScriptEngine {
     /// label), so the next frame re-cascades and re-renders.
     pub fn set_value_dirty(&mut self, node_id: NodeId, value: &str) {
         self.set_value(node_id, value);
+    }
+
+    /// Set the `checked` state of a checkbox / radio and mark changed nodes
+    /// dirty. Returns `true` when any `checked` attribute actually changed
+    /// (the control itself or a cleared radio sibling).
+    ///
+    /// Radio buttons: checking one clears the `checked` attribute of every
+    /// other input with the same `name` (document-scoped group, matching the
+    /// engine's single-form model). Unchecking a radio is a no-op in
+    /// browsers, but the engine allows it for checkbox parity — callers never
+    /// send it for a click (clicking a selected radio keeps it selected).
+    pub fn set_checked(&mut self, node_id: NodeId, checked: bool) -> bool {
+        let mut st = self.state.borrow_mut();
+        let mut changed = false;
+        let is_radio = st
+            .arena
+            .get(node_id)
+            .is_some_and(|n| n.get_type().is_some_and(|t| t.eq_ignore_ascii_case("radio")));
+        let name = st
+            .arena
+            .get(node_id)
+            .and_then(|n| n.attributes.get("name").cloned());
+        if checked && is_radio {
+            if let Some(name) = name {
+                // Clear every same-`name` radio sibling (the clicked member
+                // is excluded here and set below).
+                let siblings: Vec<NodeId> = st
+                    .arena
+                    .iter()
+                    .filter(|(id, n)| {
+                        *id != node_id
+                            && n.node_type == NodeType::Input
+                            && n.get_type()
+                                .is_some_and(|t| t.eq_ignore_ascii_case("radio"))
+                            && n.attributes.get("name").is_some_and(|nm| *nm == name)
+                    })
+                    .map(|(id, _)| id)
+                    .collect();
+                for id in siblings {
+                    if let Some(n) = st.arena.get_mut(id) {
+                        if n.attributes.remove("checked").is_some() {
+                            changed = true;
+                            st.dirty.nodes.push(id);
+                        }
+                    }
+                }
+            }
+        }
+        let was = st
+            .arena
+            .get(node_id)
+            .is_some_and(|n| n.attributes.contains_key("checked"));
+        if was == checked {
+            return changed;
+        }
+        if let Some(n) = st.arena.get_mut(node_id) {
+            if checked {
+                n.attributes.insert("checked".to_string(), String::new());
+            } else {
+                n.attributes.remove("checked");
+            }
+        }
+        st.dirty.nodes.push(node_id);
+        true
     }
 
     /// Dispatch a DOM event along the hit region's ancestor path.

@@ -191,6 +191,7 @@ htui/
 │       ├── table/
 │       ├── position/     # CSS 定位演示（relative / absolute / fixed / z-index）
 │       ├── input/        # <input> 输入框演示（点击聚焦 + 键盘编辑 + focus/blur/input/change 事件）
+│       ├── form/         # 表单控件演示（checkbox/radio 切换互斥、password 掩码、hidden 不渲染 + change 计数）
 │       ├── configurator/ # 配置器设置表单演示（input + 原生 select 下拉 + JS 开关 + 实时预览 + 保存/重置）
 │       ├── fetch_demo/   # fetch 演示：<script src="mem://…"> 加载 + fetch 经 Promise 微任务事件循环写 DOM
 │       └── viewport_units/

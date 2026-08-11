@@ -59,6 +59,28 @@ pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintC
     };
 
     let node = &arena[lb.node_id];
+    let input_type = node
+        .get_type()
+        .map(|t| t.to_ascii_lowercase())
+        .unwrap_or_default();
+
+    // `<input type=checkbox|radio>` paints a single-cell toggle glyph with
+    // no frame; the checked state comes from the DOM `checked` attribute
+    // (toggled by the script thread on click).
+    if matches!(input_type.as_str(), "checkbox" | "radio") {
+        let checked = node.attributes.contains_key("checked");
+        let glyph = match (input_type.as_str(), checked) {
+            ("checkbox", true) => '\u{2611}', // ☑
+            ("checkbox", false) => '\u{2610}', // ☐
+            ("radio", true) => '\u{25C9}',    // ◉
+            _ => '\u{25CB}',                   // ○
+        };
+        let fg = node.css_attr.get_color().unwrap_or(Color::White);
+        let bg = node.css_attr.get_bg_color();
+        put(canvas, cell_index(canvas, r.x, r.y), Some(glyph), Some(fg), bg);
+        return;
+    }
+
     // Live edit state wins while focused, and an unfocused entry covers only
     // the single repaint right after a blur (so the committed text doesn't
     // flash back to the pre-commit DOM value). Every fresh layout drops
@@ -104,11 +126,16 @@ pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintC
     let total = v.len();
     let cursor = cursor.min(total);
     let (start, end) = value_window(&value, cursor, inner_width);
+    // `<input type=password>` masks every character with `•` while keeping
+    // each glyph's cell width (so the caret window / column mapping shared
+    // with the input loop stays in sync).
+    let is_password = input_type == "password";
 
     let mut col = 0usize;
     for i in start..end {
         let ch = v[i];
         let w = char_width(ch).max(1);
+        let glyph = if is_password { '\u{2022}' } else { ch };
         let inverted = focused && i == cursor;
         for sub in 0..w {
             let abs_col = inner_x.saturating_add(col).saturating_add(sub);
@@ -144,7 +171,7 @@ pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintC
             put(
                 canvas,
                 cell_index(canvas, abs_col, r.y),
-                if sub == 0 { Some(ch) } else { None },
+                if sub == 0 { Some(glyph) } else { None },
                 cell_fg,
                 cell_bg,
             );

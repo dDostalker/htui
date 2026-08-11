@@ -240,11 +240,19 @@ fn layout_input(
         Some(rect) => (rect.x, rect.y, rect.width.max(1), rect.height.max(1)),
         None => {
             let node = &arena[generated.node_id];
-            // Default field width in cells (browser `<input size>` default is
-            // ~20 chars; 8 keeps compact layouts tidy while staying tappable).
-            let block_width = match node.get_width() {
-                Some(w) => (w as usize).min(containing.width).max(1),
-                None => 8usize.min(containing.width.max(1)),
+            // `<input type=checkbox|radio>` is a single-cell toggle glyph;
+            // every other kind is a text field sized from the HTML `width`
+            // attribute (cells) or a fixed default width when absent.
+            let is_toggle = node.get_type().is_some_and(|t| {
+                matches!(t.to_ascii_lowercase().as_str(), "checkbox" | "radio")
+            });
+            let block_width = if is_toggle {
+                1
+            } else {
+                match node.get_width() {
+                    Some(w) => (w as usize).min(containing.width).max(1),
+                    None => 8usize.min(containing.width.max(1)),
+                }
             };
             let x = containing.x;
             let y = cursor.allocate(1);

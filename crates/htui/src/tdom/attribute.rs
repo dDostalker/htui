@@ -33,6 +33,12 @@ impl Node {
         self.attributes.get("src")
     }
 
+    /// Look up the `type` attribute (used by `<input>` kind dispatch:
+    /// `hidden` / `password` / `checkbox` / `radio` / …).
+    pub fn get_type(&self) -> Option<&String> {
+        self.attributes.get("type")
+    }
+
     /// Parse the `width` attribute as `u32` pixels (used by `<img>`).
     pub fn get_width(&self) -> Option<u32> {
         self.attributes.get("width").and_then(|v| v.parse().ok())

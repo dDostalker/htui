@@ -152,6 +152,7 @@ fn main() {
         "viewport_units" => test_case!(viewport_units, no_css),
         "position" => test_case!(position, no_css),
         "input" => test_case!(input, no_css),
+        "form" => test_case!(form, no_css),
         "configurator" => test_case!(configurator, no_css),
         "fetch_demo" => test_case!(fetch_demo, no_css),
         "showcase" => test_case!(showcase, no_css),
@@ -185,6 +186,7 @@ fn main() {
                 "viewport_units",
                 "position",
                 "input",
+                "form",
                 "configurator",
                 "fetch_demo",
                 "showcase",
@@ -223,6 +225,19 @@ fn main() {
     // and keyboard editing are active (interaction needs a real terminal).
     // `--dump` falls back to the static preview.
     if test_name == "input" {
+        if dump_mode {
+            dump(html, css, cols, rows, bg_map);
+        } else {
+            render_with_events(html, css, EventBindings::default());
+        }
+        info!("Test '{test_name}' completed");
+        return;
+    }
+
+    // The `form` case runs through `render_with_events` so checkbox / radio
+    // toggling and password editing are active (interaction needs a real
+    // terminal). `--dump` falls back to the static preview.
+    if test_name == "form" {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
