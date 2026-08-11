@@ -1,0 +1,17 @@
+/* Style sheet for the dialog / template visual test. */
+
+/* Make the open dialog read as a panel (the UA default border is 1 cell). */
+dialog {
+  background-color: #1a1a1a;
+  width: 90px;
+}
+
+/* The close button inside a dialog gets a hover highlight. */
+dialog button:hover {
+  background-color: #444444;
+}
+
+/* The status line reads as a footer. */
+#status {
+  color: #888888;
+}

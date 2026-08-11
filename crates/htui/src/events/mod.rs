@@ -109,6 +109,10 @@ pub enum EventType {
     /// (`ontoggle`). Dispatched by the engine's native disclosure-widget
     /// default action when its `<summary>` is clicked.
     Toggle,
+    /// Fired on a `<dialog>` when it is closed (`onclose`). Dispatched by the
+    /// engine's native dialog default action when a `<form method="dialog">`
+    /// submit button removes the `open` attribute.
+    Close,
 }
 
 /// Terminal-agnostic keyboard payload carried by [`EventType::KeyDown`] /

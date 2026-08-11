@@ -667,6 +667,21 @@ impl ScriptEngine {
         st.dirty.nodes.push(node_id);
     }
 
+    /// Close a `<dialog>` by removing its `open` attribute and marking it
+    /// dirty. Returns whether the dialog was actually open (so callers can
+    /// skip the `close` event for already-closed dialogs).
+    pub fn close_dialog(&mut self, node_id: NodeId) -> bool {
+        let mut st = self.state.borrow_mut();
+        let Some(node) = st.arena.get_mut(node_id) else {
+            return false;
+        };
+        if node.attributes.remove("open").is_none() {
+            return false;
+        }
+        st.dirty.nodes.push(node_id);
+        true
+    }
+
     /// Dispatch a DOM event along the hit region's ancestor path.
     ///
     /// Builds a JS `Event` object, walks `region.path` target-first and fires
@@ -869,6 +884,7 @@ impl ScriptEngine {
             EventType::Submit => "submit",
             EventType::Reset => "reset",
             EventType::Toggle => "toggle",
+            EventType::Close => "close",
         };
 
         let mut init = ObjectInitializer::new(&mut self.context);
@@ -1018,6 +1034,7 @@ fn compile_attribute_listeners(
                     ("onsubmit", EventType::Submit),
                     ("onreset", EventType::Reset),
                     ("ontoggle", EventType::Toggle),
+                    ("onclose", EventType::Close),
                 ]
                 .iter()
                 .filter_map(|(attr, et)| n.attributes.get(*attr).cloned().map(|b| (b, *et)))

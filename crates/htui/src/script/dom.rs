@@ -1330,6 +1330,7 @@ fn event_type_str(et: EventType) -> &'static str {
         EventType::Submit => "submit",
         EventType::Reset => "reset",
         EventType::Toggle => "toggle",
+        EventType::Close => "close",
     }
 }
 
@@ -1352,6 +1353,7 @@ pub(crate) fn parse_event_type(
         "submit" => Ok(EventType::Submit),
         "reset" => Ok(EventType::Reset),
         "toggle" => Ok(EventType::Toggle),
+        "close" => Ok(EventType::Close),
         other => Err(JsNativeError::typ()
             .with_message(format!("unsupported event type `{other}`"))
             .into()),

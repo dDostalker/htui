@@ -148,6 +148,7 @@ htui/
 │   │   ├── layout_input_tests.rs # <input> 输入框测试（渲染 / 编辑逻辑 / 光标状态）
 │   │   ├── layout_form_tests.rs # 表单测试（hidden/password/checkbox/radio/textarea + label/button/form submit-reset，纯内存）
 │   │   ├── layout_details_tests.rs # <details>/<summary> 折叠控件测试（关闭只显 summary / 标记 ▸▾ / 点击切换 open + toggle 事件，纯内存）
+│   │   ├── layout_dialog_template_tests.rs # <dialog>/<template> 测试（dialog：open 显隐 + UA 边框 + form[method=dialog] 关闭 + close 事件；template：内容惰性恒不渲染，纯内存）
 │   │   ├── layout_noscript_tests.rs # <noscript> 测试（脚本启用：元素保留 DOM、原始文本解析、恒不渲染，纯内存）
 │   │   │   ├── render_diff_tests.rs # 帧差增量渲染（不变零输出 / 滚动 diff / 全帧对比）
 │   │   │   │   ├── macro_tests.rs       # 注册宏测试（commands/host/command(name) 自动注册，纯内存）
@@ -182,6 +183,7 @@ htui/
 │       ├── menu_dl/     # 菜单/描述列表演示（menu 同 ul：`• ` 前缀；dl 上下 1 行；dd 左缩 4 列）
 │       ├── q_abbr/      # 行内引用/缩写演示（q 自动引号嵌套交替；abbr[title] 下划线）
 │       ├── details/     # <details>/<summary> 折叠控件演示（▸/▾ 标记、点击切换 + toggle 事件、嵌套、noscript 恒不渲染）
+│       ├── dialog_template/ # <dialog>/<template> 演示（open 显隐 + UA 边框 + form[method=dialog] 关闭 + close 事件；template 惰性恒不渲染）
 │       ├── helloworld/
 │       ├── font_styles/  # bold / italic / underline / line-through
 │       ├── list/

@@ -125,6 +125,17 @@ pub fn generate_node(arena: &NodeArena, node_id: NodeId) -> Option<GeneratedBox>
         return None;
     }
 
+    // UA `dialog:not([open]) { display: none }`: a dialog without the `open`
+    // attribute produces no box. Any author-declared `display` beats the UA
+    // default (same author-over-UA cascade the margins / borders follow), so
+    // `dialog { display: block }` renders even while closed.
+    if node.node_type == NodeType::Dialog
+        && !node.attributes.contains_key("open")
+        && !node.css_attr.is_set("display")
+    {
+        return None;
+    }
+
     // `display: contents` flattens the element's children into the parent
     // instead of producing a box. We can't do that here (we only own one
     // node), so we emit a `Transparent` marker; `generate_children` will
@@ -291,6 +302,7 @@ fn is_non_rendered(node_type: &NodeType) -> bool {
             | NodeType::Meta
             | NodeType::Base
             | NodeType::Noscript
+            | NodeType::Template
             | NodeType::Comment
             | NodeType::DocumentType
             | NodeType::DocumentFragment

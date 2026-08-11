@@ -8,7 +8,7 @@
 //! right [`LayoutBlockOptions`].
 
 use crate::{
-    html::box_edges::{BoxEdges, EdgeSizes},
+    html::box_edges::{Border, BorderSides, BoxEdges, EdgeSizes},
     html::css_parse::BoxSizing,
     layout::{
         BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext, PaintStyle, Rect,
@@ -67,6 +67,7 @@ pub fn layout_block(
     // author — the same precedence an author stylesheet has over the UA
     // stylesheet in the browser cascade.
     let edges = merge_ua_margins(node, edges, opts.ua_margins);
+    let edges = merge_ua_border(node, edges, opts.ua_border);
     let sizing = node.css_attr.get_box_sizing();
     let line_height_cells = resolve_line_height_cells(
         node.css_attr.get_line_height(),
@@ -318,6 +319,53 @@ pub fn layout_block(
         node.css_attr.outer_display(&node.node_type),
         children,
     )
+}
+
+/// Layer the browser UA default border (`opts.ua_border`) onto the resolved
+/// CSS edges, mirroring the cascade where the UA stylesheet loses to any
+/// author declaration — but at component granularity, like a browser:
+/// `dialog { border-width: 2px }` keeps the UA `solid` style / default color
+/// while only the width comes from the author.
+///
+/// Each side keeps a UA component (width / style / color) only while neither
+/// the `border` shorthand, that side's `border-{side}` shorthand, nor the
+/// universal `border-{component}` longhand is declared by the author.
+fn merge_ua_border(node: &Node, edges: BoxEdges, ua_border: Option<BorderSides>) -> BoxEdges {
+    let Some(ua) = ua_border else {
+        return edges;
+    };
+    let css = &node.css_attr;
+    let authored = |side: &str, component: &str| -> bool {
+        css.is_set("border")
+            || css.is_set(&format!("border-{side}"))
+            || css.is_set(&format!("border-{component}"))
+    };
+    let merge = |side: &str, author: Border, ua_side: Border| Border {
+        width: if authored(side, "width") {
+            author.width
+        } else {
+            ua_side.width
+        },
+        style: if authored(side, "style") {
+            author.style
+        } else {
+            ua_side.style
+        },
+        color: if authored(side, "color") {
+            author.color
+        } else {
+            ua_side.color
+        },
+    };
+    BoxEdges {
+        border: BorderSides {
+            top: merge("top", edges.border.top, ua.top),
+            right: merge("right", edges.border.right, ua.right),
+            bottom: merge("bottom", edges.border.bottom, ua.bottom),
+            left: merge("left", edges.border.left, ua.left),
+        },
+        ..edges
+    }
 }
 
 /// Layer the browser UA default margins (`opts.ua_margins`) onto the

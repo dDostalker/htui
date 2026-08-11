@@ -81,14 +81,58 @@ fn convert_children(
     css_sources: &mut Vec<String>,
     scripts: &mut Vec<String>,
 ) {
+    convert_children_with_mode(handle, parent_id, arena, css_sources, scripts, false);
+}
+
+/// Recursive DOM conversion with a template-inertness flag.
+///
+/// `in_template` is set while walking the contents of a `<template>`:
+/// template content is a document fragment that must stay inert — `<style>` /
+/// `<link rel=stylesheet>` are not extracted (they would apply globally) and
+/// `<script>` is not executed (it has no DOM node type, so its source is
+/// flattened as plain text instead).
+fn convert_children_with_mode(
+    handle: &Handle,
+    parent_id: NodeId,
+    arena: &mut NodeArena,
+    css_sources: &mut Vec<String>,
+    scripts: &mut Vec<String>,
+    in_template: bool,
+) {
     let children = handle.children.borrow().clone();
     for child_handle in &children {
         match &child_handle.data {
             NodeData::Document => {
-                convert_children(child_handle, parent_id, arena, css_sources, scripts);
+                convert_children_with_mode(
+                    child_handle,
+                    parent_id,
+                    arena,
+                    css_sources,
+                    scripts,
+                    in_template,
+                );
             }
-            NodeData::Element { name, attrs, .. } => {
+            NodeData::Element {
+                name,
+                attrs,
+                template_contents,
+                ..
+            } => {
                 let tag = name.local.as_ref();
+                // `<script>` is inert inside a template (never executed).
+                // It has no DOM node type, so its source is flattened as
+                // plain text like an unknown tag would.
+                if in_template && tag.eq_ignore_ascii_case("script") {
+                    convert_children_with_mode(
+                        child_handle,
+                        parent_id,
+                        arena,
+                        css_sources,
+                        scripts,
+                        true,
+                    );
+                    continue;
+                }
                 // `<script>` is extracted verbatim (like `<style>`) rather than
                 // becoming a DOM node: the script layer evaluates its source
                 // against the rendered document.
@@ -130,7 +174,9 @@ fn convert_children(
                 }
                 match tag_name_to_node_type(tag) {
                     Some(node_type) => {
-                        if node_type == NodeType::Style {
+                        // `<style>` inside a template stays an inert DOM node;
+                        // elsewhere its CSS is extracted and applied.
+                        if node_type == NodeType::Style && !in_template {
                             let css = extract_text_content(child_handle);
                             if !css.trim().is_empty() {
                                 info!("提取 <style> CSS: {} 字节", css.len());
@@ -143,8 +189,9 @@ fn convert_children(
                                 let ar = attrs.borrow();
                                 convert_attributes(&ar)
                             };
-                            if let (Some(rel), Some(href)) =
-                                (link_attrs.get("rel"), link_attrs.get("href"))
+                            if !in_template
+                                && let (Some(rel), Some(href)) =
+                                    (link_attrs.get("rel"), link_attrs.get("href"))
                                 && rel.to_lowercase().contains("stylesheet")
                             {
                                 // Relative `href` resolves against the
@@ -172,11 +219,42 @@ fn convert_children(
                             arena[child_id].attributes = convert_attributes(&ar);
                         }
                         Node::append_child(arena, parent_id, child_id);
-                        convert_children(child_handle, child_id, arena, css_sources, scripts);
+                        if node_type == NodeType::Template {
+                            // The parser moves a template's children into a
+                            // dedicated contents fragment; walk that instead of
+                            // the (empty) element child list. The content stays
+                            // inert and never renders.
+                            if let Some(contents) = template_contents.borrow().as_ref() {
+                                convert_children_with_mode(
+                                    contents,
+                                    child_id,
+                                    arena,
+                                    css_sources,
+                                    scripts,
+                                    true,
+                                );
+                            }
+                        } else {
+                            convert_children_with_mode(
+                                child_handle,
+                                child_id,
+                                arena,
+                                css_sources,
+                                scripts,
+                                in_template,
+                            );
+                        }
                     }
                     None => {
                         warn!("不支持标签 <{}>，压平", tag);
-                        convert_children(child_handle, parent_id, arena, css_sources, scripts);
+                        convert_children_with_mode(
+                            child_handle,
+                            parent_id,
+                            arena,
+                            css_sources,
+                            scripts,
+                            in_template,
+                        );
                     }
                 }
             }

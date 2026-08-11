@@ -119,6 +119,50 @@ fn summary_details(arena: &NodeArena, node_id: NodeId) -> Option<NodeId> {
     None
 }
 
+/// The `<dialog>` a click on `node_id` should close via the
+/// `form[method=dialog]` default action, if any.
+///
+/// The browser's native dialog flow: a `type=submit` button (the default) in
+/// a `<form method="dialog">` that lives inside a `<dialog>` closes the
+/// dialog when clicked. `type=button` and disabled buttons are inert, exactly
+/// like the form submit rule in [`button_form_action`].
+fn dialog_form_action(arena: &NodeArena, node_id: NodeId) -> Option<NodeId> {
+    let node = arena.get(node_id)?;
+    if node.node_type != NodeType::Button || node.attributes.contains_key("disabled") {
+        return None;
+    }
+    if matches!(
+        node.attributes.get("type").map(|t| t.to_ascii_lowercase()).as_deref(),
+        Some("button")
+    ) {
+        return None;
+    }
+    // Find the containing form; it must declare `method=dialog`.
+    let mut current = node.parent;
+    while let Some(pid) = current {
+        if arena[pid].node_type == NodeType::Form {
+            if !arena[pid]
+                .attributes
+                .get("method")
+                .is_some_and(|m| m.eq_ignore_ascii_case("dialog"))
+            {
+                return None;
+            }
+            // The form itself must live inside a dialog.
+            let mut up = arena[pid].parent;
+            while let Some(uid) = up {
+                if arena[uid].node_type == NodeType::Dialog {
+                    return Some(uid);
+                }
+                up = arena[uid].parent;
+            }
+            return None;
+        }
+        current = arena[pid].parent;
+    }
+    None
+}
+
 /// The form event a `<button type=submit|reset>` click should produce:
 /// `(form_id, EventType::Submit | EventType::Reset)`. Buttons default to
 /// `submit`; `type=button` and disabled buttons produce nothing, and a button
@@ -181,6 +225,17 @@ pub fn apply_message(
             {
                 let region = region_for(&engine.arena(), form_id);
                 cmds.extend(engine.fire(&region, et, 0, 0));
+            }
+            // `form[method=dialog]` default action: after the submit handlers,
+            // a submit inside a dialog closes it (removes `open`) and fires a
+            // `close` event on the dialog — the browser's native dialog flow.
+            if let Some(dialog_id) = hit_map
+                .hit_test(*x, *y)
+                .and_then(|r| dialog_form_action(&engine.arena(), r.node_id))
+                && engine.close_dialog(dialog_id)
+            {
+                let region = region_for(&engine.arena(), dialog_id);
+                cmds.extend(engine.fire(&region, EventType::Close, 0, 0));
             }
             (cmds, None)
         }

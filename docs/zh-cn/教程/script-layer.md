@@ -125,13 +125,16 @@ fn main() {
 | 按键按下 | `onkeydown` | `"keydown"` |
 | 按键释放 | `onkeyup` | `"keyup"` |
 | 折叠（`<details>` 点击 summary 切换 open 后） | `ontoggle` | `"toggle"` |
+| 对话框关闭（`form[method=dialog]` 提交后） | `onclose` | `"close"` |
 
 `focus` / `blur` / `input` / `change` 目前仅由 `<input>` 字段产生：点击聚焦触发
 `focus`（mousedown 时聚焦，对齐浏览器时序），编辑每键触发 `input`，Esc /
 Enter / 点击别处 / 焦点切换提交时触发 `blur`（值有变化时额外触发 `change`）。
 `toggle` 由引擎原生的 `<details>` 折叠默认动作产生：点击 summary（或其内容）切换
 `open` 属性后，在 `<details>` 上触发该事件（`preventDefault` 不拦截切换，与
-button/checkbox 的默认动作一致）。这些事件沿 DOM 祖先链冒泡，与鼠标事件同一套分发机制。
+button/checkbox 的默认动作一致）。`close` 由引擎原生的 `<dialog>` 默认动作产生：
+`form[method=dialog]` 内的提交按钮点击后移除对话框的 `open` 属性，再在 `<dialog>`
+上触发该事件。这些事件沿 DOM 祖先链冒泡，与鼠标事件同一套分发机制。
 
 ### 键盘事件（`keydown` / `keyup`）
 

@@ -7,7 +7,7 @@
 //! [`LayoutBlockOptions`]. The default value is "no special behaviour", so
 //! the common case is `LayoutBlockOptions::default()`.
 
-use crate::layout::{EdgeSizes, InlineRun};
+use crate::layout::{BorderSides, EdgeSizes, InlineRun};
 
 /// Per-element differences layered on top of the shared block-layout pipeline.
 ///
@@ -55,4 +55,9 @@ pub struct LayoutBlockOptions {
     /// the UA stylesheet loses to any author declaration). `<blockquote>`
     /// uses this for its `margin-block: 1em; margin-inline: 40px` default.
     pub ua_margins: Option<EdgeSizes>,
+    /// Browser user-agent default border applied per component (width /
+    /// style / color) only where the author has not declared the matching
+    /// border property. `<dialog open>` uses this for the UA `border: solid`
+    /// default.
+    pub ua_border: Option<BorderSides>,
 }

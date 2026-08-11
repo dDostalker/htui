@@ -9,8 +9,8 @@
 
 use crate::{
     layout::{
-        BoxConstraint, Cursor, EdgeSizes, LayoutBox, LayoutContext,
-        inner_formatting_context::flow::{LayoutBlockOptions, layout_block},
+        BoxConstraint, Cursor, Border, BorderSides, BorderStyle, EdgeSizes, LayoutBox,
+        LayoutContext, inner_formatting_context::flow::{LayoutBlockOptions, layout_block},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
 };
@@ -99,6 +99,16 @@ fn dd_opts() -> LayoutBlockOptions {
     }
 }
 
+/// `<dialog open>` keeps the browser UA default border (`border: solid`,
+/// one cell wide) unless the author declares a border property — the framed
+/// look that separates a dialog from a plain block.
+fn dialog_opts() -> LayoutBlockOptions {
+    LayoutBlockOptions {
+        ua_border: Some(BorderSides::all(Border::new(1, BorderStyle::Solid, None))),
+        ..Default::default()
+    }
+}
+
 /// Plain block elements handled by [`layout_standard_block`].
 static STANDARD_BLOCK_ELEMENTS: &[BlockElementConfig] = &[
     BlockElementConfig {
@@ -156,6 +166,10 @@ static STANDARD_BLOCK_ELEMENTS: &[BlockElementConfig] = &[
     BlockElementConfig {
         node_type: NodeType::Search,
         opts: default_opts,
+    },
+    BlockElementConfig {
+        node_type: NodeType::Dialog,
+        opts: dialog_opts,
     },
 ];
 

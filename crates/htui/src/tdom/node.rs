@@ -165,6 +165,12 @@ pub enum NodeType {
     Figcaption,
     Details,
     Summary,
+    /// `<dialog>` — a dialog box. Without the `open` attribute the browser UA
+    /// stylesheet hides it (`dialog:not([open]) { display: none }`); with
+    /// `open` it renders as a block with the UA default border. A submit
+    /// button in a `<form method="dialog">` inside it natively closes it
+    /// (removes `open`) and fires a `close` event.
+    Dialog,
     Ul,
     Ol,
     Li,
@@ -201,6 +207,10 @@ pub enum NodeType {
     /// (mirroring a browser with JavaScript enabled); the content stays in
     /// the DOM and remains addressable by JS / CSS.
     Noscript,
+    /// `<template>` — inert markup for later reuse. The element never renders
+    /// (its content is a document fragment by spec); the subtree stays in the
+    /// DOM and remains addressable by JS / CSS.
+    Template,
     Style,
     Link,
 }
@@ -270,6 +280,7 @@ impl NodeType {
         NodeType::Figcaption,
         NodeType::Details,
         NodeType::Summary,
+        NodeType::Dialog,
         NodeType::Ul,
         NodeType::Ol,
         NodeType::Li,
@@ -295,6 +306,7 @@ impl NodeType {
         NodeType::Textarea,
         NodeType::Label,
         NodeType::Noscript,
+        NodeType::Template,
         NodeType::Style,
         NodeType::Link,
     ];
@@ -460,6 +472,7 @@ impl NodeType {
             NodeType::Figcaption => "figcaption",
             NodeType::Details => "details",
             NodeType::Summary => "summary",
+            NodeType::Dialog => "dialog",
             NodeType::Ul => "ul",
             NodeType::Ol => "ol",
             NodeType::Li => "li",
@@ -485,6 +498,7 @@ impl NodeType {
             NodeType::Textarea => "textarea",
             NodeType::Label => "label",
             NodeType::Noscript => "noscript",
+            NodeType::Template => "template",
             NodeType::Style => "style",
             NodeType::Link => "link",
             _ => return None,

@@ -137,6 +137,7 @@ fn main() {
         "menu_dl" => test_case!(menu_dl, no_css),
         "q_abbr" => test_case!(q_abbr, no_css),
         "details" => test_case!(details),
+        "dialog_template" => test_case!(dialog_template),
         "helloworld" => test_case!(helloworld, no_css),
         "font_styles" => test_case!(font_styles, no_css),
         "list" => test_case!(list, no_css),
@@ -172,6 +173,7 @@ fn main() {
                 "menu_dl",
                 "q_abbr",
                 "details",
+                "dialog_template",
                 "helloworld",
                 "font_styles",
                 "list",
@@ -267,6 +269,21 @@ fn main() {
     // flips `open` and fires `toggle`; interaction needs a real terminal).
     // `--dump` falls back to the static preview.
     if test_name == "details" {
+        if dump_mode {
+            dump(html, css, cols, rows, bg_map);
+        } else {
+            render_with_events(html, css, EventBindings::default());
+        }
+        info!("Test '{test_name}' completed");
+        return;
+    }
+
+    // The `dialog_template` case runs through `render_with_events` so a
+    // `form[method=dialog]` submit natively closes its dialog (removes `open`
+    // + fires `close`) and JS `setAttribute('open', …)` reveals the hidden
+    // one (interaction needs a real terminal). `--dump` falls back to the
+    // static preview.
+    if test_name == "dialog_template" {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
