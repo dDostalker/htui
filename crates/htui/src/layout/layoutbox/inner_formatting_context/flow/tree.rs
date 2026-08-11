@@ -17,7 +17,7 @@ use crate::{
         BoxConstraint, Cursor, LayoutBox, LayoutContext, Rect,
         layoutbox::{
             generate_box_tree, generate_node, layout_generated_box, layout_generated_tree,
-            resolve_positioned_rects,
+            resolve_positioned_rects, GeneratedBoxKind,
         },
         DEFAULT_LAYOUT,
     },
@@ -74,6 +74,21 @@ pub fn layout_children(
         let Some(generated) = generate_node(arena, child_id) else {
             continue;
         };
+        // An inline container (e.g. `<label>`, `<span>`) has no box of its
+        // own: its text is folded into the parent's inline runs, but its
+        // replaced / block descendants (a checkbox inside a `<label>`, an
+        // `<img>` inside a `<span>`) still need their own boxes, laid out
+        // below the parent's text line like any other inline-level child.
+        if generated.kind == GeneratedBoxKind::Normal && generated.outer_display.is_inline() {
+            boxes.extend(layout_inline_container_descendants(
+                arena,
+                child_id,
+                containing,
+                cursor,
+                context,
+            ));
+            continue;
+        }
         if let Some(b) = layout_generated_box(
             arena,
             &generated,
@@ -83,6 +98,39 @@ pub fn layout_children(
             None,
         ) {
             boxes.push(b);
+        }
+    }
+    boxes
+}
+
+/// Lay out the box-producing descendants of an inline container (depth
+/// first). The container itself never produces a box — [`collect_runs`]
+/// folds its text into the parent's inline runs — so only descendants with
+/// real geometry (replaced elements, block-level boxes) are dispatched,
+/// exactly like the container were a transparent wrapper.
+fn layout_inline_container_descendants(
+    arena: &NodeArena,
+    container_id: NodeId,
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+    context: LayoutContext,
+) -> Vec<LayoutBox> {
+    let mut boxes = Vec::new();
+    let mut stack: Vec<NodeId> = arena[container_id].children.iter().rev().copied().collect();
+    while let Some(id) = stack.pop() {
+        let Some(generated) = generate_node(arena, id) else {
+            continue;
+        };
+        if generated.kind == GeneratedBoxKind::Text {
+            // Text is handled by the parent's run collection; no box.
+            continue;
+        }
+        if let Some(b) = layout_generated_box(arena, &generated, containing, cursor, context, None) {
+            boxes.push(b);
+        } else {
+            // Another inline container (nested `<label>` / `<span>` …):
+            // recurse into its children as well.
+            stack.extend(arena[id].children.iter().rev().copied());
         }
     }
     boxes

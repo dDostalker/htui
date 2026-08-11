@@ -216,6 +216,82 @@ fn collect_box_lines<'a>(arena: &'a NodeArena, lb: &'a LayoutBox, out: &mut Vec<
     }
 }
 
+/// Rectangular hit regions for inline `<label>` elements, derived from the
+/// same geometry the paint phase draws (see [`collect_box_lines`]). Each
+/// label-owned run's visual slice becomes a region, so a click on label text
+/// resolves to the label itself — the delegation target for `<label for>` /
+/// wrapped controls.
+///
+/// The runs carry the label's node id (see `layoutbox::inline`); plain text
+/// runs have `node_id: None` and produce no region.
+pub fn label_regions(arena: &NodeArena, boxes: &[LayoutBox]) -> Vec<(NodeId, Rect)> {
+    let mut out = Vec::new();
+    collect_label_regions(arena, boxes, &mut out);
+    out
+}
+
+fn collect_label_regions(arena: &NodeArena, boxes: &[LayoutBox], out: &mut Vec<(NodeId, Rect)>) {
+    for lb in boxes {
+        if let Some(runs) = &lb.paint_style.runs {
+            collect_box_label_regions(arena, lb, runs, out);
+        }
+        collect_label_regions(arena, &lb.children, out);
+    }
+}
+
+fn collect_box_label_regions(
+    arena: &NodeArena,
+    lb: &LayoutBox,
+    runs: &[Vec<InlineRun>],
+    out: &mut Vec<(NodeId, Rect)>,
+) {
+    if runs.is_empty() {
+        return;
+    }
+    let be = &lb.paint_style.box_edges;
+    let font = lb.paint_style.font_size_cells.max(1);
+    let line_h = lb.paint_style.line_height_cells.max(1);
+    let align = arena[lb.node_id].css_attr.get_text_align();
+    let glyph_row = if line_h > font {
+        (line_h - font) / 2
+    } else {
+        font.saturating_sub(1) / 2
+    };
+    let content_x = lb
+        .rect
+        .x
+        .saturating_add(be.border.left.thickness())
+        .saturating_add(be.padding.left);
+    let content_width = lb.rect.width.saturating_sub(be.inner_horizontal()).max(1);
+    let first_row = lb
+        .rect
+        .y
+        .saturating_add(be.border.top.thickness())
+        .saturating_add(be.padding.top)
+        .saturating_add(glyph_row);
+    for (i, line_runs) in runs.iter().enumerate() {
+        if line_runs.is_empty() {
+            continue;
+        }
+        let line_width: usize = line_runs.iter().map(|r| r.width_at(font)).sum();
+        let line_width = line_width.min(content_width);
+        let offset = match align {
+            TextAlign::Left => 0,
+            TextAlign::Center => content_width.saturating_sub(line_width) / 2,
+            TextAlign::Right => content_width.saturating_sub(line_width),
+        };
+        let row = first_row.saturating_add(i.saturating_mul(line_h));
+        let mut col = content_x.saturating_add(offset);
+        for run in line_runs {
+            let w = run.width_at(font);
+            if let Some(node_id) = run.node_id {
+                out.push((node_id, Rect::new(col, row, w, 1)));
+            }
+            col = col.saturating_add(w);
+        }
+    }
+}
+
 /// Extract the column slice `[lo, hi)` of one visual line's runs, where the
 /// columns are absolute canvas columns starting at `line_start`.
 fn extract_line_text(runs: &[InlineRun], font: usize, lo: u32, hi: u32, line_start: u32) -> String {

@@ -100,6 +100,31 @@ pub enum ScriptResponse {
     Event(ScriptEvent),
 }
 
+/// The form event a `<button type=submit|reset>` click should produce:
+/// `(form_id, EventType::Submit | EventType::Reset)`. Buttons default to
+/// `submit`; `type=button` and disabled buttons produce nothing, and a button
+/// outside any `<form>` has no form to fire on.
+fn button_form_action(arena: &NodeArena, node_id: NodeId) -> Option<(NodeId, EventType)> {
+    let node = arena.get(node_id)?;
+    if node.node_type != NodeType::Button || node.attributes.contains_key("disabled") {
+        return None;
+    }
+    let action = match node.attributes.get("type").map(|t| t.to_ascii_lowercase()).as_deref() {
+        Some("reset") => EventType::Reset,
+        // `type=button` is inert: no submit, no reset.
+        Some("button") => return None,
+        _ => EventType::Submit,
+    };
+    let mut current = node.parent;
+    while let Some(pid) = current {
+        if arena[pid].node_type == NodeType::Form {
+            return Some((pid, action));
+        }
+        current = arena[pid].parent;
+    }
+    None
+}
+
 /// Execute one [`ScriptMsg`] against an engine and the hover state machine.
 ///
 /// Used by [`run_script_thread`] for production and by the synchronous
@@ -113,7 +138,21 @@ pub fn apply_message(
 ) -> ScriptEvent {
     let (cmds, key_gate) = match &msg {
         ScriptMsg::Move { x, y } => (interaction::on_move(hover, hit_map, engine, *x, *y), None),
-        ScriptMsg::Click { x, y } => (interaction::on_click(hover, hit_map, engine, *x, *y), None),
+        ScriptMsg::Click { x, y } => {
+            let mut cmds = interaction::on_click(hover, hit_map, engine, *x, *y);
+            // `<button type=submit|reset>` default action: after the click
+            // handlers, fire the matching event on the containing `<form>`.
+            // The engine performs no default navigation / control reset —
+            // pages handle it in JS.
+            if let Some((form_id, et)) = hit_map
+                .hit_test(*x, *y)
+                .and_then(|r| button_form_action(&engine.arena(), r.node_id))
+            {
+                let region = region_for(&engine.arena(), form_id);
+                cmds.extend(engine.fire(&region, et, 0, 0));
+            }
+            (cmds, None)
+        }
         ScriptMsg::FocusInput { node_id } => {
             let region = region_for(&engine.arena(), *node_id);
             (engine.fire(&region, EventType::Focus, 0, 0), None)

@@ -44,6 +44,10 @@ pub enum ReplacedContent {
     /// lives in [`TermLayout::input_states`](crate::tui::graph_api::TermLayout::input_states));
     /// the paint phase draws the framed box with a caret.
     Textarea,
+    /// `<button>` — a push-button: the node's text content painted inside a
+    /// frame, with `disabled` dimming. Clicks dispatch to the button and
+    /// `type=submit` / `reset` also fire on the containing form.
+    Button,
 }
 
 /// Distinguishes the rendering shape of a layout box.

@@ -52,8 +52,6 @@ fn is_generic_block(node_type: &NodeType) -> bool {
             | NodeType::Input
             | NodeType::Form
             | NodeType::Select
-            | NodeType::Button
-            | NodeType::Label
             | NodeType::Pre
     )
 }

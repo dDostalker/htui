@@ -69,6 +69,16 @@ impl HitMap {
     pub fn build(geometry: &Geometry) -> HitMap {
         let mut regions = Vec::new();
         collect_regions(&geometry.boxes, &geometry.arena, &mut regions);
+        // Inline `<label>` runs get their own small regions (the label's
+        // text slice within its block box) so a click on label text resolves
+        // to the label for `for=` / wrapped-control delegation.
+        for (node_id, rect) in crate::layout::label_regions(&geometry.arena, &geometry.boxes) {
+            regions.push(HitRegion {
+                node_id,
+                rect,
+                path: ancestor_path(&geometry.arena, node_id),
+            });
+        }
         HitMap { regions }
     }
 

@@ -847,6 +847,8 @@ impl ScriptEngine {
             EventType::Change => "change",
             EventType::KeyDown => "keydown",
             EventType::KeyUp => "keyup",
+            EventType::Submit => "submit",
+            EventType::Reset => "reset",
         };
 
         let mut init = ObjectInitializer::new(&mut self.context);
@@ -993,6 +995,8 @@ fn compile_attribute_listeners(
                     ("onchange", EventType::Change),
                     ("onkeydown", EventType::KeyDown),
                     ("onkeyup", EventType::KeyUp),
+                    ("onsubmit", EventType::Submit),
+                    ("onreset", EventType::Reset),
                 ]
                 .iter()
                 .filter_map(|(attr, et)| n.attributes.get(*attr).cloned().map(|b| (b, *et)))

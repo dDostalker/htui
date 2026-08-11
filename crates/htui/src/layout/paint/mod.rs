@@ -18,6 +18,7 @@
 
 mod block;
 mod border;
+mod button;
 mod image;
 mod input;
 mod select;
@@ -36,6 +37,7 @@ use crate::{
 };
 
 use self::block::paint_block;
+use self::button::paint_button;
 use self::image::paint_image;
 use self::input::paint_input;
 use self::select::paint_select;
@@ -343,6 +345,9 @@ fn paint_box(
         }
         BoxKind::Replaced(ReplacedContent::Textarea) => {
             paint_textarea(lb, arena, canvas, own_clip);
+        }
+        BoxKind::Replaced(ReplacedContent::Button) => {
+            paint_button(lb, arena, canvas, own_clip);
         }
         BoxKind::Anonymous => {
             // Anonymous boxes have no chrome of their own; their visible

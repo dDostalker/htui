@@ -1,11 +1,18 @@
 //! Form-control tests — `<input>` `hidden` / `password` / `checkbox` /
-//! `radio`.
+//! `radio`, `<label>` delegation, `<button>` and `<form>` submit/reset
+//! events.
 //!
 //! - `type=hidden` never renders a box (the node stays in the DOM).
 //! - `type=password` masks every glyph with `•`.
 //! - checkbox / radio paint single-cell toggle glyphs; a click toggles
 //!   `checked` (radio groups are mutually exclusive by `name`) and fires
 //!   `input` / `change` only on actual state flips.
+//! - `<label>` is inline and owns a hit region over its text; a click
+//!   delegates to the control named by `for` (or the first wrapped
+//!   labelable element).
+//! - `<button>` paints `[ text ]`; a `disabled` button swallows clicks and
+//!   `type=submit` / `reset` fire the matching event on the containing
+//!   `<form>` (the engine never navigates or resets controls itself).
 
 use htui::events::{EventBindings, Geometry, HitMap, interaction::HoverState};
 use htui::html::html_parse;
@@ -442,6 +449,254 @@ fn test_checkbox_click_full_path_toggles_and_fires_change() {
         eval_str(&mut engine, "globalThis.__seen.length"),
         "2",
         "second flip fires another change"
+    );
+}
+
+// ============================================================
+// label
+// ============================================================
+
+#[test]
+fn test_label_renders_inline_with_surrounding_text() {
+    // `<label>` is an inline container: its text flows on the same line as
+    // the surrounding paragraph text and it has no layout box of its own.
+    let (boxes, arena) = layout_boxes(r#"<p>fo<label id="l">la</label></p>"#);
+    let l = find_node_by_id(&arena, "l");
+    assert!(find_box(&boxes, l).is_none(), "inline label must not produce a box");
+
+    let (term_map, tl) = draw(r#"<p>fo<label id="l">la</label></p>"#, "");
+    let cols = term_map.columns as usize;
+    let joined: String = tl
+        .layout
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| !b.word.is_empty() && b.word != " " && b.word != "[")
+        .map(|(i, b)| format!("{}{}", b.word, if i % cols == cols - 1 { " " } else { "" }))
+        .collect();
+    assert!(
+        joined.contains("fola"),
+        "label text must flow inline with the paragraph (got {joined:?})"
+    );
+}
+
+#[test]
+fn test_label_owns_hit_region_over_its_text() {
+    // The label's text slice gets its own region so a click resolves to the
+    // label (the delegation target), not the surrounding block.
+    let (_, geo) = build_geometry(r#"<p>fo<label id="l">la</label></p>"#);
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("l").expect("label hit region exists");
+    assert_eq!(region.rect.width, 2, "region covers the label's `la` text slice");
+    assert_eq!(region.rect.height, 1);
+}
+
+#[test]
+fn test_label_for_click_focuses_input() {
+    let (mut engine, geo) = build_geometry(
+        r#"<label id="l" for="f">Name:</label><input id="f" type="text">"#,
+    );
+    let map = HitMap::build(&geo);
+    let f = find_node_by_id(&engine.arena(), "f");
+    let region = map.resolve_by_id("l").expect("label hit region");
+    let (x, y) = center(region.rect);
+
+    let mut state = InputState::new();
+    click(&mut state, &mut engine, &map, x, y);
+    assert_eq!(
+        state.focused_input,
+        Some(f),
+        "clicking `<label for>` text must focus the associated input"
+    );
+}
+
+#[test]
+fn test_label_wrapping_checkbox_toggles_on_click() {
+    let (mut engine, geo) = build_geometry(
+        r#"<label id="l"><input id="c" type="checkbox"> Agree</label>"#,
+    );
+    let map = HitMap::build(&geo);
+    let c = find_node_by_id(&engine.arena(), "c");
+    let region = map.resolve_by_id("l").expect("label hit region");
+    let (x, y) = center(region.rect);
+
+    let mut state = InputState::new();
+    click(&mut state, &mut engine, &map, x, y);
+    assert!(
+        engine.arena().get(c).unwrap().attributes.contains_key("checked"),
+        "clicking a wrapping label must activate its control"
+    );
+}
+
+#[test]
+fn test_label_wrapped_checkbox_renders_box() {
+    // A control inside a wrapping `<label>` keeps its own box (the label is
+    // an inline container — its text flows into the parent, the replaced
+    // element is laid out below the text line like any inline-level child).
+    let (boxes, arena) =
+        layout_boxes(r#"<p><label><input id="c" type="checkbox"> Agree</label></p>"#);
+    let c = find_node_by_id(&arena, "c");
+    let b = find_box(&boxes, c).expect("wrapped checkbox must keep its box");
+    assert_eq!(b.rect.width, 2, "toggle control is glyph + one spacing cell");
+
+    let (_, tl) = draw(r#"<p><label><input type="checkbox"> Agree</label></p>"#, "");
+    assert!(
+        tl.layout.iter().any(|b| b.word == "\u{2610}"),
+        "wrapped checkbox must paint `☐`"
+    );
+}
+
+// ============================================================
+// button
+// ============================================================
+
+#[test]
+fn test_button_renders_bracketed_label() {
+    let (_, tl) = draw(r#"<button>Save</button>"#, "");
+    let glyphs: String = tl
+        .layout
+        .iter()
+        .filter(|b| !b.word.is_empty() && b.word != " ")
+        .map(|b| b.word.clone())
+        .collect();
+    assert_eq!(glyphs, "[Save]", "button must paint `[ text ]` frame");
+}
+
+#[test]
+fn test_disabled_button_swallows_click() {
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var n = [];
+          document.getElementById('b').addEventListener('click', function () { n.push(1); });
+          globalThis.__n = n;
+        </script>
+        <button id="b" disabled>No</button>"#,
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("b").expect("button hit region");
+    let (x, y) = center(region.rect);
+
+    let mut state = InputState::new();
+    click(&mut state, &mut engine, &map, x, y);
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__n.length"),
+        "0",
+        "a disabled button must swallow the click entirely"
+    );
+}
+
+// ============================================================
+// form submit / reset
+// ============================================================
+
+#[test]
+fn test_submit_button_fires_submit_on_containing_form() {
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var n = [];
+          document.getElementById('f').addEventListener('submit', function () { n.push(1); });
+          globalThis.__n = n;
+        </script>
+        <form id="f"><button id="b">Go</button></form>"#,
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("b").expect("button hit region");
+    let (x, y) = center(region.rect);
+
+    let mut state = InputState::new();
+    click(&mut state, &mut engine, &map, x, y);
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__n.length"),
+        "1",
+        "clicking a submit button must fire `submit` on the containing form"
+    );
+}
+
+#[test]
+fn test_onsubmit_attribute_runs_on_submit_click() {
+    let (mut engine, geo) = build_geometry(
+        r#"<form id="f" onsubmit="globalThis.__s = (globalThis.__s || 0) + 1">
+             <button id="b">Go</button>
+           </form>"#,
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("b").expect("button hit region");
+    let (x, y) = center(region.rect);
+
+    let mut state = InputState::new();
+    click(&mut state, &mut engine, &map, x, y);
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__s"),
+        "1",
+        "the `onsubmit` attribute handler must run on submit"
+    );
+}
+
+#[test]
+fn test_reset_button_fires_reset_on_containing_form() {
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var n = [];
+          document.getElementById('f').addEventListener('reset', function () { n.push(1); });
+          globalThis.__n = n;
+        </script>
+        <form id="f"><button id="b" type="reset">Clear</button></form>"#,
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("b").expect("button hit region");
+    let (x, y) = center(region.rect);
+
+    let mut state = InputState::new();
+    click(&mut state, &mut engine, &map, x, y);
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__n.length"),
+        "1",
+        "clicking a reset button must fire `reset` on the containing form"
+    );
+}
+
+#[test]
+fn test_type_button_does_not_submit() {
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var n = [];
+          document.getElementById('f').addEventListener('submit', function () { n.push(1); });
+          globalThis.__n = n;
+        </script>
+        <form id="f"><button id="b" type="button">Go</button></form>"#,
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("b").expect("button hit region");
+    let (x, y) = center(region.rect);
+
+    let mut state = InputState::new();
+    click(&mut state, &mut engine, &map, x, y);
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__n.length"),
+        "0",
+        "`type=button` must not fire submit"
+    );
+}
+
+#[test]
+fn test_submit_button_nested_in_div_finds_ancestor_form() {
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var n = [];
+          document.getElementById('f').addEventListener('submit', function () { n.push(1); });
+          globalThis.__n = n;
+        </script>
+        <form id="f"><div><section><button id="b">Go</button></section></div></form>"#,
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("b").expect("button hit region");
+    let (x, y) = center(region.rect);
+
+    let mut state = InputState::new();
+    click(&mut state, &mut engine, &map, x, y);
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__n.length"),
+        "1",
+        "a submit button nested under divs must still find its ancestor form"
     );
 }
 

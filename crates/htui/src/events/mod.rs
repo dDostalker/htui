@@ -97,6 +97,14 @@ pub enum EventType {
     /// that report key releases (kitty keyboard protocol / Windows console
     /// mode); the dispatch target matches [`EventType::KeyDown`].
     KeyUp,
+    /// Fired on a `<form>` when a `type=submit` button is clicked or the
+    /// form is otherwise submitted (`onsubmit`). The engine performs no
+    /// default navigation — pages handle it in JS.
+    Submit,
+    /// Fired on a `<form>` when a `type=reset` button is clicked
+    /// (`onreset`). The engine does not restore control defaults itself;
+    /// pages handle the reset in JS.
+    Reset,
 }
 
 /// Terminal-agnostic keyboard payload carried by [`EventType::KeyDown`] /

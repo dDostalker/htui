@@ -85,7 +85,10 @@ fn layout_img_clamps_cols_to_containing_width() {
             panic!("expected BoxKind::Replaced(Image), got {:?}", lb.kind)
         }
         BoxKind::Replaced(
-            ReplacedContent::Input | ReplacedContent::Select | ReplacedContent::Textarea,
+            ReplacedContent::Input
+            | ReplacedContent::Select
+            | ReplacedContent::Textarea
+            | ReplacedContent::Button,
         ) => {
             panic!("expected BoxKind::Replaced(Image), got {:?}", lb.kind)
         }

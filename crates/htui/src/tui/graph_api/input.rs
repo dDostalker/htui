@@ -996,13 +996,20 @@ pub fn handle_click(
     msgs: &mut Vec<ScriptMsg>,
     cmds: &mut Vec<RenderCmd>,
 ) {
-    msgs.push(ScriptMsg::Click { x, y });
-    // Clicking an `<input>` / `<textarea>` focuses it; any other click blurs
-    // the previously focused field.
     let clicked = hit_map.hit_test(x, y);
-    let clicked_input = clicked.is_some_and(|r| is_text_field(arena, r.node_id));
+    // A disabled form control swallows the click entirely (no Click
+    // dispatch, no focus change) — matching browser behaviour.
+    if clicked.is_some_and(|r| is_disabled_control(arena, r.node_id)) {
+        return;
+    }
+    msgs.push(ScriptMsg::Click { x, y });
+    // Clicking an `<input>` / `<textarea>` focuses it; a click on a `<label>`
+    // delegates to its associated control (`for` or a wrapped element). Any
+    // other click blurs the previously focused field.
+    let click_node = resolve_click_node(arena, clicked.map(|r| r.node_id));
+    let clicked_input = click_node.is_some_and(|id| is_text_field(arena, id));
     if clicked_input {
-        if let Some(node_id) = clicked.map(|r| r.node_id) {
+        if let Some(node_id) = click_node {
             if is_toggle_input(arena, node_id) {
                 // A checkbox / radio toggle: no text focus, but clicking it
                 // still blurs any previously focused text field.
@@ -1017,6 +1024,63 @@ pub fn handle_click(
     } else if state.focused_input.is_some() {
         blur_input(state, msgs, cmds);
     }
+}
+
+/// `true` for a form control carrying a `disabled` attribute — such
+/// controls swallow clicks (no Click dispatch, no focus change).
+fn is_disabled_control(arena: &NodeArena, node_id: NodeId) -> bool {
+    arena.get(node_id).is_some_and(|n| {
+        n.attributes.contains_key("disabled")
+            && matches!(
+                n.node_type,
+                NodeType::Button | NodeType::Input | NodeType::Select | NodeType::Textarea
+            )
+    })
+}
+
+/// Resolve the element a click should act on: a `<label>` hit resolves to
+/// its associated control (`for` attribute, or the first wrapped labelable
+/// element); every other hit resolves to itself. `None` = no element.
+fn resolve_click_node(arena: &NodeArena, clicked: Option<NodeId>) -> Option<NodeId> {
+    let id = clicked?;
+    if arena.get(id).is_some_and(|n| n.node_type == NodeType::Label) {
+        Some(label_control(arena, id).unwrap_or(id))
+    } else {
+        Some(id)
+    }
+}
+
+/// The control a `<label>` activates: the element named by `for` (when it is
+/// labelable), else the first labelable descendant (input / select /
+/// textarea / button) in document order.
+fn label_control(arena: &NodeArena, label_id: NodeId) -> Option<NodeId> {
+    let label = &arena[label_id];
+    if let Some(for_id) = label.attributes.get("for") {
+        return arena.iter().find_map(|(id, n)| {
+            if n.get_id().is_some_and(|i| i == for_id) && is_labelable(&n.node_type) {
+                Some(id)
+            } else {
+                None
+            }
+        });
+    }
+    let mut stack: Vec<NodeId> = label.children.iter().rev().copied().collect();
+    while let Some(id) = stack.pop() {
+        let node = &arena[id];
+        if is_labelable(&node.node_type) {
+            return Some(id);
+        }
+        stack.extend(node.children.iter().rev().copied());
+    }
+    None
+}
+
+/// `true` for elements a `<label>` can activate.
+fn is_labelable(node_type: &NodeType) -> bool {
+    matches!(
+        node_type,
+        NodeType::Input | NodeType::Select | NodeType::Textarea | NodeType::Button
+    )
 }
 
 /// Map a field-inner column offset (0-based, relative to the first content
@@ -1176,35 +1240,42 @@ pub fn handle_mouse_down(
         }
     }
 
-    let clicked_input = clicked.is_some_and(|r| is_text_field(arena, r.node_id));
+    // A click on a `<label>` delegates to its associated control; the caret /
+    // drag-selection logic below only applies when the pointer is directly
+    // over the field itself.
+    let click_node = resolve_click_node(arena, clicked.map(|r| r.node_id));
+    let direct_field_hit = clicked.is_some_and(|r| click_node == Some(r.node_id));
+    let clicked_input = click_node.is_some_and(|id| is_text_field(arena, id));
     match button {
         MouseButton::Left => {
             if clicked_input {
-                if let Some(node_id) = clicked.map(|r| r.node_id) {
+                if let Some(node_id) = click_node {
                     if is_toggle_input(arena, node_id) {
                         // Checkbox / radio: the click handler performs the
                         // toggle — no text focus or drag selection here.
                     } else {
                         focus_input(state, node_id, arena, msgs, cmds);
-                        state.drag_selecting = true;
-                        // Position the caret (and the selection anchor) at the press
-                        // point within the field.
-                        if let Some(region) = clicked {
-                            let idx = if is_textarea_node(arena, node_id) {
-                                textarea_index_at(state, region.rect, x, y)
-                            } else {
-                                let inner_x = region.rect.x.saturating_add(1);
-                                let inner_w = region.rect.width.saturating_sub(2);
-                                char_index_at_x(
-                                    &state.input_value,
-                                    state.input_cursor,
-                                    inner_w,
-                                    (x as usize).saturating_sub(inner_x),
-                                )
-                            };
-                            state.input_sel_anchor = Some(idx);
-                            state.input_cursor = idx;
-                            push_input_render(state, node_id, cmds);
+                        if direct_field_hit {
+                            state.drag_selecting = true;
+                            // Position the caret (and the selection anchor) at
+                            // the press point within the field.
+                            if let Some(region) = clicked {
+                                let idx = if is_textarea_node(arena, node_id) {
+                                    textarea_index_at(state, region.rect, x, y)
+                                } else {
+                                    let inner_x = region.rect.x.saturating_add(1);
+                                    let inner_w = region.rect.width.saturating_sub(2);
+                                    char_index_at_x(
+                                        &state.input_value,
+                                        state.input_cursor,
+                                        inner_w,
+                                        (x as usize).saturating_sub(inner_x),
+                                    )
+                                };
+                                state.input_sel_anchor = Some(idx);
+                                state.input_cursor = idx;
+                                push_input_render(state, node_id, cmds);
+                            }
                         }
                     }
                 }

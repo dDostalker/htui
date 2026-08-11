@@ -17,6 +17,7 @@ use crossterm::style::Color;
 use crate::{
     html::css_parse::{OverflowWrap, WhiteSpace, WordBreak},
     layout::InlineRun,
+    tdom::node::NodeId,
     tui::graph_api::{FontStyle, grapheme_width},
 };
 
@@ -40,13 +41,16 @@ enum Token {
     Break,
     /// A maximal non-whitespace grapheme run lifted from one source
     /// `InlineRun`. The styling is carried alongside so the output
-    /// lines preserve span boundaries.
+    /// lines preserve span boundaries; `node_id` names the DOM element
+    /// the source run belonged to (e.g. a `<label>`) so inline hit
+    /// regions survive the wrap.
     Word {
         text: String,
         width: usize,
         style: FontStyle,
         fg: Option<Color>,
         bg: Option<Color>,
+        node_id: Option<NodeId>,
     },
 }
 
@@ -152,6 +156,7 @@ fn tokenize_run(
                     style: run.style,
                     fg: run.fg,
                     bg: run.bg,
+                    node_id: run.node_id,
                 });
             }
         }
@@ -197,6 +202,7 @@ fn tokenize_run(
                 style: run.style,
                 fg: run.fg,
                 bg: run.bg,
+                node_id: run.node_id,
             });
         } else {
             // Non-CJK, or CJK under `keep-all`: accumulate as one word
@@ -284,9 +290,12 @@ fn wrap_logical_line(
     // run inserted between two word runs paints with the same look —
     // the original text node carried the same fg / bg across the
     // space, and the renderer's SGR batcher relies on every cell in
-    // a row having consistent attributes.
+    // a row having consistent attributes. The owner (`node_id`) rides
+    // along so a space inside an inline element's text still belongs
+    // to that element's hit region.
     let mut last_run_style: (Option<Color>, Option<Color>, FontStyle) =
         (None, None, FontStyle::empty());
+    let mut last_run_node_id: Option<NodeId> = None;
 
     // Try to place `word` on the current line. If it does not fit and
     // the line is non-empty, flush and retry on a fresh line. If the
@@ -305,7 +314,7 @@ fn wrap_logical_line(
                     // output InlineRun (single cell), so the input
                     // width already counts it.
                     let (fg, bg, style) = last_run_style;
-                    current_line.push(InlineRun::new(" ", style, fg, bg));
+                    current_line.push(InlineRun::owned(" ", style, fg, bg, last_run_node_id));
                     current_width += width;
                 } else {
                     // The space run does not fit on the current line. Flush
@@ -316,20 +325,21 @@ fn wrap_logical_line(
                     current_width = 0;
                 }
             }
-            Token::Word { text, width, style, fg, bg } => {
+            Token::Word { text, width, style, fg, bg, node_id } => {
                 last_run_style = (fg, bg, style);
+                last_run_node_id = node_id;
                 if width + current_width <= max_width {
                     // Whole word fits on the current line.
-                    current_line.push(InlineRun::new(text, style, fg, bg));
+                    current_line.push(InlineRun::owned(text, style, fg, bg, node_id));
                     current_width += width;
                 } else if width <= max_width && !current_line.is_empty() {
                     // Word fits on a fresh line; flush current first.
                     out.push(std::mem::take(&mut current_line));
-                    current_line.push(InlineRun::new(text, style, fg, bg));
+                    current_line.push(InlineRun::owned(text, style, fg, bg, node_id));
                     current_width = width;
                 } else if width <= max_width {
                     // Word fits on a fresh line; current is empty.
-                    current_line.push(InlineRun::new(text, style, fg, bg));
+                    current_line.push(InlineRun::owned(text, style, fg, bg, node_id));
                     current_width = width;
                 } else {
                     // Word is wider than a full line. Split it.
@@ -344,7 +354,7 @@ fn wrap_logical_line(
                     };
                     if !should_split {
                         // Word overflows; emit the whole thing.
-                        current_line.push(InlineRun::new(text, style, fg, bg));
+                        current_line.push(InlineRun::owned(text, style, fg, bg, node_id));
                         current_width += width;
                         continue;
                     }
@@ -365,11 +375,12 @@ fn wrap_logical_line(
                     for g in graphemes {
                         let w = grapheme_width(g).max(font);
                         if !buf.is_empty() && buf_width + w > max_width {
-                            current_line.push(InlineRun::new(
+                            current_line.push(InlineRun::owned(
                                 std::mem::take(&mut buf),
                                 style,
                                 fg,
                                 bg,
+                                node_id,
                             ));
                             out.push(std::mem::take(&mut current_line));
                             buf_width = 0;
@@ -378,7 +389,7 @@ fn wrap_logical_line(
                         buf_width += w;
                     }
                     if !buf.is_empty() {
-                        current_line.push(InlineRun::new(buf, style, fg, bg));
+                        current_line.push(InlineRun::owned(buf, style, fg, bg, node_id));
                         current_width = buf_width;
                     }
                 }
@@ -411,6 +422,7 @@ fn emit_preserving_newlines(runs: &[InlineRun]) -> Vec<Vec<InlineRun>> {
     let mut cur_fg: Option<Color> = None;
     let mut cur_bg: Option<Color> = None;
     let mut cur_style = FontStyle::empty();
+    let mut cur_node_id: Option<NodeId> = None;
     let mut buffering = false;
 
     for run in runs {
@@ -420,11 +432,12 @@ fn emit_preserving_newlines(runs: &[InlineRun]) -> Vec<Vec<InlineRun>> {
         for g in run.text.graphemes(true) {
             if g == "\n" {
                 if buffering {
-                    line.push(InlineRun::new(
+                    line.push(InlineRun::owned(
                         std::mem::take(&mut buf),
                         cur_style,
                         cur_fg,
                         cur_bg,
+                        cur_node_id,
                     ));
                     buffering = false;
                 }
@@ -435,13 +448,14 @@ fn emit_preserving_newlines(runs: &[InlineRun]) -> Vec<Vec<InlineRun>> {
             // accumulated buffer so fg / bg / style never silently
             // bleed across span boundaries.
             if buffering
-                && (cur_fg != run.fg || cur_bg != run.bg || cur_style != run.style)
+                && (cur_fg != run.fg || cur_bg != run.bg || cur_style != run.style || cur_node_id != run.node_id)
             {
-                line.push(InlineRun::new(
+                line.push(InlineRun::owned(
                     std::mem::take(&mut buf),
                     cur_style,
                     cur_fg,
                     cur_bg,
+                    cur_node_id,
                 ));
                 buffering = false;
             }
@@ -449,13 +463,14 @@ fn emit_preserving_newlines(runs: &[InlineRun]) -> Vec<Vec<InlineRun>> {
                 cur_fg = run.fg;
                 cur_bg = run.bg;
                 cur_style = run.style;
+                cur_node_id = run.node_id;
                 buffering = true;
             }
             buf.push_str(g);
         }
     }
     if buffering {
-        line.push(InlineRun::new(buf, cur_style, cur_fg, cur_bg));
+        line.push(InlineRun::owned(buf, cur_style, cur_fg, cur_bg, cur_node_id));
     }
     // Always emit a trailing visual line — even an empty one when
     // the input ended on a newline. This keeps callers (which split

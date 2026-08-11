@@ -161,6 +161,9 @@ fn layout_replaced(
         GeneratedPayload::Textarea => {
             layout_textarea(arena, generated, containing, cursor, pre_allocated_rect)
         }
+        GeneratedPayload::Button => {
+            layout_button(arena, generated, containing, cursor, pre_allocated_rect)
+        }
         GeneratedPayload::Select => {
             layout_select(arena, generated, containing, cursor, pre_allocated_rect)
         }
@@ -310,6 +313,39 @@ fn layout_textarea(
         generated.node_id,
         Rect::new(x, y, block_width, height),
         ReplacedContent::Textarea,
+        PaintStyle::default(),
+    ))
+}
+
+/// Geometry for `<button>`: a single-row push-button sized from its text
+/// content (`[ text ]` — frame + one padding column each side). A `disabled`
+/// button still takes the same space (matching browsers).
+fn layout_button(
+    arena: &NodeArena,
+    generated: &GeneratedBox,
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+    pre_allocated_rect: Option<Rect>,
+) -> Option<LayoutBox> {
+    let (x, y, block_width, height) = match pre_allocated_rect {
+        Some(rect) => (rect.x, rect.y, rect.width.max(1), rect.height.max(1)),
+        None => {
+            let node = &arena[generated.node_id];
+            let text_w: usize = node
+                .text_content(arena)
+                .chars()
+                .map(|c| char_width(c).max(1))
+                .sum();
+            let block_width = (text_w.saturating_add(4)).min(containing.width).max(4);
+            let x = containing.x;
+            let y = cursor.allocate(1);
+            (x, y, block_width, 1)
+        }
+    };
+    Some(LayoutBox::new_replaced(
+        generated.node_id,
+        Rect::new(x, y, block_width, height),
+        ReplacedContent::Button,
         PaintStyle::default(),
     ))
 }

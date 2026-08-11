@@ -3,6 +3,7 @@
 use crossterm::style::Color;
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::tdom::node::NodeId;
 use crate::tui::graph_api::FontStyle;
 
 /// One inline segment of a block-level element.
@@ -21,6 +22,11 @@ pub struct InlineRun {
     /// width): the line breaker treats it as an unconditional forced break
     /// in every `white-space` mode, where a plain newline would collapse.
     pub force_break: bool,
+    /// The DOM element that produced this run — set for runs inside an
+    /// inline element like `<label>`, so the hit map can give that element
+    /// its own clickable region (its text spans a slice of a block box).
+    /// `None` for plain text / synthesized runs.
+    pub node_id: Option<NodeId>,
 }
 
 impl InlineRun {
@@ -36,6 +42,26 @@ impl InlineRun {
             fg,
             bg,
             force_break: false,
+            node_id: None,
+        }
+    }
+
+    /// A run attributed to an inline element's node id (e.g. the text inside
+    /// a `<label>`), so the hit map can resolve clicks on that element.
+    pub fn owned(
+        text: impl Into<String>,
+        style: FontStyle,
+        fg: Option<Color>,
+        bg: Option<Color>,
+        node_id: Option<NodeId>,
+    ) -> Self {
+        Self {
+            text: text.into(),
+            style,
+            fg,
+            bg,
+            force_break: false,
+            node_id,
         }
     }
 
@@ -48,6 +74,7 @@ impl InlineRun {
             fg,
             bg,
             force_break: true,
+            node_id: None,
         }
     }
 

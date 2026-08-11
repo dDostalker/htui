@@ -70,6 +70,9 @@ pub enum GeneratedPayload {
     /// it from the `cols` / `rows` attributes and the paint pass shows the
     /// (possibly edited) value with a caret.
     Textarea,
+    /// `<button>` — a push-button whose text content is painted inside a
+    /// frame; the geometry pass sizes it from the text width.
+    Button,
     /// Marker produced by [`generate_node`] for a `display: contents`
     /// element. The [`generate_children`] walker detects it and
     /// substitutes the contents element's own children in its place; the
@@ -168,6 +171,8 @@ pub fn generate_node(arena: &NodeArena, node_id: NodeId) -> Option<GeneratedBox>
         (GeneratedBoxKind::Replaced, GeneratedPayload::Input)
     } else if matches!(node.node_type, NodeType::Textarea) {
         (GeneratedBoxKind::Replaced, GeneratedPayload::Textarea)
+    } else if matches!(node.node_type, NodeType::Button) {
+        (GeneratedBoxKind::Replaced, GeneratedPayload::Button)
     } else if matches!(node.node_type, NodeType::Select) {
         (GeneratedBoxKind::Replaced, GeneratedPayload::Select)
     } else {

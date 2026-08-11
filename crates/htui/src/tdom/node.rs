@@ -344,6 +344,7 @@ impl NodeType {
             | NodeType::Samp
             | NodeType::Data
             | NodeType::Time
+            | NodeType::Label
             | NodeType::Br => CssDisplay::Inline,
             NodeType::Table => CssDisplay::Table,
             NodeType::Thead => CssDisplay::TableHeaderGroup,

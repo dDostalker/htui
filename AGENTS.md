@@ -106,6 +106,7 @@ htui/
 │   │   │   │       ├── mod.rs      # paint_layout_tree() 编排器 + PaintCanvas + paint_box()
 │   │   │   │       ├── block.rs    # paint_block
 │   │   │   │       ├── border.rs   # paint_borders
+│   │   │   │       ├── button.rs   # paint_button（`[ 文本 ]` 按钮框）
 │   │   │   │       ├── image.rs    # paint_image
 │   │   │   │       └── text.rs     # paint_runs
 │   │   │   └── tui/
@@ -145,6 +146,7 @@ htui/
 │   │   │   ├── layout_events_tests.rs # 事件系统测试（命中 / 冒泡 / hover / click，纯内存）
 │   │   │   ├── layout_position_tests.rs # CSS 定位测试（relative / absolute / fixed + z-index）
 │   │   │   ├── layout_input_tests.rs # <input> 输入框测试（渲染 / 编辑逻辑 / 光标状态）
+│   │   │   ├── layout_form_tests.rs # 表单测试（hidden/password/checkbox/radio/textarea + label/button/form submit-reset，纯内存）
 │   │   │   ├── render_diff_tests.rs # 帧差增量渲染（不变零输出 / 滚动 diff / 全帧对比）
 │   │   │   │   ├── macro_tests.rs       # 注册宏测试（commands/host/command(name) 自动注册，纯内存）
 │   │   │   │   ├── script_loop_tests.rs # 脚本线程桥测试（apply_message 语义 + 阻塞宿主函数不阻塞输入，纯内存）
