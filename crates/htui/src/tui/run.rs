@@ -100,7 +100,7 @@ fn extract_title(arena: &NodeArena, root_id: NodeId) -> Option<String> {
                 .children
                 .iter()
                 .filter_map(|&child_id| match &arena[child_id].node_type {
-                    NodeType::Text(s) => Some(s.as_str()),
+                    NodeType::Text => arena[child_id].data.as_deref(),
                     _ => None,
                 })
                 .collect();

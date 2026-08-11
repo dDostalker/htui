@@ -72,7 +72,7 @@ fn test_parse_html_body_basic() {
     );
     let (root, arena, css) = p.parse();
     let root_node = &arena[root];
-    assert_eq!(root_node.node_type, NodeType::Global);
+    assert_eq!(root_node.node_type, NodeType::Document);
     assert_eq!(
         root_node.child_count(),
         1,
@@ -128,10 +128,9 @@ fn test_parse_title_preserves_tree() {
         .expect("<title> should be a child of <head>");
     let title_node = &arena[title_id];
     assert_eq!(title_node.child_count(), 1, "<title> retains its text child");
-    match &arena[title_node.children[0]].node_type {
-        NodeType::Text(s) => assert_eq!(s, "My Doc"),
-        other => panic!("expected Text child, got {other:?}"),
-    }
+    let text_child = &arena[title_node.children[0]];
+    assert_eq!(text_child.node_type, NodeType::Text);
+    assert_eq!(text_child.data.as_deref(), Some("My Doc"));
 }
 
 #[test]

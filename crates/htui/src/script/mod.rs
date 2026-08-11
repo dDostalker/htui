@@ -55,7 +55,9 @@ pub use convert::{FromJs, IntoJs, JsObjectBuilder};
 pub use host::{HostCall, HostFn};
 pub use msg::{ScriptDirty, ScriptEvent, ScriptMsg, ScriptResponse, apply_message, run_script_thread};
 
-use dom::{add_listener, element_wrapper, get_listeners, install_builtins, response_object, with_state};
+use dom::{
+    add_listener, get_listeners, install_builtins, node_wrapper, response_object, with_state,
+};
 
 use crate::tui::graph_api::DirtyInfo;
 
@@ -141,6 +143,62 @@ globalThis.__htuiAddListener = function (nodeId, type, fn) {
 globalThis.__htuiGetListeners = function (nodeId, type) {
   var entry = globalThis.__htuiListeners[nodeId];
   return entry ? (entry[type] || []) : [];
+};
+// Live NodeList factory: `getLen()` / `getItem(i)` are native closures over
+// the engine arena, so every access (length / index / enumeration) reflects
+// the current DOM — a held `childNodes` reference stays live.
+globalThis.__htuiLiveList = function (getLen, getItem) {
+  function index(p) {
+    var n = Number(p);
+    return String(n) === p ? n : NaN;
+  }
+  var target = {
+    item: function (i) {
+      i = Number(i) | 0;
+      return (i >= 0 && i < getLen()) ? getItem(i) : null;
+    },
+    forEach: function (cb, self) {
+      for (var i = 0; i < getLen(); i++) cb.call(self, getItem(i), i, this);
+    }
+  };
+  return new Proxy(target, {
+    get: function (t, p) {
+      if (p === 'length') return getLen();
+      var i = index(p);
+      if (!Number.isNaN(i) && i >= 0 && i < getLen()) return getItem(i);
+      if (p === Symbol.iterator) return function () {
+        var i = 0;
+        return { next: function () {
+          return i < getLen()
+            ? { value: getItem(i++), done: false }
+            : { value: undefined, done: true };
+        } };
+      };
+      return Reflect.get(t, p);
+    },
+    has: function (t, p) {
+      if (p === 'length') return true;
+      var i = index(p);
+      if (!Number.isNaN(i) && i >= 0 && i < getLen()) return true;
+      return Reflect.has(t, p);
+    },
+    ownKeys: function () {
+      var keys = [];
+      for (var i = 0; i < getLen(); i++) keys.push(String(i));
+      keys.push('length');
+      return keys;
+    },
+    getOwnPropertyDescriptor: function (t, p) {
+      if (p === 'length') return { get: getLen, enumerable: false, configurable: true };
+      var i = index(p);
+      if (!Number.isNaN(i) && i >= 0 && i < getLen()) {
+        return { value: getItem(i), writable: true, enumerable: true, configurable: true };
+      }
+      return Reflect.getOwnPropertyDescriptor(t, p);
+    },
+    set: function () { return false; },
+    deleteProperty: function () { return false; }
+  });
 };
 "#;
 
@@ -579,7 +637,7 @@ impl ScriptEngine {
 
         for element in &region.path {
             // `currentTarget` must track the element being dispatched.
-            if let Ok(wrapper) = element_wrapper(&mut self.context, element.node_id)
+            if let Ok(wrapper) = node_wrapper(&mut self.context, element.node_id)
                 && let Some(obj) = event.as_object() && let Err(e) =
                     obj.set(js_string!("currentTarget"), wrapper, false, &mut self.context)
                 {
@@ -683,7 +741,7 @@ impl ScriptEngine {
         key: Option<&KeyEventInfo>,
     ) -> JsResult<JsValue> {
         let target = match path.first() {
-            Some(el) => element_wrapper(&mut self.context, el.node_id)?,
+            Some(el) => node_wrapper(&mut self.context, el.node_id)?,
             None => JsValue::null(),
         };
         let type_str = match event_type {

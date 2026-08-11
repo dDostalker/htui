@@ -96,7 +96,7 @@ pub fn generate_node(arena: &NodeArena, node_id: NodeId) -> Option<GeneratedBox>
         return None;
     }
 
-    if matches!(node.node_type, NodeType::Text(_)) {
+    if matches!(node.node_type, NodeType::Text) {
         return Some(GeneratedBox {
             node_id,
             kind: GeneratedBoxKind::Text,
@@ -242,6 +242,12 @@ fn flush_inline_group(
 fn is_non_rendered(node_type: &NodeType) -> bool {
     matches!(
         node_type,
-        NodeType::Head | NodeType::Style | NodeType::Link | NodeType::Meta
+        NodeType::Head
+            | NodeType::Style
+            | NodeType::Link
+            | NodeType::Meta
+            | NodeType::Comment
+            | NodeType::DocumentType
+            | NodeType::DocumentFragment
     )
 }

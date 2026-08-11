@@ -77,8 +77,10 @@ pub(super) fn cell_text_width(arena: &NodeArena, cell_id: NodeId) -> usize {
     let node = &arena[cell_id];
     let mut total = 0usize;
     for &child_id in &node.children {
-        if let NodeType::Text(s) = &arena[child_id].node_type {
-            total += s.graphemes(true).map(grapheme_width).sum::<usize>();
+        if let NodeType::Text = arena[child_id].node_type {
+            if let Some(s) = arena[child_id].data.as_deref() {
+                total += s.graphemes(true).map(grapheme_width).sum::<usize>();
+            }
         }
     }
     total

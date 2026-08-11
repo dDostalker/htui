@@ -191,7 +191,7 @@ pub(crate) fn select_options(arena: &NodeArena, node_id: NodeId) -> Vec<(String,
             .children
             .iter()
             .filter_map(|&c| match &arena[c].node_type {
-                NodeType::Text(s) => Some(s.as_str()),
+                NodeType::Text => arena[c].data.as_deref(),
                 _ => None,
             })
             .collect();

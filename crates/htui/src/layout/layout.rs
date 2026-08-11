@@ -145,7 +145,7 @@ impl TermLayout {
         // entries keep the live edit buffer.
         self.input_states.retain(|_, st| st.focused);
         let root = &arena[root_id];
-        assert_eq!(root.node_type, NodeType::Global);
+        assert_eq!(root.node_type, NodeType::Document);
         let containing = BoxConstraint::root(term_map);
         let mut cursor = Cursor::new();
         layout_tree(

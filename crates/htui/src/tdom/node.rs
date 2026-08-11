@@ -26,9 +26,23 @@ pub type NodeArena = SlotMap<NodeId, Node>;
 // NodeType
 // ============================================================
 
-#[derive(PartialEq, Eq, Debug, Clone, Hash)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
 pub enum NodeType {
-    Global,
+    /// Document root (`nodeType` 9). The synthetic root node inserted by the
+    /// HTML parser; never rendered directly.
+    Document,
+    /// `<!DOCTYPE html>` declaration (`nodeType` 10). The doctype name lives
+    /// in [`Node::data`]; never rendered.
+    DocumentType,
+    /// Document fragment (`nodeType` 11). Created via
+    /// `document.createDocumentFragment()`; renders nothing until its
+    /// children are appended elsewhere.
+    DocumentFragment,
+    /// Text node (`nodeType` 3). Content lives in [`Node::data`].
+    Text,
+    /// Comment node (`nodeType` 8). Content lives in [`Node::data`]; never
+    /// rendered.
+    Comment,
     Span,
     Div,
     P,
@@ -82,7 +96,6 @@ pub enum NodeType {
     Label,
     Style,
     Link,
-    Text(String),
 }
 
 impl NodeType {
@@ -155,6 +168,65 @@ impl NodeType {
             _ => None,
         }
     }
+
+    /// Lowercase HTML tag name for element variants, `None` for the
+    /// document-structure nodes (`Document` / `DocumentType` /
+    /// `DocumentFragment` / `Text` / `Comment`).
+    pub fn tag_name(&self) -> Option<&'static str> {
+        Some(match self {
+            NodeType::Span => "span",
+            NodeType::Div => "div",
+            NodeType::P => "p",
+            NodeType::Pre => "pre",
+            NodeType::Img => "img",
+            NodeType::A => "a",
+            NodeType::Em => "em",
+            NodeType::Html => "html",
+            NodeType::Body => "body",
+            NodeType::Head => "head",
+            NodeType::Title => "title",
+            NodeType::Meta => "meta",
+            NodeType::H1 => "h1",
+            NodeType::H2 => "h2",
+            NodeType::H3 => "h3",
+            NodeType::H4 => "h4",
+            NodeType::H5 => "h5",
+            NodeType::Header => "header",
+            NodeType::Footer => "footer",
+            NodeType::Nav => "nav",
+            NodeType::Main => "main",
+            NodeType::Section => "section",
+            NodeType::Article => "article",
+            NodeType::Aside => "aside",
+            NodeType::Figure => "figure",
+            NodeType::Figcaption => "figcaption",
+            NodeType::Details => "details",
+            NodeType::Summary => "summary",
+            NodeType::Ul => "ul",
+            NodeType::Ol => "ol",
+            NodeType::Li => "li",
+            NodeType::Table => "table",
+            NodeType::Thead => "thead",
+            NodeType::Tbody => "tbody",
+            NodeType::Tfoot => "tfoot",
+            NodeType::Tr => "tr",
+            NodeType::Th => "th",
+            NodeType::Td => "td",
+            NodeType::Caption => "caption",
+            NodeType::Colgroup => "colgroup",
+            NodeType::Col => "col",
+            NodeType::Input => "input",
+            NodeType::Form => "form",
+            NodeType::Select => "select",
+            NodeType::HtmlOption => "option",
+            NodeType::Button => "button",
+            NodeType::Textarea => "textarea",
+            NodeType::Label => "label",
+            NodeType::Style => "style",
+            NodeType::Link => "link",
+            _ => return None,
+        })
+    }
 }
 
 /// Resolve the effective font-size of `node_id` to a concrete cell count.
@@ -168,7 +240,7 @@ impl NodeType {
 ///
 /// The root element's font-size is **always** `1` cell unless a CSS rule
 /// explicitly sets `font-size` on `<html>` (rendered as the
-/// [`NodeType::Global`] root). `em` units inside `font-size` resolve
+/// [`NodeType::Document`] root). `em` units inside `font-size` resolve
 /// against `parent_font_size_cells`; `rem` units resolve against
 /// `root_font_size_cells`.
 pub fn effective_font_size_cells(
@@ -203,6 +275,9 @@ pub fn effective_font_size_cells(
 #[derive(Debug, Clone)]
 pub struct Node {
     pub node_type: NodeType,
+    /// Text / comment content ([`NodeType::Text`] / [`NodeType::Comment`]) or
+    /// the doctype name ([`NodeType::DocumentType`]).
+    pub data: Option<String>,
     /// Child node IDs (insertion order).
     pub children: Vec<NodeId>,
     /// Parent node ID. `None` for the root node.
@@ -220,6 +295,7 @@ impl Node {
     pub fn from(node_type: NodeType) -> Node {
         Node {
             node_type,
+            data: None,
             children: vec![],
             parent: None,
             attributes: HashMap::new(),
@@ -229,11 +305,106 @@ impl Node {
 
     pub fn text(data: &str) -> Node {
         Node {
-            node_type: NodeType::Text(data.to_string()),
+            node_type: NodeType::Text,
+            data: Some(data.to_string()),
             children: vec![],
             parent: None,
             attributes: HashMap::new(),
             css_attr: CssAttr::new(),
+        }
+    }
+
+    /// Build a comment node (`nodeType` 8).
+    pub fn comment(data: &str) -> Node {
+        Node {
+            node_type: NodeType::Comment,
+            data: Some(data.to_string()),
+            children: vec![],
+            parent: None,
+            attributes: HashMap::new(),
+            css_attr: CssAttr::new(),
+        }
+    }
+
+    /// Build a detached document fragment (`nodeType` 11).
+    pub fn fragment() -> Node {
+        Node {
+            node_type: NodeType::DocumentFragment,
+            data: None,
+            children: vec![],
+            parent: None,
+            attributes: HashMap::new(),
+            css_attr: CssAttr::new(),
+        }
+    }
+
+    /// Build a document-type node (`nodeType` 10) carrying the doctype name.
+    pub fn doctype(name: &str) -> Node {
+        Node {
+            node_type: NodeType::DocumentType,
+            data: Some(name.to_string()),
+            children: vec![],
+            parent: None,
+            attributes: HashMap::new(),
+            css_attr: CssAttr::new(),
+        }
+    }
+
+    /// DOM `nodeType` constant (the spec's `ELEMENT_NODE`…`DOCUMENT_FRAGMENT_NODE`
+    /// values).
+    pub fn node_type_constant(&self) -> u8 {
+        match self.node_type {
+            NodeType::Document => 9,
+            NodeType::DocumentType => 10,
+            NodeType::DocumentFragment => 11,
+            NodeType::Text => 3,
+            NodeType::Comment => 8,
+            _ => 1,
+        }
+    }
+
+    /// DOM `nodeName`: `"#text"` / `"#comment"` / `"#document"` for the
+    /// document-structure nodes, the uppercased tag name for elements (e.g.
+    /// `"DIV"`), and the doctype name for a document type.
+    pub fn node_name(&self) -> String {
+        match self.node_type {
+            NodeType::Document => "#document".to_string(),
+            NodeType::DocumentType => self.data.clone().unwrap_or_else(|| "html".to_string()),
+            NodeType::DocumentFragment => "#document-fragment".to_string(),
+            NodeType::Text => "#text".to_string(),
+            NodeType::Comment => "#comment".to_string(),
+            _ => self.node_type.tag_name().unwrap_or_default().to_uppercase(),
+        }
+    }
+
+    /// Whether this text node contributes rendered / measured content under
+    /// the given `white-space` mode: pure-whitespace runs are dropped when the
+    /// inline context collapses whitespace (`normal` / `nowrap` / `pre-line`),
+    /// while `pre` / `pre-wrap` preserve them verbatim and `pre-line` keeps
+    /// newlines. Keeps the DOM faithful to the source while the rendered
+    /// output stays unchanged.
+    pub fn text_is_painted(&self, white_space: WhiteSpace) -> bool {
+        let Some(s) = self.data.as_deref() else {
+            return true;
+        };
+        if white_space.preserves_whitespace() {
+            return true;
+        }
+        if matches!(white_space, WhiteSpace::PreLine) && s.contains('\n') {
+            return true;
+        }
+        !s.chars().all(char::is_whitespace)
+    }
+
+    /// The effective `white-space` governing this node's inline content: the
+    /// node's own declaration when it has one, otherwise the parent inline
+    /// context's mode. Browsers inherit `white-space`; the cascade does not,
+    /// so the inline walk threads it explicitly.
+    pub fn white_space_or(&self, parent: WhiteSpace) -> WhiteSpace {
+        if self.css_attr.is_set("white-space") {
+            self.css_attr.get_white_space(&self.node_type)
+        } else {
+            parent
         }
     }
 

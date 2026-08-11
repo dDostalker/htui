@@ -45,7 +45,7 @@ impl Parser {
         let dom = html5ever::parse_document(RcDom::default(), opts).one(self.input.clone());
 
         let mut arena = NodeArena::default();
-        let root_id = arena.insert(Node::from(NodeType::Global));
+        let root_id = arena.insert(Node::from(NodeType::Document));
         let mut css_sources: Vec<String> = Vec::new();
         let mut scripts: Vec<String> = Vec::new();
 
@@ -166,21 +166,24 @@ fn convert_children(
             }
             NodeData::Text { contents } => {
                 let text = contents.borrow().to_string();
-                // Drop purely-whitespace text nodes (no printable content) but
-                // preserve original whitespace within the text — `<pre>` and
-                // inline runs that depend on leading/trailing spaces will
-                // otherwise be silently truncated. Whitespace collapsing is a
-                // paint-time concern driven by `white-space`; the HTML parser
-                // should not mutate the source bytes.
-                if text.chars().any(|c| !c.is_whitespace()) {
-                    let text_id = arena.insert(Node::text(&text));
-                    Node::append_child(arena, parent_id, text_id);
-                }
+                // Every text node is preserved verbatim (including
+                // whitespace-only runs) so the DOM mirrors the source and
+                // `childNodes` / `textContent` stay faithful. The layout pass
+                // decides whether a whitespace-only run actually paints
+                // (see `Node::text_is_painted`), so rendering is unchanged.
+                let text_id = arena.insert(Node::text(&text));
+                Node::append_child(arena, parent_id, text_id);
             }
-            NodeData::Comment { .. } => {}
-            NodeData::Doctype { .. } | NodeData::ProcessingInstruction { .. } => {
-                convert_children(child_handle, parent_id, arena, css_sources, scripts);
+            NodeData::Comment { contents } => {
+                // Comments are DOM nodes (`nodeType` 8) that never render.
+                let comment_id = arena.insert(Node::comment(contents));
+                Node::append_child(arena, parent_id, comment_id);
             }
+            NodeData::Doctype { name, .. } => {
+                let doctype_id = arena.insert(Node::doctype(name));
+                Node::append_child(arena, parent_id, doctype_id);
+            }
+            NodeData::ProcessingInstruction { .. } => {}
         }
     }
 }

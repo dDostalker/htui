@@ -31,7 +31,7 @@ fn find_id(arena: &NodeArena, target: &str) -> Option<NodeId> {
     }
     let root = arena
         .iter()
-        .find_map(|(id, n)| (n.node_type == NodeType::Global).then_some(id));
+        .find_map(|(id, n)| (n.node_type == NodeType::Document).then_some(id));
     root.and_then(|r| walk(arena, r, target))
 }
 
@@ -243,7 +243,7 @@ fn region_repaint_emits_only_the_changed_text() {
     // a same-width string so the layout (box rects) stays identical.
     let a_id = find_id(&arena, "a").expect("paragraph a");
     let text_child = arena[a_id].children[0];
-    if let NodeType::Text(t) = &mut arena[text_child].node_type {
+    if let Some(t) = arena[text_child].data.as_mut() {
         *t = "helpx".to_string();
     }
 
@@ -277,7 +277,7 @@ fn region_repaint_preserves_ancestor_background() {
 
     let a_id = find_id(&arena, "a").expect("paragraph a");
     let text_child = arena[a_id].children[0];
-    if let NodeType::Text(t) = &mut arena[text_child].node_type {
+    if let Some(t) = arena[text_child].data.as_mut() {
         *t = "uno".to_string();
     }
 
@@ -318,7 +318,7 @@ fn region_repaint_clears_stale_cells_of_a_shorter_value() {
 
     let a_id = find_id(&arena, "a").expect("paragraph a");
     let text_child = arena[a_id].children[0];
-    if let NodeType::Text(t) = &mut arena[text_child].node_type {
+    if let Some(t) = arena[text_child].data.as_mut() {
         *t = "hi".to_string();
     }
 

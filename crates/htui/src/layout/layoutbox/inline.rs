@@ -11,7 +11,7 @@ use crossterm::style::Color;
 
 use super::InlineRun;
 use crate::{
-    html::css_parse::TextTransform,
+    html::css_parse::{TextTransform, WhiteSpace},
     tdom::node::{Node, NodeArena, NodeType},
     tui::graph_api::{FontStyle, block_style},
 };
@@ -40,8 +40,9 @@ pub fn collect_runs(
     style: FontStyle,
 ) -> Vec<InlineRun> {
     let transform = node.css_attr.get_text_transform();
+    let white_space = node.css_attr.get_white_space(&node.node_type);
     let mut runs = Vec::new();
-    walk_runs(arena, node, fg, bg, style, transform, &mut runs);
+    walk_runs(arena, node, fg, bg, style, transform, white_space, &mut runs);
     runs
 }
 
@@ -52,15 +53,23 @@ fn walk_runs(
     bg: Option<Color>,
     style: FontStyle,
     transform: TextTransform,
+    white_space: WhiteSpace,
     runs: &mut Vec<InlineRun>,
 ) {
     for child_id in node.child_ids() {
         let child = &arena[child_id];
         match &child.node_type {
-            NodeType::Text(s) => {
-                if !s.is_empty() {
-                    let text = apply_text_transform(s, transform);
-                    runs.push(InlineRun::new(text, style, fg, bg));
+            NodeType::Text => {
+                // Whitespace-only text nodes are kept in the DOM but only
+                // become runs when the context preserves whitespace (see
+                // `Node::text_is_painted`).
+                if child.text_is_painted(white_space) {
+                    if let Some(s) = child.data.as_deref()
+                        && !s.is_empty()
+                    {
+                        let text = apply_text_transform(s, transform);
+                        runs.push(InlineRun::new(text, style, fg, bg));
+                    }
                 }
             }
             NodeType::Span => {
@@ -69,7 +78,8 @@ fn walk_runs(
                 let span_bg = child.css_attr.get_bg_color().or(bg);
                 let span_style = style | block_style(&child.css_attr);
                 let span_transform = child.css_attr.get_text_transform();
-                walk_runs(arena, child, span_fg, span_bg, span_style, span_transform, runs);
+                let span_ws = child.white_space_or(white_space);
+                walk_runs(arena, child, span_fg, span_bg, span_style, span_transform, span_ws, runs);
             }
             NodeType::A => {
                 // A block-level anchor is painted by its own `LayoutBox`
@@ -110,7 +120,8 @@ fn walk_runs(
                     a_style |= FontStyle::UNDERLINED;
                 }
                 let a_transform = child.css_attr.get_text_transform();
-                walk_runs(arena, child, a_fg, a_bg, a_style, a_transform, runs);
+                let a_ws = child.white_space_or(white_space);
+                walk_runs(arena, child, a_fg, a_bg, a_style, a_transform, a_ws, runs);
             }
             NodeType::Em => {
                 // User-agent default: `<em>` renders italic. Anything the
@@ -124,7 +135,8 @@ fn walk_runs(
                     em_style |= FontStyle::ITALIC;
                 }
                 let em_transform = child.css_attr.get_text_transform();
-                walk_runs(arena, child, em_fg, em_bg, em_style, em_transform, runs);
+                let em_ws = child.white_space_or(white_space);
+                walk_runs(arena, child, em_fg, em_bg, em_style, em_transform, em_ws, runs);
             }
             // Block-level nested elements live in their own LayoutBox;
             // unknown inline tags are flattened by the HTML parser so they

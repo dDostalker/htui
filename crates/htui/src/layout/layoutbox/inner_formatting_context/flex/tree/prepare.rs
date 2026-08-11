@@ -4,14 +4,15 @@
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    html::css_parse::{AlignItems, AlignSelf, FlexDirection},
+    html::css_parse::{AlignItems, AlignSelf, FlexDirection, WhiteSpace},
     layout::{
         LayoutContext,
+        layoutbox::collect_runs,
         layoutbox::generation::{GeneratedBoxKind, generate_node},
         layoutbox::geometry::select_options,
     },
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
-    tui::graph_api::{char_width, grapheme_width},
+    tui::graph_api::{FontStyle, char_width, grapheme_width},
 };
 
 use super::container::{FLEX_ITEM_MIN_CROSS, FlexItemPrep};
@@ -110,20 +111,37 @@ pub(super) fn prepare_flex_item(
 
 /// Sum the grapheme widths of every direct text leaf of `node_id`.
 pub(super) fn measure_text_content_width(arena: &NodeArena, node_id: NodeId) -> Option<usize> {
+    let white_space = arena[node_id]
+        .css_attr
+        .get_white_space(&arena[node_id].node_type);
+    measure_text_content_width_ws(arena, node_id, white_space)
+}
+
+fn measure_text_content_width_ws(
+    arena: &NodeArena,
+    node_id: NodeId,
+    white_space: WhiteSpace,
+) -> Option<usize> {
     let node = &arena[node_id];
     let mut total: Option<usize> = Some(0);
     for &child_id in &node.children {
-        match &arena[child_id].node_type {
-            NodeType::Text(s) => {
-                let w: usize = s.graphemes(true).map(grapheme_width).sum();
-                total = Some(total.unwrap_or(0).saturating_add(w));
+        let child = &arena[child_id];
+        match &child.node_type {
+            NodeType::Text => {
+                if child.text_is_painted(white_space) {
+                    if let Some(s) = child.data.as_deref() {
+                        let w: usize = s.graphemes(true).map(grapheme_width).sum();
+                        total = Some(total.unwrap_or(0).saturating_add(w));
+                    }
+                }
             }
             // Inline wrappers (`<span>` / `<a>` / `<em>`) hold the text that
             // belongs to this block's inline content; recurse so a block whose
             // text lives entirely inside inline elements still reports its
             // intrinsic width (flex-basis: auto relies on it).
             NodeType::Span | NodeType::A | NodeType::Em => {
-                if let Some(w) = measure_text_content_width(arena, child_id) {
+                let ws = child.white_space_or(white_space);
+                if let Some(w) = measure_text_content_width_ws(arena, child_id, ws) {
                     total = Some(total.unwrap_or(0).saturating_add(w));
                 }
             }
@@ -141,27 +159,36 @@ pub(super) fn measure_text_content_width(arena: &NodeArena, node_id: NodeId) -> 
 /// the node has no inline text (e.g. a pure block container) the floor is
 /// the [`FLEX_ITEM_MIN_CROSS`] single cell.
 pub(super) fn longest_breakable_width(arena: &NodeArena, node_id: NodeId) -> usize {
-    fn walk(arena: &NodeArena, node_id: NodeId, max_w: &mut usize) {
+    fn walk(arena: &NodeArena, node_id: NodeId, white_space: WhiteSpace, max_w: &mut usize) {
         let node = &arena[node_id];
         for &child_id in &node.children {
-            match &arena[child_id].node_type {
-                NodeType::Text(s) => {
-                    for token in s.split_whitespace() {
-                        let w: usize = token.graphemes(true).map(grapheme_width).sum();
-                        if w > *max_w {
-                            *max_w = w;
+            let child = &arena[child_id];
+            match &child.node_type {
+                NodeType::Text => {
+                    if child.text_is_painted(white_space) {
+                        if let Some(s) = child.data.as_deref() {
+                            for token in s.split_whitespace() {
+                                let w: usize = token.graphemes(true).map(grapheme_width).sum();
+                                if w > *max_w {
+                                    *max_w = w;
+                                }
+                            }
                         }
                     }
                 }
                 NodeType::Span | NodeType::A | NodeType::Em => {
-                    walk(arena, child_id, max_w);
+                    let ws = child.white_space_or(white_space);
+                    walk(arena, child_id, ws, max_w);
                 }
                 _ => {}
             }
         }
     }
+    let white_space = arena[node_id]
+        .css_attr
+        .get_white_space(&arena[node_id].node_type);
     let mut max_w: usize = FLEX_ITEM_MIN_CROSS;
-    walk(arena, node_id, &mut max_w);
+    walk(arena, node_id, white_space, &mut max_w);
     max_w
 }
 
@@ -328,7 +355,6 @@ fn natural_intrinsic_size(
         // recursive pre-layout measurement pass.
         let mut content_w: usize = 0;
         let mut content_h: usize = 0;
-        let mut has_inline = false;
         for &child_id in &node.children {
             let Some(child_gen) = generate_node(arena, child_id) else {
                 continue;
@@ -339,17 +365,18 @@ fn natural_intrinsic_size(
                 let cs = natural_intrinsic_size(arena, child_id, child_context);
                 content_w = content_w.max(cs.width);
                 content_h = content_h.saturating_add(cs.height);
-            } else {
-                // Text nodes, inline elements and anonymous wrappers all
-                // contribute to the block's own inline content.
-                has_inline = true;
             }
+            // Non-block children (text / inline elements / anonymous inline
+            // groups) fold into the block's own inline content, measured by
+            // `collect_runs` / `measure_text_content_width` below.
         }
         let text_w = measure_text_content_width(arena, node_id).unwrap_or(0);
-        if text_w > 0 {
-            has_inline = true;
-            content_w = content_w.max(text_w);
-        }
+        content_w = content_w.max(text_w);
+        // Mirror the block layout's inline-run walker: whitespace-only text
+        // that the walker drops (collapsing `white-space`) must not add a
+        // phantom inline row to the intrinsic height.
+        let has_inline = !collect_runs(arena, node, None, None, FontStyle::empty()).is_empty()
+            || text_w > 0;
         if has_inline {
             // Intrinsic (max-content) measurement does not wrap, so a
             // single line of inline content contributes one row scaled by

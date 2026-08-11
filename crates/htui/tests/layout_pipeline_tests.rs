@@ -157,7 +157,7 @@ fn sibling_top_level_boxes_paint_on_distinct_rows() {
     // top-level boxes that must paint their own rows sequentially — a
     // regression guard for the paint pass over multi-box forests.
     let mut arena = NodeArena::default();
-    let root = arena.insert(Node::from(NodeType::Global));
+    let root = arena.insert(Node::from(NodeType::Document));
     let div1 = arena.insert(Node::from(NodeType::Div));
     let text1 = arena.insert(Node::text("first band"));
     let div2 = arena.insert(Node::from(NodeType::Div));

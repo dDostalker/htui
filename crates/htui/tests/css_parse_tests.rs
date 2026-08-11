@@ -51,7 +51,7 @@ fn init() {
 }
 
 fn build_test(arena: &mut NodeArena) -> (NodeId, NodeId) {
-    let root = arena.insert(Node::from(NodeType::Global));
+    let root = arena.insert(Node::from(NodeType::Document));
     let div_id = arena.insert(Node::from(NodeType::Div));
     arena[div_id].attributes = HashMap::from([
         ("class".to_string(), "active".to_string()),
@@ -68,7 +68,7 @@ fn build_test(arena: &mut NodeArena) -> (NodeId, NodeId) {
 /// Build `root -> div -> p(class="a b")`, returning `(root, p)`. Used by the
 /// cascade tests that need same-specificity class selectors matching one node.
 fn build_p_with_classes(arena: &mut NodeArena) -> (NodeId, NodeId) {
-    let root = arena.insert(Node::from(NodeType::Global));
+    let root = arena.insert(Node::from(NodeType::Document));
     let div_id = arena.insert(Node::from(NodeType::Div));
     let p_id = arena.insert(Node::from(NodeType::P));
     arena[p_id]
@@ -842,7 +842,7 @@ fn test_full_parse_pipeline_handles_important_and_comments() {
     let _rules = parser.parse();
 
     let mut arena = NodeArena::default();
-    let root = arena.insert(Node::from(NodeType::Global));
+    let root = arena.insert(Node::from(NodeType::Document));
     let h1 = arena.insert(Node::from(NodeType::H1));
     Node::append_child(&mut arena, root, h1);
 

@@ -1101,7 +1101,7 @@ fn js_can_mutate_the_dom_and_marks_dirty() {
         .children
         .iter()
         .filter_map(|&c| match &arena[c].node_type {
-            htui::tdom::node::NodeType::Text(s) => Some(s.as_str()),
+            htui::tdom::node::NodeType::Text => arena[c].data.as_deref(),
             _ => None,
         })
         .collect();
@@ -1466,7 +1466,7 @@ fn sysmon_refresh_pipeline_updates_the_dom() {
         .children
         .iter()
         .filter_map(|&c| match &arena[c].node_type {
-            htui::tdom::node::NodeType::Text(s) => Some(s.as_str()),
+            htui::tdom::node::NodeType::Text => arena[c].data.as_deref(),
             _ => None,
         })
         .collect();
