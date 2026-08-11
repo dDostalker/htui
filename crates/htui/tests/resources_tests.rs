@@ -91,3 +91,73 @@ fn load_missing_mem_key_errors() {
         "error should mention the missing registration, got {err}"
     );
 }
+
+// ============================================================
+// resolve_url — `<base href>` document-relative resolution
+// ============================================================
+
+#[test]
+fn resolve_url_without_base_prepends_mem_prefix() {
+    assert_eq!(
+        resources::resolve_url(None, "app.js"),
+        "mem://app.js",
+        "no base: bare path gains the mem:// prefix"
+    );
+    assert_eq!(
+        resources::resolve_url(None, "mem://app.js"),
+        "mem://app.js",
+        "no base: prefixed path passes through"
+    );
+    assert_eq!(
+        resources::resolve_url(Some(""), "app.js"),
+        "mem://app.js",
+        "empty base is treated as absent"
+    );
+}
+
+#[test]
+fn resolve_url_keeps_absolute_urls_untouched() {
+    assert_eq!(
+        resources::resolve_url(Some("mem://dir/"), "mem://x/y.png"),
+        "mem://x/y.png",
+        "absolute mem:// URLs ignore the base"
+    );
+    assert_eq!(
+        resources::resolve_url(Some("mem://dir/"), "https://example.com/a.png"),
+        "https://example.com/a.png",
+        "external schemes pass through (the registry will report them as missing)"
+    );
+}
+
+#[test]
+fn resolve_url_joins_relative_paths_against_base() {
+    assert_eq!(
+        resources::resolve_url(Some("mem://dir/"), "pic.png"),
+        "mem://dir/pic.png",
+        "base with trailing slash"
+    );
+    assert_eq!(
+        resources::resolve_url(Some("mem://dir"), "pic.png"),
+        "mem://dir/pic.png",
+        "base without trailing slash is treated as a directory"
+    );
+    assert_eq!(
+        resources::resolve_url(Some("dir/"), "pic.png"),
+        "mem://dir/pic.png",
+        "bare base gains the mem:// prefix"
+    );
+    assert_eq!(
+        resources::resolve_url(Some("mem://a/b/"), "c/d.png"),
+        "mem://a/b/c/d.png",
+        "nested relative paths join under the base"
+    );
+}
+
+#[test]
+fn resolve_url_root_relative_resolves_to_mem_root() {
+    assert_eq!(
+        resources::resolve_url(Some("mem://dir/"), "/root.png"),
+        "mem://root.png",
+        "root-relative reference ignores the base directory"
+    );
+}

@@ -852,6 +852,62 @@ fn fetch_mem_resource_resolves_through_poll() {
     htui::resources::unregister(&key);
 }
 
+#[test]
+fn fetch_relative_url_resolves_against_document_base() {
+    // JS `fetch()` resolves relative URLs against the document base URL
+    // (`<base href>`) the same way `<img src>` / `<script src>` do.
+    let pid = std::process::id();
+    let key = format!("mem://api/data_{pid}.json");
+    htui::resources::register(&key, br#"{"ok":true}"#.to_vec())
+        .expect("register mem file");
+
+    let html = format!(
+        r#"<base href="mem://api/">
+        <script>
+          fetch('data_{pid}.json').then(function (res) {{ return res.text(); }})
+            .then(function (t) {{ document.getElementById('out').textContent = t; }});
+        </script>
+        <div id="out"></div>"#
+    );
+    let mut engine = ScriptEngine::new(&html, EventBindings::default())
+        .expect("engine initializes");
+    engine.poll_fetches();
+    engine.poll_fetches();
+
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('out').textContent"),
+        r#"{"ok":true}"#,
+        "relative fetch must resolve against <base href>"
+    );
+    htui::resources::unregister(&key);
+}
+
+#[test]
+fn base_uri_reflects_document_base_href() {
+    // `Node.baseURI` reports the document base URL established by `<base>`;
+    // without one it is an empty string.
+    let pid = std::process::id();
+    let html = format!(
+        r#"<base href="mem://site/{pid}/"><div id="x"></div>"#
+    );
+    let mut engine = ScriptEngine::new(&html, EventBindings::default())
+        .expect("engine initializes");
+    let expected_uri = format!("mem://site/{pid}/");
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('x').baseURI"),
+        expected_uri
+    );
+
+    let mut no_base =
+        ScriptEngine::new(r#"<div id="y"></div>"#, EventBindings::default())
+            .expect("engine initializes");
+    assert_eq!(
+        eval_str(&mut no_base, "document.getElementById('y').baseURI"),
+        "",
+        "no <base href>: baseURI must be empty"
+    );
+}
+
 
 // ============================================================
 // Helpers

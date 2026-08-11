@@ -26,7 +26,7 @@ use crate::{
     events::EventType,
     html::css_parse::parse_declaration_text,
     resources,
-    tdom::node::{Node, NodeArena, NodeId, NodeType},
+    tdom::node::{Node, NodeArena, NodeId, NodeType, document_base_href},
     tui::graph_api::RenderCmd,
 };
 
@@ -145,6 +145,7 @@ fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsValue
     let get_prev_sibling = js_fn(context, NativeFunction::from_fn_ptr(native_get_prev_sibling));
     let get_next_sibling = js_fn(context, NativeFunction::from_fn_ptr(native_get_next_sibling));
     let get_owner_doc = js_fn(context, NativeFunction::from_fn_ptr(native_get_owner_document));
+    let get_base_uri = js_fn(context, NativeFunction::from_fn_ptr(native_get_base_uri));
     let get_data = js_fn(context, NativeFunction::from_fn_ptr(native_get_data));
     let set_data = js_fn(context, NativeFunction::from_fn_ptr(native_set_data));
     let get_tag = js_fn(context, NativeFunction::from_fn_ptr(native_get_tag_name));
@@ -172,6 +173,7 @@ fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsValue
     init.accessor(js_string!("previousSibling"), Some(get_prev_sibling), None, Attribute::all());
     init.accessor(js_string!("nextSibling"), Some(get_next_sibling), None, Attribute::all());
     init.accessor(js_string!("ownerDocument"), Some(get_owner_doc), None, Attribute::all());
+    init.accessor(js_string!("baseURI"), Some(get_base_uri), None, Attribute::all());
 
     init.function(
         NativeFunction::from_fn_ptr(native_has_child_nodes),
@@ -827,6 +829,23 @@ fn native_get_owner_document(
         return Ok(JsValue::null());
     }
     node_wrapper(context, st.root_id)
+}
+
+/// `baseURI` — the document base URL established by the first `<base href>`,
+/// or an empty string when the document declares no `<base>`. Mirrors the DOM
+/// property that reports the base URL relative references (`<img src>`,
+/// `<script src>`, `fetch`, …) resolve against.
+fn native_get_base_uri(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::null());
+    };
+    let st = rc.borrow();
+    let uri = document_base_href(&st.arena, st.root_id).unwrap_or_default();
+    Ok(js_string!(uri).into())
 }
 
 fn native_has_child_nodes(
@@ -1572,8 +1591,15 @@ fn native_fetch(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsR
     registry.set(js_string!(id.to_string()), entry.build(), false, context)?;
 
     // Kick off the load. The result is tagged with the fetch id
-    // so `poll_fetches` can route it back to the right promise.
-    resources::load_async(id, url, tx);
+    // so `poll_fetches` can route it back to the right promise. Relative
+    // URLs resolve against the document base URL (`<base href>`) the same
+    // way `<img src>` / `<script src>` do.
+    let resolved = {
+        let st = rc.borrow();
+        let base = document_base_href(&st.arena, st.root_id);
+        resources::resolve_url(base.as_deref(), &url)
+    };
+    resources::load_async(id, resolved, tx);
     Ok(promise.into())
 }
 

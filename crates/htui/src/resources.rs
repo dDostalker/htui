@@ -5,6 +5,11 @@
 //! document's assets live entirely in memory, registered by the host via
 //! [`register`] — no file system access.
 //!
+//! Relative references are first resolved against the document base URL
+//! (`<base href>`, see [`resolve_url`] and
+//! [`crate::tdom::node::document_base_href`]), so a page under
+//! `mem://app/` can use `src="img/pic.png"` and hit `mem://app/img/pic.png`.
+//!
 //! Paths are convenience-first: the `mem://` prefix is optional everywhere.
 //! [`register`], [`load`] and [`unregister`] all normalise bare paths to
 //! `mem://…` internally, so `register("app.js", …)` + `load("app.js")` (or
@@ -63,6 +68,36 @@ fn normalize(path: &str) -> String {
     } else {
         format!("mem://{path}")
     }
+}
+
+/// Resolve a resource reference against an optional document base URL.
+///
+/// `<base href>` sets the document base URL
+/// ([`crate::tdom::node::document_base_href`]); every relative reference
+/// (`<script src>`, `<link href>`, `<img src>`, JS `fetch`) resolves against
+/// it. Rules:
+///
+/// - Absolute references (any `scheme://` URL, including `mem://`) pass
+///   through unchanged.
+/// - Root-relative references (`/path`) resolve to `mem://path`.
+/// - Relative references resolve against the base (`mem://dir/` + `x.png` →
+///   `mem://dir/x.png`); a base without a trailing `/` is treated as a
+///   directory.
+/// - Without a base, the reference is a bare `mem://` key (prefixed when
+///   needed), matching the pre-`<base>` behaviour.
+pub fn resolve_url(base_href: Option<&str>, url: &str) -> String {
+    // Already-absolute URLs (mem:// or any external scheme) pass through.
+    if url.contains("://") {
+        return url.to_string();
+    }
+    let Some(base) = base_href.filter(|b| !b.trim().is_empty()) else {
+        return normalize(url);
+    };
+    if url.starts_with('/') {
+        return format!("mem://{}", url.trim_start_matches('/'));
+    }
+    let base = normalize(base);
+    format!("{}/{url}", base.trim_end_matches('/'))
 }
 
 /// Register raw bytes under a virtual path. The `mem://` prefix is optional:

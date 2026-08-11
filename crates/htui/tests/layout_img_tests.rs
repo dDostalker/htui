@@ -11,7 +11,7 @@
 use htui::html::html_parse;
 use htui::layout::layout::TermMap;
 use htui::layout::inner_formatting_context::flow::layout_img;
-use htui::layout::{BoxConstraint, BoxKind, Cursor, LayoutContext, ReplacedContent, Viewport};
+use htui::layout::{BoxConstraint, BoxKind, Cursor, LayoutBox, LayoutContext, ReplacedContent, Viewport};
 use htui::tdom::node::{self, NodeType};
 use htui::tui::graph_api::{
     IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, ClipRect, ImageCache, TermLayout,
@@ -508,4 +508,49 @@ fn svg_intrinsic_aspect_ratio_drives_default_layout() {
         lb.rect.height, 20,
         "default height must follow the SVG intrinsic aspect ratio"
     );
+}
+
+// ============================================================
+// <base href> — relative `src` resolution
+// ============================================================
+
+#[test]
+fn layout_img_resolves_src_against_document_base() {
+    // A relative `<img src>` must resolve against `<base href>` at
+    // generation time, so the geometry/paint phases only ever see the
+    // absolute `mem://` key.
+    init();
+    let pid = std::process::id();
+    let key = format!("mem://dir/pic_{pid}.png");
+    htui::resources::register(&key, vec![0u8; 16]).expect("register mem image");
+
+    let html = format!(
+        "<base href=\"mem://dir/\"><img src=\"pic_{pid}.png\" width=\"20\" height=\"10\">"
+    );
+    let (root_id, arena, _) = html_parse::Parser::new(&html).parse();
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    let boxes = tl.draw(&arena, root_id, &term_map);
+
+    // The img box sits under the implicit <html>/<body> wrappers, so search
+    // the whole box tree.
+    let img_box = find_img_box(&boxes).expect("img must produce a replaced layout box");
+    match &img_box.kind {
+        BoxKind::Replaced(ReplacedContent::Image { path, .. }) => {
+            assert_eq!(
+                path.as_str(),
+                key.as_str(),
+                "relative img src must resolve against <base href>"
+            );
+        }
+        _ => unreachable!(),
+    }
+    htui::resources::unregister(&key);
+}
+
+fn find_img_box(boxes: &[LayoutBox]) -> Option<&LayoutBox> {
+    boxes.iter().find_map(|b| match &b.kind {
+        BoxKind::Replaced(ReplacedContent::Image { .. }) => Some(b),
+        _ => find_img_box(&b.children),
+    })
 }

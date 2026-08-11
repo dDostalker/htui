@@ -6,7 +6,7 @@ use log::{debug, info, warn};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
 use crate::resources;
-use crate::tdom::node::{Node, NodeArena, NodeId, NodeType};
+use crate::tdom::node::{Node, NodeArena, NodeId, NodeType, document_base_href};
 
 /// Parsed HTML document: the DOM arena plus the `<style>` CSS and `<script>`
 /// JS sources extracted during parsing (inline, or external files loaded via
@@ -103,8 +103,15 @@ fn convert_children(
                         convert_attributes(&ar)
                     };
                     if let Some(src) = script_attrs.get("src") {
+                        // Relative `src` resolves against the document base
+                        // URL (`<base href>`) established earlier in the
+                        // document.
+                        let src = resources::resolve_url(
+                            document_base_href(arena, parent_id).as_deref(),
+                            src,
+                        );
                         info!("外部脚本: {}", src);
-                        match load_text(src) {
+                        match load_text(&src) {
                             Ok(js) if !js.trim().is_empty() => scripts.push(js),
                             Ok(_) => warn!("外部脚本 {} 为空", src),
                             Err(e) => warn!("读取 {} 失败: {}", src, e),
@@ -140,15 +147,24 @@ fn convert_children(
                                 (link_attrs.get("rel"), link_attrs.get("href"))
                                 && rel.to_lowercase().contains("stylesheet")
                             {
+                                // Relative `href` resolves against the
+                                // document base URL (`<base href>`).
+                                let href = resources::resolve_url(
+                                    document_base_href(arena, parent_id).as_deref(),
+                                    href,
+                                );
                                 info!("外部样式表: {}", href);
-                                match load_text(href) {
+                                match load_text(&href) {
                                     Ok(c) => {
                                         css_sources.push(c);
                                     }
                                     Err(e) => warn!("读取 {} 失败: {}", href, e),
                                 }
                             }
-                            continue;
+                            // Fall through: `<link>` stays in the DOM as a
+                            // non-rendered node (stylesheets are extracted
+                            // above), so it is addressable by CSS / DOM
+                            // queries like a browser's `<link>`.
                         }
                         let child_id = arena.insert(Node::from(node_type));
                         {

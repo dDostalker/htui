@@ -17,7 +17,7 @@
 use crate::{
     html::css_parse::CssDisplay,
     layout::{FormattingContext, OuterDisplay},
-    tdom::node::{NodeArena, NodeId, NodeType},
+    tdom::node::{NodeArena, NodeId, NodeType, document_base_href},
 };
 
 /// Content-shape classification produced before geometry is calculated.
@@ -140,12 +140,17 @@ pub fn generate_node(arena: &NodeArena, node_id: NodeId) -> Option<GeneratedBox>
     // dispatcher route through the replaced path — the dispatch never
     // inspects `NodeType`.
     let (kind, payload) = if matches!(node.node_type, NodeType::Img) {
-        (
-            GeneratedBoxKind::Replaced,
-            GeneratedPayload::Image {
-                src: node.get_src().cloned().unwrap_or_default(),
-            },
-        )
+        // Relative `src` resolves against the document base URL (`<base
+        // href>`) once here, so the geometry and paint phases only ever see
+        // the absolute `mem://` key.
+        let raw_src = node.get_src().cloned().unwrap_or_default();
+        let src = if raw_src.is_empty() {
+            raw_src
+        } else {
+            let base = document_base_href(arena, node_id);
+            crate::resources::resolve_url(base.as_deref(), &raw_src)
+        };
+        (GeneratedBoxKind::Replaced, GeneratedPayload::Image { src })
     } else if matches!(node.node_type, NodeType::Input) {
         (GeneratedBoxKind::Replaced, GeneratedPayload::Input)
     } else if matches!(node.node_type, NodeType::Select) {
@@ -246,6 +251,7 @@ fn is_non_rendered(node_type: &NodeType) -> bool {
             | NodeType::Style
             | NodeType::Link
             | NodeType::Meta
+            | NodeType::Base
             | NodeType::Comment
             | NodeType::DocumentType
             | NodeType::DocumentFragment

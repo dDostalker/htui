@@ -58,6 +58,11 @@ pub enum NodeType {
     Head,
     Title,
     Meta,
+    /// `<base>` — document base URL. The element is never rendered; its
+    /// `href` (see [`document_base_href`]) establishes the base URL against
+    /// which relative resource references (`<script src>`, `<link href>`,
+    /// `<img src>`, JS `fetch`) resolve.
+    Base,
     H1,
     H2,
     H3,
@@ -134,6 +139,7 @@ impl NodeType {
         NodeType::Head,
         NodeType::Title,
         NodeType::Meta,
+        NodeType::Base,
         NodeType::H1,
         NodeType::H2,
         NodeType::H3,
@@ -178,7 +184,10 @@ impl NodeType {
     ];
 
     pub fn is_self_closing(&self) -> bool {
-        matches!(self, NodeType::Img | NodeType::Input | NodeType::Meta)
+        matches!(
+            self,
+            NodeType::Img | NodeType::Input | NodeType::Meta | NodeType::Base | NodeType::Link
+        )
     }
 
     /// Browser-style UA `display` default for this element.
@@ -265,6 +274,7 @@ impl NodeType {
             NodeType::Head => "head",
             NodeType::Title => "title",
             NodeType::Meta => "meta",
+            NodeType::Base => "base",
             NodeType::H1 => "h1",
             NodeType::H2 => "h2",
             NodeType::H3 => "h3",
@@ -326,6 +336,36 @@ impl NodeType {
             .copied()
             .find(|nt| nt.tag_name() == Some(t.as_str()))
     }
+}
+
+/// The document base URL (`<base href>`), if one is present.
+///
+/// Walks `from` up to the document root, then scans the tree for the first
+/// `<base>` element carrying a non-empty `href` attribute — mirroring the
+/// browser rule that the first `href`-bearing `<base>` establishes the
+/// document base URL. Relative resource references (`<script src>`,
+/// `<link href>`, `<img src>`, JS `fetch`) resolve against the returned
+/// value via [`crate::resources::resolve_url`].
+///
+/// Calling with any node id works: the lookup only needs to reach the
+/// document root through the `parent` chain.
+pub fn document_base_href(arena: &NodeArena, from: NodeId) -> Option<String> {
+    let mut root = from;
+    while let Some(parent) = arena[root].parent {
+        root = parent;
+    }
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        let node = &arena[id];
+        if node.node_type == NodeType::Base
+            && let Some(href) = node.attributes.get("href")
+            && !href.trim().is_empty()
+        {
+            return Some(href.clone());
+        }
+        stack.extend(node.children.iter().copied());
+    }
+    None
 }
 
 /// Resolve the effective font-size of `node_id` to a concrete cell count.

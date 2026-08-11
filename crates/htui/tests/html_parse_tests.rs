@@ -1,5 +1,5 @@
 use htui::html::html_parse::{self, Parser};
-use htui::tdom::node::NodeType;
+use htui::tdom::node::{NodeType, document_base_href};
 
 fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
@@ -287,4 +287,85 @@ fn test_link_href_loads_mem_stylesheet() {
         "<link> must load the mem:// stylesheet"
     );
     htui::resources::unregister(&key);
+}
+
+// ============================================================
+// <base> — document base URL
+// ============================================================
+
+#[test]
+fn test_parse_base_keeps_dom_node_with_href() {
+    // `<base>` must survive parsing as a real (non-rendered) element so its
+    // `href` can establish the document base URL.
+    init();
+    let html = "<html><head><base href=\"mem://app/\"></head><body></body></html>";
+    let (root, arena, _) = Parser::new(html).parse();
+    let html_id = arena[root].children[0];
+    let head_id = arena[html_id].children[0];
+    let base_id = arena[head_id].children[0];
+    assert_eq!(arena[base_id].node_type, NodeType::Base);
+    assert_eq!(
+        arena[base_id].attributes.get("href").map(String::as_str),
+        Some("mem://app/"),
+        "<base href> must be kept as an attribute"
+    );
+    assert_eq!(
+        document_base_href(&arena, root),
+        Some("mem://app/".to_string()),
+        "the first <base href> must be the document base URL"
+    );
+}
+
+#[test]
+fn test_base_resolves_script_src() {
+    // `<script src>` relative paths resolve against the `<base href>`.
+    init();
+    let pid = std::process::id();
+    let key = format!("mem://app/main_{pid}.js");
+    htui::resources::register(&key, b"globalThis.__basedScript = true;".to_vec())
+        .expect("register mem script");
+    let html = format!(
+        "<base href=\"mem://app/\"><script src=\"main_{pid}.js\"></script><p>x</p>"
+    );
+    let doc = Parser::new(&html).parse_with_scripts();
+    assert!(
+        doc.scripts.iter().any(|s| s.contains("__basedScript")),
+        "<script src> must resolve against <base href>"
+    );
+    htui::resources::unregister(&key);
+}
+
+#[test]
+fn test_base_resolves_link_stylesheet_href() {
+    // `<link rel=stylesheet>` relative `href` resolves against `<base href>`.
+    init();
+    let pid = std::process::id();
+    let key = format!("mem://assets/style_{pid}.css");
+    htui::resources::register(&key, b"p { color: green; }".to_vec())
+        .expect("register mem css");
+    let html = format!(
+        "<base href=\"mem://assets/\"><link rel=\"stylesheet\" href=\"style_{pid}.css\"><p>x</p>"
+    );
+    let (_root, _arena, css) = Parser::new(&html).parse();
+    assert!(
+        css.contains("color: green"),
+        "<link> stylesheet href must resolve against <base href>"
+    );
+    htui::resources::unregister(&key);
+}
+
+#[test]
+fn test_link_enters_dom_as_non_rendered_node() {
+    // `<link>` is now a real DOM node (addressable by CSS / DOM queries),
+    // while its stylesheet is still extracted during parsing.
+    init();
+    let html = "<html><head><link rel=\"stylesheet\" href=\"mem://x/y.css\"></head><body></body></html>";
+    let (root, arena, _) = Parser::new(html).parse();
+    let html_id = arena[root].children[0];
+    let head_id = arena[html_id].children[0];
+    assert_eq!(
+        arena[arena[head_id].children[0]].node_type,
+        NodeType::Link,
+        "<link> must stay in the DOM"
+    );
 }
