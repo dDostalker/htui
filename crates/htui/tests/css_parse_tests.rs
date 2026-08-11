@@ -567,6 +567,148 @@ fn test_color_rgb_parsing() {
 }
 
 #[test]
+fn test_color_rgba_and_modern_syntax() {
+    // Legacy comma syntax with a 4th alpha component.
+    assert_eq!(
+        parse_color_str("rgba(255, 0, 0, 0.5)"),
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 0
+        }),
+        "rgba alpha is dropped (opaque)"
+    );
+    // CSS Color 4 space syntax with a `/ alpha` separator.
+    assert_eq!(
+        parse_color_str("rgb(255 0 0 / 50%)"),
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 0
+        })
+    );
+    // Percentage components + out-of-range clamping (CSS Color 4).
+    assert_eq!(
+        parse_color_str("rgb(100% 0% 0%)"),
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 0
+        })
+    );
+    assert_eq!(
+        parse_color_str("rgb(300, 0, 0)"),
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 0
+        }),
+        "out-of-range components clamp to 0–255"
+    );
+    assert_eq!(
+        parse_color_str("rgb(20% 40% 60%)"),
+        Some(Color::Rgb {
+            r: 51,
+            g: 102,
+            b: 153
+        })
+    );
+}
+
+#[test]
+fn test_color_hsl_parsing() {
+    // hsl(0, 100%, 50%) == red; hsl(120, 100%, 50%) == green.
+    assert_eq!(
+        parse_color_str("hsl(0, 100%, 50%)"),
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 0
+        })
+    );
+    assert_eq!(
+        parse_color_str("hsl(120, 100%, 50%)"),
+        Some(Color::Rgb {
+            r: 0,
+            g: 255,
+            b: 0
+        })
+    );
+    // Space syntax + `/ alpha` (dropped).
+    assert_eq!(
+        parse_color_str("hsl(120 100% 50% / 0.25)"),
+        Some(Color::Rgb {
+            r: 0,
+            g: 255,
+            b: 0
+        })
+    );
+    // Hue wraps: 480° ≡ 120°.
+    assert_eq!(
+        parse_color_str("hsl(480, 100%, 50%)"),
+        Some(Color::Rgb {
+            r: 0,
+            g: 255,
+            b: 0
+        })
+    );
+    // Zero saturation → gray.
+    assert_eq!(
+        parse_color_str("hsl(0, 0%, 50%)"),
+        Some(Color::Rgb {
+            r: 128,
+            g: 128,
+            b: 128
+        })
+    );
+    // hsla legacy comma syntax with the 4th alpha component.
+    assert_eq!(
+        parse_color_str("hsla(0, 100%, 50%, 0.5)"),
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 0
+        })
+    );
+}
+
+#[test]
+fn test_color_hex_alpha_parsing() {
+    assert_eq!(
+        parse_color_str("#ff000080"),
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 0
+        }),
+        "#RRGGBBAA drops the alpha channel"
+    );
+    assert_eq!(
+        parse_color_str("#f008"),
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 0
+        }),
+        "#RGBA drops the alpha channel"
+    );
+}
+
+#[test]
+fn test_color_transparent_and_malformed() {
+    // `transparent` is accepted for backgrounds / borders as "no paint"
+    // (callers treat None that way), so a document background falls through
+    // to the parent's, matching the browser.
+    assert_eq!(parse_color_str("transparent"), None);
+    // Malformed functional colors are dropped, not guessed.
+    assert_eq!(parse_color_str("rgb(0, 0)"), None);
+    assert_eq!(parse_color_str("rgb(0 0)"), None);
+    assert_eq!(parse_color_str("hsl(0, 100%)"), None);
+    assert_eq!(parse_color_str("rgba(0, 0, 0, 1.5)"), None);
+    assert_eq!(parse_color_str("hsl(0, 0%, 0%, 2)"), None);
+}
+
+#[test]
 fn test_css_attr_full_color() {
     let mut attr = CssAttr::new();
     let css = "color: darkblue; background-color: #1e293b;";
@@ -1484,6 +1626,38 @@ fn border_shorthand_solid_parses_width_and_style() {
     assert_eq!(sides.right.width, 1);
     assert_eq!(sides.bottom.width, 1);
     assert_eq!(sides.left.width, 1);
+}
+
+#[test]
+fn border_shorthand_parses_functional_colors() {
+    // `border: 1px solid rgb(255, 0, 0)` — the parenthesised color must stay
+    // one token through the shorthand's whitespace split.
+    let attr = attr_from_decl("border", "1px solid rgb(255, 0, 0)");
+    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
+    assert_eq!(
+        sides.top.color,
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 0
+        }),
+        "comma-syntax rgb() must survive the border shorthand"
+    );
+    assert_eq!(sides.top.style, BorderStyle::Solid);
+
+    // Space-syntax hsl() with internal spaces also works.
+    let attr = attr_from_decl("border", "2px solid hsl(120 100% 50%)");
+    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
+    assert_eq!(
+        sides.top.color,
+        Some(Color::Rgb {
+            r: 0,
+            g: 255,
+            b: 0
+        }),
+        "space-syntax hsl() must survive the border shorthand"
+    );
+    assert_eq!(sides.top.width, 2);
 }
 
 #[test]

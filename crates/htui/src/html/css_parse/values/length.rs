@@ -169,7 +169,9 @@ pub(crate) fn parse_border_side(
 /// CSS allows any of width / style / color in any order, with some pieces
 /// optional. We tokenise on whitespace and classify each token; tokens we
 /// can't classify fall through (treated as missing) so a typo in one piece
-/// doesn't drop the whole border.
+/// doesn't drop the whole border. Functional colors (`rgb(255, 0, 0)`,
+/// `hsl(120 50% 50%)`, …) are kept intact as one token — splitting them on
+/// internal spaces / commas would break the color.
 fn parse_border_shorthand(
     value: &str,
     containing_width: usize,
@@ -180,8 +182,13 @@ fn parse_border_shorthand(
     let mut style: Option<BorderStyle> = None;
     let mut color: Option<Color> = None;
 
-    for token in value.split_whitespace() {
-        if let Some(w) = parse_length_token(Some(token), containing_width, font_ctx, viewport) {
+    for token in split_border_tokens(value) {
+        if let Some(w) = parse_length_token(
+            Some(token.as_str()),
+            containing_width,
+            font_ctx,
+            viewport,
+        ) {
             width = Some(w);
             continue;
         }
@@ -199,10 +206,10 @@ fn parse_border_shorthand(
                 | "inset"
                 | "outset"
         ) {
-            style = Some(BorderStyle::parse(token));
+            style = Some(BorderStyle::parse(&token));
             continue;
         }
-        if let Some(c) = parse_color_str(token) {
+        if let Some(c) = parse_color_str(&token) {
             color = Some(c);
             continue;
         }
@@ -220,6 +227,37 @@ fn parse_border_shorthand(
         style: style.unwrap_or(BorderStyle::None),
         color,
     })
+}
+
+/// Split a border-shorthand value on whitespace, keeping any parenthesised
+/// functional colors (`rgb(…)` / `hsl(…)` / …) as single tokens so their
+/// internal spaces and commas survive.
+fn split_border_tokens(value: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut depth = 0usize;
+    for c in value.chars() {
+        match c {
+            '(' => {
+                depth = depth.saturating_add(1);
+                cur.push(c);
+            }
+            ')' => {
+                depth = depth.saturating_sub(1);
+                cur.push(c);
+            }
+            c if c.is_whitespace() && depth == 0 => {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
 }
 
 /// Font-size context propagated through the layout tree.

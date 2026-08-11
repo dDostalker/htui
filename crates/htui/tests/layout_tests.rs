@@ -653,3 +653,85 @@ fn test_layout_br_forces_line_break() {
         "post-br text must start at the same column"
     );
 }
+
+// ============================================================
+// Canvas background (<html>/<body> propagate to the full viewport)
+// ============================================================
+
+#[test]
+fn test_body_background_fills_canvas() {
+    init();
+    // Browser semantics: a short page still paints the whole terminal with
+    // the <body> background (transparent <html> falls back to <body>).
+    let html = "<body><h1>Hi</h1></body>";
+    let css = "body { background-color: blue; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let cols = term_map.columns as usize;
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let rows = tl.layout.len() / cols;
+    let last_row = &tl.layout[(rows - 1) * cols];
+    assert_eq!(
+        last_row.bcolor,
+        Some(Color::Rgb {
+            r: 0,
+            g: 0,
+            b: 255
+        }),
+        "body background must fill rows below the content"
+    );
+    assert_eq!(last_row.word, " ", "the fill must not add glyphs");
+}
+
+#[test]
+fn test_html_background_wins_over_body_for_canvas() {
+    init();
+    // When both are set, the <html> background paints the canvas.
+    let html = "<body><p>x</p></body>";
+    let css = "html { background-color: green; } body { background-color: red; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let cols = term_map.columns as usize;
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let rows = tl.layout.len() / cols;
+    let cell = &tl.layout[(rows - 1) * cols];
+    assert_eq!(
+        cell.bcolor,
+        Some(Color::Rgb {
+            r: 0,
+            g: 128,
+            b: 0
+        }),
+        "<html> background must win over <body> for the canvas"
+    );
+}
+
+#[test]
+fn test_hsl_background_through_cascade_and_paint() {
+    init();
+    // A modern hsl() value must survive the cascade and paint the canvas via
+    // the `background` shorthand alias.
+    let html = "<body><p>x</p></body>";
+    let css = "body { background: hsl(240, 100%, 50%); }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let cols = term_map.columns as usize;
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let rows = tl.layout.len() / cols;
+    let cell = &tl.layout[(rows - 1) * cols];
+    assert_eq!(
+        cell.bcolor,
+        Some(Color::Rgb {
+            r: 0,
+            g: 0,
+            b: 255
+        }),
+        "hsl() through the `background` shorthand must paint the canvas"
+    );
+}

@@ -30,7 +30,7 @@ use crossterm::style::Color;
 use crate::{
     html::css_parse::Position,
     layout::{BoxKind, LayoutBox, Rect, ReplacedContent},
-    tdom::node::{NodeArena, NodeId},
+    tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{Block, ImageCache, InputRenderState, TermLayout},
 };
 
@@ -134,6 +134,7 @@ pub fn paint_layout_tree(boxes: &[LayoutBox], arena: &NodeArena, term_layout: &m
     for b in boxes {
         paint_box(b, arena, &mut canvas, None, None);
     }
+    fill_canvas_background(&mut canvas, boxes, arena, max_y);
 }
 
 /// Repaint only the cells inside `region`, leaving the rest of the canvas
@@ -178,6 +179,88 @@ pub fn paint_layout_tree_region(
             paint_box(b, arena, &mut canvas, None, None);
         }
     }
+    fill_canvas_background(&mut canvas, boxes, arena, max_y);
+}
+
+/// Paint the canvas background below the content, browser-style.
+///
+/// In browsers the `<html>` element's `background-color` paints the whole
+/// canvas; when `<html>` is transparent the `<body>` background propagates
+/// instead. Boxes only fill their own rects, so a short page would otherwise
+/// leave the terminal rows below the content unpainted. This fills every
+/// still-default cell from the content bottom down to the canvas end with the
+/// propagated colour. Cell writes stay gated by [`PaintCanvas::in_region`], so
+/// the incremental-repaint path never touches cells outside its region.
+fn fill_canvas_background(
+    canvas: &mut PaintCanvas<'_>,
+    boxes: &[LayoutBox],
+    arena: &NodeArena,
+    content_bottom: usize,
+) {
+    let Some(bg) = find_canvas_background(boxes, arena) else {
+        return;
+    };
+    let cols = canvas.columns as usize;
+    let rows = canvas.layout.len() / cols;
+    let start_row = content_bottom.min(rows);
+    let region = canvas.region;
+    for y in start_row..rows {
+        let row_start = y * cols;
+        for (i, cell) in canvas.layout[row_start..row_start + cols].iter_mut().enumerate() {
+            let in_region = match region {
+                None => true,
+                Some(r) => {
+                    i >= r.x
+                        && i < r.x.saturating_add(r.width)
+                        && y >= r.y
+                        && y < r.y.saturating_add(r.height)
+                }
+            };
+            if !in_region {
+                continue;
+            }
+            // Only still-default cells: never clobber content that happens to
+            // sit below `content_bottom` (e.g. a positioned child).
+            if cell.word == " " && cell.bcolor.is_none() && cell.style.is_empty() {
+                cell.bcolor = Some(bg);
+            }
+        }
+    }
+}
+
+/// The colour the canvas should paint: the `<html>` background, or the
+/// `<body>` background when `<html>` has none (browser propagation). `None`
+/// when neither element paints one.
+fn find_canvas_background(boxes: &[LayoutBox], arena: &NodeArena) -> Option<Color> {
+    for b in boxes {
+        if let Some(bg) = box_canvas_background(b, arena) {
+            return Some(bg);
+        }
+    }
+    None
+}
+
+fn box_canvas_background(lb: &LayoutBox, arena: &NodeArena) -> Option<Color> {
+    let node = &arena[lb.node_id];
+    if node.node_type == NodeType::Html {
+        if let Some(bg) = node.css_attr.get_bg_color() {
+            return Some(bg);
+        }
+        for child in &lb.children {
+            if arena[child.node_id].node_type == NodeType::Body
+                && let Some(bg) = arena[child.node_id].css_attr.get_bg_color()
+            {
+                return Some(bg);
+            }
+        }
+    }
+    // Fragment documents may lack an `<html>` wrapper — recurse.
+    for child in &lb.children {
+        if let Some(bg) = box_canvas_background(child, arena) {
+            return Some(bg);
+        }
+    }
+    None
 }
 
 /// Clamp `a` to the intersection with `b`, or return `None` when the two

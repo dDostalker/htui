@@ -17,9 +17,14 @@
         .magenta  { color: magenta; }
         .white    { color: white; }
         .grey     { color: grey; }
+        .hsl      { color: hsl(200, 100%, 50%); }
+        .rgba     { color: rgba(255, 128, 0, 0.5); }
+        .hexa     { color: #7c3aedcc; }
+        .bg-hsl   { background: hsl(120, 60%, 40%); }
+        .bg-hexa  { background-color: #2563eb80; }
     </style>
 </head>
-<body>
+<body style="background-color: #0b1220;">
     <div>
         <h1>Color Rendering Test</h1>
         <p>Colors applied via CSS selectors.</p>
@@ -52,6 +57,16 @@
         <h1 class="cyan">Cyan H1 Heading</h1>
         <h2 class="yellow">Yellow H2 Heading</h2>
         <h3 class="magenta">Magenta H3 Heading</h3>
+
+        <h2>Functional / Alpha Formats</h2>
+        <p class="hsl">hsl(200, 100%, 50%) — deep sky blue</p>
+        <p class="rgba">rgba(255, 128, 0, 0.5) — orange (alpha dropped)</p>
+        <p class="hexa">#7c3aedcc — violet (8-digit hex, alpha dropped)</p>
+        <p class="bg-hsl">background: hsl(120, 60%, 40%) — green chip</p>
+        <p class="bg-hexa">background-color: #2563eb80 — blue chip (alpha dropped)</p>
+
+        <h2>Canvas Background</h2>
+        <p>The &lt;body&gt; background (#0b1220 dark navy) paints the whole viewport, including rows below the content.</p>
 
         <p>=== End of Color Test ===</p>
     </div>

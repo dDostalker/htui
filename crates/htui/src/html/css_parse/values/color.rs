@@ -3,11 +3,23 @@ use crossterm::style::Color;
 /// Parse a CSS color string into a [`crossterm::style::Color`].
 ///
 /// Supported formats:
-/// - Hexadecimal: `#RRGGBB`, `#RGB`
-/// - Functional: `rgb(255, 0, 0)`
+/// - Hexadecimal: `#RRGGBB`, `#RGB`, `#RRGGBBAA`, `#RGBA` (alpha dropped)
+/// - Functional: `rgb()` / `rgba()` / `hsl()` / `hsla()`, with comma or
+///   space-separated syntax and an optional `/ alpha` component
+///   (`rgb(255 0 0 / 50%)`). `rgb`/`rgba` components may be integers
+///   (0–255, out-of-range values clamp) or percentages; `hsl` hue is in
+///   degrees (negative values wrap) and saturation / lightness are
+///   percentages.
 /// - The 148 CSS named colors from Color Module Level 4 (e.g. `red`,
 ///   `rebeccapurple`), resolved to their exact sRGB value so they render
 ///   identically on any terminal theme.
+///
+/// Alpha is parsed and validated but **dropped**: the terminal has no
+/// alpha compositing (the background is the theme's, unknown to the
+/// renderer), so `rgba(…)` / `hsla(…)` / `#RRGGBBAA` paint fully opaque.
+/// `transparent` returns `None` — callers treat it as "no paint", which is
+/// exactly what backgrounds / borders want (`background-color: transparent`
+/// lets the parent show through).
 ///
 /// Unknown formats return `None` so callers can treat the declaration as
 /// invalid (CSS drops unsupported values) instead of silently substituting
@@ -16,26 +28,46 @@ use crossterm::style::Color;
 pub fn parse_color_str(s: &str) -> Option<Color> {
     let lower = s.trim().to_lowercase();
 
-    // 1. Hexadecimal #RRGGBB or #RGB
+    // 1. Hexadecimal #RRGGBB / #RGB / #RRGGBBAA / #RGBA
     if let Some(hex) = lower.strip_prefix('#') {
         return parse_hex_color(hex);
     }
 
-    // 2. Functional rgb(r, g, b)
-    if let Some(inner) = lower.strip_prefix("rgb(").and_then(|s| s.strip_suffix(')')) {
-        return parse_rgb_color(inner);
+    // 2. Functional colors. Longer names first so `rgba` matches before
+    //    `rgb` (and `hsla` before `hsl`).
+    for (name, has_alpha) in [("rgba", true), ("rgb", false), ("hsla", true), ("hsl", false)] {
+        if let Some(rest) = lower.strip_prefix(name)
+            && let Some(inner) = rest.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
+        {
+            return parse_functional_color(name, has_alpha, inner);
+        }
     }
 
-    // 3. CSS named colors (see [`NAMED_COLORS`]).
+    // 3. CSS named colors (see [`NAMED_COLORS`]). `transparent` and
+    //    `currentColor` fall through here and return `None`.
     parse_named_color(&lower)
 }
 
 fn parse_hex_color(hex: &str) -> Option<Color> {
     let hex = hex.trim();
-    let (r, g, b) = if hex.len() == 6 {
+    let (r, g, b) = if hex.len() == 8 {
+        // #RRGGBBAA — the alpha channel is validated then dropped.
         let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
         let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
         let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+        u8::from_str_radix(&hex[6..8], 16).ok()?;
+        (r, g, b)
+    } else if hex.len() == 6 {
+        let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+        let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+        let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+        (r, g, b)
+    } else if hex.len() == 4 {
+        // #RGBA — alpha validated then dropped.
+        let r = u8::from_str_radix(&hex[0..1], 16).ok()? * 17;
+        let g = u8::from_str_radix(&hex[1..2], 16).ok()? * 17;
+        let b = u8::from_str_radix(&hex[2..3], 16).ok()? * 17;
+        u8::from_str_radix(&hex[3..4], 16).ok()?;
         (r, g, b)
     } else if hex.len() == 3 {
         let r = u8::from_str_radix(&hex[0..1], 16).ok()? * 17;
@@ -48,15 +80,155 @@ fn parse_hex_color(hex: &str) -> Option<Color> {
     Some(Color::Rgb { r, g, b })
 }
 
-fn parse_rgb_color(inner: &str) -> Option<Color> {
-    let parts: Vec<&str> = inner.split(',').collect();
-    if parts.len() != 3 {
-        return None;
+/// Parse the body of a functional color (`rgb` / `rgba` / `hsl` / `hsla`)
+/// — the text between the parentheses.
+///
+/// Accepts the legacy comma syntax (`rgb(255, 0, 0)`, `rgba(255, 0, 0, 0.5)`)
+/// and the CSS Color 4 space syntax (`rgb(255 0 0)`, `rgb(255 0 0 / 50%)`).
+fn parse_functional_color(kind: &str, has_alpha: bool, inner: &str) -> Option<Color> {
+    // Split off an optional `/ alpha` component.
+    let (body, alpha) = match inner.find('/') {
+        Some(i) => (&inner[..i], Some(inner[i + 1..].trim())),
+        None => (inner, None),
+    };
+    if let Some(a) = alpha {
+        // Validated, then dropped — the terminal cannot composite.
+        parse_alpha(a)?;
     }
-    let r = parts[0].trim().parse::<u8>().ok()?;
-    let g = parts[1].trim().parse::<u8>().ok()?;
-    let b = parts[2].trim().parse::<u8>().ok()?;
-    Some(Color::Rgb { r, g, b })
+
+    let parts: Vec<&str> = if body.contains(',') {
+        body.split(',').map(str::trim).collect()
+    } else {
+        body.split_whitespace().collect()
+    };
+
+    match kind {
+        "rgb" | "rgba" => {
+            // 3 components, or 4 when legacy comma syntax carries the alpha.
+            if parts.len() == 3 {
+                let r = parse_rgb_component(parts[0])?;
+                let g = parse_rgb_component(parts[1])?;
+                let b = parse_rgb_component(parts[2])?;
+                Some(Color::Rgb { r, g, b })
+            } else if parts.len() == 4 && has_alpha {
+                let r = parse_rgb_component(parts[0])?;
+                let g = parse_rgb_component(parts[1])?;
+                let b = parse_rgb_component(parts[2])?;
+                parse_alpha(parts[3])?;
+                Some(Color::Rgb { r, g, b })
+            } else {
+                None
+            }
+        }
+        "hsl" | "hsla" => {
+            if parts.len() == 3 {
+                let h = parse_hue(parts[0])?;
+                let s = parse_percent(parts[1])?;
+                let l = parse_percent(parts[2])?;
+                let (r, g, b) = hsl_to_rgb(h, s, l);
+                Some(Color::Rgb { r, g, b })
+            } else if parts.len() == 4 && has_alpha {
+                let h = parse_hue(parts[0])?;
+                let s = parse_percent(parts[1])?;
+                let l = parse_percent(parts[2])?;
+                parse_alpha(parts[3])?;
+                let (r, g, b) = hsl_to_rgb(h, s, l);
+                Some(Color::Rgb { r, g, b })
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// An `rgb()` / `rgba()` component: an integer 0–255 (out-of-range values
+/// clamp, per CSS Color 4) or a percentage.
+fn parse_rgb_component(tok: &str) -> Option<u8> {
+    let tok = tok.trim();
+    if let Some(pct) = tok.strip_suffix('%') {
+        let v = pct.trim().parse::<f64>().ok()?;
+        return Some((v.clamp(0.0, 100.0) / 100.0 * 255.0).round() as u8);
+    }
+    let v = tok.parse::<f64>().ok()?;
+    Some(v.clamp(0.0, 255.0).round() as u8)
+}
+
+/// An `hsl()` hue: degrees (`120`, `120deg`), negative values wrap around
+/// the colour wheel.
+fn parse_hue(tok: &str) -> Option<f64> {
+    let tok = tok.trim();
+    if let Some(v) = tok.strip_suffix("deg") {
+        v.trim().parse::<f64>().ok()
+    } else if let Some(v) = tok.strip_suffix("turn") {
+        v.trim().parse::<f64>().ok().map(|t| t * 360.0)
+    } else {
+        tok.parse::<f64>().ok()
+    }
+}
+
+/// A percentage component (saturation / lightness). Accepts `50%` and, for
+/// leniency, a bare number treated as a percentage.
+fn parse_percent(tok: &str) -> Option<f64> {
+    let tok = tok.trim();
+    let v = tok.strip_suffix('%').unwrap_or(tok).parse::<f64>().ok()?;
+    Some(v / 100.0)
+}
+
+/// Validate an alpha value: `0`–`1` or `0%`–`100%`. The value itself is
+/// discarded by the caller (no terminal compositing).
+fn parse_alpha(tok: &str) -> Option<()> {
+    let tok = tok.trim();
+    let v = if let Some(pct) = tok.strip_suffix('%') {
+        pct.trim().parse::<f64>().ok()? / 100.0
+    } else {
+        tok.parse::<f64>().ok()?
+    };
+    if (0.0..=1.0).contains(&v) {
+        Some(())
+    } else {
+        None
+    }
+}
+
+/// Convert HSL to sRGB (the standard CSS algorithm).
+///
+/// `h` is in degrees (any sign — wrapped), `s` / `l` are fractions of 1.
+fn hsl_to_rgb(h: f64, s: f64, l: f64) -> (u8, u8, u8) {
+    let h = ((h % 360.0) + 360.0) % 360.0 / 360.0;
+    let s = s.clamp(0.0, 1.0);
+    let l = l.clamp(0.0, 1.0);
+    if s == 0.0 {
+        let v = (l * 255.0).round() as u8;
+        return (v, v, v);
+    }
+    let q = if l < 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
+    let p = 2.0 * l - q;
+    let hue = |mut t: f64| -> f64 {
+        if t < 0.0 {
+            t += 1.0;
+        }
+        if t > 1.0 {
+            t -= 1.0;
+        }
+        if t < 1.0 / 6.0 {
+            p + (q - p) * 6.0 * t
+        } else if t < 1.0 / 2.0 {
+            q
+        } else if t < 2.0 / 3.0 {
+            p + (q - p) * (2.0 / 3.0 - t) * 6.0
+        } else {
+            p
+        }
+    };
+    let r = (hue(h + 1.0 / 3.0) * 255.0).round() as u8;
+    let g = (hue(h) * 255.0).round() as u8;
+    let b = (hue(h - 1.0 / 3.0) * 255.0).round() as u8;
+    (r, g, b)
 }
 
 /// CSS Color Module Level 4 named colours (148 total), each mapped to its
