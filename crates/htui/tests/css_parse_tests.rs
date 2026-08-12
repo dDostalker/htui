@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crossterm::style::Color;
 use htui::html::css_parse::{
     BorderStyle, BoxSizing, Combinator, CornerRadii, CssAttr, CssRule, CssSelector, EdgeSizes,
@@ -54,7 +52,7 @@ fn init() {
 fn build_test(arena: &mut NodeArena) -> (NodeId, NodeId) {
     let root = arena.insert(Node::from(NodeType::Document));
     let div_id = arena.insert(Node::from(NodeType::Div));
-    arena[div_id].attributes = HashMap::from([
+    arena[div_id].attributes = IndexMap::from([
         ("class".to_string(), "active".to_string()),
         ("id".to_string(), "main".to_string()),
     ]);

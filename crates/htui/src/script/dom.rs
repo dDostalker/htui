@@ -151,6 +151,7 @@ fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsValue
     let get_tag = js_fn(context, NativeFunction::from_fn_ptr(native_get_tag_name));
     let get_class = js_fn(context, NativeFunction::from_fn_ptr(native_get_class));
     let set_class = js_fn(context, NativeFunction::from_fn_ptr(native_set_class));
+    let get_class_list = js_fn(context, NativeFunction::from_fn_ptr(native_get_class_list));
     let get_id = js_fn(context, NativeFunction::from_fn_ptr(native_get_id));
     let set_id = js_fn(context, NativeFunction::from_fn_ptr(native_set_id));
     let get_style = js_fn(context, NativeFunction::from_fn_ptr(native_get_style));
@@ -220,6 +221,7 @@ fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsValue
     if is_element {
         init.accessor(js_string!("tagName"), Some(get_tag), None, Attribute::all());
         init.accessor(js_string!("className"), Some(get_class), Some(set_class), Attribute::all());
+        init.accessor(js_string!("classList"), Some(get_class_list), None, Attribute::all());
         init.accessor(js_string!("id"), Some(get_id), Some(set_id), Attribute::all());
         init.accessor(js_string!("value"), Some(get_value), Some(set_value), Attribute::all());
         init.accessor(js_string!("style"), Some(get_style), None, Attribute::all());
@@ -403,7 +405,7 @@ fn native_remove_attribute(
     };
     let mut st = rc.borrow_mut();
     if let Some(node) = st.arena.get_mut(node_id) {
-        node.attributes.remove(&name);
+        node.attributes.shift_remove(&name);
         mark_dirty(&mut st, node_id);
     }
     Ok(JsValue::undefined())
@@ -411,7 +413,9 @@ fn native_remove_attribute(
 
 /// `el.value` getter — the DOM `value` attribute (the field's committed
 /// content; the active edit buffer while focused is engine-side state).
-/// `<output>` is special-cased: its `value` IDL reflects the text content.
+/// `<output>` and `<textarea>` are special-cased: their `value` IDL reflects
+/// the text content (a textarea's DOM value lives in its child text nodes,
+/// not a `value` attribute).
 fn native_get_value(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let Some(rc) = with_state() else {
@@ -422,7 +426,7 @@ fn native_get_value(this: &JsValue, _args: &[JsValue], context: &mut Context) ->
         .arena
         .get(node_id)
         .map(|n| {
-            if n.node_type == NodeType::Output {
+            if matches!(n.node_type, NodeType::Output | NodeType::Textarea) {
                 n.text_content(&st.arena)
             } else {
                 n.attributes.get("value").cloned().unwrap_or_default()
@@ -434,8 +438,9 @@ fn native_get_value(this: &JsValue, _args: &[JsValue], context: &mut Context) ->
 
 /// `el.value` setter — write the DOM `value` attribute, marking the node dirty
 /// so the next frame re-renders it. Equal values short-circuit (no re-render),
-/// mirroring the `textContent` fast path. `<output>` is special-cased: setting
-/// `value` replaces the element's text content (the output IDL contract).
+/// mirroring the `textContent` fast path. `<output>` and `<textarea>` are
+/// special-cased: setting `value` replaces the element's text content (the
+/// output / textarea IDL contract).
 fn native_set_value(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let value = args
@@ -450,7 +455,7 @@ fn native_set_value(this: &JsValue, args: &[JsValue], context: &mut Context) -> 
     if st
         .arena
         .get(node_id)
-        .is_some_and(|n| n.node_type == NodeType::Output)
+        .is_some_and(|n| matches!(n.node_type, NodeType::Output | NodeType::Textarea))
     {
         return set_text_content(&mut st, node_id, &value);
     }
@@ -642,6 +647,87 @@ fn native_set_class(this: &JsValue, args: &[JsValue], context: &mut Context) -> 
         node.attributes.insert("class".to_string(), value);
         mark_dirty(&mut st, node_id);
     }
+    Ok(JsValue::undefined())
+}
+
+/// Return a live `DOMTokenList`-like object over the element's `class`
+/// attribute (the `classList` property). The factory's `getAttr` / `setAttr`
+/// closures read / write the attribute through the engine arena, so the
+/// returned object reflects later DOM mutations (browser `classList` is
+/// live).
+fn native_get_class_list(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let node_key = node_id_to_f64(node_id);
+    let get_attr = js_fn(
+        context,
+        NativeFunction::from_copy_closure_with_captures(class_list_get, node_key),
+    );
+    let set_attr = js_fn(
+        context,
+        NativeFunction::from_copy_closure_with_captures(class_list_set, node_key),
+    );
+    let global = context.global_object();
+    let helper = global
+        .get(js_string!("__htuiClassList"), context)?
+        .to_object(context)?;
+    helper.call(
+        &JsValue::undefined(),
+        &[get_attr.into(), set_attr.into()],
+        context,
+    )
+}
+
+/// Live `classList` read: the element's `class` attribute value.
+fn class_list_get(
+    _this: &JsValue,
+    _args: &[JsValue],
+    node_key: &f64,
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = f64_to_node_id(*node_key);
+    let value = with_state()
+        .map(|rc| {
+            rc.borrow()
+                .arena
+                .get(node_id)
+                .and_then(|n| n.attributes.get("class").cloned())
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+    Ok(js_string!(value).into())
+}
+
+/// Live `classList` write: replace the element's `class` attribute, marking
+/// the node dirty only when the value actually changed (an unchanged token
+/// set must not schedule a re-render).
+fn class_list_set(
+    _this: &JsValue,
+    args: &[JsValue],
+    node_key: &f64,
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = f64_to_node_id(*node_key);
+    let value = args
+        .first()
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?
+        .unwrap_or_default();
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let mut st = rc.borrow_mut();
+    let existing = st
+        .arena
+        .get(node_id)
+        .and_then(|n| n.attributes.get("class").cloned())
+        .unwrap_or_default();
+    if existing == value {
+        return Ok(JsValue::undefined());
+    }
+    if let Some(node) = st.arena.get_mut(node_id) {
+        node.attributes.insert("class".to_string(), value);
+    }
+    mark_dirty(&mut st, node_id);
     Ok(JsValue::undefined())
 }
 
@@ -1178,15 +1264,23 @@ fn native_is_equal_node(this: &JsValue, args: &[JsValue], context: &mut Context)
     Ok(JsValue::from(nodes_equal(&st.arena, node_id, other_id)))
 }
 
-/// Structural equality: same node kind / data / attributes and equal
-/// children recursively.
+/// Structural equality: same node kind / data / attributes (order-insensitive,
+/// matching the DOM's set semantics) and equal children recursively.
 fn nodes_equal(arena: &NodeArena, a: NodeId, b: NodeId) -> bool {
     let (na, nb) = match (arena.get(a), arena.get(b)) {
         (Some(x), Some(y)) => (x, y),
         _ => return false,
     };
-    if na.node_type != nb.node_type || na.data != nb.data || na.attributes != nb.attributes {
+    if na.node_type != nb.node_type || na.data != nb.data {
         return false;
+    }
+    if na.attributes.len() != nb.attributes.len() {
+        return false;
+    }
+    for (k, v) in &na.attributes {
+        if nb.attributes.get(k) != Some(v) {
+            return false;
+        }
     }
     na.children.len() == nb.children.len()
         && na

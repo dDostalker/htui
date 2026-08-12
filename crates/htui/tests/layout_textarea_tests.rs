@@ -111,6 +111,16 @@ fn apply(engine: &mut ScriptEngine, map: &HitMap, msg: ScriptMsg) -> Vec<RenderC
     cmds
 }
 
+/// Evaluate `String(expr)` against the engine and return its text.
+fn eval_str(engine: &mut ScriptEngine, expr: &str) -> String {
+    let v = engine
+        .eval_source(&format!("String({expr})"))
+        .expect("eval must succeed");
+    v.as_string()
+        .map(|s| s.to_std_string_lossy())
+        .unwrap_or_default()
+}
+
 #[test]
 fn test_textarea_renders_framed_default_value() {
     // `cols`/`rows` size the box (width = cols + 2 frame columns, height =
@@ -274,6 +284,94 @@ fn test_textarea_scroll_keeps_caret_visible() {
     assert!(
         !tl.layout.iter().any(|b| b.word == "a"),
         "scrolled-out lines must not paint"
+    );
+}
+
+#[test]
+fn test_textarea_value_getter_reads_text_content() {
+    // A `<textarea>`'s DOM value is its text content, not a `value`
+    // attribute — `el.value` must reflect the text nodes.
+    let mut engine = ScriptEngine::new(
+        r#"<textarea id="t">first&#10;line</textarea>"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('t').value"),
+        "first\nline",
+        "el.value must read the text content"
+    );
+    // textContent agrees (same underlying text nodes).
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('t').textContent"),
+        "first\nline"
+    );
+}
+
+#[test]
+fn test_textarea_value_setter_writes_text_content() {
+    let mut engine = ScriptEngine::new(
+        r#"<textarea id="t">old</textarea>"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
+    eval_str(
+        &mut engine,
+        "(function(){ document.getElementById('t').value = 'new\\nvalue'; })()",
+    );
+    let arena = engine.arena();
+    let t = find_node_by_id(&arena, "t");
+    assert_eq!(
+        arena.get(t).unwrap().text_content(&arena),
+        "new\nvalue",
+        "el.value setter must write the text content"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('t').value"),
+        "new\nvalue"
+    );
+    // The dirty marker routes a re-render through the normal path.
+    let dirty = engine.take_dirty();
+    assert!(
+        dirty.nodes.contains(&t),
+        "value write must mark the node dirty: {dirty:?}"
+    );
+}
+
+#[test]
+fn test_textarea_value_setter_short_circuits_unchanged() {
+    // Setting the same value again must not schedule a re-render.
+    let mut engine = ScriptEngine::new(
+        r#"<textarea id="t">same</textarea>"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
+    eval_str(
+        &mut engine,
+        "(function(){ document.getElementById('t').value = 'same'; })()",
+    );
+    let dirty = engine.take_dirty();
+    assert!(
+        dirty.is_empty(),
+        "unchanged textarea value must not re-render: {dirty:?}"
+    );
+}
+
+#[test]
+fn test_textarea_value_setter_clears_to_empty() {
+    let mut engine = ScriptEngine::new(
+        r#"<textarea id="t">stuff</textarea>"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
+    eval_str(
+        &mut engine,
+        "(function(){ document.getElementById('t').value = ''; })()",
+    );
+    assert_eq!(eval_str(&mut engine, "document.getElementById('t').value"), "");
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('t').textContent"),
+        ""
     );
 }
 

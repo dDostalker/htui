@@ -197,12 +197,17 @@ button/checkbox 的默认动作一致）。`close` 由引擎原生的 `<dialog>`
 - `document.createElement(tag)` → 新元素（尚未挂到文档）
 
 **Element 包装对象**（`getElementById` / `event.target` 返回）
-- 属性访问器：`textContent`、`innerHTML`、`className`、`id`、`parentNode`、`value`
+- 属性访问器：`textContent`、`innerHTML`、`className`、`classList`、`id`、`parentNode`、`value`
   （`<input>` 字段的已提交值，可读写；写值会标记重渲染）
 - `innerHTML`：读写子树 HTML 片段。读按浏览器序列化算法（文本/属性转义、void 元素
-  无闭合标签）；写用 html5ever 片段解析（以元素自身为上下文），替换全部子节点。
+  无闭合标签、属性按源码顺序）；写用 html5ever 片段解析（以元素自身为上下文），替换全部子节点。
   `<style>`（及 `<link rel=stylesheet>`）的 CSS 会被提取并注入会话样式表生效，
   `<script>` 按浏览器语义**不执行**
+- `classList`：live `DOMTokenList`（每次访问实时读 `class` 属性）：`length`、
+  `item(i)`、`contains(t)`、`add(...)`、`remove(...)`、`toggle(t, force?)`、
+  `replace(old, new)`、`value`（读写整个 class 串）、`forEach` / `keys` /
+  `values` / `entries`，可迭代 / 索引访问；空 token 或含空白 token 抛 `SyntaxError`；
+  仅当 token 集合实际变化时才标记重渲染
 - 方法：`getAttribute(name)` / `setAttribute(name, value)` / `removeAttribute(name)`
 - `querySelector(sel)` / `querySelectorAll(sel)`：限定在元素子树内查询（不含元素自身）
 - `addEventListener(type, fn)` / `removeEventListener(type, fn)`

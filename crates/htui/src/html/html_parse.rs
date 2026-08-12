@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use indexmap::IndexMap;
 
 use html5ever::driver::ParseOpts;
 use html5ever::tendril::TendrilSink;
@@ -68,7 +68,10 @@ impl Parser {
     }
 }
 
-fn convert_attributes(html5_attrs: &[html5ever::Attribute]) -> HashMap<String, String> {
+fn convert_attributes(html5_attrs: &[html5ever::Attribute]) -> IndexMap<String, String> {
+    // Insertion order mirrors the source document (html5ever reports
+    // attributes in source order), so the `innerHTML` serializer can reproduce
+    // a browser's attribute order.
     html5_attrs
         .iter()
         .map(|a| (a.name.local.to_string(), a.value.to_string()))
@@ -416,7 +419,8 @@ pub fn tag_name_to_node_type(tag: &str) -> Option<NodeType> {
 /// Mirrors the browser's fragment serialization algorithm: text escapes `&`
 /// `<` `>` and non-breaking spaces, comments keep their delimiters, attribute
 /// values escape `&` `"` and non-breaking spaces, and void elements emit no
-/// closing tag. Attributes are emitted in sorted order for determinism.
+/// closing tag. Attributes are emitted in source order (preserved by the
+/// `IndexMap` attribute store).
 pub fn serialize_inner_html(arena: &NodeArena, node_id: NodeId) -> String {
     let Some(node) = arena.get(node_id) else {
         return String::new();
@@ -453,15 +457,11 @@ fn serialize_node(arena: &NodeArena, node_id: NodeId, out: &mut String) {
             let Some(tag) = node.node_type.tag_name() else {
                 return;
             };
-            let mut attrs: Vec<(&str, &str)> = node
-                .attributes
-                .iter()
-                .map(|(k, v)| (k.as_str(), v.as_str()))
-                .collect();
-            attrs.sort_by(|a, b| a.0.cmp(b.0));
+            // Attributes serialize in insertion order (source order), which
+            // the fragment parser preserves via `IndexMap`.
             out.push('<');
             out.push_str(tag);
-            for (k, v) in attrs {
+            for (k, v) in &node.attributes {
                 out.push(' ');
                 out.push_str(k);
                 out.push_str("=\"");

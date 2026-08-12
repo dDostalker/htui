@@ -83,6 +83,35 @@ fn inner_html_getter_round_trips_escaped_source() {
 }
 
 #[test]
+fn inner_html_getter_preserves_attribute_source_order() {
+    // Multi-attribute elements serialize in source order (browser behaviour),
+    // not sorted.
+    let mut engine = ScriptEngine::new(
+        r#"<div id="d"><a id="x" class="btn" data-k="v" href="/z">t</a></div>"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('d').innerHTML"),
+        r#"<a id="x" class="btn" data-k="v" href="/z">t</a>"#
+    );
+}
+
+#[test]
+fn inner_html_getter_tracks_set_and_remove_attribute_order() {
+    // `setAttribute` appends new attributes; `removeAttribute` keeps the
+    // remaining ones in their relative source order (browser behaviour).
+    let mut engine =
+        ScriptEngine::new(r#"<div id="d"><p class="x"></p></div>"#, EventBindings::default())
+            .expect("engine initializes");
+    let html = eval_str(
+        &mut engine,
+        "(function(){ var el = document.querySelector('#d p'); el.setAttribute('a', '1'); el.setAttribute('b', '2'); el.removeAttribute('a'); return document.getElementById('d').innerHTML; })()",
+    );
+    assert_eq!(html, r#"<p class="x" b="2"></p>"#);
+}
+
+#[test]
 fn inner_html_getter_empty_when_no_children() {
     let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
         .expect("engine initializes");

@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use std::fmt;
 
+use indexmap::IndexMap;
 use slotmap::{Key, SlotMap, new_key_type};
 
 use crate::html::css_parse::{CssAttr, CssDisplay, FontContext, LengthContext, Viewport, WhiteSpace};
@@ -646,12 +646,14 @@ pub struct Node {
     pub children: Vec<NodeId>,
     /// Parent node ID. `None` for the root node.
     pub parent: Option<NodeId>,
-    /// Raw HTML attributes as a `(name, value)` map.
+    /// Raw HTML attributes as a `(name, value)` map preserving insertion
+    /// order (the `innerHTML` serializer emits them in source order, like a
+    /// browser).
     ///
     /// Use the inherent helpers below (`get_id`, `get_class`, …) for the few
     /// lookups that carry domain semantics; everything else should go through
     /// `attributes.get(...)` directly so the surface stays minimal.
-    pub attributes: HashMap<String, String>,
+    pub attributes: IndexMap<String, String>,
     pub css_attr: CssAttr,
 }
 
@@ -662,7 +664,7 @@ impl Node {
             data: None,
             children: vec![],
             parent: None,
-            attributes: HashMap::new(),
+            attributes: IndexMap::new(),
             css_attr: CssAttr::new(),
         }
     }
@@ -673,7 +675,7 @@ impl Node {
             data: Some(data.to_string()),
             children: vec![],
             parent: None,
-            attributes: HashMap::new(),
+            attributes: IndexMap::new(),
             css_attr: CssAttr::new(),
         }
     }
@@ -685,7 +687,7 @@ impl Node {
             data: Some(data.to_string()),
             children: vec![],
             parent: None,
-            attributes: HashMap::new(),
+            attributes: IndexMap::new(),
             css_attr: CssAttr::new(),
         }
     }
@@ -697,7 +699,7 @@ impl Node {
             data: None,
             children: vec![],
             parent: None,
-            attributes: HashMap::new(),
+            attributes: IndexMap::new(),
             css_attr: CssAttr::new(),
         }
     }
@@ -709,7 +711,7 @@ impl Node {
             data: Some(name.to_string()),
             children: vec![],
             parent: None,
-            attributes: HashMap::new(),
+            attributes: IndexMap::new(),
             css_attr: CssAttr::new(),
         }
     }

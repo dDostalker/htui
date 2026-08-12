@@ -130,77 +130,7 @@ pub struct ScriptEngine {
 }
 
 /// Bootstrap script: the GC-rooted listener / element / timer registries.
-const BOOTSTRAP: &str = r#"
-globalThis.__htuiListeners = {};
-globalThis.__htuiElements = {};
-globalThis.__htuiTimers = {};
-globalThis.__htuiFetchResolvers = {};
-globalThis.__htuiAddListener = function (nodeId, type, fn) {
-  var entry = globalThis.__htuiListeners[nodeId] || (globalThis.__htuiListeners[nodeId] = {});
-  var arr = entry[type] || (entry[type] = []);
-  arr.push(fn);
-};
-globalThis.__htuiGetListeners = function (nodeId, type) {
-  var entry = globalThis.__htuiListeners[nodeId];
-  return entry ? (entry[type] || []) : [];
-};
-// Live NodeList factory: `getLen()` / `getItem(i)` are native closures over
-// the engine arena, so every access (length / index / enumeration) reflects
-// the current DOM — a held `childNodes` reference stays live.
-globalThis.__htuiLiveList = function (getLen, getItem) {
-  function index(p) {
-    var n = Number(p);
-    return String(n) === p ? n : NaN;
-  }
-  var target = {
-    item: function (i) {
-      i = Number(i) | 0;
-      return (i >= 0 && i < getLen()) ? getItem(i) : null;
-    },
-    forEach: function (cb, self) {
-      for (var i = 0; i < getLen(); i++) cb.call(self, getItem(i), i, this);
-    }
-  };
-  return new Proxy(target, {
-    get: function (t, p) {
-      if (p === 'length') return getLen();
-      var i = index(p);
-      if (!Number.isNaN(i) && i >= 0 && i < getLen()) return getItem(i);
-      if (p === Symbol.iterator) return function () {
-        var i = 0;
-        return { next: function () {
-          return i < getLen()
-            ? { value: getItem(i++), done: false }
-            : { value: undefined, done: true };
-        } };
-      };
-      return Reflect.get(t, p);
-    },
-    has: function (t, p) {
-      if (p === 'length') return true;
-      var i = index(p);
-      if (!Number.isNaN(i) && i >= 0 && i < getLen()) return true;
-      return Reflect.has(t, p);
-    },
-    ownKeys: function () {
-      var keys = [];
-      for (var i = 0; i < getLen(); i++) keys.push(String(i));
-      keys.push('length');
-      return keys;
-    },
-    getOwnPropertyDescriptor: function (t, p) {
-      if (p === 'length') return { get: getLen, enumerable: false, configurable: true };
-      var i = index(p);
-      if (!Number.isNaN(i) && i >= 0 && i < getLen()) {
-        return { value: getItem(i), writable: true, enumerable: true, configurable: true };
-      }
-      return Reflect.getOwnPropertyDescriptor(t, p);
-    },
-    set: function () { return false; },
-    deleteProperty: function () { return false; }
-  });
-};
-"#;
+const BOOTSTRAP: &str = include_str!("bootstrap.js");
 
 impl ScriptEngine {
     /// Create an engine from an HTML document and the application bindings.
@@ -593,7 +523,7 @@ impl ScriptEngine {
                     .collect();
                 for id in siblings {
                     if let Some(n) = st.arena.get_mut(id) {
-                        if n.attributes.remove("checked").is_some() {
+                        if n.attributes.shift_remove("checked").is_some() {
                             changed = true;
                             st.dirty.nodes.push(id);
                         }
@@ -612,7 +542,7 @@ impl ScriptEngine {
             if checked {
                 n.attributes.insert("checked".to_string(), String::new());
             } else {
-                n.attributes.remove("checked");
+                n.attributes.shift_remove("checked");
             }
         }
         st.dirty.nodes.push(node_id);
@@ -660,7 +590,7 @@ impl ScriptEngine {
             return;
         };
         if node.attributes.contains_key("open") {
-            node.attributes.remove("open");
+            node.attributes.shift_remove("open");
         } else {
             node.attributes.insert("open".to_string(), String::new());
         }
@@ -675,7 +605,7 @@ impl ScriptEngine {
         let Some(node) = st.arena.get_mut(node_id) else {
             return false;
         };
-        if node.attributes.remove("open").is_none() {
+        if node.attributes.shift_remove("open").is_none() {
             return false;
         }
         st.dirty.nodes.push(node_id);

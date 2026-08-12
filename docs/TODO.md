@@ -1,6 +1,4 @@
 # A
-- el.classList
-- <textarea> !
 - focus()/blur()
 - document.createTextNode
 

@@ -145,8 +145,10 @@ htui/
 │   │   │   ├── layout_wrap_tests.rs
 │   │   │   ├── layout_events_tests.rs # 事件系统测试（命中 / 冒泡 / hover / click，纯内存）
 │   │   │   ├── layout_inner_html_tests.rs # innerHTML 测试（读取序列化 / 写入片段解析 / style 提取 / script 跳过，纯内存）
+│   │   │   ├── layout_class_list_tests.rs # classList 测试（live DOMTokenList 读/写/迭代/校验，纯内存）
 │   │   │   ├── layout_position_tests.rs # CSS 定位测试（relative / absolute / fixed + z-index）
 │   │   ├── layout_input_tests.rs # <input> 输入框测试（渲染 / 编辑逻辑 / 光标状态）
+│   │   ├── layout_textarea_tests.rs # <textarea> 多行编辑框测试（几何/绘制/编辑/滚动/value IDL，纯内存）
 │   │   ├── layout_form_tests.rs # 表单测试（hidden/password/checkbox/radio/textarea + label/button/form submit-reset，纯内存）
 │   │   ├── layout_details_tests.rs # <details>/<summary> 折叠控件测试（关闭只显 summary / 标记 ▸▾ / 点击切换 open + toggle 事件，纯内存）
 │   │   ├── layout_dialog_template_tests.rs # <dialog>/<template> 测试（dialog：open 显隐 + UA 边框 + form[method=dialog] 关闭 + close 事件；template：内容惰性恒不渲染，纯内存）
