@@ -4,7 +4,7 @@ use crossterm::style::Color;
 
 use crate::{
     layout::{LayoutBox, Rect},
-    tdom::node::NodeArena,
+    tdom::node::{NodeArena, NodeType},
     tui::graph_api::{FontStyle, char_width},
 };
 
@@ -27,7 +27,14 @@ pub(crate) fn paint_button(
 
     let node = &arena[lb.node_id];
     let disabled = node.attributes.contains_key("disabled");
-    let text = node.text_content(arena);
+    // `<button>` draws its text content; an `<input type=button|submit|reset>`
+    // draws its `value` attribute (with the browser default label when the
+    // attribute is absent) through the same `[ text ]` frame.
+    let text = if node.node_type == NodeType::Input {
+        node.input_button_label().unwrap_or_default()
+    } else {
+        node.text_content(arena)
+    };
     let fg = node.css_attr.get_color().unwrap_or(Color::White);
     let bg = node.css_attr.get_bg_color();
     // A disabled button is dimmed (frame and text both grey).

@@ -774,6 +774,36 @@ impl Node {
         }
     }
 
+    /// The display label of an `<input>` push-button element: the `value`
+    /// attribute, or a browser-appropriate default when absent (`submit` →
+    /// `Submit`, `reset` → `Reset`, `image` → `alt` / `Submit Query`).
+    /// Returns `None` for inputs that are not push-buttons.
+    pub fn input_button_label(&self) -> Option<String> {
+        let input_type = self.get_type()?.to_ascii_lowercase();
+        if !matches!(
+            input_type.as_str(),
+            "button" | "submit" | "reset" | "image"
+        ) {
+            return None;
+        }
+        let value = self.attributes.get("value").cloned().unwrap_or_default();
+        match input_type.as_str() {
+            "submit" if value.is_empty() => Some("Submit".to_string()),
+            "reset" if value.is_empty() => Some("Reset".to_string()),
+            // `image` is a submit button whose label is the `alt` text (or
+            // the `value`, falling back to the browser's default query name).
+            "image" if value.is_empty() => {
+                let alt = self.attributes.get("alt").cloned().unwrap_or_default();
+                if alt.is_empty() {
+                    Some("Submit Query".to_string())
+                } else {
+                    Some(alt)
+                }
+            }
+            _ => Some(value),
+        }
+    }
+
     /// Append a child node to the current node (also sets child's parent).
     pub fn append_child(arena: &mut NodeArena, parent_id: NodeId, child_id: NodeId) {
         let child_parent = &mut arena[child_id].parent;

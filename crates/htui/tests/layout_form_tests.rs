@@ -733,3 +733,191 @@ fn test_radio_click_fires_change_once_for_group_flip() {
         "checking a radio fires change on it"
     );
 }
+
+// ============================================================
+// `<input type=button|submit|reset>` — push-button inputs
+// ============================================================
+
+#[test]
+fn test_input_submit_fires_submit_on_containing_form() {
+    // `<input type=submit>` behaves like `<button type=submit>`: a click fires
+    // `submit` on the containing form.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var n = [];
+          document.getElementById('f').addEventListener('submit', function () { n.push(1); });
+          globalThis.__n = n;
+        </script>
+        <form id="f"><input id="s" type="submit"></form>"#,
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("s").expect("submit input region");
+    let (x, y) = center(region.rect);
+
+    let mut state = InputState::new();
+    click(&mut state, &mut engine, &map, x, y);
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__n.length"),
+        "1",
+        "clicking `<input type=submit>` must fire `submit` on the containing form"
+    );
+}
+
+#[test]
+fn test_input_reset_fires_reset_on_containing_form() {
+    // `<input type=reset>` fires `reset` on the containing form.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var n = [];
+          document.getElementById('f').addEventListener('reset', function () { n.push(1); });
+          globalThis.__n = n;
+        </script>
+        <form id="f"><input id="s" type="reset"></form>"#,
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("s").expect("reset input region");
+    let (x, y) = center(region.rect);
+
+    let mut state = InputState::new();
+    click(&mut state, &mut engine, &map, x, y);
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__n.length"),
+        "1",
+        "clicking `<input type=reset>` must fire `reset` on the containing form"
+    );
+}
+
+#[test]
+fn test_input_type_button_does_not_submit() {
+    // `<input type=button>` is inert: no submit, no reset.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var n = [];
+          document.getElementById('f').addEventListener('submit', function () { n.push(1); });
+          document.getElementById('f').addEventListener('reset', function () { n.push(1); });
+          globalThis.__n = n;
+        </script>
+        <form id="f"><input id="s" type="button" value="Go"></form>"#,
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("s").expect("button input region");
+    let (x, y) = center(region.rect);
+
+    let mut state = InputState::new();
+    click(&mut state, &mut engine, &map, x, y);
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__n.length"),
+        "0",
+        "`type=button` input must not fire submit or reset"
+    );
+}
+
+#[test]
+fn test_input_submit_click_does_not_focus() {
+    // A button input activates on click but never takes text focus.
+    let (mut engine, geo) = build_geometry(
+        r#"<input id="f" type="text"><input id="s" type="submit">"#,
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("s").expect("submit input region");
+    let (x, y) = center(region.rect);
+
+    let mut state = InputState::new();
+    state.focused_input = Some(find_node_by_id(&engine.arena(), "f"));
+    click(&mut state, &mut engine, &map, x, y);
+    assert!(
+        state.focused_input.is_none(),
+        "clicking a submit input must blur any focused text field"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('s').getAttribute('type')"),
+        "submit",
+        "the button input stays a submit input"
+    );
+}
+
+// ============================================================
+// `<input type=image>` / Enter implicit submission / readonly
+// ============================================================
+
+#[test]
+fn test_input_image_fires_submit_on_containing_form() {
+    // `<input type=image>` is a submit button: a click fires `submit`.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var n = [];
+          document.getElementById('f').addEventListener('submit', function () { n.push(1); });
+          globalThis.__n = n;
+        </script>
+        <form id="f"><input id="s" type="image" alt="Go"></form>"#,
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("s").expect("image input region");
+    let (x, y) = center(region.rect);
+
+    let mut state = InputState::new();
+    click(&mut state, &mut engine, &map, x, y);
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__n.length"),
+        "1",
+        "clicking `<input type=image>` must fire `submit` on the containing form"
+    );
+}
+
+#[test]
+fn test_enter_implicit_submission_fires_submit_on_form() {
+    // Pressing Enter in a focused text field submits its containing form —
+    // the browser's implicit submission, routed as `ScriptMsg::FormSubmit`.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          var n = [];
+          document.getElementById('f').addEventListener('submit', function () { n.push(1); });
+          globalThis.__n = n;
+        </script>
+        <form id="f"><input id="t" type="text"></form>"#,
+    );
+    let map = HitMap::build(&geo);
+    let form = find_node_by_id(&engine.arena(), "f");
+    let cmds = apply(&mut engine, &map, ScriptMsg::FormSubmit { form_id: form });
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__n.length"),
+        "1",
+        "Enter must submit the containing form"
+    );
+    assert!(!cmds.is_empty() || eval_str(&mut engine, "globalThis.__n.length") == "1");
+}
+
+#[test]
+fn test_readonly_input_focuses_but_disabled_does_not() {
+    // `readonly` keeps the field focusable (unlike `disabled`, which swallows
+    // the click entirely) — matching the browser: readonly text is selectable
+    // and copyable, just not editable.
+    let (mut engine, geo) = build_geometry(
+        r#"<input id="r" type="text" value="fixed" readonly><input id="d" type="text" disabled>"#,
+    );
+    let map = HitMap::build(&geo);
+
+    // Clicking the readonly field focuses it.
+    let mut state = InputState::new();
+    let region = map.resolve_by_id("r").expect("readonly region");
+    let (x, y) = center(region.rect);
+    click(&mut state, &mut engine, &map, x, y);
+    let r = find_node_by_id(&engine.arena(), "r");
+    assert_eq!(
+        state.focused_input,
+        Some(r),
+        "readonly fields stay focusable"
+    );
+
+    // Clicking the disabled field swallows the click: no focus change.
+    let region = map.resolve_by_id("d").expect("disabled region");
+    let (x, y) = center(region.rect);
+    click(&mut state, &mut engine, &map, x, y);
+    let d = find_node_by_id(&engine.arena(), "d");
+    assert_eq!(
+        state.focused_input,
+        Some(r),
+        "disabled fields must never take focus"
+    );
+    assert_ne!(state.focused_input, Some(d));
+}

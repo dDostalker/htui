@@ -48,6 +48,10 @@ pub enum ScriptMsg {
     /// attribute (clearing same-`name` radio siblings), then fire `input` /
     /// `change`.
     ToggleCheck { node_id: NodeId },
+    /// The focused text field's containing `<form>` was submitted via Enter
+    /// (the browser's implicit submission): fire `submit` on the form. The
+    /// engine performs no default navigation — pages handle it in JS.
+    FormSubmit { form_id: NodeId },
     /// A key was pressed (`KeyDown`). `target` is the focused `<input>` node
     /// (the browser's key event target); `None` means the document `<body>`.
     /// `key_id` correlates the response back to the input loop's gate wait, so
@@ -122,19 +126,28 @@ fn summary_details(arena: &NodeArena, node_id: NodeId) -> Option<NodeId> {
 /// The `<dialog>` a click on `node_id` should close via the
 /// `form[method=dialog]` default action, if any.
 ///
-/// The browser's native dialog flow: a `type=submit` button (the default) in
-/// a `<form method="dialog">` that lives inside a `<dialog>` closes the
-/// dialog when clicked. `type=button` and disabled buttons are inert, exactly
-/// like the form submit rule in [`button_form_action`].
+/// The browser's native dialog flow: a submit control (`<button type=submit>`
+/// by default, or `<input type=submit>`) in a `<form method="dialog">` that
+/// lives inside a `<dialog>` closes the dialog when clicked. `type=button` and
+/// disabled controls are inert, exactly like the form submit rule in
+/// [`button_form_action`].
 fn dialog_form_action(arena: &NodeArena, node_id: NodeId) -> Option<NodeId> {
     let node = arena.get(node_id)?;
-    if node.node_type != NodeType::Button || node.attributes.contains_key("disabled") {
+    if node.attributes.contains_key("disabled") {
         return None;
     }
-    if matches!(
-        node.attributes.get("type").map(|t| t.to_ascii_lowercase()).as_deref(),
-        Some("button")
-    ) {
+    let is_submit = match node.node_type {
+        NodeType::Button => !matches!(
+            node.attributes.get("type").map(|t| t.to_ascii_lowercase()).as_deref(),
+            Some("button")
+        ),
+        NodeType::Input => matches!(
+            node.attributes.get("type").map(|t| t.to_ascii_lowercase()).as_deref(),
+            Some("submit") | Some("image")
+        ),
+        _ => false,
+    };
+    if !is_submit {
         return None;
     }
     // Find the containing form; it must declare `method=dialog`.
@@ -163,20 +176,32 @@ fn dialog_form_action(arena: &NodeArena, node_id: NodeId) -> Option<NodeId> {
     None
 }
 
-/// The form event a `<button type=submit|reset>` click should produce:
-/// `(form_id, EventType::Submit | EventType::Reset)`. Buttons default to
-/// `submit`; `type=button` and disabled buttons produce nothing, and a button
-/// outside any `<form>` has no form to fire on.
+/// The form event a submit / reset control click should produce:
+/// `(form_id, EventType::Submit | EventType::Reset)`. `<button>` defaults to
+/// `submit`; `<input type=submit|reset>` activates its form, while
+/// `type=button` (both elements) and disabled controls produce nothing, and a
+/// control outside any `<form>` has no form to fire on.
 fn button_form_action(arena: &NodeArena, node_id: NodeId) -> Option<(NodeId, EventType)> {
     let node = arena.get(node_id)?;
-    if node.node_type != NodeType::Button || node.attributes.contains_key("disabled") {
+    if node.attributes.contains_key("disabled") {
         return None;
     }
-    let action = match node.attributes.get("type").map(|t| t.to_ascii_lowercase()).as_deref() {
-        Some("reset") => EventType::Reset,
-        // `type=button` is inert: no submit, no reset.
-        Some("button") => return None,
-        _ => EventType::Submit,
+    let input_type = node.attributes.get("type").map(|t| t.to_ascii_lowercase());
+    let action = match node.node_type {
+        NodeType::Button => match input_type.as_deref() {
+            Some("reset") => EventType::Reset,
+            // `type=button` is inert: no submit, no reset.
+            Some("button") => return None,
+            _ => EventType::Submit,
+        },
+        // `<input type=submit|image|reset>` fire on the containing form; every
+        // other input kind (text / checkbox / …) has no form default action.
+        NodeType::Input => match input_type.as_deref() {
+            Some("submit") | Some("image") => EventType::Submit,
+            Some("reset") => EventType::Reset,
+            _ => return None,
+        },
+        _ => return None,
     };
     let mut current = node.parent;
     while let Some(pid) = current {
@@ -319,6 +344,13 @@ pub fn apply_message(
             } else {
                 (Vec::new(), None)
             }
+        }
+        ScriptMsg::FormSubmit { form_id } => {
+            // Enter in a focused text field submits its containing form (the
+            // browser's implicit submission). No default navigation — pages
+            // handle the `submit` event in JS.
+            let region = region_for(&engine.arena(), *form_id);
+            (engine.fire(&region, EventType::Submit, 0, 0), None)
         }
         ScriptMsg::KeyDown { key_id, target, key } => {
             let region = key_region(engine, *target);

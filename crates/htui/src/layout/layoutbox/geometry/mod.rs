@@ -376,14 +376,20 @@ fn layout_input(
         None => {
             let node = &arena[generated.node_id];
             // `<input type=checkbox|radio>` is a two-cell toggle (glyph +
-            // one spacing column so it never glues onto adjacent text); every
-            // other kind is a text field sized from the HTML `width`
-            // attribute (cells) or a fixed default width when absent.
+            // one spacing column so it never glues onto adjacent text); a
+            // button input (`button` / `submit` / `reset` / `image`) sizes
+            // itself from its label like `<button>` (`[ text ]` — frame + one
+            // padding column each side); every other kind is a text field
+            // sized from the HTML `width` attribute (cells) or a fixed default
+            // width when absent.
             let is_toggle = node.get_type().is_some_and(|t| {
                 matches!(t.to_ascii_lowercase().as_str(), "checkbox" | "radio")
             });
             let block_width = if is_toggle {
                 2
+            } else if let Some(label) = node.input_button_label() {
+                let text_w: usize = label.chars().map(|c| char_width(c).max(1)).sum();
+                (text_w.saturating_add(4)).min(containing.width).max(4)
             } else {
                 match node.get_width() {
                     Some(w) => (w as usize).min(containing.width).max(1),

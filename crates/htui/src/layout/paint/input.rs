@@ -11,6 +11,7 @@ use crate::{
 };
 
 use super::{PaintCanvas, intersect_rects};
+use super::button::paint_button;
 
 /// Frame colour for a focused field (Tokyo Night accent cyan).
 const FOCUS_FRAME: &str = "#2ac3de";
@@ -64,18 +65,33 @@ pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintC
         .map(|t| t.to_ascii_lowercase())
         .unwrap_or_default();
 
+    // `<input type=button|submit|reset|image>` paints as a push-button
+    // (`[ label ]`) sharing the `<button>` frame painter (the label comes
+    // from the `value` attribute, with browser defaults when absent).
+    if node.input_button_label().is_some() {
+        paint_button(lb, arena, canvas, clip);
+        return;
+    }
+
     // `<input type=checkbox|radio>` paints a single-cell toggle glyph with
     // no frame; the checked state comes from the DOM `checked` attribute
     // (toggled by the script thread on click).
     if matches!(input_type.as_str(), "checkbox" | "radio") {
         let checked = node.attributes.contains_key("checked");
+        let disabled = node.attributes.contains_key("disabled");
         let glyph = match (input_type.as_str(), checked) {
             ("checkbox", true) => '\u{2611}', // ☑
             ("checkbox", false) => '\u{2610}', // ☐
             ("radio", true) => '\u{25C9}',    // ◉
             _ => '\u{25CB}',                   // ○
         };
-        let fg = node.css_attr.get_color().unwrap_or(Color::White);
+        // A disabled toggle is dimmed grey (the click is already swallowed by
+        // the input loop).
+        let fg = if disabled {
+            Color::DarkGrey
+        } else {
+            node.css_attr.get_color().unwrap_or(Color::White)
+        };
         let bg = node.css_attr.get_bg_color();
         put(canvas, cell_index(canvas, r.x, r.y), Some(glyph), Some(fg), bg);
         // The second cell is a spacing column so the toggle never glues onto
@@ -106,9 +122,26 @@ pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintC
         ),
     };
 
+    // A `placeholder` attribute shows as dimmed hint text while the field is
+    // empty and unfocused (browsers hide it once the field has a value or
+    // focus).
+    let placeholder = node.attributes.get("placeholder").cloned();
+    let placeholder = placeholder.as_deref().filter(|p| !p.is_empty());
+    let showing_placeholder = value.is_empty() && !focused && placeholder.is_some();
+    let display: &str = if showing_placeholder {
+        placeholder.expect("placeholder is Some when showing")
+    } else {
+        &value
+    };
+
+    let disabled = node.attributes.contains_key("disabled");
+    // A disabled field is dimmed (frame and text both grey).
     let fg = node.css_attr.get_color();
     let bg = node.css_attr.get_bg_color();
-    let frame = if focused {
+    let text_fg = if disabled { Some(Color::DarkGrey) } else { fg };
+    let frame = if disabled {
+        Some(Color::DarkGrey)
+    } else if focused {
         parse_color_str(FOCUS_FRAME).or(fg)
     } else {
         fg
@@ -131,14 +164,13 @@ pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintC
     // walk back from the caret until the width before it plus the caret's own
     // column fits, then extend forward while columns remain. This keeps the
     // caret visible without letting a multi-column glyph push past the `]`.
-    let v: Vec<char> = value.chars().collect();
-    let total = v.len();
-    let cursor = cursor.min(total);
-    let (start, end) = value_window(&value, cursor, inner_width);
+    let v: Vec<char> = display.chars().collect();
+    let cursor = cursor.min(value.chars().count());
+    let (start, end) = value_window(display, cursor, inner_width);
     // `<input type=password>` masks every character with `•` while keeping
     // each glyph's cell width (so the caret window / column mapping shared
     // with the input loop stays in sync).
-    let is_password = input_type == "password";
+    let is_password = input_type == "password" && !showing_placeholder;
 
     let mut col = 0usize;
     for i in start..end {
@@ -164,12 +196,12 @@ pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintC
             } else if selection.is_some_and(|(s, e)| i >= s && i < e) {
                 // Selected characters are highlighted (Tokyo Night selection
                 // blue) over the field's own colours.
-                (
-                    Some(Color::White),
-                    parse_color_str(SELECTION_BG),
-                )
+                (Some(Color::White), parse_color_str(SELECTION_BG))
+            } else if showing_placeholder {
+                // Placeholder hint text is dimmed grey.
+                (Some(Color::DarkGrey), bg)
             } else {
-                (fg, bg)
+                (text_fg, bg)
             };
             // ASCII glyphs write one cell. The second column of a wide CJK
             // glyph is marked with an *empty* word (not a space) so the
@@ -190,7 +222,7 @@ pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintC
 
     // Caret past the last character: an inverted blank cell at the content
     // end (kept inside the frame).
-    if focused && cursor == total && col < inner_width {
+    if focused && cursor == value.chars().count() && col < inner_width {
         let abs_col = inner_x.saturating_add(col);
         if abs_col < r.x.saturating_add(r.width).saturating_sub(1) {
             put(

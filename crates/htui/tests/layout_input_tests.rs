@@ -12,8 +12,8 @@ use htui::script::ScriptEngine;
 use htui::tdom::node::{NodeArena, NodeId, NodeType};
 use htui::tui::graph_api::{
     InputRenderState, InputState, TermLayout, apply_input_key, apply_input_word_key,
-    collect_input_ids, is_input_field_key, key_event_info, next_word_boundary, prev_word_boundary,
-    selection_range,
+    collect_input_ids, is_input_field_key, key_event_info, next_word_boundary, number_input_allows_char,
+    prev_word_boundary, selection_range,
 };
 use htui::tui::graph_api::Block;
 
@@ -55,6 +55,30 @@ fn render_rows(html: &str) -> (Vec<String>, TermLayout) {
         rows.push(s);
     }
     (rows, tl)
+}
+
+/// Layout the document into a box tree (for geometry assertions).
+fn layout_boxes(arena: &NodeArena, root: NodeId) -> Vec<htui::layout::LayoutBox> {
+    use htui::layout::{BoxConstraint, Cursor, layout_tree};
+    let containing = BoxConstraint::root(&mock_term_map());
+    let mut cursor = Cursor::new();
+    layout_tree(arena, root, containing, &mut cursor, COLS as usize, ROWS as usize)
+}
+
+/// Depth-first search for the first box belonging to `node_id`.
+fn find_box<'a>(
+    boxes: &'a [htui::layout::LayoutBox],
+    node_id: NodeId,
+) -> Option<&'a htui::layout::LayoutBox> {
+    for b in boxes {
+        if b.node_id == node_id {
+            return Some(b);
+        }
+        if let Some(found) = find_box(&b.children, node_id) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 #[test]
@@ -663,4 +687,185 @@ fn input_state_clamps_scroll_to_the_content_ceiling() {
     fresh.scroll_y = 5;
     fresh.clamp_scroll_to(u32::MAX);
     assert_eq!(fresh.scroll_y, 5);
+}
+
+// ============================================================
+// `<input type=button|submit|reset>` — push-button inputs
+// ============================================================
+
+#[test]
+fn input_button_types_render_as_bracketed_buttons() {
+    init();
+    // `button` / `submit` / `reset` paint the `[ label ]` frame instead of a
+    // text field; the label comes from the `value` attribute. Each inline
+    // replaced element claims its own row (the engine's flow semantics).
+    let (rows, _) = render_rows(
+        r#"<div><input type="button" value="X"><input type="submit" value="Save"><input type="reset" value="Clear"></div>"#,
+    );
+    assert!(rows[0].contains("[ X ]"), "button input paints `[ label ]`; row={:?}", rows[0]);
+    assert!(rows[1].contains("[ Save ]"), "submit input paints its value label; row={:?}", rows[1]);
+    assert!(rows[2].contains("[ Clear ]"), "reset input paints its value label; row={:?}", rows[2]);
+}
+
+#[test]
+fn input_button_default_labels_submit_reset() {
+    init();
+    // No `value` attribute → the browser default labels `Submit` / `Reset`.
+    let (rows, _) = render_rows(r#"<div><input type="submit"><input type="reset"></div>"#);
+    assert!(rows[0].contains("[ Submit ]"), "default submit label; row={:?}", rows[0]);
+    assert!(rows[1].contains("[ Reset ]"), "default reset label; row={:?}", rows[1]);
+}
+
+#[test]
+fn input_button_geometry_sizes_from_label() {
+    init();
+    // The button input width adapts to its label (`[ text ]`), like `<button>`
+    // — not the fixed `width` attribute used for text fields.
+    let (root_id, arena) = setup(r#"<div><input id="sub" type="submit" value="Go"><input id="txt" type="text" width="20"></div>"#);
+    let boxes = layout_boxes(&arena, root_id);
+    let id_of = |id: &str| {
+        arena
+            .iter()
+            .find(|(_, n)| n.attributes.get("id").map(String::as_str) == Some(id))
+            .map(|(nid, _)| nid)
+            .expect(id)
+    };
+    let submit = find_box(&boxes, id_of("sub")).expect("submit box");
+    assert_eq!(submit.rect.width, 6, "`[ Go ]` is 6 columns");
+    let text = find_box(&boxes, id_of("txt")).expect("text box");
+    assert_eq!(text.rect.width, 20, "text field keeps the width attribute");
+}
+
+#[test]
+fn input_button_skipped_by_tab_focus_cycle() {
+    init();
+    // Button inputs activate on click only — they are not text fields, so
+    // `Tab` focus cycling must skip them.
+    let (_, arena) = setup(
+        r#"<div><input id="a" type="text"><input type="submit"><input type="button" value="X"><input id="b" type="text"></div>"#,
+    );
+    let ids = collect_input_ids(&arena);
+    let labels: Vec<&str> = ids
+        .iter()
+        .map(|&id| arena[id].attributes.get("id").map(String::as_str).unwrap_or("?"))
+        .collect();
+    assert_eq!(
+        labels,
+        vec!["a", "b"],
+        "button inputs must not enter the text-field tab order"
+    );
+}
+
+// ============================================================
+// placeholder / disabled / number
+// ============================================================
+
+#[test]
+fn input_placeholder_shows_dimmed_hint_when_empty() {
+    init();
+    // An empty field with a `placeholder` attribute shows the hint text in
+    // grey (the field is unfocused, so no value/caret either).
+    let (_, tl) = render_rows(r#"<div><input placeholder="Type here" width="20"></div>"#);
+    let hint_cells: Vec<&Block> = tl
+        .layout
+        .iter()
+        .filter(|b| !b.word.is_empty() && b.word != "[" && b.word != "]")
+        .collect();
+    let text: String = hint_cells.iter().map(|b| b.word.as_str()).collect();
+    let text = text.trim();
+    assert_eq!(text, "Type here", "placeholder must render in the empty field");
+    // Every non-space placeholder glyph (the frame and blank padding cells
+    // keep their own colours) must be dimmed grey.
+    assert!(
+        hint_cells
+            .iter()
+            .filter(|b| b.word != " ")
+            .all(|b| b.fcolor == Some(crossterm::style::Color::DarkGrey)),
+        "placeholder hint must be dimmed grey"
+    );
+}
+
+#[test]
+fn input_placeholder_hidden_when_value_present() {
+    init();
+    // A non-empty `value` wins over the placeholder hint.
+    let (_, tl) = render_rows(r#"<div><input placeholder="hint" value="val"></div>"#);
+    let text: String = tl
+        .layout
+        .iter()
+        .filter(|b| !b.word.is_empty() && b.word != " " && b.word != "[" && b.word != "]")
+        .map(|b| b.word.as_str())
+        .collect();
+    assert_eq!(text, "val", "the value renders, not the placeholder");
+}
+
+#[test]
+fn input_disabled_field_is_dimmed() {
+    init();
+    // A `disabled` text field dims its frame and value (grey) like a disabled
+    // `<button>`.
+    let (_, tl) = render_rows(r#"<div><input disabled value="off"></div>"#);
+    let cells: Vec<&Block> = tl
+        .layout
+        .iter()
+        .filter(|b| !b.word.is_empty() && b.word != " ")
+        .collect();
+    let text: String = cells.iter().map(|b| b.word.as_str()).collect();
+    assert_eq!(text, "[off]", "disabled field keeps its value");
+    assert!(
+        cells.iter().all(|b| b.fcolor == Some(crossterm::style::Color::DarkGrey)),
+        "disabled field must be dimmed grey"
+    );
+}
+
+#[test]
+fn number_input_character_filter_matches_browser() {
+    init();
+    // The number-editor character set: digits plus sign / decimal / exponent
+    // markers. Letters and other symbols are rejected.
+    for ok in ['0', '9', '-', '+', '.', 'e', 'E'] {
+        assert!(number_input_allows_char(ok), "{ok:?} must be accepted");
+    }
+    for bad in ['a', 'x', '_', ' ', ',', '#', '你'] {
+        assert!(!number_input_allows_char(bad), "{bad:?} must be rejected");
+    }
+}
+
+#[test]
+fn input_checkbox_radio_disabled_is_dimmed() {
+    init();
+    // A disabled toggle paints its glyph in grey (clicks are already
+    // swallowed); the enabled one keeps its normal colour.
+    let (_, tl) = render_rows(
+        r#"<div><input id="c" type="checkbox" disabled><input id="r" type="radio" disabled checked></div>"#,
+    );
+    let dark = crossterm::style::Color::DarkGrey;
+    let glyphs: Vec<&Block> = tl
+        .layout
+        .iter()
+        .filter(|b| matches!(b.word.as_str(), "☐" | "☑" | "○" | "◉"))
+        .collect();
+    assert_eq!(glyphs.len(), 2, "both disabled toggles paint their glyph");
+    assert!(
+        glyphs.iter().all(|b| b.fcolor == Some(dark)),
+        "disabled toggles must be dimmed grey"
+    );
+}
+
+#[test]
+fn input_image_renders_as_button() {
+    init();
+    // `image` is a button-shaped control: it paints the `[ label ]` frame
+    // (the browser's own look) even though the terminal has no image — the
+    // label comes from its `value` / `alt` with a default fallback.
+    let (rows, _) = render_rows(
+        r#"<div><input type="image" value="Go"><input type="image" alt="Logo"><input type="image"></div>"#,
+    );
+    assert!(rows[0].contains("[ Go ]"), "image input uses its value label; row={:?}", rows[0]);
+    assert!(rows[1].contains("[ Logo ]"), "image input falls back to alt; row={:?}", rows[1]);
+    assert!(
+        rows[2].contains("[ Submit Query ]"),
+        "image input defaults to `Submit Query`; row={:?}",
+        rows[2]
+    );
 }

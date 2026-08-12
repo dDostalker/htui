@@ -288,6 +288,42 @@ fn test_dialog_form_method_dialog_submit_closes_and_fires_close() {
 }
 
 #[test]
+fn test_dialog_input_submit_closes_and_fires_close() {
+    // `<input type=submit>` inside `form[method=dialog]` closes the dialog
+    // exactly like a `<button>` submit does (both activate the dialog's
+    // default action).
+    init();
+    let html = format!(
+        r#"<script>
+          var closes = [];
+          var d = document.getElementById('d');
+          d.addEventListener('close', function () {{ closes.push('closed'); }});
+          globalThis.__closes = closes;
+        </script>
+        <dialog id="d" open>
+          <form method="dialog"><input id="ok" type="submit"></form>
+        </dialog>"#
+    );
+    let (mut engine, geo) = build_geometry(&html);
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("ok").expect("submit input region");
+    let (x, y) = center(region.rect);
+
+    let mut hover = HoverState::new();
+    let _ = apply_message(&mut engine, &mut hover, &map, ScriptMsg::Click { x, y });
+    let d = find_node_by_id(&engine.arena(), "d");
+    assert!(
+        !engine.arena()[d].attributes.contains_key("open"),
+        "`<input type=submit>` in form[method=dialog] must close the dialog"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.__closes.join(','))"),
+        "closed",
+        "the close event fires on the dialog"
+    );
+}
+
+#[test]
 fn test_dialog_onclose_attribute_fires() {
     init();
     let (mut engine, geo) = build_geometry(

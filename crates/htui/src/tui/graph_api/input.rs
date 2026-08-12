@@ -737,6 +737,63 @@ fn is_toggle_input(arena: &NodeArena, node_id: NodeId) -> bool {
     })
 }
 
+/// `true` for an `<input type=button|submit|reset|image>` node — a click
+/// activates the push-button (the form submit / reset default action fires on
+/// the script thread) instead of focusing a text field.
+fn is_button_input(arena: &NodeArena, node_id: NodeId) -> bool {
+    arena.get(node_id).is_some_and(|n| {
+        n.node_type == NodeType::Input
+            && n.get_type().is_some_and(|t| {
+                matches!(
+                    t.to_ascii_lowercase().as_str(),
+                    "button" | "submit" | "reset" | "image"
+                )
+            })
+    })
+}
+
+/// `true` for an `<input type=number>` node — plain typing is filtered to the
+/// numeric character set the browser's number editor accepts.
+fn is_number_input(arena: Option<&NodeArena>, node_id: NodeId) -> bool {
+    arena.is_some_and(|a| {
+        a.get(node_id).is_some_and(|n| {
+            n.get_type().is_some_and(|t| t.eq_ignore_ascii_case("number"))
+        })
+    })
+}
+
+/// The character set an `<input type=number>` field accepts while typing:
+/// digits plus the sign / decimal / exponent markers the browser's number
+/// editor recognises (`-1.5e+3`).
+pub fn number_input_allows_char(c: char) -> bool {
+    c.is_ascii_digit() || matches!(c, '-' | '+' | '.' | 'e' | 'E')
+}
+
+/// `true` for a `<input readonly>` text field — it can be focused, selected
+/// and copied like any other field, but no keystroke or paste may change its
+/// value.
+fn is_readonly_input(arena: Option<&NodeArena>, node_id: NodeId) -> bool {
+    arena.is_some_and(|a| {
+        a.get(node_id).is_some_and(|n| {
+            n.node_type == NodeType::Input && n.attributes.contains_key("readonly")
+        })
+    })
+}
+
+/// The nearest `<form>` ancestor of `node_id`, if any — the target of the
+/// browser's implicit submission when Enter is pressed in a text field.
+fn focused_form(arena: Option<&NodeArena>, node_id: NodeId) -> Option<NodeId> {
+    let arena = arena?;
+    let mut current = arena.get(node_id).and_then(|n| n.parent);
+    while let Some(pid) = current {
+        if arena.get(pid).is_some_and(|n| n.node_type == NodeType::Form) {
+            return Some(pid);
+        }
+        current = arena.get(pid).and_then(|n| n.parent);
+    }
+    None
+}
+
 /// `true` for a `<textarea>` node — the multi-line field whose caret
 /// placement uses visual row/col, not the single-line column mapping.
 fn is_textarea_node(arena: &NodeArena, node_id: NodeId) -> bool {
@@ -790,7 +847,13 @@ pub fn collect_input_ids(arena: &NodeArena) -> Vec<NodeId> {
                     .get_type()
                     .map(|t| t.to_ascii_lowercase())
                     .unwrap_or_default();
-                if t != "hidden" && t != "checkbox" && t != "radio" {
+                // Button inputs activate on click only — they take no text
+                // focus, so `Tab` cycling skips them.
+                let is_button = matches!(
+                    t.as_str(),
+                    "button" | "submit" | "reset" | "image"
+                );
+                if t != "hidden" && t != "checkbox" && t != "radio" && !is_button {
                     out.push(id);
                 }
             }
@@ -1103,6 +1166,14 @@ pub fn handle_click(
                     blur_input(state, msgs, cmds);
                 }
                 msgs.push(ScriptMsg::ToggleCheck { node_id });
+            } else if is_button_input(arena, node_id) {
+                // A button input (`button` / `submit` / `reset`) activates on
+                // click — the `Click` dispatch already queued above, and the
+                // script thread runs the form submit / reset default action.
+                // It never takes text focus, but blurs any focused field.
+                if state.focused_input.is_some() {
+                    blur_input(state, msgs, cmds);
+                }
             } else {
                 focus_input(state, node_id, arena, msgs, cmds);
                 // Clicking an `<input list>` opens its autocomplete dropdown
@@ -1435,6 +1506,9 @@ pub fn handle_mouse_down(
                     if is_toggle_input(arena, node_id) {
                         // Checkbox / radio: the click handler performs the
                         // toggle — no text focus or drag selection here.
+                    } else if is_button_input(arena, node_id) {
+                        // Button input: the click handler activates it — no
+                        // text focus or drag selection here.
                     } else {
                         focus_input(state, node_id, arena, msgs, cmds);
                         // Pressing an `<input list>` opens its autocomplete
@@ -1750,21 +1824,32 @@ pub fn trigger_refresh(
             // below, matching a browser where an input only intercepts the
             // keys it edits.
             if state.focused_input.is_some() {
-                if key.code == KeyCode::Esc || (key.code == KeyCode::Enter && !state.focused_is_textarea)
-                {
-                    blur_input(state, msgs, &mut cmds);
-                    return cmds;
-                }
                 let Some(focused) = state.focused_input else {
                     return cmds;
                 };
+                // `Esc` blurs; `Enter` on a single-line field commits and —
+                // when the field lives in a `<form>` — submits it (the
+                // browser's implicit submission). A focused `<textarea>`
+                // owns `Enter` (newline) instead.
+                if key.code == KeyCode::Esc
+                    || (key.code == KeyCode::Enter && !state.focused_is_textarea)
+                {
+                    if key.code == KeyCode::Enter
+                        && let Some(form_id) = focused_form(arena, focused)
+                    {
+                        msgs.push(ScriptMsg::FormSubmit { form_id });
+                    }
+                    blur_input(state, msgs, &mut cmds);
+                    return cmds;
+                }
                 let content_width =
                     textarea_content_width(arena, focused);
 
                 // Word-level editing: Ctrl / Alt + ←/→/Home/End/Backspace/
                 // Delete, with optional Shift extending the selection. Must
                 // run before the plain Ctrl shortcuts so Ctrl+Left is a word
-                // move rather than an ignored combo.
+                // move rather than an ignored combo. A readonly field keeps
+                // the navigation keys but drops the deletion keys.
                 if (key.modifiers.contains(event::KeyModifiers::CONTROL)
                     || key.modifiers.contains(event::KeyModifiers::ALT))
                     && matches!(
@@ -1777,11 +1862,17 @@ pub fn trigger_refresh(
                             | KeyCode::Delete
                     )
                 {
+                    let mut code = key.code;
+                    if is_readonly_input(arena, focused)
+                        && matches!(code, KeyCode::Backspace | KeyCode::Delete)
+                    {
+                        code = KeyCode::Null;
+                    }
                     if apply_input_word_key(
                         &mut state.input_value,
                         &mut state.input_cursor,
                         &mut state.input_sel_anchor,
-                        key.code,
+                        code,
                         key.modifiers,
                     ) {
                         push_input_render(state, focused, &mut cmds);
@@ -1795,9 +1886,16 @@ pub fn trigger_refresh(
 
                 // Ctrl shortcuts: select-all / copy / cut / paste. Other Ctrl
                 // combos are ignored (not inserted as characters — browser
-                // behaviour).
+                // behaviour). A readonly field keeps select-all / copy but
+                // drops cut / paste.
                 if key.modifiers.contains(event::KeyModifiers::CONTROL) {
-                    if apply_ctrl_shortcut(state, key.code) {
+                    let mut code = key.code;
+                    if is_readonly_input(arena, focused)
+                        && matches!(code, KeyCode::Char('x') | KeyCode::Char('v'))
+                    {
+                        code = KeyCode::Null;
+                    }
+                    if apply_ctrl_shortcut(state, code) {
                         push_input_render(state, focused, &mut cmds);
                         if arena.is_some() {
                             msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
@@ -1842,19 +1940,38 @@ pub fn trigger_refresh(
                 // boundary no-ops (Home at the start must not scroll the
                 // page). Everything else belongs to the page-level handler.
                 if is_input_field_key(key.code) {
+                    // `<input type=number>` fields only accept the numeric
+                    // character set (digit, sign, decimal point, exponent) —
+                    // mirroring the browser's number editor, which rejects
+                    // other characters at the keystroke level.
+                    let mut code = key.code;
+                    if !state.focused_is_textarea
+                        && is_number_input(arena, focused)
+                        && let KeyCode::Char(c) = code
+                        && !number_input_allows_char(c)
+                    {
+                        code = KeyCode::Null;
+                    }
+                    // A readonly field keeps caret navigation but rejects the
+                    // editing keys (insert / delete) — its value is fixed.
+                    if is_readonly_input(arena, focused)
+                        && matches!(code, KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete)
+                    {
+                        code = KeyCode::Null;
+                    }
                     // Plain editing keys clear the selection.
                     let changed = if state.focused_is_textarea {
                         apply_textarea_key(
                             &mut state.input_value,
                             &mut state.input_cursor,
                             content_width,
-                            key.code,
+                            code,
                         )
                     } else {
                         apply_input_key(
                             &mut state.input_value,
                             &mut state.input_cursor,
-                            key.code,
+                            code,
                         )
                     };
                     if changed {
@@ -2032,9 +2149,13 @@ pub fn trigger_refresh(
             // system clipboard verbatim. Insert it at the caret of the focused
             // field — `<textarea>` keeps newlines, single-line fields collapse
             // them — then fire `input` and repaint. Nothing to do when no
-            // field is focused (the terminal already showed the pasted text).
+            // field is focused (the terminal already showed the pasted text)
+            // or the field is readonly.
             if let Some(focused) = state.focused_input {
-                if paste_into_field(state, &pasted, focused, &mut cmds) && arena.is_some() {
+                if !is_readonly_input(arena, focused)
+                    && paste_into_field(state, &pasted, focused, &mut cmds)
+                    && arena.is_some()
+                {
                     msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
                 }
             }
