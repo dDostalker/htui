@@ -358,7 +358,7 @@ fn host_render_html_reloads_in_engine_instead_of_render_thread() {
     // re-parse on the render side (the former dual-source bug, browser-compat
     // §6.4.12).
     let bindings = host_bindings("rebuild", move |call| {
-        call.render.push(RenderCmd::RenderHtml {
+        call.render().push(RenderCmd::RenderHtml {
             html: Arc::from(r#"<div id="fresh">hello</div>"#),
         });
         boa_engine::JsValue::undefined()
@@ -480,7 +480,7 @@ fn timer_callback_can_push_render_commands() {
     // Host functions called from a timer callback push into the same render
     // command queue as any other JS execution.
     let bindings = host_bindings("pushIt", move |call| {
-        call.render.push(RenderCmd::Redraw {
+        call.render().push(RenderCmd::Redraw {
             scroll_y: 0,
             zoom: 1.0,
         });
@@ -999,7 +999,7 @@ fn find_node_by_id(arena: &NodeArena, id: &str) -> NodeId {
 
 fn host_bindings(
     name: &str,
-    mut f: impl FnMut(&mut htui::script::HostCall) -> boa_engine::JsValue + Send + 'static,
+    mut f: impl FnMut(&mut htui::script::HostCtx) -> boa_engine::JsValue + Send + 'static,
 ) -> EventBindings {
     let mut bindings = EventBindings::default();
     bindings.host.insert(

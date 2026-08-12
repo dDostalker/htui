@@ -41,7 +41,7 @@ HTML ──► html_parse（提取 style CSS / script JS 源码）
 | 求值器 | 手写 JS 子集 `eval.rs`（仅表达式） | Boa 完整 ECMAScript 引擎 |
 | DOM 访问 | 无 | `document` / element 包装对象（`textContent`、`style`、`className`…） |
 | 动态重渲染 | `RenderCmd::RenderHtml`（整文档重新解析） | JS 直接改 DOM → `RenderCmd::RenderArena`（**零重解析**） |
-| 宿主回调 | `EventHandler: FnMut(&HtmlEvent) -> Option<RenderCmd>` | `HostFn: FnMut(&mut HostCall) -> JsValue`（可返回值给 JS、可 push 渲染命令） |
+| 宿主回调 | `EventHandler: FnMut(&HtmlEvent) -> Option<RenderCmd>` | `host_fn` 构造的 `HostFn`（闭包不暴露 Boa，参数/返回值/错误均纯 Rust） |
 
 ---
 
@@ -75,18 +75,23 @@ HTML ──► html_parse（提取 style CSS / script JS 源码）
 
 ```rust
 use htui::events::EventBindings;
-use htui::script::HostCall;
-use boa_engine::JsValue;
 
 fn main() {
     let mut bindings = EventBindings::default();
+    // host_fn 闭包完全不碰 Boa：参数 FromJs、错误 HostError、返回 IntoJs
     bindings.host.insert(
         "fetchPrice".to_string(),
-        Box::new(|call: &mut HostCall| {
-            // 读参数：call.args
-            let symbol = call.args.get(0).and_then(|v| v.as_string());
-            // 返回给 JS 的值（可以是对象）
-            JsValue::from(12.5)
+        htui::script::host_fn(|ctx| {
+            let symbol: String = ctx.arg_required(0)?;
+            let price = match symbol.as_str() {
+                "AAPL" => 212.5,
+                "TSLA" => 248.9,
+                _ => return Err(htui::script::HostError::new("unknown symbol")),
+            };
+            let mut obj = ctx.object();
+            obj.set("symbol", symbol);
+            obj.set("price", price);
+            Ok(obj)
         }),
     );
 
@@ -233,9 +238,14 @@ button/checkbox 的默认动作一致）。`close` 由引擎原生的 `<dialog>`
 
 ## 5. 命令（Commands，即宿主函数）
 
-命令是"JS ↔ Rust 之间的桥"：页面脚本调用它们完成 Rust 侧的工作（系统采样、
-IO、复杂计算），并把结果返回给 JS。写法只有一种：`#[htui::command]`。
-（文档有时沿用"宿主函数"一词指代同一个概念；底层类型为 `HostFn` / `HostCall`。）
+命令是“JS ↔ Rust 之间的桥”：页面脚本调用它们完成 Rust 侧的工作（系统采样、
+IO、复杂计算），并把结果返回给 JS。推荐写法两种，都**不碰 Boa**：
+
+- `#[htui::command]`（纯函数 / 宏自动注册，见 5.1）；
+- `htui::script::host_fn(|ctx| …)`（手写闭包，适合有状态 / 动态构造对象，见 5.2）。
+
+（文档有时沿用“宿主函数”一词指代同一个概念；底层类型为 `HostFn`，由
+`host_fn` 与宏生成，应用代码从不直接构造。）
 
 ### 5.1 推荐写法：`#[htui::commands]` + `#[htui::command]`（tauri 式，不碰 Boa）
 
@@ -267,11 +277,18 @@ mod app {
     #[htui::command]
     pub fn set_threshold(value: f64) -> Result<(), String> { /* … */ }
 
-    /// 有状态命令：返回 `HostFn` 闭包（闭包内自行捕获锁、Arc 等状态）
+    /// 有状态命令：返回 `HostFn` 闭包（闭包内捕获锁、Arc 等状态；
+    /// 用 `host_fn` 写，函数体不出现任何 Boa 类型）
     #[htui::command]
     pub fn snapshot() -> HostFn {
         let shared = Arc::new(Mutex::new(State::default()));
-        Box::new(move |call: &mut HostCall| { /* 读 shared，构造返回对象 */ })
+        htui::script::host_fn(move |ctx| {
+            let state = shared.lock().unwrap();
+            let mut obj = ctx.object();
+            obj.set("cpu", state.cpu_bar.clone());
+            obj.set("proc", state.proc);
+            Ok(obj)
+        })
     }
 
     /// 需要重命名的命令：JS 侧叫 `formatDateTime`
@@ -286,13 +303,14 @@ app::register(&mut bindings);   // 一条语句注册模块内全部命令
 页面侧：`var d = sample(); d.cpuBar`；出错时 `try { set_threshold(120) } catch (e) { … }`。
 周期刷新直接在页面里写 `setInterval(refresh, 200)`（见下「定时任务」）。
 
-- **只有 `#[htui::command]` 一种写法**，注册统一走 `<fn>_command()`：
+- **宏形态的写法**：注册统一走 `<fn>_command()`：
   - 普通函数（参数 `FromJs`、返回 `IntoJs`）自动包成 `HostFn`；
-  - 返回 `HostFn` 的函数（零参数）用于有状态场景，闭包捕获什么由你决定。
+  - 返回 `HostFn` 的函数（零参数）用于有状态场景，闭包捕获什么由你决定（推荐
+    用 `host_fn` 写，见 5.2）。
 - `#[htui::commands]` 扫描模块内的 `#[htui::command]` 函数，生成 `register(&mut
   EventBindings)`：JS 名默认取函数名，`#[htui::command(name = "…")]` 可改名。
 - 返回值 `IntoJs` 支持：`String`/`&str`/数值/`bool`/`()`/`Option<T>`/`Vec<T>`/`Result<T, E>`
-  （`E: String/&str/JsNativeError`，`Err` 抛异常）以及 `#[derive(IntoJs)]` 结构体。
+  （`E: String/&str/HostError`，`Err` 抛异常）以及 `#[derive(IntoJs)]` 结构体。
 - 参数 `FromJs` 支持：`String`/`f64`/整数/`bool`/`Option<T>`/`Vec<T>`，以及
   `#[derive(FromJs)]` 结构体（同样支持 `#[js_name]` 属性名映射，如
   `{ maxCpu: 80 }` → `max_cpu` 字段）。
@@ -301,27 +319,47 @@ app::register(&mut bindings);   // 一条语句注册模块内全部命令
   命令（返回 `HostFn`）内部直接复用这些纯函数（Rust 侧调用，不走 JS 层），
   页面脚本也可直接 `bar(0.5, 14)` / `formatDateTime(...)` 调用。
 
-### 5.2 手写闭包（有状态 / 高级场景）
+### 5.2 手写闭包：`host_fn`（有状态 / 构造对象，同样不碰 Boa）
+
+需要跨调用状态或动态返回对象、又不想拆成纯命令时，用 `htui::script::host_fn`。
+闭包签名是 `FnMut(&mut HostCtx) -> Result<T, HostError>`——**参数、返回值、错误、
+对象构造全走纯 Rust 类型**，`HostCtx` 内部的 Boa `Context` 字段私有且不暴露，
+结构上无法触碰引擎类型：
 
 ```rust
-pub type HostFn = Box<dyn FnMut(&mut HostCall) -> JsResult<JsValue> + Send>;
+use std::sync::{Arc, Mutex};
+use htui::events::EventBindings;
 
-pub struct HostCall<'a> {
-    pub args: &'a [JsValue],        // JS 传入的参数
-    pub event: Option<&'a HtmlEvent>, // 当前派发中的事件（如有）
-    pub render: &'a mut Vec<RenderCmd>, // push 渲染命令（如 Quit）
-    pub context: &'a mut Context,   // Boa Context，可构造返回对象
-}
+let calls = Arc::new(Mutex::new(0u64));
+bindings.host.insert(
+    "sample".to_string(),
+    htui::script::host_fn({
+        let calls = Arc::clone(&calls);
+        move |ctx| {
+            // 读参数：FromJs 转换，错误自动变成 HostError
+            let min: Option<i64> = ctx.arg(0)?;
+            // 状态：闭包捕获，跨 JS 调用存活
+            let mut n = calls.lock().unwrap();
+            *n += 1;
+            // 返回对象：ctx.object() 拿到 JsObjectBuilder，set 后直接返回
+            let mut obj = ctx.object();
+            obj.set("n", *n);
+            obj.set("min", min.unwrap_or(0));
+            Ok(obj)
+        }
+    }),
+);
 ```
 
-- 注册：`bindings.host.insert("name".into(), Box::new(|call: &mut HostCall| …))`。
-  更推荐把闭包包进零参数函数、用 `#[htui::command]`（返回 `HostFn`）放进
-  `#[htui::commands]` 模块统一注册（闭包内的状态自行创建），例如
-  `example/src/sysmon.rs` 的 `sample()`。
-- `HostFn` 返回 `JsResult<JsValue>`：`Err` 抛 JS 异常，`Ok` 是调用结果。
-- 便捷方法：`call.arg::<T>(i)` / `call.arg_required::<T>(i)`（`FromJs` 转换）、
-  `call.ret(value)`（`IntoJs` 转换）；构造对象用 `htui::js_obj!(call.context, "k" => v, …)`。
-- 需要触发重渲染时 push `RenderCmd`（例如 `RenderCmd::Quit`）。
+- `HostCtx` 方法：`arg::<T>(i)` / `arg_required::<T>(i)`（缺参自动抛
+  `TypeError`）、`event()`（当前派发中的事件）、`render()`（返回 `&mut
+  Vec<RenderCmd>`，push 命令触发重渲染）、`object()`（构造返回对象，
+  `JsObjectBuilder` 实现了 `IntoJs`，可直接作为返回值）。
+- 错误用 `HostError`：`Err("msg".into())` / `HostError::new(..)` 映射为通用
+  `Error`；`type_error(..)` / `range_error(..)` 映射为 `TypeError` / `RangeError`。
+  页面侧 `try { … } catch (e) { if (e instanceof TypeError) … }` 可区分。
+- 有状态命令推荐组合进宏：`#[htui::command] fn snapshot() -> HostFn { htui::script::host_fn(…) }`，
+  放进 `#[htui::commands]` 模块统一注册（见 5.1）。
 - **宿主函数在脚本线程上执行**：引擎（Boa Context + live DOM + hover 状态机）独占一个
   脚本线程，输入循环只发 `ScriptMsg`、收 `ScriptResponse`，永不执行 JS。因此宿主函数
   阻塞只会拖住脚本线程——滚动、退出、鼠标拖选照常（Tauri 式 UI 解耦）。但**慢宿主
@@ -474,7 +512,9 @@ html → tdom → layout → tui    （不可破坏的既有四层）
   `Result::Err` → JS throw，纯内存，不依赖终端）。
 - `tests/macro_tests.rs`：`#[htui::commands]` 模块自动注册（纯命令 + 有状态
   `HostFn` 返回命令）、JS 可调用性，以及
-  `#[htui::command(name = "…")]` 与手工注册的兼容（纯内存）。
+  `#[htui::command(name = "…")]` 与手工注册的兼容；另有 `host_fn` 的
+  **Boa-free 测试**（对象返回 / 可选参数 / `HostError` 抛 `TypeError` /
+  跨调用状态捕获 / push 渲染命令，测试文件零 Boa import，纯内存）。
 - `tests/script_loop_tests.rs`：脚本线程桥——`apply_message` 语义（hover 进出顺序 /
   blur→change / select 提交+dirty）、`run_script_thread` 端到端，以及**阻塞宿主
   函数不阻塞输入侧通道**的解耦保证（纯内存）。

@@ -6,18 +6,18 @@
 use std::sync::{Arc, Mutex};
 
 use htui::events::EventBindings;
-use htui::script::{HostCall, HostFn, ScriptEngine};
+use htui::script::{HostFn, ScriptEngine};
 
 // The fixture module exercises every registration feature:
 //   - `greet` is registered under its function name,
 //   - `format_datetime` under the explicit `name = "formatDateTime"`,
-//   - `sample` is a stateful command returning a `HostFn` (its counter
-//     survives across JS calls) — the only way stateful hosts are written.
+//   - `sample` is a stateful command (its counter survives across JS calls),
+//     written with `host_fn` so the body never names a Boa type.
 #[htui::commands]
 mod app {
     use std::sync::{Arc, Mutex};
 
-    use htui::script::{HostCall, HostFn};
+    use htui::script::HostFn;
 
     /// Command registered under its function name.
     #[htui::command]
@@ -31,14 +31,17 @@ mod app {
         format!("@{secs}")
     }
 
-    /// Stateful command: every JS call increments its internal counter.
+    /// Stateful command: every JS call increments its internal counter and
+    /// returns it as an object property.
     #[htui::command(name = "sample")]
     pub fn sample() -> HostFn {
         let calls = Arc::new(Mutex::new(0u64));
-        Box::new(move |call: &mut HostCall| {
+        htui::script::host_fn(move |ctx| {
             let mut n = calls.lock().unwrap();
             *n += 1;
-            Ok(htui::js_obj!(call.context, "n" => *n))
+            let mut obj = ctx.object();
+            obj.set("n", *n);
+            Ok(obj)
         })
     }
 }
@@ -106,14 +109,15 @@ fn command_name_attribute_does_not_break_manual_registration() {
 }
 
 /// A stateful `#[htui::command]` returning `HostFn` also works with manual
-/// registration via its generated `<fn>_command()` wrapper.
+/// registration via its generated `<fn>_command()` wrapper. The closure is
+/// written with `host_fn`, so the body never names a Boa type.
 #[htui::command]
 fn counter() -> HostFn {
     let calls = Arc::new(Mutex::new(0u64));
-    Box::new(move |call: &mut HostCall| {
+    htui::script::host_fn(move |_ctx| {
         let mut n = calls.lock().unwrap();
         *n += 1;
-        Ok(htui::js_obj!(call.context, "n" => *n))
+        Ok(*n)
     })
 }
 
@@ -124,8 +128,8 @@ fn host_fn_returning_command_works_with_manual_registration() {
 
     let mut engine = ScriptEngine::new(
         r#"<script>
-          globalThis.__c = counter().n;
-          globalThis.__c2 = counter().n;
+          globalThis.__c = counter();
+          globalThis.__c2 = counter();
         </script>
         <p>x</p>"#,
         bindings,
@@ -147,4 +151,114 @@ fn eval_str(engine: &mut ScriptEngine, expr: &str) -> String {
     v.as_string()
         .map(|s| s.to_std_string_lossy())
         .unwrap_or_default()
+}
+
+// ---------------------------------------------------------------------------
+// Boa-free host functions via `htui::script::host_fn`.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn host_fn_closures_are_fully_boa_free() {
+    use htui::script::HostError;
+
+    let mut bindings = EventBindings::default();
+    // Object return, optional argument, error path — none of it names a Boa
+    // type (no `JsValue` / `Context` / `JsResult` / `JsError` in this test).
+    bindings.host.insert(
+        "describe".to_string(),
+        htui::script::host_fn(|ctx| {
+            let name: String = ctx.arg_required(0)?;
+            let count: i64 = ctx.arg(1)?.unwrap_or(0);
+            let mut obj = ctx.object();
+            obj.set("greeting", format!("hi {name}"));
+            obj.set("count", count);
+            Ok(obj)
+        }),
+    );
+    bindings.host.insert(
+        "bounded".to_string(),
+        htui::script::host_fn(|ctx| -> Result<i64, HostError> {
+            let n: i64 = ctx.arg_required(0)?;
+            if n < 0 {
+                return Err(HostError::type_error("must be non-negative"));
+            }
+            Ok(n * 2)
+        }),
+    );
+
+    let mut engine = ScriptEngine::new(
+        r#"
+        <script>
+          globalThis.__g = describe("Ada", 3).greeting;
+          globalThis.__c = describe("Bob").count;
+          globalThis.__d = bounded(21);
+          try { bounded(-1); globalThis.__threw = false; }
+          catch (e) { globalThis.__threw = e instanceof TypeError; }
+        </script>
+        <p>x</p>
+        "#,
+        bindings,
+    )
+    .expect("engine must build");
+
+    assert_eq!(eval_str(&mut engine, "globalThis.__g"), "hi Ada");
+    assert_eq!(eval_str(&mut engine, "globalThis.__c"), "0");
+    assert_eq!(eval_str(&mut engine, "globalThis.__d"), "42");
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__threw"),
+        "true",
+        "HostError::type_error must surface as a JS TypeError"
+    );
+}
+
+#[test]
+fn host_fn_captures_state_across_calls() {
+    let calls = std::sync::Arc::new(std::sync::Mutex::new(0u64));
+    let mut bindings = EventBindings::default();
+    bindings.host.insert(
+        "counter".to_string(),
+        htui::script::host_fn({
+            let calls = std::sync::Arc::clone(&calls);
+            move |_ctx| {
+                let mut n = calls.lock().unwrap();
+                *n += 1;
+                Ok(*n)
+            }
+        }),
+    );
+
+    let mut engine = ScriptEngine::new(
+        r#"<script>
+          globalThis.__a = counter();
+          globalThis.__b = counter();
+        </script>
+        <p>x</p>"#,
+        bindings,
+    )
+    .expect("engine must build");
+
+    assert_eq!(eval_str(&mut engine, "globalThis.__a"), "1");
+    assert_eq!(eval_str(&mut engine, "globalThis.__b"), "2");
+}
+
+#[test]
+fn host_fn_can_push_render_commands() {
+    use htui::tui::graph_api::RenderCmd;
+
+    let mut bindings = EventBindings::default();
+    bindings.host.insert(
+        "refresh".to_string(),
+        htui::script::host_fn(|ctx| {
+            ctx.render().push(RenderCmd::Rerender { scroll_y: 0 });
+            Ok(())
+        }),
+    );
+
+    let mut engine = ScriptEngine::new(
+        r#"<script>globalThis.__ok = (refresh(), true);</script><p>x</p>"#,
+        bindings,
+    )
+    .expect("engine must build");
+
+    assert_eq!(eval_str(&mut engine, "globalThis.__ok"), "true");
 }

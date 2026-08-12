@@ -27,8 +27,8 @@ htui/
 │   │   │   │   └── interaction.rs  # 纯逻辑鼠标交互（HoverState / on_move / on_click，脚本线程内调 ScriptEngine::fire）
 │   │   │   ├── script/             # JS 脚本层（旁路：Boa 引擎 + live DOM + 宿主函数）
 │   │   │   │   ├── mod.rs          # ScriptEngine：Context + ScriptState(thread_local) + 引导脚本 + fire/invoke_action/run_due_timers/poll_fetches + on* 属性编译
-│   │   │   │   ├── host.rs         # HostFn / HostCall（Rust 回调 → JS 可调用）+ arg/arg_required/ret 便捷方法
-│   │   │   │   ├── convert.rs      # IntoJs/FromJs 转换层 + js_obj! 宏 + JsObjectBuilder（Rust ↔ JS 值）
+│   │   │   │   ├── host.rs         # HostFn / HostCtx（Rust 回调 → JS 可调用）+ host_fn（Boa 无关构造器）+ arg/arg_required/event/render/object 方法
+│   │   │   │   ├── convert.rs      # IntoJs/FromJs 转换层 + JsObjectBuilder（Rust ↔ JS 值）+ HostError（Boa 无关错误）
 │   │   │   │   ├── dom.rs          # DOM 绑定：document / element 包装 / style / addEventListener / console / alert / quit
 │   │   │   │   └── msg.rs          # 脚本线程桥：ScriptMsg/ScriptResponse + apply_message + run_script_thread（引擎独占线程）
 │   │   │   ├── html/
@@ -470,11 +470,12 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
 | `ScriptEngine`     | `script`                | Boa 引擎封装：live NodeArena + DOM 绑定 + fire/invoke_action/run_due_timers + eval_source（脚本线程独占） |
 | `ScriptMsg`        | `script::msg`           | 脚本线程消息协议：Move / Click / FocusInput / BlurInput / InputKeystroke / SelectPick / Quit |
 | `ScriptResponse`   | `script::msg`           | 脚本线程回复：Ready / Failed / Event{cmds, dirty{arena,root_id}, hovered} |
-| `HostCall`         | `script::host`          | 宿主函数调用上下文（args / event / render / context）+ arg/arg_required/ret 便捷方法 |
-| `HostFn`           | `script::host`          | 宿主函数类型：`Box<dyn FnMut(&mut HostCall) -> JsResult<JsValue> + Send>`（Err → JS throw） |
+| `HostFn`           | `script::host`          | 宿主函数类型：`Box<dyn FnMut(&mut HostCtx) -> JsResult<JsValue> + Send>`（Err → JS throw；由 host_fn/宏生成，勿手写） |
+| `HostCtx`          | `script::host`          | Boa 无关调用句柄（`host_fn` 闭包参数）：arg/arg_required/event/render/object，不暴露 Context |
+| `host_fn`          | `script::host`          | Boa 无关宿主函数构造器：`host_fn(|ctx| ...) -> HostFn`，用户侧不出现任何 Boa 类型（参数/返回值/对象/错误均纯 Rust） |
+| `HostError`        | `script::convert`       | Boa 无关错误类型：`new`/`type_error`/`range_error` + `From<String|&str|JsError>`；`Result<T, HostError>` 映射为 JS 异常 |
 | `IntoJs` / `FromJs` | `script::convert`       | Rust ↔ JS 值转换 trait（基础类型 + Option/Vec/Result 实现） |
-| `js_obj!`          | `script::convert`       | JS 对象字面量宏（`js_obj!(ctx, "k" => v, …)`） |
-| `#[htui::command]` | `htui_macros`           | 唯一命令写法：普通 `fn(… FromJs 参数) -> IntoJs 返回值` 自动包成 `HostFn`，或零参数 `fn() -> HostFn`（有状态，闭包捕获状态），均生成 `<fn>_command()`；`name = "…"` 指定 JS 注册名 |
+| `#[htui::command]` | `htui_macros`           | 命令写法之一：普通 `fn(… FromJs 参数) -> IntoJs 返回值` 自动包成 `HostFn`，或零参数 `fn() -> HostFn`（有状态，闭包捕获状态，函数体用 `host_fn` 写），均生成 `<fn>_command()`；`name = "…"` 指定 JS 注册名 |
 | `#[htui::commands]` | `htui_macros`          | 模块级自动注册：扫描模块内 `#[htui::command]`，生成 `register(&mut EventBindings)`；周期任务由页面 JS `setInterval` 调度 |
 | `#[derive(IntoJs/FromJs)]` | `htui_macros`    | 结构体 ↔ JS 对象（`#[js_name = "…"]` 重命名属性） |
 | `EdgeSizes`        | `html::box_edges`       | 四边长度（top/right/bottom/left），用于 padding / margin |

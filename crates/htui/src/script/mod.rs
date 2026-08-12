@@ -51,8 +51,8 @@ mod msg;
 
 pub mod convert;
 
-pub use convert::{FromJs, IntoJs, JsObjectBuilder};
-pub use host::{HostCall, HostFn};
+pub use convert::{FromJs, HostError, IntoJs, JsObjectBuilder};
+pub use host::{HostCtx, HostFn, host_fn};
 pub use msg::{ScriptDirty, ScriptEvent, ScriptMsg, ScriptResponse, apply_message, run_script_thread};
 
 use dom::{
@@ -951,7 +951,7 @@ fn register_host_global(context: &mut Context, name: &str) -> JsResult<()> {
 }
 
 /// Native dispatcher for host functions: looks the function up in the shared
-/// state and calls it with a [`HostCall`].
+/// state and calls it with a [`HostCtx`].
 fn dispatch_host(name: &str, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let Some(rc) = with_state() else {
         return Ok(JsValue::undefined());
@@ -967,12 +967,7 @@ fn dispatch_host(name: &str, args: &[JsValue], context: &mut Context) -> JsResul
         log::warn!("Unknown host function `{name}`");
         return Ok(JsValue::undefined());
     };
-    let mut call = host::HostCall {
-        args,
-        event: current_event.as_ref(),
-        render: render_cmds,
-        context,
-    };
+    let mut call = host::HostCtx::new(args, current_event.as_ref(), render_cmds, context);
     f(&mut call)
 }
 

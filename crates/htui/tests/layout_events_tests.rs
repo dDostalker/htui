@@ -821,7 +821,7 @@ fn center(rect: Rect) -> (u32, u32) {
 /// Build bindings with a single host function.
 fn host_bindings(
     name: &str,
-    mut f: impl FnMut(&mut htui::script::HostCall) -> JsValue + Send + 'static,
+    mut f: impl FnMut(&mut htui::script::HostCtx) -> JsValue + Send + 'static,
 ) -> EventBindings {
     let mut bindings = EventBindings::default();
     bindings.host.insert(name.to_string(), Box::new(move |call| Ok(f(call))));
@@ -1128,8 +1128,8 @@ fn stop_propagation_stops_the_ancestor_listener() {
     let (mut engine, geo) = build_geometry(
         html,
         host_bindings("report", move |call| {
-            if let Some(s) = call.args.first().and_then(|v| v.as_string()) {
-                hits2.lock().unwrap().push(s.to_std_string_lossy());
+            if let Some(s) = call.arg::<String>(0).ok().flatten() {
+                hits2.lock().unwrap().push(s);
             }
             JsValue::undefined()
         }),
@@ -1189,8 +1189,8 @@ fn hover_fires_mouseover_and_mouseout_listeners() {
     let (mut engine, geo) = build_geometry(
         html,
         host_bindings("report", move |call| {
-            if let Some(s) = call.args.first().and_then(|v| v.as_string()) {
-                hits2.lock().unwrap().push(s.to_std_string_lossy());
+            if let Some(s) = call.arg::<String>(0).ok().flatten() {
+                hits2.lock().unwrap().push(s);
             }
             JsValue::undefined()
         }),
@@ -1252,8 +1252,8 @@ fn resize_relayout_keeps_node_ids_and_events_fire() {
     let (mut engine, geo) = build_geometry(
         html,
         host_bindings("report", move |call| {
-            if let Some(s) = call.args.first().and_then(|v| v.as_string()) {
-                hits2.lock().unwrap().push(s.to_std_string_lossy());
+            if let Some(s) = call.arg::<String>(0).ok().flatten() {
+                hits2.lock().unwrap().push(s);
             }
             JsValue::undefined()
         }),
@@ -1302,8 +1302,8 @@ fn resize_reflow_revalidates_hover_under_the_stationary_pointer() {
     let (mut engine, geo) = build_geometry(
         html,
         host_bindings("report", move |call| {
-            if let Some(s) = call.args.first().and_then(|v| v.as_string()) {
-                hits2.lock().unwrap().push(s.to_std_string_lossy());
+            if let Some(s) = call.arg::<String>(0).ok().flatten() {
+                hits2.lock().unwrap().push(s);
             }
             JsValue::undefined()
         }),
@@ -1388,7 +1388,7 @@ fn invoke_action_calls_a_js_global_function() {
     let mut engine = ScriptEngine::new(
         html,
         host_bindings("report", move |call| {
-            if let Some(n) = call.args.first().and_then(|v| v.as_number()) {
+            if let Some(n) = call.arg::<f64>(0).ok().flatten() {
                 *sampled2.lock().unwrap() = n;
             }
             JsValue::undefined()
@@ -1445,15 +1445,10 @@ fn sysmon_refresh_pipeline_updates_the_dom() {
     let mut bindings = EventBindings::default();
     bindings.host.insert(
         "sample".to_string(),
-        Box::new(|call: &mut htui::script::HostCall| {
-            let obj = boa_engine::object::ObjectInitializer::new(call.context)
-                .property(
-                    boa_engine::js_string!("cpu"),
-                    boa_engine::js_string!("23%"),
-                    boa_engine::property::Attribute::all(),
-                )
-                .build();
-            Ok(obj.into())
+        htui::script::host_fn(|ctx| {
+            let mut obj = ctx.object();
+            obj.set("cpu", "23%");
+            Ok(obj)
         }),
     );
     let mut engine = ScriptEngine::new(html, bindings).expect("engine");
@@ -1494,15 +1489,10 @@ fn sysmon_refresh_renders_the_progress_bar() {
     let mut bindings = EventBindings::default();
     bindings.host.insert(
         "sample".to_string(),
-        Box::new(|call: &mut htui::script::HostCall| {
-            Ok(boa_engine::object::ObjectInitializer::new(call.context)
-                .property(
-                    boa_engine::js_string!("cpu"),
-                    boa_engine::js_string!("[########--------] 45%"),
-                    boa_engine::property::Attribute::all(),
-                )
-                .build()
-                .into())
+        htui::script::host_fn(|ctx| {
+            let mut obj = ctx.object();
+            obj.set("cpu", "[########--------] 45%");
+            Ok(obj)
         }),
     );
     let mut engine = ScriptEngine::new(html, bindings).expect("engine");
