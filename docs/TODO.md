@@ -1,5 +1,4 @@
 # A
-- innerHTML
 - el.classList
 - <textarea> !
 - focus()/blur()

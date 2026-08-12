@@ -149,15 +149,20 @@ pub enum SelectionMode {
 /// repaint only the affected rectangles) instead of clearing and re-painting
 /// the whole canvas; the rect comparison against the cached layout decides
 /// whether that path is safe and falls back to a full repaint otherwise.
+/// `style_css` carries CSS injected via `innerHTML` `<style>` elements so the
+/// render thread can extend the session stylesheet before re-cascading.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DirtyInfo {
     pub nodes: Vec<crate::tdom::node::NodeId>,
+    /// CSS extracted from `<style>` / `<link rel=stylesheet>` elements inserted
+    /// through `innerHTML` since the last render.
+    pub style_css: String,
 }
 
 impl DirtyInfo {
     /// True when no DOM mutation is pending (nothing to repaint).
     pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
+        self.nodes.is_empty() && self.style_css.is_empty()
     }
 }
 

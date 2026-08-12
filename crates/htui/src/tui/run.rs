@@ -71,21 +71,23 @@ fn flush_frame<W: Write>(out: &mut BufWriter<W>) {
 /// at ~60 fps. 16 ms is imperceptible to interactive input.
 const MIN_FRAME_GAP: Duration = Duration::from_millis(16);
 
-fn build_css_rules(html: &str, css: &str) -> CssRule {
+fn combined_css_source(html: &str, css: &str) -> String {
     let mut html_parser = crate::html::html_parse::Parser::new(html);
     let (_root_id, _arena, embedded_css) = html_parser.parse();
 
-    let combined = if css.is_empty() {
+    if css.is_empty() {
         embedded_css
     } else {
         format!("{}\n{}", embedded_css, css)
-    };
+    }
+}
 
-    if combined.trim().is_empty() {
+/// Parse a full CSS source string into rules (empty source → empty rules).
+fn parse_css_source(source: &str) -> CssRule {
+    if source.trim().is_empty() {
         return CssRule::new();
     }
-
-    let mut css_parser = css_parse::Parser::new(&combined);
+    let mut css_parser = css_parse::Parser::new(source);
     css_parser.parse()
 }
 
@@ -201,6 +203,12 @@ impl OpenSelect {
 
 struct RenderState {
     html: Arc<str>,
+    /// Combined initial stylesheet source (document-embedded + session CSS),
+    /// kept so `innerHTML`-injected CSS can be appended and re-parsed.
+    base_css: Arc<str>,
+    /// CSS injected via `innerHTML` `<style>` elements, appended to the
+    /// session stylesheet incrementally.
+    extra_css: String,
     css_rules: Arc<CssRule>,
     /// Whether the stylesheet declares any `:hover` rule — when false, moving
     /// the pointer can never change the painted output, so `Hover` commands
@@ -560,11 +568,39 @@ impl RenderState {
         dirty: DirtyInfo,
         hover_changed: bool,
     ) {
+        // `innerHTML`-injected `<style>` CSS must extend the session
+        // stylesheet before the cascade. The added rules may restyle any node
+        // in the tree, so the incremental repaint is disabled for this frame.
+        let css_changed = !dirty.style_css.is_empty();
+        if css_changed {
+            self.append_style_css(&dirty.style_css);
+        }
         let mut arena = arena.clone();
         reset_css_attr(&mut arena, root_id);
         css_into_node_with_hover(&mut arena, root_id, &self.css_rules, self.hovered);
-        let dirty = if hover_changed { None } else { Some(&dirty) };
+        let dirty = if hover_changed || css_changed {
+            None
+        } else {
+            Some(&dirty)
+        };
         self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom, dirty);
+    }
+
+    /// Extend the session stylesheet with `innerHTML`-injected CSS and
+    /// re-parse the combined rules (new rules may add `:hover` selectors).
+    fn append_style_css(&mut self, css: &str) {
+        if css.trim().is_empty() {
+            return;
+        }
+        self.extra_css.push_str(css);
+        self.extra_css.push('\n');
+        let mut combined = String::with_capacity(self.base_css.len() + self.extra_css.len());
+        combined.push_str(&self.base_css);
+        combined.push('\n');
+        combined.push_str(&self.extra_css);
+        let rules = parse_css_source(&combined);
+        self.has_hover_rules = css_has_hover_rules(&rules);
+        self.css_rules = Arc::new(rules);
     }
 
     /// Replace the session document and fully re-render it, keeping the
@@ -587,6 +623,11 @@ impl RenderState {
             None => (0, 1.0),
         };
         self.html = html;
+        // A fresh document discards any `innerHTML`-injected CSS.
+        self.extra_css = String::new();
+        let rules = parse_css_source(&self.base_css);
+        self.has_hover_rules = css_has_hover_rules(&rules);
+        self.css_rules = Arc::new(rules);
         // The new document may carry a different `<title>`.
         self.title_set = false;
         self.redraw(out, geo_tx, term_map, scroll_y, zoom);
@@ -938,7 +979,7 @@ fn css_has_hover_rules(css_rules: &CssRule) -> bool {
 fn render_thread(
     rx: mpsc::Receiver<RenderCmd>,
     html: Arc<str>,
-    css_rules: Arc<CssRule>,
+    base_css: Arc<str>,
     max_scroll: Arc<AtomicU32>,
     geo_tx: Option<mpsc::Sender<Arc<Geometry>>>,
     selection_text: Arc<Mutex<String>>,
@@ -948,9 +989,12 @@ fn render_thread(
     // into it and is flushed exactly once, so a frame costs a single write
     // syscall instead of one per render call.
     let mut out = BufWriter::new(stdout());
+    let css_rules = Arc::new(parse_css_source(&base_css));
     let has_hover_rules = css_has_hover_rules(&css_rules);
     let mut state = RenderState {
         html,
+        base_css,
+        extra_css: String::new(),
         css_rules,
         has_hover_rules,
         term_layout: None,
@@ -1360,7 +1404,7 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
         return;
     }
 
-    let css_rules = Arc::new(build_css_rules(html, css));
+    let css_source = Arc::<str>::from(combined_css_source(html, css));
 
     let html: Arc<str> = Arc::from(html);
 
@@ -1423,7 +1467,7 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
     let render_beat: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
     let render_handle = std::thread::spawn({
         let html_clone = Arc::clone(&html);
-        let css_clone = Arc::clone(&css_rules);
+        let css_clone = Arc::clone(&css_source);
         let max_scroll_clone = Arc::clone(&max_scroll);
         let selection_text_clone = Arc::clone(&selection_text);
         let render_beat_clone = Arc::clone(&render_beat);

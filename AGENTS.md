@@ -144,6 +144,7 @@ htui/
 │   │   │   ├── layout_table_tests.rs
 │   │   │   ├── layout_wrap_tests.rs
 │   │   │   ├── layout_events_tests.rs # 事件系统测试（命中 / 冒泡 / hover / click，纯内存）
+│   │   │   ├── layout_inner_html_tests.rs # innerHTML 测试（读取序列化 / 写入片段解析 / style 提取 / script 跳过，纯内存）
 │   │   │   ├── layout_position_tests.rs # CSS 定位测试（relative / absolute / fixed + z-index）
 │   │   ├── layout_input_tests.rs # <input> 输入框测试（渲染 / 编辑逻辑 / 光标状态）
 │   │   ├── layout_form_tests.rs # 表单测试（hidden/password/checkbox/radio/textarea + label/button/form submit-reset，纯内存）

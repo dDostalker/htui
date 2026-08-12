@@ -197,8 +197,12 @@ button/checkbox 的默认动作一致）。`close` 由引擎原生的 `<dialog>`
 - `document.createElement(tag)` → 新元素（尚未挂到文档）
 
 **Element 包装对象**（`getElementById` / `event.target` 返回）
-- 属性访问器：`textContent`、`className`、`id`、`parentNode`、`value`
+- 属性访问器：`textContent`、`innerHTML`、`className`、`id`、`parentNode`、`value`
   （`<input>` 字段的已提交值，可读写；写值会标记重渲染）
+- `innerHTML`：读写子树 HTML 片段。读按浏览器序列化算法（文本/属性转义、void 元素
+  无闭合标签）；写用 html5ever 片段解析（以元素自身为上下文），替换全部子节点。
+  `<style>`（及 `<link rel=stylesheet>`）的 CSS 会被提取并注入会话样式表生效，
+  `<script>` 按浏览器语义**不执行**
 - 方法：`getAttribute(name)` / `setAttribute(name, value)` / `removeAttribute(name)`
 - `querySelector(sel)` / `querySelectorAll(sel)`：限定在元素子树内查询（不含元素自身）
 - `addEventListener(type, fn)` / `removeEventListener(type, fn)`
@@ -378,8 +382,10 @@ JS 每 200ms 刷一次监控器，大部分帧只改几个 `<p>` 的文本。旧
 增量重绘把这一路径拆开：
 
 1. **引擎侧记账**：每个 DOM 原生写操作（`textContent` / `style` / `setAttribute` /
-   `appendChild`…）把对应 `NodeId` 追加进 `ScriptState.dirty`；`take_dirty()`
-   一次性取出，随 `RenderArena` 送到渲染线程。
+   `appendChild` / `innerHTML`…）把对应 `NodeId` 追加进 `ScriptState.dirty`；
+   `innerHTML` 注入的 `<style>` CSS 额外记入 `dirty.style_css`，随 `RenderArena`
+   送到渲染线程追加进会话样式表。`take_dirty()` 一次性取出，随 `RenderArena`
+   送到渲染线程。
 2. **渲染线程判定**：对每个 dirty 节点沿 DOM 向上找到第一个"有盒子的祖先"
    （inline 元素折叠进外层 block 的 runs，因此按祖先盒子的 rect 计算区域）。
    该盒子的 rect 必须在缓存布局与新布局中完全一致——否则说明改动影响了几何

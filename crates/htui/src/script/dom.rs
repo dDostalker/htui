@@ -156,6 +156,8 @@ fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsValue
     let get_style = js_fn(context, NativeFunction::from_fn_ptr(native_get_style));
     let get_value = js_fn(context, NativeFunction::from_fn_ptr(native_get_value));
     let set_value = js_fn(context, NativeFunction::from_fn_ptr(native_set_value));
+    let get_inner_html = js_fn(context, NativeFunction::from_fn_ptr(native_get_inner_html));
+    let set_inner_html = js_fn(context, NativeFunction::from_fn_ptr(native_set_inner_html));
 
     let mut init = ObjectInitializer::new(context);
     init.property(js_string!("_nodeId"), node_key, hidden);
@@ -221,6 +223,7 @@ fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsValue
         init.accessor(js_string!("id"), Some(get_id), Some(set_id), Attribute::all());
         init.accessor(js_string!("value"), Some(get_value), Some(set_value), Attribute::all());
         init.accessor(js_string!("style"), Some(get_style), None, Attribute::all());
+        init.accessor(js_string!("innerHTML"), Some(get_inner_html), Some(set_inner_html), Attribute::all());
         init.function(
             NativeFunction::from_fn_ptr(native_get_attribute),
             js_string!("getAttribute"),
@@ -559,6 +562,52 @@ fn set_text_content(st: &mut ScriptState, node_id: NodeId, text: &str) -> JsResu
     }
     if let Some(t) = st.arena.get_mut(text_id) {
         t.parent = Some(node_id);
+    }
+    mark_dirty(st, node_id);
+    Ok(JsValue::undefined())
+}
+
+fn native_get_inner_html(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(js_string!().into());
+    };
+    let st = rc.borrow();
+    let html = crate::html::html_parse::serialize_inner_html(&st.arena, node_id);
+    Ok(js_string!(html).into())
+}
+
+fn native_set_inner_html(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let html = args
+        .first()
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?
+        .unwrap_or_default();
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let mut st = rc.borrow_mut();
+    set_inner_html(&mut st, node_id, &html)
+}
+
+/// Shared `innerHTML` write: parse `html` as a fragment in the context of
+/// `node_id` and replace the node's children. `<style>` CSS is accumulated on
+/// the state so the next render applies it; `<script>` blocks are skipped
+/// (never executed, matching the browser's `innerHTML` semantics).
+fn set_inner_html(st: &mut ScriptState, node_id: NodeId, html: &str) -> JsResult<JsValue> {
+    // `innerHTML` is an Element-only property; non-elements are left alone.
+    let is_element = st
+        .arena
+        .get(node_id)
+        .is_some_and(|n| n.node_type_constant() == 1);
+    if !is_element {
+        return Ok(JsValue::undefined());
+    }
+    let mut css_sources = Vec::new();
+    crate::html::html_parse::parse_fragment_into(&mut st.arena, node_id, html, &mut css_sources);
+    if !css_sources.is_empty() {
+        st.dirty.style_css.push_str(&css_sources.join("\n"));
     }
     mark_dirty(st, node_id);
     Ok(JsValue::undefined())

@@ -446,6 +446,7 @@ pub fn run_script_thread(
             event.dirty = match event.dirty {
                 Some(mut d) => {
                     d.dirty.nodes.extend(snapshot.dirty.nodes);
+                    d.dirty.style_css.push_str(&snapshot.dirty.style_css);
                     d.arena = snapshot.arena;
                     d.root_id = snapshot.root_id;
                     Some(d)

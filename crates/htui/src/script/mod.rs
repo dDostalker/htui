@@ -763,10 +763,17 @@ impl ScriptEngine {
         }
 
         for element in &region.path {
+            // The element wrapper doubles as the listener's `this`: browsers
+            // bind `this` inside a listener to the element it is attached to
+            // (the current target of the dispatch).
+            let Ok(wrapper) = node_wrapper(&mut self.context, element.node_id) else {
+                log::warn!("Failed to wrap node {:?} during dispatch", element.node_id);
+                continue;
+            };
             // `currentTarget` must track the element being dispatched.
-            if let Ok(wrapper) = node_wrapper(&mut self.context, element.node_id)
-                && let Some(obj) = event.as_object() && let Err(e) =
-                    obj.set(js_string!("currentTarget"), wrapper, false, &mut self.context)
+            if let Some(obj) = event.as_object()
+                && let Err(e) =
+                    obj.set(js_string!("currentTarget"), wrapper.clone(), false, &mut self.context)
                 {
                     log::warn!("Failed to set event.currentTarget: {e}");
                 }
@@ -787,7 +794,7 @@ impl ScriptEngine {
             for listener in listeners {
                 let call = listener
                     .to_object(&mut self.context)
-                    .and_then(|f| f.call(&JsValue::undefined(), std::slice::from_ref(&event), &mut self.context));
+                    .and_then(|f| f.call(&wrapper, std::slice::from_ref(&event), &mut self.context));
                 if let Err(e) = call {
                     log::warn!("Listener threw: {e}");
                 }
