@@ -109,6 +109,9 @@ fn main() {
   可终止。
 - **hover**：`onmouseover` / `onmouseout` 在指针进入/离开时触发；CSS `:hover`
   规则通过 `RenderCmd::Hover` 重级联生效（无 `:hover` 规则则无视觉变化）。
+- **focus**：`focus` / `blur` 事件由点击、`el.focus()` / `el.blur()` 或
+  `autofocus` 属性产生；CSS `:focus` 规则（只匹配聚焦元素自身）通过
+  `RenderCmd::Focus` 重级联生效，聚焦变化随 `RenderArena` 镜像到渲染线程。
 - 解析失败 / 未定义函数仅 `log::warn`，不崩溃（对齐浏览器 ReferenceError 语义）。
 
 ### 支持的事件类型
@@ -128,8 +131,10 @@ fn main() {
 | 对话框关闭（`form[method=dialog]` 提交后） | `onclose` | `"close"` |
 
 `focus` / `blur` / `input` / `change` 目前仅由 `<input>` 字段产生：点击聚焦触发
-`focus`（mousedown 时聚焦，对齐浏览器时序），编辑每键触发 `input`，Esc /
-Enter / 点击别处 / 焦点切换提交时触发 `blur`（值有变化时额外触发 `change`）。
+`focus`（mousedown 时聚焦，对齐浏览器时序），JS `el.focus()` / `el.blur()` 也走同一
+路径（经输入循环生效后派发事件，blur 在 focus 之前、值变化时额外 `change`），编辑每键
+触发 `input`，Esc / Enter / 点击别处 / 焦点切换提交时触发 `blur`（值有变化时额外触发
+`change`）。
 `toggle` 由引擎原生的 `<details>` 折叠默认动作产生：点击 summary（或其内容）切换
 `open` 属性后，在 `<details>` 上触发该事件（`preventDefault` 不拦截切换，与
 button/checkbox 的默认动作一致）。`close` 由引擎原生的 `<dialog>` 默认动作产生：
@@ -212,6 +217,9 @@ button/checkbox 的默认动作一致）。`close` 由引擎原生的 `<dialog>`
 - `querySelector(sel)` / `querySelectorAll(sel)`：限定在元素子树内查询（不含元素自身）
 - `addEventListener(type, fn)` / `removeEventListener(type, fn)`
 - `appendChild(child)` / `removeChild(child)`
+- `focus()` / `blur()`：请求聚焦/失焦（仅 `<input>`/`<textarea>` 可聚焦，其余元素
+  `focus()` 为 no-op、`blur()` 只作用于当前聚焦元素）。请求经输入循环生效：种子编辑
+  缓冲、重绘字段，并派发 `focus` / `blur`（值变化时 + `change`）事件
 - `style`：对象，包含 `cssText` 和常用属性访问器（`color`、`backgroundColor`、
   `fontSize`、`fontWeight`、`textAlign`、`display`、`padding`、`margin`、
   `flexDirection` 等，camelCase ↔ kebab-case）

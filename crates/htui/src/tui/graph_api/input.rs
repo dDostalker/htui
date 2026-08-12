@@ -8,6 +8,7 @@ use crossterm::event::{
 
 use crate::{
     events::KeyEventInfo,
+    html::css_parse::DynamicState,
     script::ScriptMsg,
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::char_width,
@@ -172,17 +173,18 @@ pub enum RenderCmd {
     Redraw { scroll_y: u32, zoom: f32 },
     /// Render a supplied DOM arena snapshot (the script engine's live arena
     /// after JS mutations), cascading styles and re-laying-out without
-    /// re-parsing HTML. `hovered` is the current `:hover` target so the
-    /// re-cascade re-applies the highlight in the same pass (no separate
-    /// `Hover` command needed). `dirty` lists the nodes JS mutated since the
-    /// previous frame, letting the render thread repaint only the affected
-    /// rectangles when the re-layout leaves every box rect unchanged.
+    /// re-parsing HTML. `dynamic` carries the session interaction state (the
+    /// `:hover` target and the focused field), so the re-cascade re-applies
+    /// both highlights in the same pass (no separate `Hover` / `Focus`
+    /// command needed). `dirty` lists the nodes JS mutated since the previous
+    /// frame, letting the render thread repaint only the affected rectangles
+    /// when the re-layout leaves every box rect unchanged.
     RenderArena {
         arena: Arc<crate::tdom::node::NodeArena>,
         root_id: crate::tdom::node::NodeId,
         scroll_y: u32,
         zoom: f32,
-        hovered: Option<crate::tdom::node::NodeId>,
+        dynamic: DynamicState,
         dirty: DirtyInfo,
     },
     /// Replace the session document with `html` and fully re-render it,
@@ -195,6 +197,11 @@ pub enum RenderCmd {
     /// given session-local node (`None` clears any hover), then repaint. With
     /// no `:hover` rules in the stylesheet this repaints to the same pixels.
     Hover { node_id: Option<NodeId> },
+    /// Re-style the cached document for the CSS `:focus` pseudo-class with the
+    /// given focused text field (`None` clears any focus highlight), then
+    /// repaint. Pushed by the input loop whenever the focus moves; with no
+    /// `:focus` rules in the stylesheet this repaints to the same pixels.
+    Focus { node_id: Option<NodeId> },
     /// Repaint one `<input>` field with fresh edit state (value / caret /
     /// focus). The layout is unchanged — the field's rectangle is fixed — so
     /// only that rectangle is repainted.
@@ -205,6 +212,15 @@ pub enum RenderCmd {
         focused: bool,
         selection: Option<(usize, usize)>,
     },
+    /// JS `el.focus()` — focus the text field `node_id`. Intercepted by the
+    /// input loop (never forwarded to the render thread): it seeds the edit
+    /// session and routes the `blur` / `focus` events back through the
+    /// script-message path, so the focus state stays owned by the input side.
+    FocusRequest { node_id: NodeId },
+    /// JS `el.blur()` — remove focus from `node_id` if it is the focused
+    /// field (no-op otherwise, matching the browser). Intercepted by the
+    /// input loop like [`RenderCmd::FocusRequest`](Self::FocusRequest).
+    BlurRequest { node_id: NodeId },
     /// Open the dropdown overlay for `node_id`: the render thread resolves the
     /// options (a `<select>`'s children, or an `<input list>`'s `<datalist>`
     /// filtered by `filter`), paints the overlay below the field and
@@ -957,6 +973,10 @@ fn focus_input(
         focused: true,
         selection: None,
     });
+    // Re-cascade CSS `:focus` rules for the newly focused field.
+    cmds.push(RenderCmd::Focus {
+        node_id: Some(node_id),
+    });
     // Fire `focus` on the newly focused field.
     msgs.push(ScriptMsg::FocusInput { node_id });
 }
@@ -986,6 +1006,8 @@ fn blur_input(
         focused: false,
         selection: None,
     });
+    // Clear the CSS `:focus` highlight.
+    cmds.push(RenderCmd::Focus { node_id: None });
 }
 
 /// Queue a repaint of the focused field with its current edit state.
@@ -999,6 +1021,46 @@ fn push_input_render(state: &InputState, focused: NodeId, cmds: &mut Vec<RenderC
             .input_sel_anchor
             .map(|anchor| selection_range(anchor, state.input_cursor)),
     });
+}
+
+/// Filter JS-initiated focus changes out of `cmds` and apply them to the
+/// focus state.
+///
+/// [`RenderCmd::FocusRequest`] / [`RenderCmd::BlurRequest`] travel from the
+/// script thread through the ordinary render-command channel (`el.focus()` /
+/// `el.blur()`), but they target input-loop state: the edit session lives in
+/// [`InputState`], and the `focus` / `blur` (+ `change`) events are routed
+/// back through the script-message path so both sides stay in sync. Each
+/// request is expanded into the focus repaints (`RenderInput`) plus the
+/// `BlurInput` / `FocusInput` script messages for `msgs`; everything else
+/// passes through untouched. The returned commands are the ones that should
+/// reach the render thread.
+pub fn apply_focus_requests(
+    state: &mut InputState,
+    cmds: Vec<RenderCmd>,
+    arena: Option<&NodeArena>,
+    msgs: &mut Vec<ScriptMsg>,
+) -> Vec<RenderCmd> {
+    let mut out: Vec<RenderCmd> = Vec::with_capacity(cmds.len());
+    for cmd in cmds {
+        match cmd {
+            RenderCmd::FocusRequest { node_id } => {
+                // `focus()` on an already-focused field is a no-op (browsers
+                // do not re-fire `focus`); `focus_input` early-returns.
+                if let Some(arena) = arena {
+                    focus_input(state, node_id, arena, msgs, &mut out);
+                }
+            }
+            RenderCmd::BlurRequest { node_id } => {
+                // `blur()` only takes effect on the focused element.
+                if state.focused_input == Some(node_id) {
+                    blur_input(state, msgs, &mut out);
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// Handle a completed left-button click at canvas coordinates `(x, y)`.

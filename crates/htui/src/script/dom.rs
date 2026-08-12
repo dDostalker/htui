@@ -251,6 +251,8 @@ fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsValue
             js_string!("querySelectorAll"),
             1,
         );
+        init.function(NativeFunction::from_fn_ptr(native_focus), js_string!("focus"), 0);
+        init.function(NativeFunction::from_fn_ptr(native_blur), js_string!("blur"), 0);
     }
     if is_text_like {
         init.accessor(js_string!("data"), Some(get_data), Some(set_data), Attribute::all());
@@ -615,6 +617,44 @@ fn set_inner_html(st: &mut ScriptState, node_id: NodeId, html: &str) -> JsResult
         st.dirty.style_css.push_str(&css_sources.join("\n"));
     }
     mark_dirty(st, node_id);
+    Ok(JsValue::undefined())
+}
+
+/// `el.focus()` — request focus for a text field.
+///
+/// htui's input model focuses `<input>` / `<textarea>` only, so calling
+/// `focus()` on any other element is a no-op (browsers ignore it for
+/// non-focusable elements). The actual focus transition runs on the input
+/// loop — it owns the edit session — so the request travels as a
+/// [`RenderCmd::FocusRequest`]; the input loop routes the `focus` event back
+/// through the script-message path.
+fn native_focus(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let mut st = rc.borrow_mut();
+    let focusable = st
+        .arena
+        .get(node_id)
+        .is_some_and(|n| matches!(n.node_type, NodeType::Input | NodeType::Textarea));
+    if !focusable {
+        return Ok(JsValue::undefined());
+    }
+    st.render_cmds.push(RenderCmd::FocusRequest { node_id });
+    Ok(JsValue::undefined())
+}
+
+/// `el.blur()` — remove focus from this element if it is the focused one
+/// (a no-op otherwise, matching the browser). The transition runs on the
+/// input loop via [`RenderCmd::BlurRequest`].
+fn native_blur(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let mut st = rc.borrow_mut();
+    st.render_cmds.push(RenderCmd::BlurRequest { node_id });
     Ok(JsValue::undefined())
 }
 

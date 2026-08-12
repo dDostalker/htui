@@ -3,7 +3,8 @@ use indexmap::IndexMap;
 use crate::tdom::node::{NodeArena, NodeId};
 
 use super::{
-    matcher::selector_chain_matches_with_hover, properties::CssAttr, selector::CssSelector,
+    matcher::selector_chain_matches_with_state, properties::CssAttr, selector::CssSelector,
+    selector::{DynamicState, PseudoClassSet},
     stylesheet::{CssRule, CssRuleEntry, parse_declaration_splits},
 };
 
@@ -12,14 +13,14 @@ fn apply_css_rule(
     node_id: NodeId,
     selector: &CssSelector,
     css: &CssAttr,
-    hovered: Option<NodeId>,
+    state: &DynamicState,
 ) {
-    if selector_chain_matches_with_hover(arena, node_id, selector, hovered) {
+    if selector_chain_matches_with_state(arena, node_id, selector, state) {
         arena[node_id].css_attr.add(css.clone());
     }
     let children: Vec<NodeId> = arena[node_id].children.clone();
     for child_id in children {
-        apply_css_rule(arena, child_id, selector, css, hovered);
+        apply_css_rule(arena, child_id, selector, css, state);
     }
 }
 /// Apply the `style` attribute of every node in the subtree, restricted to the
@@ -44,24 +45,25 @@ fn apply_inline_styles(arena: &mut NodeArena, node_id: NodeId, important: bool) 
 }
 
 /// Apply all stylesheet rules, inline `style` attributes and inheritance to
-/// the arena, evaluating `:hover` pseudo-class rules against `hovered` (the
-/// session-local node currently under the pointer).
+/// the arena, evaluating the dynamic pseudo-classes (`:hover` / `:focus`)
+/// against the session [`DynamicState`] snapshot.
 ///
 /// The cascade follows the browser's author-origin order:
 ///   1. stylesheet normal declarations, ordered by (specificity, source order);
 ///   2. inline `style` normal declarations;
 ///   3. stylesheet `!important` declarations, ordered the same way;
 ///   4. inline `style` `!important` declarations (highest priority).
+///
 /// Each later pass overrides earlier ones per property.
 ///
-/// Callers that need a hover-aware cascade (the event system's hover
+/// Callers that need a state-aware cascade (the event system's hover / focus
 /// highlight) use this; everything else should call [`css_into_node`], which
-/// cascades without any `:hover` matching.
-pub fn css_into_node_with_hover(
+/// cascades without any dynamic pseudo-class matching.
+pub fn css_into_node_with_state(
     arena: &mut NodeArena,
     root_id: NodeId,
     css: &CssRule,
-    hovered: Option<NodeId>,
+    state: &DynamicState,
 ) {
     // Order every rule by (specificity, source order); the stable sort keeps
     // same-specificity rules in stylesheet order so the last applied rule for
@@ -72,7 +74,7 @@ pub fn css_into_node_with_hover(
     // 1. Author stylesheet, normal declarations (lowest priority).
     for entry in &rules {
         if !entry.normal.0.is_empty() {
-            apply_css_rule(arena, root_id, &entry.selector, &entry.normal, hovered);
+            apply_css_rule(arena, root_id, &entry.selector, &entry.normal, state);
         }
     }
     // 2. Inline `style` attributes, normal declarations.
@@ -80,7 +82,7 @@ pub fn css_into_node_with_hover(
     // 3. Author stylesheet, `!important` declarations.
     for entry in &rules {
         if !entry.important.0.is_empty() {
-            apply_css_rule(arena, root_id, &entry.selector, &entry.important, hovered);
+            apply_css_rule(arena, root_id, &entry.selector, &entry.important, state);
         }
     }
     // 4. Inline `style` attributes, `!important` declarations (highest).
@@ -91,9 +93,39 @@ pub fn css_into_node_with_hover(
     inherit_css(arena, root_id, &IndexMap::new());
 }
 
-/// Cascade styles without a hover context (no `:hover` rules match).
+/// Cascade styles with a hover context but no focus (no `:focus` rules match).
+pub fn css_into_node_with_hover(
+    arena: &mut NodeArena,
+    root_id: NodeId,
+    css: &CssRule,
+    hovered: Option<NodeId>,
+) {
+    css_into_node_with_state(
+        arena,
+        root_id,
+        css,
+        &DynamicState {
+            hovered,
+            focused: None,
+        },
+    );
+}
+
+/// Cascade styles with no dynamic pseudo-class context (no `:hover` / `:focus`
+/// rule matches).
 pub fn css_into_node(arena: &mut NodeArena, root_id: NodeId, css: &CssRule) {
-    css_into_node_with_hover(arena, root_id, css, None);
+    css_into_node_with_state(arena, root_id, css, &DynamicState::default());
+}
+
+/// The set of dynamic pseudo-classes any rule in `css` uses — computed once at
+/// rule-build time so state-change commands can test membership in O(1)
+/// instead of rescanning the stylesheet.
+pub fn css_pseudo_rule_set(css: &CssRule) -> PseudoClassSet {
+    css.0
+        .iter()
+        .fold(PseudoClassSet::EMPTY, |set, entry| {
+            set.union(PseudoClassSet::from_selector(&entry.selector))
+        })
 }
 
 /// Clear the parsed CSS attributes of every node in the subtree rooted at

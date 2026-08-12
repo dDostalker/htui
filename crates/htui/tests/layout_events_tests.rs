@@ -11,7 +11,7 @@ use htui::events::{
     interaction::{HoverState, on_click, on_move},
 };
 use htui::html::css_parse::{
-    Parser as CssParser, PseudoClass, Selector, css_into_node,
+    DynamicState, Parser as CssParser, PseudoClass, Selector, css_into_node,
     css_into_node_with_hover, reset_css_attr,
 };
 use htui::html::{css_parse, html_parse};
@@ -880,7 +880,10 @@ fn drive_msgs(
                 root_id: d.root_id,
                 scroll_y: state.scroll_y,
                 zoom: state.zoom,
-                hovered: ev.hovered,
+                dynamic: DynamicState {
+                    hovered: ev.hovered,
+                    focused: None,
+                },
                 dirty: d.dirty,
             });
         }

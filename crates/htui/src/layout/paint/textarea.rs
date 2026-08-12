@@ -66,6 +66,12 @@ pub(crate) fn textarea_visual_lines(value: &str, content_width: usize) -> Vec<Te
 }
 
 /// `(visual row, caret column in cells)` of `cursor` within `value`.
+///
+/// A cursor at the end of a visual line stays on that line (its column is
+/// the line's cell width), so the displayed caret position agrees with the
+/// editing layer's character index: `Backspace` removes `cursor - 1` and
+/// `Delete` removes `cursor` — exactly the characters either side of the
+/// painted caret, including the `\n` between lines.
 pub(crate) fn textarea_caret_position(
     value: &str,
     content_width: usize,
@@ -74,7 +80,7 @@ pub(crate) fn textarea_caret_position(
     let lines = textarea_visual_lines(value, content_width);
     for (row, line) in lines.iter().enumerate() {
         let end = line.char_start.saturating_add(line.text.chars().count());
-        if cursor < end || (cursor == end && row == lines.len().saturating_sub(1)) {
+        if cursor <= end {
             let col: usize = line
                 .text
                 .chars()

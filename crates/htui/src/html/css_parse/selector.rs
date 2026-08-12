@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use crate::tdom::node::NodeType;
+use crate::tdom::node::{NodeId, NodeType};
 
 /// Errors produced while parsing a CSS selector string.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -23,6 +23,9 @@ pub enum SelectorError {
     /// `:hover` was given arguments, which it does not take.
     #[error(":hover takes no arguments")]
     HoverTakesNoArguments,
+    /// `:focus` was given arguments, which it does not take.
+    #[error(":focus takes no arguments")]
+    FocusTakesNoArguments,
     /// `:nth-child` is missing its `(...)` argument list.
     #[error(":nth-child requires `(...)`")]
     NthChildRequiresParens,
@@ -71,12 +74,80 @@ impl NthExpr {
     }
 }
 
+/// Session-level dynamic pseudo-class state (`:hover` / `:focus`).
+///
+/// One slot per dynamic pseudo-class, populated by whoever owns that piece of
+/// interaction state (the script thread's pointer state machine fills
+/// `hovered`; the input loop's focus state fills `focused`). The cascade and
+/// the render thread treat it as a single value: adding a pseudo-class means
+/// adding one field here, one `PseudoClass` variant and one method arm.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DynamicState {
+    /// The node currently under the pointer (`:hover` matches it and its
+    /// ancestors).
+    pub hovered: Option<NodeId>,
+    /// The focused text field (`:focus` matches it exactly).
+    pub focused: Option<NodeId>,
+}
+
+/// The set of dynamic pseudo-classes a stylesheet actually uses, packed as a
+/// bitmask so rule detection is a single parse-time pass and command
+/// processing is an O(1) membership test.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PseudoClassSet(u8);
+
+impl PseudoClassSet {
+    /// No dynamic pseudo-class rules.
+    pub const EMPTY: Self = Self(0);
+    /// `:hover` rules present.
+    pub const HOVER: Self = Self(1 << 0);
+    /// `:focus` rules present.
+    pub const FOCUS: Self = Self(1 << 1);
+
+    /// Whether `pseudo` is a member of the set.
+    pub fn contains_pseudo(&self, pseudo: PseudoClass) -> bool {
+        self.0 & pseudo.as_flag().0 != 0
+    }
+
+    /// Union of two sets.
+    pub fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    /// The pseudo-classes appearing anywhere in a selector chain.
+    pub fn from_selector(sel: &CssSelector) -> Self {
+        let mut set = Self::EMPTY;
+        for compound in &sel.compounds {
+            for s in compound {
+                if let Selector::PseudoClass(p) = s {
+                    set = set.union(p.as_flag());
+                }
+            }
+        }
+        set
+    }
+}
+
 /// Dynamic pseudo-classes supported by the selector parser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PseudoClass {
     /// `:hover` — matches while the pointer is over the element (or one of
     /// its descendants). Evaluated against the cascade's hovered node.
     Hover,
+    /// `:focus` — matches the element that currently holds keyboard focus
+    /// (the session's focused text field). Unlike `:hover`, it matches the
+    /// focused element itself, not its ancestors (`:focus-within` would).
+    Focus,
+}
+
+impl PseudoClass {
+    /// The bit this pseudo-class maps to in [`PseudoClassSet`].
+    pub fn as_flag(&self) -> PseudoClassSet {
+        match self {
+            PseudoClass::Hover => PseudoClassSet::HOVER,
+            PseudoClass::Focus => PseudoClassSet::FOCUS,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -322,6 +393,11 @@ fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, SelectorErro
                         return Err(SelectorError::HoverTakesNoArguments);
                     }
                     out.push(Selector::PseudoClass(PseudoClass::Hover));
+                } else if name.eq_ignore_ascii_case("focus") {
+                    if i < chars.len() && chars[i] == '(' {
+                        return Err(SelectorError::FocusTakesNoArguments);
+                    }
+                    out.push(Selector::PseudoClass(PseudoClass::Focus));
                 } else if name.eq_ignore_ascii_case("nth-child") {
                     if i >= chars.len() || chars[i] != '(' {
                         return Err(SelectorError::NthChildRequiresParens);

@@ -9,6 +9,7 @@
 use crossterm::event::KeyCode;
 use crossterm::style::Color;
 use htui::events::{EventBindings, Geometry, HitMap, interaction::HoverState};
+use htui::html::css_parse::DynamicState;
 use htui::html::html_parse;
 use htui::layout::layout::TermMap;
 use htui::layout::{BoxConstraint, Cursor, layout_tree};
@@ -104,7 +105,10 @@ fn apply(engine: &mut ScriptEngine, map: &HitMap, msg: ScriptMsg) -> Vec<RenderC
             root_id: d.root_id,
             scroll_y: 0,
             zoom: 1.0,
-            hovered: ev.hovered,
+            dynamic: DynamicState {
+                hovered: ev.hovered,
+                focused: None,
+            },
             dirty: d.dirty,
         });
     }
@@ -401,4 +405,99 @@ fn test_textarea_focused_paints_inverted_caret() {
         .expect("inverted caret cell");
     let cols = term_map.columns as usize;
     assert_eq!(caret_idx % cols, 2, "caret sits at column 1 of the content");
+}
+
+#[test]
+fn test_textarea_caret_at_line_end_stays_on_its_line() {
+    // cursor=2 sits between 'b' and '\n' in "ab\ncd": the caret must paint at
+    // the end of the first line (after 'b'), NOT at the start of the second
+    // line. Otherwise Backspace / Delete remove characters that are not the
+    // ones either side of the painted caret (the edit buffer is indexed by
+    // character, so a line-end cursor must display on the line it ends).
+    let term_map = mock_term_map();
+    let (root_id, arena) = setup(r#"<textarea id="t" cols="8" rows="3">ab&#10;cd</textarea>"#);
+    let t = find_node_by_id(&arena, "t");
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.input_states.insert(
+        t,
+        InputRenderState {
+            value: "ab\ncd".to_string(),
+            cursor: 2,
+            focused: true,
+            selection: None,
+        },
+    );
+    tl.draw(&arena, root_id, &term_map);
+    let caret_idx = tl
+        .layout
+        .iter()
+        .position(|b| b.fcolor == Some(Color::Black) && b.bcolor == Some(Color::White))
+        .expect("inverted caret cell");
+    let cols = term_map.columns as usize;
+    let (row, col) = (caret_idx / cols, caret_idx % cols);
+    // The textarea box sits at y=0 (border row), so the first content row is
+    // canvas y=1; the caret paints at column 3 — after 'ab' (x=0 border,
+    // x=1..2 'ab', x=3 caret). Before the fix it landed on the second
+    // content row (canvas y=2, 'c' start) instead.
+    assert_eq!(
+        (row, col),
+        (1, 3),
+        "caret paints after 'ab' on the first content line"
+    );
+}
+
+#[test]
+fn test_textarea_backspace_delete_match_caret_position() {
+    // "ab\ncd" with the caret after 'b' (cursor 2): Backspace removes 'b'
+    // and Delete removes the '\n' — exactly the characters either side of
+    // the painted caret (see the caret-position test above).
+    let mut value = "ab\ncd".to_string();
+    let mut cursor = 2;
+    assert!(apply_textarea_key(&mut value, &mut cursor, 10, KeyCode::Backspace));
+    assert_eq!(value, "a\ncd", "Backspace removes the char before the caret");
+    assert_eq!(cursor, 1);
+
+    let mut value = "ab\ncd".to_string();
+    let mut cursor = 2;
+    assert!(apply_textarea_key(&mut value, &mut cursor, 10, KeyCode::Delete));
+    assert_eq!(value, "abcd", "Delete at a line end removes the newline");
+    assert_eq!(cursor, 2);
+}
+
+#[test]
+fn test_textarea_wide_char_caret_matches_editing() {
+    // A CJK character occupies two cells: the caret after '中' paints at
+    // column 2 and Backspace removes the whole character (never half of a
+    // UTF-8 sequence / a single cell).
+    let mut value = "中文".to_string();
+    let mut cursor = 1;
+    assert!(apply_textarea_key(&mut value, &mut cursor, 10, KeyCode::Backspace));
+    assert_eq!(value, "文", "Backspace removes the full wide character");
+    assert_eq!(cursor, 0);
+
+    let term_map = mock_term_map();
+    let (root_id, arena) = setup(r#"<textarea id="t" cols="6" rows="1">中文</textarea>"#);
+    let t = find_node_by_id(&arena, "t");
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.input_states.insert(
+        t,
+        InputRenderState {
+            value: "中文".to_string(),
+            cursor: 1,
+            focused: true,
+            selection: None,
+        },
+    );
+    tl.draw(&arena, root_id, &term_map);
+    let caret_idx = tl
+        .layout
+        .iter()
+        .position(|b| b.fcolor == Some(Color::Black) && b.bcolor == Some(Color::White))
+        .expect("inverted caret cell");
+    let cols = term_map.columns as usize;
+    assert_eq!(
+        caret_idx % cols,
+        3,
+        "caret paints after the two-cell '中' (x=0 border, x=1..2 '中', x=3 caret)"
+    );
 }

@@ -15,6 +15,7 @@
 //!   `<form>` (the engine never navigates or resets controls itself).
 
 use htui::events::{EventBindings, Geometry, HitMap, interaction::HoverState};
+use htui::html::css_parse::DynamicState;
 use htui::html::html_parse;
 use htui::layout::layout::TermMap;
 use htui::layout::{BoxConstraint, Cursor, Rect, layout_tree};
@@ -137,7 +138,10 @@ fn apply(engine: &mut ScriptEngine, map: &HitMap, msg: ScriptMsg) -> Vec<RenderC
             root_id: d.root_id,
             scroll_y: 0,
             zoom: 1.0,
-            hovered: ev.hovered,
+            dynamic: DynamicState {
+                hovered: ev.hovered,
+                focused: None,
+            },
             dirty: d.dirty,
         });
     }

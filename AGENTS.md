@@ -144,6 +144,7 @@ htui/
 │   │   │   ├── layout_table_tests.rs
 │   │   │   ├── layout_wrap_tests.rs
 │   │   │   ├── layout_events_tests.rs # 事件系统测试（命中 / 冒泡 / hover / click，纯内存）
+│   │   │   ├── layout_focus_tests.rs # el.focus()/el.blur() 测试（请求经输入循环生效 + focus/blur 事件派发，纯内存）
 │   │   │   ├── layout_inner_html_tests.rs # innerHTML 测试（读取序列化 / 写入片段解析 / style 提取 / script 跳过，纯内存）
 │   │   │   ├── layout_class_list_tests.rs # classList 测试（live DOMTokenList 读/写/迭代/校验，纯内存）
 │   │   │   ├── layout_position_tests.rs # CSS 定位测试（relative / absolute / fixed + z-index）

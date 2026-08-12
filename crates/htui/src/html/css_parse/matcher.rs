@@ -1,8 +1,62 @@
 use crate::tdom::node::{NodeArena, NodeId, NodeType};
 
-use super::selector::{Combinator, CompoundSelector, CssSelector, NthExpr, PseudoClass, Selector};
+use super::selector::{Combinator, CompoundSelector, CssSelector, DynamicState, NthExpr, PseudoClass, Selector};
 
-fn matches_css(arena: &NodeArena, node_id: NodeId, sel: &Selector, hovered: Option<NodeId>) -> bool {
+impl PseudoClass {
+    /// The matching semantics of a dynamic pseudo-class: read the slot of
+    /// `state` this pseudo-class owns and judge `node_id` by its DOM rule.
+    /// `:hover` follows the ancestor chain (the pointer being over a
+    /// descendant counts); `:focus` matches the focused element itself.
+    pub fn matches(&self, arena: &NodeArena, node_id: NodeId, state: &DynamicState) -> bool {
+        match self {
+            PseudoClass::Hover => state
+                .hovered
+                .is_some_and(|h| is_hovered_or_ancestor(arena, node_id, h)),
+            PseudoClass::Focus => state.focused == Some(node_id),
+        }
+    }
+
+    /// The nodes whose painted output can change when this pseudo-class's
+    /// state target moves to `target`: the target plus (for `:hover`) every
+    /// ancestor that `:hover` rules can match. `:focus` is exact — only the
+    /// focused element's own boxes can be restyled.
+    pub fn affected_candidates(&self, arena: &NodeArena, target: Option<NodeId>) -> Vec<NodeId> {
+        match self {
+            PseudoClass::Hover => ancestor_chain(arena, target),
+            PseudoClass::Focus => target.into_iter().collect(),
+        }
+    }
+
+    /// A [`DynamicState`] with this pseudo-class's slot set to `target` and
+    /// every other slot cleared — the match context for deciding whether a
+    /// rule is affected by a state change of this pseudo-class alone.
+    pub fn state_with_target(&self, target: Option<NodeId>) -> DynamicState {
+        match self {
+            PseudoClass::Hover => DynamicState {
+                hovered: target,
+                focused: None,
+            },
+            PseudoClass::Focus => DynamicState {
+                hovered: None,
+                focused: target,
+            },
+        }
+    }
+}
+
+/// `target` and its ancestors, target-first, ending at the root (or at the
+/// root-most reachable node for a detached node).
+fn ancestor_chain(arena: &NodeArena, target: Option<NodeId>) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    let mut cur = target;
+    while let Some(id) = cur {
+        out.push(id);
+        cur = arena.get(id).and_then(|n| n.parent);
+    }
+    out
+}
+
+fn matches_css(arena: &NodeArena, node_id: NodeId, sel: &Selector, state: &DynamicState) -> bool {
     let node = &arena[node_id];
     match sel {
         // `*` matches every element node, never non-element nodes (text,
@@ -22,7 +76,7 @@ fn matches_css(arena: &NodeArena, node_id: NodeId, sel: &Selector, hovered: Opti
             .map(|s| s.as_str() == id.as_str())
             .unwrap_or(false),
         Selector::NthChild(expr) => nth_child_matches(arena, node_id, *expr),
-        Selector::PseudoClass(PseudoClass::Hover) => hovered.is_some_and(|h| is_hovered_or_ancestor(arena, node_id, h)),
+        Selector::PseudoClass(p) => p.matches(arena, node_id, state),
     }
 }
 
@@ -30,11 +84,11 @@ fn matches_compound(
     arena: &NodeArena,
     node_id: NodeId,
     compound: &CompoundSelector,
-    hovered: Option<NodeId>,
+    state: &DynamicState,
 ) -> bool {
     compound
         .iter()
-        .all(|s| matches_css(arena, node_id, s, hovered))
+        .all(|s| matches_css(arena, node_id, s, state))
 }
 
 /// Compute the 1-based sibling index of `node_id` among its parent's
@@ -66,35 +120,46 @@ pub fn selector_chain_matches(arena: &NodeArena, node_id: NodeId, selector: &Css
     selector_chain_matches_with_hover(arena, node_id, selector, None)
 }
 
-/// Like [`selector_chain_matches`], but evaluates `:hover` against the node
-/// currently under the pointer.
+/// Like [`selector_chain_matches`], but evaluates the dynamic pseudo-classes
+/// against a session [`DynamicState`] snapshot.
 ///
-/// `hovered` is a session-local [`NodeId`]; a stale id from a previous layout
-/// session simply fails to match (it is looked up via `arena.get`, never
-/// indexed directly).
+/// A stale node id from a previous layout session simply fails to match (it
+/// is looked up via `arena.get`, never indexed directly).
+pub fn selector_chain_matches_with_state(
+    arena: &NodeArena,
+    node_id: NodeId,
+    selector: &CssSelector,
+    state: &DynamicState,
+) -> bool {
+    let n = selector.compounds.len();
+    if n == 0 {
+        return false;
+    }
+    if !matches_compound(arena, node_id, &selector.compounds[n - 1], state) {
+        return false;
+    }
+    if n == 1 {
+        return true;
+    }
+    match_combinators(arena, node_id, &selector.compounds, &selector.combinators, n - 1, state)
+}
+
+/// Like [`selector_chain_matches`], but evaluates `:hover` against the node
+/// currently under the pointer (`:focus` never matches).
 pub fn selector_chain_matches_with_hover(
     arena: &NodeArena,
     node_id: NodeId,
     selector: &CssSelector,
     hovered: Option<NodeId>,
 ) -> bool {
-    let n = selector.compounds.len();
-    if n == 0 {
-        return false;
-    }
-    if !matches_compound(arena, node_id, &selector.compounds[n - 1], hovered) {
-        return false;
-    }
-    if n == 1 {
-        return true;
-    }
-    match_combinators(
+    selector_chain_matches_with_state(
         arena,
         node_id,
-        &selector.compounds,
-        &selector.combinators,
-        n - 1,
-        hovered,
+        selector,
+        &DynamicState {
+            hovered,
+            focused: None,
+        },
     )
 }
 
@@ -117,7 +182,7 @@ fn match_combinators(
     compounds: &[CompoundSelector],
     combinators: &[Combinator],
     idx: usize,
-    hovered: Option<NodeId>,
+    state: &DynamicState,
 ) -> bool {
     if idx == 0 {
         return true;
@@ -130,8 +195,8 @@ fn match_combinators(
             let mut cur = arena[node_id].parent;
             while let Some(pid) = cur {
                 let ancestor = &arena[pid];
-                if matches_compound(arena, pid, target, hovered)
-                    && match_combinators(arena, pid, compounds, combinators, idx - 1, hovered)
+                if matches_compound(arena, pid, target, state)
+                    && match_combinators(arena, pid, compounds, combinators, idx - 1, state)
                 {
                     return true;
                 }
@@ -140,22 +205,22 @@ fn match_combinators(
             false
         }
         Combinator::Child => match arena[node_id].parent {
-            Some(pid) if matches_compound(arena, pid, target, hovered) => {
-                match_combinators(arena, pid, compounds, combinators, idx - 1, hovered)
+            Some(pid) if matches_compound(arena, pid, target, state) => {
+                match_combinators(arena, pid, compounds, combinators, idx - 1, state)
             }
             _ => false,
         },
         Combinator::NextSibling => match prev_sibling_id(arena, node_id) {
-            Some(sid) if matches_compound(arena, sid, target, hovered) => {
-                match_combinators(arena, sid, compounds, combinators, idx - 1, hovered)
+            Some(sid) if matches_compound(arena, sid, target, state) => {
+                match_combinators(arena, sid, compounds, combinators, idx - 1, state)
             }
             _ => false,
         },
         Combinator::SubsequentSibling => {
             let mut cur = prev_sibling_id(arena, node_id);
             while let Some(sid) = cur {
-                if matches_compound(arena, sid, target, hovered)
-                    && match_combinators(arena, sid, compounds, combinators, idx - 1, hovered)
+                if matches_compound(arena, sid, target, state)
+                    && match_combinators(arena, sid, compounds, combinators, idx - 1, state)
                 {
                     return true;
                 }

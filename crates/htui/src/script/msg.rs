@@ -436,6 +436,11 @@ pub fn run_script_thread(
         // must happen after timers so a timer callback that starts a fetch and
         // the fetch's `.then` chain both drain in the same tick.
         engine.poll_fetches();
+        // Flush render commands queued outside a dispatch (e.g. `el.focus()`
+        // from a top-level `<script>`): `dispatch` only drains the queue for
+        // its own calls, so without this a load-time command would wait for
+        // the first user event.
+        event.cmds.extend(engine.take_pending_cmds());
         let extra = engine.take_dirty();
         if !extra.is_empty() {
             let snapshot = ScriptDirty {

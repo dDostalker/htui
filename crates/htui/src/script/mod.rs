@@ -236,6 +236,22 @@ impl ScriptEngine {
                 log::warn!("Script execution failed: {e}");
             }
         }
+
+        // Browser `autofocus`: the first focusable element carrying the
+        // `autofocus` attribute (document order) requests focus once the
+        // input loop processes the command — the same `FocusRequest` path a
+        // JS `el.focus()` uses.
+        let autofocus = state.borrow().arena.iter().find_map(|(id, n)| {
+            (matches!(n.node_type, NodeType::Input | NodeType::Textarea)
+                && n.attributes.contains_key("autofocus"))
+            .then_some(id)
+        });
+        if let Some(id) = autofocus {
+            state
+                .borrow_mut()
+                .render_cmds
+                .push(RenderCmd::FocusRequest { node_id: id });
+        }
         Ok((context, state))
     }
 
@@ -445,6 +461,19 @@ impl ScriptEngine {
     /// reported exactly once.
     pub fn take_dirty(&mut self) -> DirtyInfo {
         std::mem::take(&mut self.state.borrow_mut().dirty)
+    }
+
+    /// Drain render commands queued *outside* a dispatch — e.g. `el.focus()`
+    /// from a top-level `<script>` or a host call inside a settled `fetch`
+    /// `.then`. [`dispatch`](Self::fire) only takes the queue for its own
+    /// calls, so without an explicit drain a load-time command would sit until
+    /// the first event. Applies the same [`RenderHtml`](RenderCmd::RenderHtml)
+    /// interception as every other command source.
+    pub fn take_pending_cmds(&mut self) -> Vec<RenderCmd> {
+        let mut st = self.state.borrow_mut();
+        let cmds = std::mem::take(&mut st.render_cmds);
+        drop(st);
+        self.intercept_render_html(cmds)
     }
 
     /// Commit an `<input>` field's edited value into the DOM `value`

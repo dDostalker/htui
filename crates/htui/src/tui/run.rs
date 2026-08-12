@@ -27,8 +27,8 @@ use crossterm::{
 use crate::{
     events::{EventBindings, Geometry, HitMap},
     html::css_parse::{
-        self, CssRule, PseudoClass, Selector, css_into_node_with_hover, reset_css_attr,
-        selector_chain_matches_with_hover,
+        self, CssRule, DynamicState, PseudoClass, PseudoClassSet, css_into_node_with_state,
+        css_pseudo_rule_set, reset_css_attr, selector_chain_matches_with_state,
     },
     layout::layoutbox::geometry::{
         SelectRow, overlay_options, select_item_indices, select_overlay_rect, select_rows,
@@ -39,7 +39,8 @@ use crate::{
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{
         Block, DirtyInfo, FontStyle, InputRenderState, InputState, KEY_GATE_TIMEOUT, RenderCmd,
-        SelectionMode, TermLayout, char_width, reapply_console_modes, trigger_refresh,
+        SelectionMode, TermLayout, apply_focus_requests, char_width, reapply_console_modes,
+        trigger_refresh,
     },
 };
 
@@ -210,22 +211,25 @@ struct RenderState {
     /// session stylesheet incrementally.
     extra_css: String,
     css_rules: Arc<CssRule>,
-    /// Whether the stylesheet declares any `:hover` rule — when false, moving
-    /// the pointer can never change the painted output, so `Hover` commands
-    /// are skipped entirely (browser-like no-op).
-    has_hover_rules: bool,
+    /// The dynamic pseudo-classes the stylesheet uses, computed once at rule
+    /// build time; `Hover` / `Focus` commands test membership in O(1) and are
+    /// skipped entirely when the stylesheet has no matching rule (browser-like
+    /// no-op).
+    pseudo_rules: PseudoClassSet,
     term_layout: Option<TermLayout>,
     /// Terminal title: install the document `<title>` once per session (or
     /// per replaced document). crossterm offers no title getter, so the
     /// previous title is intentionally left untouched on quit.
     title_set: bool,
+    /// The session interaction state driving the dynamic pseudo-classes:
+    /// `hovered` (under the pointer) and `focused` (focused text field),
+    /// mirrored from the input loop / script thread for `RenderArena` and
+    /// `Hover` / `Focus` re-cascades.
+    dynamic: DynamicState,
     /// Cached geometry of the latest layout pass: kept so `RenderCmd::Hover`
-    /// can re-style the document for CSS `:hover` rules and repaint without
-    /// re-parsing or re-laying out.
+    /// / `RenderCmd::Focus` can re-style the document for CSS `:hover` /
+    /// `:focus` rules and repaint without re-parsing or re-laying out.
     geometry: Option<Arc<Geometry>>,
-    /// The node currently under the pointer (for CSS `:hover` cascade on
-    /// `RenderArena` re-renders).
-    hovered: Option<NodeId>,
     /// Active page text selection (canvas-space endpoints + shape); `None`
     /// while no selection exists.
     text_selection: Option<TextSel>,
@@ -548,14 +552,14 @@ impl RenderState {
         flush_frame(out);
     }
 
-    /// Re-cascade CSS (with the current `:hover`) into a script-engine arena
-    /// snapshot and render it without re-parsing HTML.
+    /// Re-cascade CSS (with the current `:hover` / `:focus`) into a
+    /// script-engine arena snapshot and render it without re-parsing HTML.
     ///
     /// Backs `RenderCmd::RenderArena`: JS mutated the live DOM, so the arena
     /// arrives raw (no `css_attr`) and must be cascaded first. `dirty` lists
-    /// the mutated nodes for the incremental repaint; `hover_changed` is true
-    /// when the `:hover` target moved, which invalidates the incremental path
-    /// (the highlight may live anywhere in the tree).
+    /// the mutated nodes for the incremental repaint; `state_changed` is true
+    /// when the `:hover` target or the focused field moved, which invalidates
+    /// the incremental path (the highlight may live anywhere in the tree).
     fn render_arena<W: Write>(
         &mut self,
         out: &mut BufWriter<W>,
@@ -566,7 +570,7 @@ impl RenderState {
         scroll_y: u32,
         zoom: f32,
         dirty: DirtyInfo,
-        hover_changed: bool,
+        state_changed: bool,
     ) {
         // `innerHTML`-injected `<style>` CSS must extend the session
         // stylesheet before the cascade. The added rules may restyle any node
@@ -577,8 +581,8 @@ impl RenderState {
         }
         let mut arena = arena.clone();
         reset_css_attr(&mut arena, root_id);
-        css_into_node_with_hover(&mut arena, root_id, &self.css_rules, self.hovered);
-        let dirty = if hover_changed || css_changed {
+        css_into_node_with_state(&mut arena, root_id, &self.css_rules, &self.dynamic);
+        let dirty = if state_changed || css_changed {
             None
         } else {
             Some(&dirty)
@@ -587,7 +591,8 @@ impl RenderState {
     }
 
     /// Extend the session stylesheet with `innerHTML`-injected CSS and
-    /// re-parse the combined rules (new rules may add `:hover` selectors).
+    /// re-parse the combined rules (new rules may add `:hover` / `:focus`
+    /// selectors, so the pseudo-class rule set is recomputed).
     fn append_style_css(&mut self, css: &str) {
         if css.trim().is_empty() {
             return;
@@ -599,8 +604,64 @@ impl RenderState {
         combined.push('\n');
         combined.push_str(&self.extra_css);
         let rules = parse_css_source(&combined);
-        self.has_hover_rules = css_has_hover_rules(&rules);
+        self.pseudo_rules = css_pseudo_rule_set(&rules);
         self.css_rules = Arc::new(rules);
+    }
+
+    /// Re-cascade the cached geometry with the session interaction state
+    /// (`self.dynamic`) and repaint only the region affected by `pseudo`
+    /// moving from `prev` to `new` (the old highlight is cleared, the new one
+    /// painted). When neither position matches a rule of that pseudo-class the
+    /// cascade paints identically, so nothing is drawn.
+    ///
+    /// Backs `RenderCmd::Hover` / `RenderCmd::Focus`. The arena is cloned —
+    /// the shared snapshot stays immutable for the hit-test thread, and a
+    /// slotmap clone keeps the same keys, so the cached boxes remain valid
+    /// (state changes only recolour, never reflow).
+    fn repaint_dynamic<W: Write>(
+        &mut self,
+        out: &mut BufWriter<W>,
+        pseudo: PseudoClass,
+        prev: Option<NodeId>,
+        new: Option<NodeId>,
+    ) {
+        let Some(tl) = self.term_layout.as_mut() else {
+            return;
+        };
+        let Some(geo) = self.geometry.as_ref() else {
+            return;
+        };
+        let mut arena = geo.arena.clone();
+        reset_css_attr(&mut arena, geo.root_id);
+        css_into_node_with_state(&mut arena, geo.root_id, &self.css_rules, &self.dynamic);
+        // Incremental repaint: only the union of the old and new affected
+        // regions can differ from the previous frame. Repainting this small
+        // region instead of resetting the whole canvas keeps hover / focus
+        // tracking responsive.
+        let region = match (
+            pseudo_affected_region(&geo.boxes, &arena, &self.css_rules, pseudo, prev),
+            pseudo_affected_region(&geo.boxes, &arena, &self.css_rules, pseudo, new),
+        ) {
+            (Some(a), Some(b)) => Some(union_rect(a, b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        };
+        let Some(r) = region else {
+            return;
+        };
+        tl.repaint_region(&arena, &geo.boxes, r);
+        // The repaint reset the canvas (or part of it); the active selection
+        // highlight must be overlaid again.
+        if let Some(sel) = &self.text_selection {
+            let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
+            apply_selection_lines(tl, &lines);
+        }
+        if let Some(open) = &self.open_select {
+            apply_select_overlay(tl, open);
+        }
+        tl.render(out);
+        flush_frame(out);
     }
 
     /// Replace the session document and fully re-render it, keeping the
@@ -626,7 +687,7 @@ impl RenderState {
         // A fresh document discards any `innerHTML`-injected CSS.
         self.extra_css = String::new();
         let rules = parse_css_source(&self.base_css);
-        self.has_hover_rules = css_has_hover_rules(&rules);
+        self.pseudo_rules = css_pseudo_rule_set(&rules);
         self.css_rules = Arc::new(rules);
         // The new document may carry a different `<title>`.
         self.title_set = false;
@@ -916,33 +977,30 @@ fn collect_box_rects(boxes: &[LayoutBox]) -> Vec<(NodeId, Rect)> {
     out
 }
 
-/// Union of every box rect that the pointer being over `hovered` can change:
-/// the hovered element itself plus each ancestor that matches a `:hover` rule
-/// (`:hover` applies to any element on the hovered node's ancestor chain, e.g.
-/// `#panel:hover` matches while a descendant is hovered). Ancestors that match
-/// no `:hover` selector are skipped — otherwise hovering a bottom-of-page
-/// button would repaint the whole document through its `body` ancestor.
+/// Union of every box rect that a dynamic pseudo-class's state target being
+/// `target` can change: the target plus (for `:hover`) each ancestor that
+/// matches a rule of that pseudo-class. Candidates that match no rule are
+/// skipped — otherwise hovering a bottom-of-page button would repaint the
+/// whole document through its `body` ancestor.
 ///
-/// Used by the `Hover` command to repaint only the affected region instead of
-/// the whole canvas.
-fn hover_affected_region(
+/// Used by `repaint_dynamic` (backing the `Hover` / `Focus` commands) to
+/// repaint only the affected region instead of the whole canvas.
+fn pseudo_affected_region(
     boxes: &[LayoutBox],
     arena: &NodeArena,
     rules: &CssRule,
-    hovered: Option<NodeId>,
+    pseudo: PseudoClass,
+    target: Option<NodeId>,
 ) -> Option<Rect> {
+    let match_state = pseudo.state_with_target(target);
     let mut region: Option<Rect> = None;
-    let mut cur = hovered;
-    while let Some(id) = cur {
-        // Only a selector that contains `:hover` and matches `id` while
-        // `hovered` is the pointer target can repaint `id`'s boxes.
+    for id in pseudo.affected_candidates(arena, target) {
+        // Only a selector that contains `pseudo` and matches `id` while the
+        // state target is `target` can repaint `id`'s boxes.
         let affected = rules.0.iter().any(|entry| {
             let sel = &entry.selector;
-            sel.compounds.iter().any(|compound| {
-                compound
-                    .iter()
-                    .any(|s| matches!(s, Selector::PseudoClass(PseudoClass::Hover)))
-            }) && selector_chain_matches_with_hover(arena, id, sel, hovered)
+            PseudoClassSet::from_selector(sel).contains_pseudo(pseudo)
+                && selector_chain_matches_with_state(arena, id, sel, &match_state)
         });
         if affected {
             let mut stack = vec![boxes];
@@ -958,22 +1016,8 @@ fn hover_affected_region(
                 }
             }
         }
-        cur = arena.get(id).and_then(|n| n.parent);
     }
     region
-}
-
-/// True when the stylesheet contains any `:hover` rule — the only case where
-/// moving the pointer can change the painted output.
-fn css_has_hover_rules(css_rules: &CssRule) -> bool {
-    css_rules.0.iter().any(|entry| {
-        let sel = &entry.selector;
-        sel.compounds.iter().any(|compound| {
-            compound
-                .iter()
-                .any(|s| matches!(s, Selector::PseudoClass(PseudoClass::Hover)))
-        })
-    })
 }
 
 fn render_thread(
@@ -990,17 +1034,17 @@ fn render_thread(
     // syscall instead of one per render call.
     let mut out = BufWriter::new(stdout());
     let css_rules = Arc::new(parse_css_source(&base_css));
-    let has_hover_rules = css_has_hover_rules(&css_rules);
+    let pseudo_rules = css_pseudo_rule_set(&css_rules);
     let mut state = RenderState {
         html,
         base_css,
         extra_css: String::new(),
         css_rules,
-        has_hover_rules,
+        pseudo_rules,
         term_layout: None,
         title_set: false,
         geometry: None,
-        hovered: None,
+        dynamic: DynamicState::default(),
         text_selection: None,
         selection_text,
         open_select: None,
@@ -1148,14 +1192,15 @@ fn render_thread(
                 root_id,
                 scroll_y,
                 zoom,
-                hovered,
+                dynamic,
                 dirty,
             } => {
-                // A hover change re-styles the whole tree (the `:hover`
-                // highlight may sit anywhere), so the incremental repaint is
-                // only valid when the hover target is unchanged.
-                let hover_changed = state.hovered != hovered;
-                state.hovered = hovered;
+                // A hover / focus change re-styles the whole tree (the
+                // `:hover` / `:focus` highlight may sit anywhere), so the
+                // incremental repaint is only valid when the interaction
+                // state is unchanged.
+                let state_changed = state.dynamic != dynamic;
+                state.dynamic = dynamic;
                 let term_map = match TermMap::get_ter_map() {
                     Ok(m) => m,
                     Err(e) => {
@@ -1172,7 +1217,7 @@ fn render_thread(
                     scroll_y,
                     zoom,
                     dirty,
-                    hover_changed,
+                    state_changed,
                 );
             }
 
@@ -1188,61 +1233,29 @@ fn render_thread(
             }
 
             RenderCmd::Hover { node_id } => {
-                let prev = state.hovered;
-                state.hovered = node_id;
+                let prev = state.dynamic.hovered;
+                state.dynamic.hovered = node_id;
                 // Without any `:hover` rule the cascade is identical for every
                 // pointer position, so nothing can change on screen — skip the
                 // repaint entirely (browser behaviour: moving the pointer with
                 // no `:hover` styles produces no drawing).
-                if !state.has_hover_rules {
+                if !state.pseudo_rules.contains_pseudo(PseudoClass::Hover) {
                     continue;
                 }
-                let Some(tl) = state.term_layout.as_mut() else {
+                state.repaint_dynamic(&mut out, PseudoClass::Hover, prev, node_id);
+            }
+
+            RenderCmd::Focus { node_id } => {
+                let prev = state.dynamic.focused;
+                state.dynamic.focused = node_id;
+                // Without any `:focus` rule the cascade is identical for every
+                // focus position, so nothing can change on screen — skip the
+                // repaint entirely (browser behaviour: focusing with no
+                // `:focus` styles produces no drawing).
+                if !state.pseudo_rules.contains_pseudo(PseudoClass::Focus) {
                     continue;
-                };
-                let Some(geo) = state.geometry.as_ref() else {
-                    continue;
-                };
-                // Re-run the cascade with the hovered node so `:hover` rules
-                // apply. The arena is cloned — the shared snapshot stays
-                // immutable for the hit-test thread, and a slotmap clone keeps
-                // the same keys, so the cached boxes remain valid (hover only
-                // changes colours / backgrounds, never geometry).
-                let mut arena = geo.arena.clone();
-                reset_css_attr(&mut arena, geo.root_id);
-                css_into_node_with_hover(&mut arena, geo.root_id, &state.css_rules, node_id);
-                // Incremental repaint: only the union of the old and new hover
-                // regions can differ from the previous frame (the old
-                // highlight is cleared, the new one painted). Repainting this
-                // small region instead of resetting the whole canvas keeps
-                // hover tracking responsive while the pointer moves. When
-                // neither the old nor the new target matches any `:hover`
-                // rule the cascade paints identically, so there is nothing to
-                // repaint at all.
-                let region = match (
-                    hover_affected_region(&geo.boxes, &arena, &state.css_rules, prev),
-                    hover_affected_region(&geo.boxes, &arena, &state.css_rules, node_id),
-                ) {
-                    (Some(a), Some(b)) => Some(union_rect(a, b)),
-                    (Some(a), None) => Some(a),
-                    (None, Some(b)) => Some(b),
-                    (None, None) => None,
-                };
-                let Some(r) = region else {
-                    continue;
-                };
-                tl.repaint_region(&arena, &geo.boxes, r);
-                // The repaint reset the canvas (or part of it); the active
-                // selection highlight must be overlaid again.
-                if let Some(sel) = &state.text_selection {
-                    let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
-                    apply_selection_lines(tl, &lines);
                 }
-                if let Some(open) = &state.open_select {
-                    apply_select_overlay(tl, open);
-                }
-                tl.render(&mut out);
-                flush_frame(&mut out);
+                state.repaint_dynamic(&mut out, PseudoClass::Focus, prev, node_id);
             }
 
             // Select dropdown commands share one handler so the pending pass
@@ -1325,6 +1338,13 @@ fn render_thread(
             } => {
                 state.handle_input(&mut out, node_id, value, cursor, focused, selection);
             }
+
+            // JS `el.focus()` / `el.blur()` requests are intercepted by the
+            // input loop (they mutate input-loop state); if one ever reaches
+            // the render thread it is stale — drop it.
+            RenderCmd::FocusRequest { .. } | RenderCmd::BlurRequest { .. } => {
+                log::debug!("Focus request reached the render thread — dropping");
+            }
         }
 
         // A single command batch taking this long usually means a bogus
@@ -1373,7 +1393,10 @@ fn fold_script_event(
             root_id: d.root_id,
             scroll_y: state.scroll_y,
             zoom: state.zoom,
-            hovered: ev.hovered,
+            dynamic: DynamicState {
+                hovered: ev.hovered,
+                focused: state.focused_input,
+            },
             dirty: d.dirty,
         });
     }
@@ -1503,7 +1526,7 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
             root_id: *root_id,
             scroll_y: state.scroll_y,
             zoom: state.zoom,
-            hovered: None,
+            dynamic: DynamicState::default(),
             dirty: DirtyInfo::default(),
         },
         None => RenderCmd::Redraw {
@@ -1769,10 +1792,36 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
                     RenderCmd::Hover { .. } if arena_pending => {
                         // Dropped: the arena render re-cascades with `hovered`.
                     }
+                    RenderCmd::Focus { .. } if arena_pending => {
+                        // Dropped: the arena render re-cascades with `focused`.
+                    }
                     other => merged.push(other),
                 }
             }
             merged
+        };
+
+        // JS `el.focus()` / `el.blur()` requests target input-loop state (the
+        // edit session lives here) and route their `focus` / `blur` (+ `change`)
+        // events back through the script-message path — apply them now and
+        // never forward them to the render thread. `msgs` was already sent
+        // above, so the focus transitions flush their own messages immediately.
+        let cmds = {
+            let mut focus_msgs: Vec<ScriptMsg> = Vec::new();
+            let cmds = apply_focus_requests(
+                &mut state,
+                cmds,
+                live_dom.as_ref().map(|(a, _)| a.as_ref()),
+                &mut focus_msgs,
+            );
+            for msg in focus_msgs {
+                if let Err(e) = script_tx.send(msg) {
+                    log::error!("Failed to send focus message: {}", e);
+                    quit = true;
+                    break;
+                }
+            }
+            cmds
         };
 
         let mut sent_any = false;
@@ -1800,7 +1849,10 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
                         root_id: *root_id,
                         scroll_y,
                         zoom,
-                        hovered,
+                        dynamic: DynamicState {
+                            hovered,
+                            focused: state.focused_input,
+                        },
                         dirty: DirtyInfo::default(),
                     },
                     None => RenderCmd::Redraw { scroll_y, zoom },

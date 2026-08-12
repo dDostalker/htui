@@ -1,12 +1,10 @@
 # A
-- focus()/blur()
 - document.createTextNode
 
 # B
 - <dl>/<dt>/<dd>
 - <progress>/<meter>
 - <fieldset>/<legend>
-- focus
 - onkeydown / onkeyup
 - mousedown/mouseup
 - tagName / nodeType
