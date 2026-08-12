@@ -1432,3 +1432,64 @@ fn test_flex_item_content_taller_than_container_height_is_not_clipped() {
         "bottom border row ends with the corner glyph"
     );
 }
+
+#[test]
+fn test_flex_row_line_grows_when_item_content_wraps() {
+    init();
+    // Regression: a flex item whose text wraps at the item's final width
+    // (e.g. the showcase DISK I/O card's "812 MB/s" on a narrow terminal)
+    // grows taller than the natural max-content measure. The line and the
+    // flex container must expand to cover the grown item, and the default
+    // `align-items: stretch` must stretch every item to the final line
+    // height. Before the fix the container stayed at the natural height, so
+    // the paint clip drew the card's bottom border over its own last
+    // content row (broken `└──  ──┘` frame).
+    let html = r#"
+        <div class="row">
+            <div class="card"><div>MEMORY</div><div>61%</div></div>
+            <div class="card"><div>DISK I/O</div><div>812 MB/s</div></div>
+        </div>
+    "#;
+    let css = r#"
+        .row { display: flex; gap: 2; }
+        .card { border: 1px solid red; padding: 1px 2px; }
+    "#;
+    let (root_id, arena) = setup(html, css);
+    let map = TermMap {
+        columns: 24,
+        rows: 20,
+    };
+    let mut tl = TermLayout::new(&map, 1.0);
+    tl.draw(&arena, root_id, &map);
+    let cols = map.columns as usize;
+    let rows: Vec<String> = tl
+        .layout
+        .chunks(cols)
+        .map(|chunk| chunk.iter().map(|b| b.word.as_str()).collect())
+        .collect();
+
+    // Both cards share one bottom border row (stretched to the same line
+    // height), and each card's bottom border must be a continuous run of
+    // `─` between its `└` and `┘` corners — a space in the run means a
+    // content row painted over the border (the original "出框" symptom).
+    let border_row = rows
+        .iter()
+        .find(|r| r.contains('└'))
+        .expect("bottom border row");
+    let first_p = border_row.find('└').expect("left card corner");
+    let first_q = border_row[first_p..].find('┘').expect("left card end") + first_p;
+    let second_p = border_row[first_q..].find('└').expect("right card corner") + first_q;
+    let second_q = border_row[second_p..].find('┘').expect("right card end") + second_p;
+    // Corner glyphs are 3-byte UTF-8; the end index must cover the whole
+    // `┘` character.
+    let left_border = &border_row[first_p..first_q + 3];
+    let right_border = &border_row[second_p..second_q + 3];
+    assert!(
+        !left_border.contains(' '),
+        "left card bottom border must be continuous: {border_row:?}"
+    );
+    assert!(
+        !right_border.contains(' '),
+        "right card bottom border must be continuous: {border_row:?}"
+    );
+}

@@ -359,6 +359,38 @@ fn border_style_none_hides_the_border() {
     );
 }
 
+#[test]
+fn border_wins_over_overflowing_content() {
+    init();
+    // `max-height` caps the box smaller than its text: the wrapped content
+    // would land on the bottom border row. The frame must win the contended
+    // cells — the border glyphs stay and the overflow is clipped instead of
+    // painting over the border (the "出框" symptom in general form).
+    let (term_map, tl) = draw(
+        "<div>ABC</div>",
+        "div { width: 5px; border: 1px solid red; max-height: 2; }",
+    );
+    let cols = term_map.columns as usize;
+    let rows: Vec<String> = tl
+        .layout
+        .chunks(cols)
+        .map(|chunk| chunk.iter().map(|b| b.word.as_str()).collect())
+        .collect();
+    // The 2-row box paints both borders on rows 0 (top) and 1 (bottom); the
+    // squeezed "ABC" text must not appear on the border row.
+    assert!(
+        !rows[1].contains("ABC"),
+        "overflowing content must not overwrite the border: {:?}",
+        rows[1]
+    );
+    // The bottom border row keeps a continuous frame (corners + dashes).
+    let bottom = &rows[1];
+    assert!(
+        bottom.contains(BOX_BL) && bottom.contains(BOX_BR) && bottom.contains(BOX_H),
+        "bottom border must stay intact: {bottom:?}"
+    );
+}
+
 // ============================================================
 // combined padding + border + margin
 // ============================================================

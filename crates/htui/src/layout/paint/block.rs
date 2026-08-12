@@ -162,16 +162,10 @@ pub(crate) fn paint_block(
         }
     }
 
-    // Border glyphs overlay the border cells (after fill). When no border is
-    // configured this is a no-op. Borders use the same fg / bg as the box;
-    // individual border colors are layered on top when set. The clamped
-    // rect is passed down so edges never extend past the terminal width.
-    paint_borders(lb, r, canvas, fg, effective_bg);
-
+    // Inline content sits in the content-box (rect shrunk by border +
+    // padding), not the border-box, so text-align and run positioning
+    // work against the inner width.
     if let Some(runs) = &lb.paint_style.runs {
-        // Inline content sits in the content-box (rect shrunk by border +
-        // padding), not the border-box, so text-align and run positioning
-        // work against the inner width.
         let inner_h = box_edges.inner_horizontal();
         let border_top = box_edges.border.top.thickness();
         let padding_top = box_edges.padding.top;
@@ -206,20 +200,26 @@ pub(crate) fn paint_block(
                 .saturating_sub(padding_bottom)
                 .max(1),
         );
-        let content_clip = match intersect_rects(content_clip, clip) {
-            Some(c) => c,
-            None => return,
-        };
-        paint_runs(
-            canvas,
-            runs,
-            content_row,
-            content_width,
-            align,
-            effective_bg,
-            lb.paint_style.font_size_cells,
-            lb.paint_style.line_height_cells,
-            content_clip,
-        );
+        if let Some(content_clip) = intersect_rects(content_clip, clip) {
+            paint_runs(
+                canvas,
+                runs,
+                content_row,
+                content_width,
+                align,
+                effective_bg,
+                lb.paint_style.font_size_cells,
+                lb.paint_style.line_height_cells,
+                content_clip,
+            );
+        }
     }
+
+    // Border glyphs overlay the border cells (after fill and content). When
+    // no border is configured this is a no-op. Borders use the same fg / bg
+    // as the box; individual border colors are layered on top when set. The
+    // clamped rect is passed down so edges never extend past the terminal
+    // width. Painting last guarantees a frame cell keeps its glyph even if
+    // wrapped content reached it.
+    paint_borders(lb, r, canvas, fg, effective_bg);
 }

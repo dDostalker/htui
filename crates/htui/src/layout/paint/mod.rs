@@ -362,7 +362,10 @@ fn paint_box(
     // Children are positioned inside the box's content-box (the rect shrunk
     // by border + padding); anything that spills out of it — e.g. a squeezed
     // flex item's wrapped lines — is dropped rather than painted over the
-    // padding / border rows of this box or the sibling below.
+    // padding / border rows of this box or the sibling below. The content
+    // area is NOT rounded up to 1 cell: when a box is smaller than its
+    // border + padding the true content area is empty and the children are
+    // dropped entirely, so no descendant can ever overwrite a frame cell.
     let edges = &lb.paint_style.box_edges;
     let content_area = Rect::new(
         lb.rect
@@ -375,15 +378,11 @@ fn paint_box(
             .saturating_add(edges.padding.top),
         lb.rect
             .width
-            .saturating_sub(edges.inner_horizontal())
-            .max(1),
-        lb.rect.height.saturating_sub(edges.inner_vertical()).max(1),
+            .saturating_sub(edges.inner_horizontal()),
+        lb.rect.height.saturating_sub(edges.inner_vertical()),
     );
-    let children_clip = match intersect_rects(own_clip, content_area) {
-        Some(c) => c,
-        None => return,
-    };
-    paint_children(lb, arena, canvas, effective_bg, Some(children_clip));
+    let children_clip = intersect_rects(own_clip, content_area);
+    paint_children(lb, arena, canvas, effective_bg, children_clip);
 }
 
 /// Paint `lb`'s children in stacking order.
@@ -392,6 +391,11 @@ fn paint_box(
 /// content area). Detached positioned children are not clipped by the parent
 /// — they are anchored to a containing block that may extend beyond it — and
 /// their own rects clip their descendants via [`paint_box`].
+///
+/// When the parent's content area is empty (`children_clip` is `None` — the
+/// box is smaller than its border + padding), static children are dropped via
+/// a zero-area clip so they can never paint over the parent's frame, while
+/// positioned children keep painting unclipped.
 fn paint_children(
     lb: &LayoutBox,
     arena: &NodeArena,
@@ -406,7 +410,7 @@ fn paint_children(
         // chain. Their own rects still clip their descendants via
         // [`paint_box`]. Static children inherit the parent's clip.
         let clip = match child.positioning.position {
-            Position::Static => children_clip,
+            Position::Static => children_clip.or(Some(Rect::new(0, 0, 0, 0))),
             _ => None,
         };
         paint_box(child, arena, canvas, effective_bg, clip);

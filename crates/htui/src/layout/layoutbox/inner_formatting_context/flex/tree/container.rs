@@ -249,7 +249,23 @@ pub(super) fn layout_flex_container(
     child_boxes.extend(positioned_boxes);
 
     let mut outer_height = match preallocated_height {
-        Some(height) => height,
+        Some(height) => {
+            // A pre-allocated rect (this flex container is itself a flex
+            // item) fixes the border-box height, but the lines laid out
+            // inside can grow taller than the parent's max-content measure
+            // assumed (text wrapping at the item's final width). Grow the
+            // rect to cover the actual content instead of clipping the last
+            // rows — mirrors `layout_block`'s pre-allocated growth.
+            let inner_v = edges.padding.top
+                + edges.padding.bottom
+                + edges.border.top.thickness()
+                + edges.border.bottom.thickness();
+            height.max(
+                lines_total_height
+                    .saturating_add(inline_rows)
+                    .saturating_add(inner_v),
+            )
+        }
         None if has_explicit_height => container_css_height.unwrap_or(0).max(lines_total_height),
         None => lines_total_height,
     };
