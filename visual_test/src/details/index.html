@@ -8,14 +8,14 @@
     // `toggle` event on it. This page only observes those events and reports
     // them on the status line — no host functions are needed.
     function log(msg) {
-      document.getElementById('status').textContent = msg;
+      document.querySelector('#status').textContent = msg;
     }
-    document.getElementById('d1').addEventListener('toggle', function () {
-      var open = document.getElementById('d1').getAttribute('open') !== null;
+    document.querySelector('#d1').addEventListener('toggle', function () {
+      var open = document.querySelector('#d1').getAttribute('open') !== null;
       log('d1 ' + (open ? 'opened' : 'closed'));
     });
-    document.getElementById('d2').addEventListener('toggle', function () {
-      var open = document.getElementById('d2').getAttribute('open') !== null;
+    document.querySelector('#d2').addEventListener('toggle', function () {
+      var open = document.querySelector('#d2').getAttribute('open') !== null;
       log('d2 ' + (open ? 'opened' : 'closed'));
     });
   </script>

@@ -7,13 +7,13 @@
     // `<optgroup>` select grouping, `<datalist>` autocomplete, `<fieldset>` /
     // `<legend>` framing, and the `<progress>` / `<meter>` bars.
     function log(msg) {
-      document.getElementById('status').textContent = msg;
+      document.querySelector('#status').textContent = msg;
     }
     // `<output>`'s `value` setter replaces the text content (browser IDL).
     function compute() {
-      var a = parseInt(document.getElementById('a').value || '0');
-      var b = parseInt(document.getElementById('b').value || '0');
-      var out = document.getElementById('sum');
+      var a = parseInt(document.querySelector('#a').value || '0');
+      var b = parseInt(document.querySelector('#b').value || '0');
+      var out = document.querySelector('#sum');
       out.value = String(a + b);
       log('sum = ' + out.value);
     }

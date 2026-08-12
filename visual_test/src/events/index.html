@@ -7,7 +7,7 @@
     // like a browser) and bound to elements via `on*` attributes or
     // `addEventListener`. `console.log` goes to the htui log file.
     function log(msg) {
-      document.getElementById('log').textContent = msg;
+      document.querySelector('#log').textContent = msg;
     }
     function panel() { log('panel() — from a click inside the panel'); }
     function buy() { log('buy()'); }
@@ -21,13 +21,13 @@
     // writing `textContent` (no HTML re-parse — the engine flags the dirty
     // DOM and the render thread diff-renders the changed cells).
     function increment() {
-      var c = document.getElementById('count');
+      var c = document.querySelector('#count');
       var n = parseInt(c.textContent.replace('Count: ', '')) + 1;
       c.textContent = 'Count: ' + n;
     }
 
     // Programmatic binding demo: this button has no `onclick` attribute.
-    document.getElementById('btn-add').addEventListener('click', buy);
+    document.querySelector('#btn-add').addEventListener('click', buy);
 
     // Keyboard demo: every key is dispatched to the focused element (or the
     // document `<body>` when nothing is focused — the `onkeydown` attribute

@@ -322,15 +322,15 @@ fn main() {
                 "mem://demo/app.js",
                 r#"
                   function boot() {
-                    document.getElementById('status').textContent = 'fetching...';
+                    document.querySelector('#status').textContent = 'fetching...';
                     fetch('mem://demo/hello.txt')
                       .then(function (r) { return r.text(); })
                       .then(function (t) {
-                        document.getElementById('output').textContent = 'got: ' + t;
-                        document.getElementById('status').textContent = 'done';
+                        document.querySelector('#output').textContent = 'got: ' + t;
+                        document.querySelector('#status').textContent = 'done';
                       })
                       .catch(function (e) {
-                        document.getElementById('status').textContent = 'error: ' + e;
+                        document.querySelector('#status').textContent = 'error: ' + e;
                       });
                   }
                   boot();

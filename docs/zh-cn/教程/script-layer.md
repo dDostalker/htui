@@ -192,12 +192,15 @@ button/checkbox 的默认动作一致）。`close` 由引擎原生的 `<dialog>`
 
 **`document`**
 - `document.getElementById(id)` → element 或 `null`
+- `document.querySelector(sel)` → 首个匹配元素或 `null`（无效选择器抛 `SyntaxError`）
+- `document.querySelectorAll(sel)` → 文档序匹配元素数组
 - `document.createElement(tag)` → 新元素（尚未挂到文档）
 
 **Element 包装对象**（`getElementById` / `event.target` 返回）
 - 属性访问器：`textContent`、`className`、`id`、`parentNode`、`value`
   （`<input>` 字段的已提交值，可读写；写值会标记重渲染）
 - 方法：`getAttribute(name)` / `setAttribute(name, value)` / `removeAttribute(name)`
+- `querySelector(sel)` / `querySelectorAll(sel)`：限定在元素子树内查询（不含元素自身）
 - `addEventListener(type, fn)` / `removeEventListener(type, fn)`
 - `appendChild(child)` / `removeChild(child)`
 - `style`：对象，包含 `cssText` 和常用属性访问器（`color`、`backgroundColor`、

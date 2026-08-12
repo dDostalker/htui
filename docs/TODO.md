@@ -1,5 +1,4 @@
 # A
-- querySelector(ALL)
 - innerHTML
 - el.classList
 - <textarea> !

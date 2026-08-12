@@ -24,7 +24,7 @@ use slotmap::Key;
 
 use crate::{
     events::EventType,
-    html::css_parse::parse_declaration_text,
+    html::css_parse::{CssSelector, parse_declaration_text, selector_chain_matches},
     resources,
     tdom::node::{Node, NodeArena, NodeId, NodeType, document_base_href},
     tui::graph_api::RenderCmd,
@@ -236,6 +236,16 @@ fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsValue
             js_string!("removeAttribute"),
             1,
         );
+        init.function(
+            NativeFunction::from_fn_ptr(native_query_selector),
+            js_string!("querySelector"),
+            1,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_query_selector_all),
+            js_string!("querySelectorAll"),
+            1,
+        );
     }
     if is_text_like {
         init.accessor(js_string!("data"), Some(get_data), Some(set_data), Attribute::all());
@@ -247,6 +257,84 @@ fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsValue
 // ============================================================
 // Element natives
 // ============================================================
+
+/// Parse a CSS selector string for `querySelector` / `querySelectorAll`,
+/// throwing a JS `SyntaxError` on invalid input (browser behavior).
+fn parse_query_selector(args: &[JsValue], context: &mut Context) -> JsResult<CssSelector> {
+    let raw = args
+        .first()
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?
+        .unwrap_or_default();
+    raw.parse::<CssSelector>().map_err(|e| {
+        JsNativeError::syntax()
+            .with_message(format!("invalid selector `{raw}`: {e}"))
+            .into()
+    })
+}
+
+/// Document-order (pre-order DFS) list of every node under `scope` matching
+/// `selector`. The scope element itself is never considered — matching
+/// `document.querySelector` (the root's children) and `element.querySelector`
+/// (the element's subtree) semantics.
+fn query_selector_nodes(arena: &NodeArena, scope: NodeId, selector: &CssSelector) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    let mut stack: Vec<NodeId> = arena[scope].children.iter().rev().copied().collect();
+    while let Some(id) = stack.pop() {
+        if selector_chain_matches(arena, id, selector) {
+            out.push(id);
+        }
+        stack.extend(arena[id].children.iter().rev().copied());
+    }
+    out
+}
+
+/// `document.querySelector(sel)` / `element.querySelector(sel)` — the first
+/// matching element in document order, or `null`. On an element the search is
+/// scoped to its subtree; `:hover` never matches (no pointer context).
+fn native_query_selector(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let selector = parse_query_selector(args, context)?;
+    let scope = this_node_id(this, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::null());
+    };
+    let st = rc.borrow();
+    let first = query_selector_nodes(&st.arena, scope, &selector)
+        .into_iter()
+        .next();
+    drop(st);
+    match first {
+        Some(node_id) => node_wrapper(context, node_id),
+        None => Ok(JsValue::null()),
+    }
+}
+
+/// `document.querySelectorAll(sel)` / `element.querySelectorAll(sel)` — every
+/// matching element in document order, returned as a static array of element
+/// wrappers (indexable / `.length` / `.forEach`, like a browser NodeList).
+fn native_query_selector_all(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let selector = parse_query_selector(args, context)?;
+    let scope = this_node_id(this, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let st = rc.borrow();
+    let ids = query_selector_nodes(&st.arena, scope, &selector);
+    drop(st);
+    let arr = boa_engine::object::builtins::JsArray::new(context);
+    for id in ids {
+        arr.push(node_wrapper(context, id)?, context)?;
+    }
+    Ok(arr.into())
+}
 
 fn native_get_attribute(
     this: &JsValue,
@@ -1495,6 +1583,8 @@ pub(crate) fn install_builtins(context: &mut Context) -> JsResult<()> {
 
     for (name, native) in [
         ("getElementById", NativeFunction::from_fn_ptr(native_get_element_by_id)),
+        ("querySelector", NativeFunction::from_fn_ptr(native_query_selector)),
+        ("querySelectorAll", NativeFunction::from_fn_ptr(native_query_selector_all)),
         ("createElement", NativeFunction::from_fn_ptr(native_create_element)),
         ("createTextNode", NativeFunction::from_fn_ptr(native_create_text_node)),
         ("createComment", NativeFunction::from_fn_ptr(native_create_comment)),

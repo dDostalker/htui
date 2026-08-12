@@ -78,8 +78,8 @@
     // ---- Theme (native <select> dropdown) ----
     var THEME_NAMES = { tn: 'Tokyo Night', light: 'Light', custom: 'Custom' };
     var theme = 'tn';
-    document.getElementById('theme').addEventListener('change', function () {
-      theme = document.getElementById('theme').value;
+    document.querySelector('#theme').addEventListener('change', function () {
+      theme = document.querySelector('#theme').value;
       updatePreview();
     });
 
@@ -105,7 +105,7 @@
       var refresh = document.getElementById('refresh').value;
       var portOk = !isNaN(parseInt(port, 10)) && port >= 1 && port <= 65535;
       var refreshOk = !isNaN(parseInt(refresh, 10)) && refresh >= 50;
-      var preview = document.getElementById('preview');
+      var preview = document.querySelector('.preview');
       var base = 'Profile: ' + profile + '\n' +
         'Sampling http://' + host + ':' + port + ' every ' + refresh + 'ms\n' +
         'Theme: ' + THEME_NAMES[theme] + ' | CPU: ' + (cpuOn ? 'ON' : 'OFF') +
@@ -133,7 +133,7 @@
         logEnabled: logOn
       };
       console.log('config saved: ' + JSON.stringify(cfg));
-      var s = document.getElementById('status');
+      var s = document.querySelector('#status');
       s.textContent = 'Saved ✓ (see log)';
     }
     function resetForm() {
@@ -147,7 +147,7 @@
       paintToggle('cpu-alarm', false);
       paintToggle('disk-alarm', false);
       paintToggle('logging', true);
-      var s = document.getElementById('status');
+      var s = document.querySelector('#status');
       s.textContent = 'Defaults restored';
       updatePreview();
     }

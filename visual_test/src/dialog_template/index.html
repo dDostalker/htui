@@ -8,18 +8,19 @@
     // button natively closes its dialog (removes `open` and fires a `close`
     // event). Templates hold inert content that never renders.
     function log(msg) {
-      document.getElementById('status').textContent = msg;
+      document.querySelector('#status').textContent = msg;
     }
-    var d1 = document.getElementById('d1');
+    var d1 = document.querySelector('#d1');
     d1.addEventListener('close', function () {
       log('d1 closed — the dialog box just disappeared');
     });
     function openD2() {
-      document.getElementById('d2').setAttribute('open', '');
+      document.querySelector('#d2').setAttribute('open', '');
       log('d2 opened via setAttribute(\'open\', \'\')');
     }
-    // Template content is addressable but inert.
-    log('template holds: ' + document.getElementById('tpl').textContent.replace(/\s+/g, ' ').trim());
+    // Template content is addressable but inert — the `template` tag selector
+    // finds it.
+    log('template holds: ' + document.querySelector('template').textContent.replace(/\s+/g, ' ').trim());
   </script>
   <h1>dialog / template</h1>
   <p>A dialog is a framed box: hidden while `open` is absent, shown once it is
