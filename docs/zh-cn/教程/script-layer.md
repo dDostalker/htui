@@ -318,6 +318,11 @@ app::register(&mut bindings);   // 一条语句注册模块内全部命令
   （`bar` / `gb` / `format_datetime`）做成 `#[htui::command]`，`sample()`
   命令（返回 `HostFn`）内部直接复用这些纯函数（Rust 侧调用，不走 JS 层），
   页面脚本也可直接 `bar(0.5, 14)` / `formatDateTime(...)` 调用。
+- `#[htui::commands]` 还生成 `js_bindings()`（返回自动生成的**样本 JS 接口**：
+  每个宿主命令一条带 `@param`/`@returns` JSDoc 注释的 `function` 声明，代码
+  分析器/编辑器（VS Code、tsserver、AI 工具）可直接读懂 JS 侧接口形状）与
+  `write_js_bindings(path)`（写入文件），JS 侧签名不再靠手写对齐——改 Rust
+  签名后重新生成即可；有状态命令（`fn() -> HostFn`）无静态签名，不参与生成。
 
 ### 5.2 手写闭包：`host_fn`（有状态 / 构造对象，同样不碰 Boa）
 

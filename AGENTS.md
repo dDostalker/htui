@@ -162,7 +162,7 @@ htui/
 │   │   └── benches/               # criterion 基准（parse / cascade / paint / render_to_bytes / full_redraw）
 │   └── htui-macros/             # 过程宏 crate：#[htui::command]/#[htui::commands] + #[derive(IntoJs/FromJs)]
 │       ├── Cargo.toml
-│       └── src/lib.rs           # proc-macro：命令包装（纯 fn + 返回 HostFn）/ 模块自动注册 / 结构体 ↔ JS 对象 derive
+│       └── src/lib.rs           # proc-macro：命令包装（纯 fn + 返回 HostFn）/ 模块自动注册 / 结构体 ↔ JS 对象 derive + 样本 JS 接口生成（js_bindings，JSDoc）
 ├── docs/
 │   ├── TODO.md            # 待办（querySelector / innerHTML / textarea / details 等，按优先级分组）
 │   └── zh-cn/
@@ -476,7 +476,7 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
 | `HostError`        | `script::convert`       | Boa 无关错误类型：`new`/`type_error`/`range_error` + `From<String|&str|JsError>`；`Result<T, HostError>` 映射为 JS 异常 |
 | `IntoJs` / `FromJs` | `script::convert`       | Rust ↔ JS 值转换 trait（基础类型 + Option/Vec/Result 实现） |
 | `#[htui::command]` | `htui_macros`           | 命令写法之一：普通 `fn(… FromJs 参数) -> IntoJs 返回值` 自动包成 `HostFn`，或零参数 `fn() -> HostFn`（有状态，闭包捕获状态，函数体用 `host_fn` 写），均生成 `<fn>_command()`；`name = "…"` 指定 JS 注册名 |
-| `#[htui::commands]` | `htui_macros`          | 模块级自动注册：扫描模块内 `#[htui::command]`，生成 `register(&mut EventBindings)`；周期任务由页面 JS `setInterval` 调度 |
+| `#[htui::commands]` | `htui_macros`          | 模块级自动注册：扫描模块内 `#[htui::command]`，生成 `register(&mut EventBindings)` + `js_bindings()`/`write_js_bindings(path)`（自动生成样本 JS 接口：JSDoc 标注的 function 声明，供代码分析器识别，有状态命令除外）；周期任务由页面 JS `setInterval` 调度 |
 | `#[derive(IntoJs/FromJs)]` | `htui_macros`    | 结构体 ↔ JS 对象（`#[js_name = "…"]` 重命名属性） |
 | `EdgeSizes`        | `html::box_edges`       | 四边长度（top/right/bottom/left），用于 padding / margin |
 | `BorderStyle`      | `html::box_edges`       | `border-style` 枚举（`None` / `Solid`） |

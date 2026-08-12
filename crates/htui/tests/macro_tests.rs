@@ -144,6 +144,39 @@ fn host_fn_returning_command_works_with_manual_registration() {
     assert_eq!(eval_str(&mut engine, "globalThis.__c2"), "2");
 }
 
+/// A fixture exercising the auto-generated JS/TS bindings: primitive +
+/// `Option` + `Result` args, a renamed command with `Vec`, a unit return, and
+/// a stateful command that must be excluded.
+#[htui::commands]
+mod bindings {
+    use htui::script::HostFn;
+
+    /// Plain command: string + optional number, result return.
+    #[htui::command]
+    pub fn lookup(key: String, fallback: Option<f64>) -> Result<f64, String> {
+        if key.is_empty() {
+            return Err("empty key".into());
+        }
+        Ok(fallback.unwrap_or(1.0))
+    }
+
+    /// Renamed command with a Vec return.
+    #[htui::command(name = "tagList")]
+    pub fn tags(count: u8, names: Vec<String>) -> Vec<String> {
+        names.into_iter().take(count as usize).collect()
+    }
+
+    /// Unit return.
+    #[htui::command]
+    pub fn reboot() {}
+
+    /// Stateful — excluded from bindings (no static signature).
+    #[htui::command]
+    pub fn ticker() -> HostFn {
+        htui::script::host_fn(move |_ctx| Ok(0u64))
+    }
+}
+
 fn eval_str(engine: &mut ScriptEngine, expr: &str) -> String {
     let v = engine
         .eval_source(&format!("String({expr})"))
@@ -151,6 +184,52 @@ fn eval_str(engine: &mut ScriptEngine, expr: &str) -> String {
     v.as_string()
         .map(|s| s.to_std_string_lossy())
         .unwrap_or_default()
+}
+
+// ---------------------------------------------------------------------------
+// Auto-generated JS/TS bindings via `#[htui::commands]`.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn commands_module_generates_js_bindings() {
+    let text = bindings::js_bindings();
+    // JSDoc-annotated sample declarations derived from the Rust signatures.
+    assert!(text.contains("function lookup(key, fallback) {}"));
+    assert!(text.contains("* @param {string} key"));
+    assert!(text.contains("* @param {number | undefined} fallback"));
+    assert!(text.contains("* @returns {number}"));
+    assert!(text.contains("* Throws on error."));
+    assert!(text.contains("function tagList(count, names) {}"));
+    assert!(text.contains("* @param {number} count"));
+    assert!(text.contains("* @param {string[]} names"));
+    assert!(text.contains("* @returns {string[]}"));
+    assert!(text.contains("function reboot() {}"));
+    // Stateful commands have no static signature → excluded.
+    assert!(!text.contains("function ticker"));
+    assert!(!app::js_bindings().contains("function sample"));
+    // `name = "..."` is honoured in the declarations too.
+    assert!(app::js_bindings().contains("function formatDateTime(secs) {}"));
+}
+
+#[test]
+fn commands_module_writes_js_bindings_to_a_file() {
+    let dir = std::env::temp_dir().join(format!("htui-js-bindings-{}", std::process::id()));
+    let path = dir.join("bindings.js");
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    bindings::write_js_bindings(&path).expect("write bindings");
+    let text = std::fs::read_to_string(&path).expect("read bindings back");
+    assert!(text.contains("function lookup(key, fallback) {}"));
+    assert!(text.contains("* @returns {number}"));
+    std::fs::remove_dir_all(&dir).expect("remove temp dir");
+}
+
+#[test]
+fn bindings_fixture_commands_register() {
+    let mut bindings = EventBindings::default();
+    bindings::register(&mut bindings);
+    for name in ["lookup", "tagList", "reboot", "ticker"] {
+        assert!(bindings.host.contains_key(name), "missing host `{name}`");
+    }
 }
 
 // ---------------------------------------------------------------------------
