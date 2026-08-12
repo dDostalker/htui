@@ -138,6 +138,7 @@ fn main() {
         "q_abbr" => test_case!(q_abbr, no_css),
         "details" => test_case!(details),
         "dialog_template" => test_case!(dialog_template),
+        "form_elements" => test_case!(form_elements),
         "helloworld" => test_case!(helloworld, no_css),
         "font_styles" => test_case!(font_styles, no_css),
         "list" => test_case!(list, no_css),
@@ -174,6 +175,7 @@ fn main() {
                 "q_abbr",
                 "details",
                 "dialog_template",
+                "form_elements",
                 "helloworld",
                 "font_styles",
                 "list",
@@ -284,6 +286,20 @@ fn main() {
     // one (interaction needs a real terminal). `--dump` falls back to the
     // static preview.
     if test_name == "dialog_template" {
+        if dump_mode {
+            dump(html, css, cols, rows, bg_map);
+        } else {
+            render_with_events(html, css, EventBindings::default());
+        }
+        info!("Test '{test_name}' completed");
+        return;
+    }
+
+    // The `form_elements` case runs through `render_with_events` so the
+    // controls are live: the grouped `<select>` dropdown, the `<datalist>`
+    // autocomplete, the calculator / gauge buttons (JS + DOM mutation).
+    // `--dump` falls back to the static preview.
+    if test_name == "form_elements" {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {

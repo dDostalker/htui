@@ -1,9 +1,11 @@
+use crossterm::style::Color;
+
 use crate::{
     layout::{
         BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext,
         inner_formatting_context::flow::{LayoutBlockOptions, layout_block},
     },
-    tdom::node::{NodeArena, NodeId, NodeType},
+    tdom::node::{Node, NodeArena, NodeId, NodeType},
     tui::graph_api::block_style,
 };
 
@@ -106,6 +108,86 @@ fn summary_marker(arena: &NodeArena, node_id: NodeId) -> Option<String> {
     }
     let open = arena[parent_id].attributes.contains_key("open");
     Some(if open { "▾ " } else { "▸ " }.to_string())
+}
+
+/// Build a [`LayoutBox`] for an `<progress>` / `<meter>` element — a
+/// terminal bar (`█` filled / `░` empty) spanning the content-box width.
+///
+/// The fill ratio comes from `value` / `max` (`<progress>` defaults `max` to
+/// 1; `<meter>` resolves `min` / `max`, defaulting to 0 / 1). `<meter>`
+/// colours the filled cells by the value's position against `low` / `high` /
+/// `optimum`: red outside `[low, high]`, green between `optimum` and the
+/// range midpoint, amber on the far side — the browser's gauge semantics.
+pub fn layout_progress(
+    arena: &NodeArena,
+    node_id: NodeId,
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+    context: LayoutContext,
+    pre_allocated_rect: Option<crate::layout::Rect>,
+) -> Option<LayoutBox> {
+    let node = &arena[node_id];
+    if !matches!(node.node_type, NodeType::Progress | NodeType::Meter) {
+        return None;
+    }
+    let (ratio, color) = progress_ratio(node);
+    Some(layout_block(
+        arena,
+        node,
+        node_id,
+        containing,
+        cursor,
+        LayoutBlockOptions {
+            bar_fill: Some(ratio),
+            bar_color: color,
+            ..Default::default()
+        },
+        context,
+        pre_allocated_rect,
+    ))
+}
+
+/// Resolve the `(fill ratio, bar color)` of a `<progress>` / `<meter>` from
+/// its `value` / `min` / `max` / `low` / `high` / `optimum` attributes.
+fn progress_ratio(node: &Node) -> (f32, Option<Color>) {
+    let attr = |name: &str, default: f32| {
+        node.attributes
+            .get(name)
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(default)
+    };
+    let value = attr("value", 0.0);
+    if node.node_type == NodeType::Meter {
+        let min = attr("min", 0.0);
+        let max = attr("max", 1.0);
+        let ratio = if max > min {
+            ((value - min) / (max - min)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let low = attr("low", min);
+        let high = attr("high", max);
+        let optimum = attr("optimum", (min + max) / 2.0);
+        // Browser gauge tiers: red outside the good range, green between
+        // `optimum` and the range midpoint, amber on the far side.
+        let mid = (low + high) / 2.0;
+        let color = if value < low || value > high {
+            Color::Red
+        } else if (value >= optimum) == (mid >= optimum) {
+            Color::Green
+        } else {
+            Color::Yellow
+        };
+        (ratio, Some(color))
+    } else {
+        let max = attr("max", 1.0);
+        let ratio = if max > 0.0 {
+            (value / max).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        (ratio, None)
+    }
 }
 
 /// Build a [`LayoutBox`] for an `<hr>` element.

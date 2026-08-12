@@ -246,7 +246,7 @@ fn natural_intrinsic_size(
     if matches!(node.node_type, NodeType::Select) {
         let text_w: usize = select_options(arena, node_id)
             .iter()
-            .map(|(_, label)| label.chars().map(char_width).sum::<usize>())
+            .map(|opt| opt.label.chars().map(char_width).sum::<usize>())
             .max()
             .unwrap_or(0);
         let w = node

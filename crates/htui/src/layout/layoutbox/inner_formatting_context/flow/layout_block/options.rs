@@ -60,4 +60,11 @@ pub struct LayoutBlockOptions {
     /// border property. `<dialog open>` uses this for the UA `border: solid`
     /// default.
     pub ua_border: Option<BorderSides>,
+    /// When `Some(ratio)` (0..=1), the body runs are replaced with a single
+    /// synthetic bar run spanning the content-box width — `█` for the filled
+    /// part, `░` for the rest — used by `<progress>` and `<meter>`. The
+    /// filled cells take `bar_color` when set, else the element's own fg.
+    pub bar_fill: Option<f32>,
+    /// Foreground for the filled cells of a [`bar_fill`](Self::bar_fill) run.
+    pub bar_color: Option<crossterm::style::Color>,
 }

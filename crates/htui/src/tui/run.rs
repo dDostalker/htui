@@ -30,7 +30,9 @@ use crate::{
         self, CssRule, PseudoClass, Selector, css_into_node_with_hover, reset_css_attr,
         selector_chain_matches_with_hover,
     },
-    layout::layoutbox::geometry::{select_options, select_overlay_rect},
+    layout::layoutbox::geometry::{
+        SelectRow, overlay_options, select_item_indices, select_overlay_rect, select_rows,
+    },
     layout::{LayoutBox, Rect},
     layout::layout::{MAX_TERM_COLS, MAX_TERM_ROWS, TermMap},
     script::{ScriptMsg, ScriptResponse, run_script_thread},
@@ -149,6 +151,15 @@ const OVERLAY_FG: Color = Color::Rgb {
     b: 0xf5,
 };
 
+/// Foreground of `<optgroup>` header rows — dimmer than the options so a
+/// group label reads as a non-option heading (clicking it still picks the
+/// group's first option).
+const GROUP_FG: Color = Color::Rgb {
+    r: 0x7a,
+    g: 0x83,
+    b: 0xa8,
+};
+
 /// An active page text selection: the two canvas-space endpoints and the
 /// shape connecting them (`Flow` follows reading order, `Block` is a
 /// rectangle). The highlight and the extractable text are both derived from
@@ -168,10 +179,24 @@ struct OpenSelect {
     node_id: NodeId,
     /// Overlay rectangle (canvas coordinates, directly below the field).
     rect: Rect,
-    /// `(value, label)` pairs of the options.
-    options: Vec<(String, String)>,
-    /// Row highlighted by the keyboard cursor.
+    /// Flat option list (`value`, `label`, optional group) — the label source
+    /// for the row painter.
+    options: Vec<crate::layout::layoutbox::geometry::SelectOption>,
+    /// Dropdown rows (group headers interleaved with option items).
+    rows: Vec<crate::layout::layoutbox::geometry::SelectRow>,
+    /// Option index highlighted by the keyboard cursor.
     highlight: usize,
+}
+
+impl OpenSelect {
+    /// The row index holding the highlighted option (first row when the
+    /// highlight is stale / absent).
+    fn highlight_row(&self) -> usize {
+        self.rows
+            .iter()
+            .position(|r| matches!(r, SelectRow::Item(i) if *i == self.highlight))
+            .unwrap_or(0)
+    }
 }
 
 struct RenderState {
@@ -252,7 +277,7 @@ impl RenderState {
     /// repaint) and `SelectMove` cannot be swallowed by a `Hover`.
     fn handle_select<W: Write>(&mut self, out: &mut BufWriter<W>, cmd: RenderCmd) {
         match cmd {
-            RenderCmd::SelectOpen { node_id } => {
+            RenderCmd::SelectOpen { node_id, filter } => {
                 let Some(geo) = self.geometry.as_ref() else {
                     return;
                 };
@@ -271,17 +296,21 @@ impl RenderState {
                         .unwrap_or(prev.rect);
                     tl.repaint_region(&geo.arena, &geo.boxes, union_rect(prev_select, prev.rect));
                 }
-                let options = select_options(&geo.arena, node_id);
-                let value = geo
-                    .arena
-                    .get(node_id)
-                    .and_then(|n| n.attributes.get("value"))
-                    .cloned()
-                    .unwrap_or_default();
-                let selected = options
-                    .iter()
-                    .position(|(v, _)| *v == value)
-                    .unwrap_or(0);
+                let options = overlay_options(&geo.arena, node_id, filter.as_deref());
+                let rows = select_rows(&options);
+                let selected = match filter {
+                    // A datalist autocomplete starts at the first suggestion.
+                    Some(_) => 0,
+                    None => {
+                        let value = geo
+                            .arena
+                            .get(node_id)
+                            .and_then(|n| n.attributes.get("value"))
+                            .cloned()
+                            .unwrap_or_default();
+                        options.iter().position(|o| o.value == value).unwrap_or(0)
+                    }
+                };
                 let Some(select_rect) = collect_box_rects(&geo.boxes)
                     .into_iter()
                     .find(|(id, _)| *id == node_id)
@@ -289,11 +318,12 @@ impl RenderState {
                 else {
                     return;
                 };
-                let rect = select_overlay_rect(&options, select_rect);
+                let rect = select_overlay_rect(&options, &rows, select_rect);
                 self.open_select = Some(OpenSelect {
                     node_id,
                     rect,
                     options,
+                    rows,
                     highlight: selected,
                 });
                 let Some(tl) = self.term_layout.as_mut() else {
@@ -336,7 +366,8 @@ impl RenderState {
                 if open.node_id != node_id {
                     return;
                 }
-                open.highlight = highlight.min(open.options.len().saturating_sub(1));
+                let item_count = select_item_indices(&open.rows).len();
+                open.highlight = highlight.min(item_count.saturating_sub(1));
                 let Some(tl) = self.term_layout.as_mut() else {
                     return;
                 };
@@ -716,12 +747,21 @@ fn apply_select_overlay(tl: &mut TermLayout, open: &OpenSelect) {
         .x
         .saturating_add(open.rect.width)
         .min(cols);
-    for (i, (_, label)) in open.options.iter().enumerate() {
-        let row_start = open.rect.y.saturating_add(i).saturating_mul(cols);
+    for (row_idx, row) in open.rows.iter().enumerate() {
+        let row_start = open.rect.y.saturating_add(row_idx).saturating_mul(cols);
         if row_start >= max {
             break;
         }
-        let bg = if i == open.highlight {
+        let (label, fg, is_item) = match row {
+            // `<optgroup>` headers are dimmed and never take the highlight.
+            SelectRow::Group(g) => (g.as_str(), GROUP_FG, false),
+            SelectRow::Item(i) => (
+                open.options.get(*i).map(|o| o.label.as_str()).unwrap_or(""),
+                OVERLAY_FG,
+                true,
+            ),
+        };
+        let bg = if is_item && row_idx == open.highlight_row() {
             Some(SELECTION_BG)
         } else {
             Some(OVERLAY_BG)
@@ -735,7 +775,7 @@ fn apply_select_overlay(tl: &mut TermLayout, open: &OpenSelect) {
             let cell = &mut tl.layout[idx];
             cell.word.clear();
             cell.word.push(' ');
-            cell.fcolor = Some(OVERLAY_FG);
+            cell.fcolor = Some(fg);
             cell.bcolor = bg;
             cell.style = FontStyle::empty();
         }
@@ -750,7 +790,7 @@ fn apply_select_overlay(tl: &mut TermLayout, open: &OpenSelect) {
                 let cell = &mut tl.layout[idx];
                 cell.word.clear();
                 cell.word.push(ch);
-                cell.fcolor = Some(OVERLAY_FG);
+                cell.fcolor = Some(fg);
                 cell.bcolor = bg;
                 cell.style = FontStyle::empty();
             }

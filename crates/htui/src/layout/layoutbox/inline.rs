@@ -257,7 +257,7 @@ fn walk_runs(
                 let bg = child.css_attr.get_bg_color().or(bg);
                 walk_inline_children(arena, child_id, child, fg, bg, style | block_style(&child.css_attr), white_space, owner, runs);
             }
-            NodeType::Data | NodeType::Time => {
+            NodeType::Data | NodeType::Time | NodeType::Output => {
                 // No UA visual default: plain inline containers like `<span>`.
                 // The `value` / `datetime` attributes are machine-readable
                 // only and carry no visual effect, matching browsers.

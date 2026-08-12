@@ -320,6 +320,7 @@ fn native_remove_attribute(
 
 /// `el.value` getter — the DOM `value` attribute (the field's committed
 /// content; the active edit buffer while focused is engine-side state).
+/// `<output>` is special-cased: its `value` IDL reflects the text content.
 fn native_get_value(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let Some(rc) = with_state() else {
@@ -329,15 +330,21 @@ fn native_get_value(this: &JsValue, _args: &[JsValue], context: &mut Context) ->
     let value = st
         .arena
         .get(node_id)
-        .and_then(|n| n.attributes.get("value"))
-        .cloned()
+        .map(|n| {
+            if n.node_type == NodeType::Output {
+                n.text_content(&st.arena)
+            } else {
+                n.attributes.get("value").cloned().unwrap_or_default()
+            }
+        })
         .unwrap_or_default();
     Ok(js_string!(value).into())
 }
 
 /// `el.value` setter — write the DOM `value` attribute, marking the node dirty
 /// so the next frame re-renders it. Equal values short-circuit (no re-render),
-/// mirroring the `textContent` fast path.
+/// mirroring the `textContent` fast path. `<output>` is special-cased: setting
+/// `value` replaces the element's text content (the output IDL contract).
 fn native_set_value(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let value = args
@@ -349,6 +356,13 @@ fn native_set_value(this: &JsValue, args: &[JsValue], context: &mut Context) -> 
         return Ok(JsValue::undefined());
     };
     let mut st = rc.borrow_mut();
+    if st
+        .arena
+        .get(node_id)
+        .is_some_and(|n| n.node_type == NodeType::Output)
+    {
+        return set_text_content(&mut st, node_id, &value);
+    }
     let existing = st
         .arena
         .get(node_id)
@@ -386,7 +400,13 @@ fn native_set_text(this: &JsValue, args: &[JsValue], context: &mut Context) -> J
         return Ok(JsValue::undefined());
     };
     let mut st = rc.borrow_mut();
+    set_text_content(&mut st, node_id, &text)
+}
 
+/// Shared `textContent` write: replace the node's text, short-circuiting on
+/// equal values and reusing a sole text child to avoid arena growth. Also the
+/// backing store of the `<output>` `value` setter.
+fn set_text_content(st: &mut ScriptState, node_id: NodeId, text: &str) -> JsResult<JsValue> {
     // Text / Comment nodes: `textContent` writes their `data` directly.
     let is_text_like = matches!(
         st.arena.get(node_id).map(|n| n.node_type),
@@ -402,9 +422,9 @@ fn native_set_text(this: &JsValue, args: &[JsValue], context: &mut Context) -> J
             return Ok(JsValue::undefined());
         }
         if let Some(n) = st.arena.get_mut(node_id) {
-            n.data = Some(text);
+            n.data = Some(text.to_string());
         }
-        mark_dirty(&mut st, node_id);
+        mark_dirty(st, node_id);
         return Ok(JsValue::undefined());
     }
 
@@ -429,9 +449,9 @@ fn native_set_text(this: &JsValue, args: &[JsValue], context: &mut Context) -> J
             return Ok(JsValue::undefined());
         }
         if let Some(c) = st.arena.get_mut(child_id) {
-            c.data = Some(text);
+            c.data = Some(text.to_string());
         }
-        mark_dirty(&mut st, node_id);
+        mark_dirty(st, node_id);
         return Ok(JsValue::undefined());
     }
 
@@ -445,14 +465,14 @@ fn native_set_text(this: &JsValue, args: &[JsValue], context: &mut Context) -> J
             c.parent = None;
         }
     }
-    let text_id = st.arena.insert(Node::text(&text));
+    let text_id = st.arena.insert(Node::text(text));
     if let Some(parent) = st.arena.get_mut(node_id) {
         parent.children.push(text_id);
     }
     if let Some(t) = st.arena.get_mut(text_id) {
         t.parent = Some(node_id);
     }
-    mark_dirty(&mut st, node_id);
+    mark_dirty(st, node_id);
     Ok(JsValue::undefined())
 }
 

@@ -47,12 +47,12 @@ pub(crate) fn paint_select(
     let value = node.attributes.get("value").cloned().unwrap_or_default();
     let label = options
         .iter()
-        .find(|(v, _)| *v == value)
-        .map(|(_, l)| l.clone())
+        .find(|o| o.value == value)
+        .map(|o| o.label.clone())
         .unwrap_or_else(|| {
             options
                 .first()
-                .map(|(_, l)| l.clone())
+                .map(|o| o.label.clone())
                 .unwrap_or_default()
         });
 

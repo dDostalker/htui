@@ -14,7 +14,9 @@ use crate::{
 };
 use crate::events::HitMap;
 use crate::layout::Rect;
-use crate::layout::layoutbox::geometry::{select_options, select_overlay_rect};
+use crate::layout::layoutbox::geometry::{
+    SelectRow, overlay_options, select_item_indices, select_overlay_rect, select_rows,
+};
 use crate::layout::paint::{
     textarea_caret_position, textarea_char_at, textarea_scroll_row, textarea_visual_lines,
     value_window,
@@ -198,10 +200,14 @@ pub enum RenderCmd {
         focused: bool,
         selection: Option<(usize, usize)>,
     },
-    /// Open the `<select>` dropdown overlay for `node_id`: the render thread
-    /// reads the options from the DOM, paints the overlay below the field and
-    /// recolours the field's frame.
-    SelectOpen { node_id: NodeId },
+    /// Open the dropdown overlay for `node_id`: the render thread resolves the
+    /// options (a `<select>`'s children, or an `<input list>`'s `<datalist>`
+    /// filtered by `filter`), paints the overlay below the field and
+    /// recolours the field's frame. `filter` is `None` for a plain `<select>`.
+    SelectOpen {
+        node_id: NodeId,
+        filter: Option<String>,
+    },
     /// Close the dropdown overlay for `node_id` (clears the painted overlay
     /// and restores the field's frame).
     SelectClose { node_id: NodeId },
@@ -224,17 +230,30 @@ pub enum RenderCmd {
     Quit,
 }
 
-/// Canvas-space state of an open `<select>` dropdown, held by the input loop
-/// so clicks and keyboard navigation can be resolved without asking the
-/// render thread.
+/// What an open dropdown overlay is attached to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverlayKind {
+    /// A `<select>` — picking an option commits its value and fires `change`.
+    Select,
+    /// An `<input list="…">` autocomplete — picking fills the field.
+    Datalist,
+}
+
+/// Canvas-space state of an open dropdown overlay, held by the input loop so
+/// clicks and keyboard navigation can be resolved without asking the render
+/// thread.
 #[derive(Debug, Clone)]
 pub struct SelectOpenState {
-    /// The `<select>` node id.
+    /// The owning `<select>` / `<input>` node id.
     pub node_id: NodeId,
+    /// What the overlay is attached to (select vs input autocomplete).
+    pub kind: OverlayKind,
     /// Overlay rectangle (canvas coordinates, directly below the field).
     pub rect: crate::layout::Rect,
-    /// `(value, label)` pairs of the options.
-    pub options: Vec<(String, String)>,
+    /// The flat option list (`value`, `label`, optional group).
+    pub options: Vec<crate::layout::layoutbox::geometry::SelectOption>,
+    /// The dropdown rows (group headers interleaved with options).
+    pub rows: Vec<crate::layout::layoutbox::geometry::SelectRow>,
     /// Index of the currently selected option.
     pub selected: usize,
     /// Index highlighted in the overlay (keyboard / hover cursor).
@@ -1019,6 +1038,9 @@ pub fn handle_click(
                 msgs.push(ScriptMsg::ToggleCheck { node_id });
             } else {
                 focus_input(state, node_id, arena, msgs, cmds);
+                // Clicking an `<input list>` opens its autocomplete dropdown
+                // (browser behavior: focus shows the suggestions).
+                refresh_datalist(state, Some(hit_map), Some(arena), cmds);
             }
         }
     } else if state.focused_input.is_some() {
@@ -1079,7 +1101,13 @@ fn label_control(arena: &NodeArena, label_id: NodeId) -> Option<NodeId> {
 fn is_labelable(node_type: &NodeType) -> bool {
     matches!(
         node_type,
-        NodeType::Input | NodeType::Select | NodeType::Textarea | NodeType::Button
+        NodeType::Input
+            | NodeType::Select
+            | NodeType::Textarea
+            | NodeType::Button
+            | NodeType::Output
+            | NodeType::Progress
+            | NodeType::Meter
     )
 }
 
@@ -1134,9 +1162,70 @@ fn hit_select_option(open: &SelectOpenState, x: u32, y: u32) -> Option<usize> {
     }
 }
 
-/// Open the `<select>` dropdown for `node_id`: resolve the options and
-/// overlay geometry from the DOM, remember them on the input loop, and ask
-/// the render thread to paint the overlay.
+/// Resolve a dropdown row click to an option index.
+///
+/// Option rows map to themselves; `<optgroup>` header rows map to the first
+/// option of that group — a terminal convenience so every visible row is
+/// actionable (the browser would ignore a header click). `None` when the row
+/// is out of range.
+fn row_option(rows: &[SelectRow], row: usize) -> Option<usize> {
+    match rows.get(row)? {
+        SelectRow::Item(i) => Some(*i),
+        SelectRow::Group(_) => rows[row..]
+            .iter()
+            .find_map(|r| match r {
+                SelectRow::Item(i) => Some(*i),
+                SelectRow::Group(_) => None,
+            }),
+    }
+}
+
+/// Open the dropdown overlay for `node_id`: resolve the options (a
+/// `<select>`'s children, or an `<input list>`'s `<datalist>` filtered by
+/// `filter`), the rows and overlay geometry from the DOM, remember them on the
+/// input loop, and ask the render thread to paint the overlay.
+fn open_overlay(
+    state: &mut InputState,
+    hit_map: &HitMap,
+    arena: &NodeArena,
+    node_id: NodeId,
+    kind: OverlayKind,
+    filter: Option<&str>,
+    cmds: &mut Vec<RenderCmd>,
+) {
+    let Some(region) = hit_map.iter().find(|r| r.node_id == node_id) else {
+        return;
+    };
+    let options = overlay_options(arena, node_id, filter);
+    let rows = select_rows(&options);
+    let selected = match kind {
+        OverlayKind::Select => {
+            let value = arena
+                .get(node_id)
+                .and_then(|n| n.attributes.get("value"))
+                .cloned()
+                .unwrap_or_default();
+            options.iter().position(|o| o.value == value).unwrap_or(0)
+        }
+        OverlayKind::Datalist => 0,
+    };
+    let rect = select_overlay_rect(&options, &rows, region.rect);
+    state.open_select = Some(SelectOpenState {
+        node_id,
+        kind,
+        rect,
+        options,
+        rows,
+        selected,
+        highlight: selected,
+    });
+    cmds.push(RenderCmd::SelectOpen {
+        node_id,
+        filter: filter.map(str::to_string),
+    });
+}
+
+/// Open the `<select>` dropdown for `node_id` (see [`open_overlay`]).
 fn open_select(
     state: &mut InputState,
     hit_map: &HitMap,
@@ -1144,28 +1233,49 @@ fn open_select(
     node_id: NodeId,
     cmds: &mut Vec<RenderCmd>,
 ) {
-    let Some(region) = hit_map.iter().find(|r| r.node_id == node_id) else {
+    open_overlay(state, hit_map, arena, node_id, OverlayKind::Select, None, cmds);
+}
+
+/// Open / refresh the autocomplete dropdown of a focused `<input list>`.
+///
+/// The overlay tracks the field's current text: an empty value shows every
+/// `<datalist>` suggestion (the browser's focus behavior), otherwise the
+/// options are filtered by the current text (case-insensitive substring).
+/// `hit_map` / `arena` being `None` (tests / hosts that disable interaction)
+/// skips the overlay entirely.
+fn refresh_datalist(
+    state: &mut InputState,
+    hit_map: Option<&HitMap>,
+    arena: Option<&NodeArena>,
+    cmds: &mut Vec<RenderCmd>,
+) {
+    let Some(focused) = state.focused_input else {
         return;
     };
-    let options = select_options(arena, node_id);
-    let value = arena
-        .get(node_id)
-        .and_then(|n| n.attributes.get("value"))
-        .cloned()
-        .unwrap_or_default();
-    let selected = options
-        .iter()
-        .position(|(v, _)| *v == value)
-        .unwrap_or(0);
-    let rect = select_overlay_rect(&options, region.rect);
-    state.open_select = Some(SelectOpenState {
-        node_id,
-        rect,
-        options,
-        selected,
-        highlight: selected,
-    });
-    cmds.push(RenderCmd::SelectOpen { node_id });
+    let (Some(hit_map), Some(arena)) = (hit_map, arena) else {
+        return;
+    };
+    let has_list = arena
+        .get(focused)
+        .is_some_and(|n| n.node_type == NodeType::Input && n.attributes.contains_key("list"));
+    if !has_list {
+        if let Some(open) = state.open_select.take() {
+            cmds.push(RenderCmd::SelectClose {
+                node_id: open.node_id,
+            });
+        }
+        return;
+    }
+    let filter = state.input_value.clone();
+    open_overlay(
+        state,
+        hit_map,
+        arena,
+        focused,
+        OverlayKind::Datalist,
+        Some(&filter),
+        cmds,
+    );
 }
 
 /// Close the open `<select>` dropdown. When `pick` is `Some`, the option is
@@ -1187,7 +1297,7 @@ fn close_select(
         node_id: open.node_id,
     });
     if let Some(idx) = pick && idx < open.options.len() {
-            let value = open.options[idx].0.clone();
+            let value = open.options[idx].value.clone();
             let old = arena
                 .get(open.node_id)
                 .and_then(|n| n.attributes.get("value"))
@@ -1225,12 +1335,17 @@ pub fn handle_mouse_down(
 ) {
     let clicked = hit_map.hit_test(x, y);
 
-    // An open dropdown takes priority: a press on an option row picks it,
-    // a press on the field toggles it closed, any other press closes it and
-    // then falls through to the normal dispatch.
+    // An open dropdown takes priority: a press on an option row picks it, a
+    // press on an `<optgroup>` header does nothing (browsers keep the
+    // dropdown open), a press on the field toggles it closed, any other press
+    // closes it and then falls through to the normal dispatch.
     if let Some(open) = state.open_select.clone() {
-        if let Some(idx) = hit_select_option(&open, x, y) {
-            close_select(state, arena, Some(idx), msgs, cmds);
+        if let Some(row) = hit_select_option(&open, x, y) {
+            // Option rows pick; `<optgroup>` headers pick their first option
+            // (see [`row_option`]) — every visible row is actionable.
+            if let Some(option_idx) = row_option(&open.rows, row) {
+                close_select(state, arena, Some(option_idx), msgs, cmds);
+            }
             return;
         }
         let clicked_self = clicked.is_some_and(|r| r.node_id == open.node_id);
@@ -1255,6 +1370,10 @@ pub fn handle_mouse_down(
                         // toggle — no text focus or drag selection here.
                     } else {
                         focus_input(state, node_id, arena, msgs, cmds);
+                        // Pressing an `<input list>` opens its autocomplete
+                        // dropdown (browser behavior: focus shows the
+                        // suggestions).
+                        refresh_datalist(state, Some(hit_map), Some(arena), cmds);
                         if direct_field_hit {
                             state.drag_selecting = true;
                             // Position the caret (and the selection anchor) at
@@ -1334,15 +1453,20 @@ pub fn handle_mouse_move(
     msgs: &mut Vec<ScriptMsg>,
     cmds: &mut Vec<RenderCmd>,
 ) {
-    // An open `<select>` dropdown follows the pointer: hovering an option row
-    // moves the highlight (and repaints only the overlay). This runs even
-    // while the button is held (browser select: press-drag over the options)
-    // and short-circuits when the highlight is unchanged.
-    if let Some(idx) = state
+    // An open dropdown follows the pointer: hovering an option row moves the
+    // highlight (group headers are skipped; the highlight stays put over them),
+    // repainting only the overlay. This runs even while the button is held
+    // (browser select: press-drag over the options) and short-circuits when
+    // the highlight is unchanged.
+    if let Some(row) = state
         .open_select
         .as_ref()
         .and_then(|open| hit_select_option(open, x, y))
-        .filter(|&idx| state.open_select.as_ref().is_some_and(|o| o.highlight != idx))
+    &&  let Some(idx) = state
+            .open_select
+            .as_ref()
+            .and_then(|open| row_option(&open.rows, row))
+    &&  state.open_select.as_ref().is_some_and(|o| o.highlight != idx)
     &&  let Some(open) = &mut state.open_select {
             open.highlight = idx;
             cmds.push(RenderCmd::SelectMove {
@@ -1472,10 +1596,13 @@ pub fn trigger_refresh(
                 });
             }
 
-            // An open `<select>` dropdown consumes navigation keys: ↑ / ↓
-            // move the highlight, `Enter` picks the highlighted option, `Esc`
-            // closes. Any other key closes the dropdown and is swallowed
-            // (the dropdown owns the keyboard while open).
+            // An open dropdown overlay consumes navigation keys: ↑ / ↓ move
+            // the highlight (skipping `<optgroup>` headers), `Enter` picks the
+            // highlighted option (a `<select>` commits it, an `<input list>`
+            // fills the field), `Esc` closes. A plain `<select>` owns the
+            // keyboard while open — any other key closes it and is swallowed.
+            // A datalist autocomplete instead lets the key edit the field
+            // (fall through to the input block, which re-filters).
             if state.open_select.is_some() {
                 let Some(arena) = arena else {
                     return cmds;
@@ -1485,36 +1612,53 @@ pub fn trigger_refresh(
                     .as_ref()
                     .map(|o| o.node_id)
                     .unwrap();
+                let kind = state.open_select.as_ref().map(|o| o.kind).unwrap();
                 match key.code {
-                    KeyCode::Up => {
+                    KeyCode::Up | KeyCode::Down => {
+                        let dir: i32 = if key.code == KeyCode::Up { -1 } else { 1 };
                         if let Some(open) = &mut state.open_select {
-                            let n = open.options.len().max(1);
-                            open.highlight = if open.highlight == 0 {
-                                n - 1
-                            } else {
-                                open.highlight - 1
-                            };
-                            cmds.push(RenderCmd::SelectMove {
-                                node_id,
-                                highlight: open.highlight,
-                            });
-                        }
-                        return cmds;
-                    }
-                    KeyCode::Down => {
-                        if let Some(open) = &mut state.open_select {
-                            let n = open.options.len().max(1);
-                            open.highlight = (open.highlight + 1).min(n - 1);
-                            cmds.push(RenderCmd::SelectMove {
-                                node_id,
-                                highlight: open.highlight,
-                            });
+                            let items = select_item_indices(&open.rows);
+                            if !items.is_empty() {
+                                let pos = items
+                                    .iter()
+                                    .position(|&i| i == open.highlight)
+                                    .unwrap_or(0);
+                                let next = items
+                                    [(((pos as i32) + dir).rem_euclid(items.len() as i32)) as usize];
+                                open.highlight = next;
+                                cmds.push(RenderCmd::SelectMove {
+                                    node_id,
+                                    highlight: next,
+                                });
+                            }
                         }
                         return cmds;
                     }
                     KeyCode::Enter => {
-                        let pick = state.open_select.as_ref().map(|o| o.highlight);
-                        close_select(state, arena, pick, msgs, &mut cmds);
+                        if kind == OverlayKind::Select {
+                            let pick = state.open_select.as_ref().map(|o| o.highlight);
+                            close_select(state, arena, pick, msgs, &mut cmds);
+                        } else {
+                            // Datalist: fill the field with the highlighted
+                            // suggestion and keep focus (the value commits on
+                            // blur / Enter as usual).
+                            let pick_value = state
+                                .open_select
+                                .as_ref()
+                                .and_then(|o| o.options.get(o.highlight).map(|opt| opt.value.clone()));
+                            if let Some(open) = state.open_select.take() {
+                                cmds.push(RenderCmd::SelectClose {
+                                    node_id: open.node_id,
+                                });
+                            }
+                            if let Some(value) = pick_value {
+                                state.input_value = value;
+                                state.input_cursor = state.input_value.chars().count();
+                                state.input_sel_anchor = None;
+                                push_input_render(state, node_id, &mut cmds);
+                                msgs.push(ScriptMsg::InputKeystroke { node_id });
+                            }
+                        }
                         return cmds;
                     }
                     KeyCode::Esc => {
@@ -1523,7 +1667,9 @@ pub fn trigger_refresh(
                     }
                     _ => {
                         close_select(state, arena, None, msgs, &mut cmds);
-                        return cmds;
+                        if kind == OverlayKind::Select {
+                            return cmds;
+                        }
                     }
                 }
             }
@@ -1575,6 +1721,7 @@ pub fn trigger_refresh(
                         if arena.is_some() {
                             msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
                         }
+                        refresh_datalist(state, hit_map, arena, &mut cmds);
                     }
                     return cmds;
                 }
@@ -1588,6 +1735,7 @@ pub fn trigger_refresh(
                         if arena.is_some() {
                             msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
                         }
+                        refresh_datalist(state, hit_map, arena, &mut cmds);
                     }
                     return cmds;
                 }
@@ -1648,6 +1796,7 @@ pub fn trigger_refresh(
                         if arena.is_some() {
                             msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
                         }
+                        refresh_datalist(state, hit_map, arena, &mut cmds);
                     }
                     return cmds;
                 }
@@ -1737,11 +1886,16 @@ pub fn trigger_refresh(
                         state.pressed = None;
                         state.drag_selecting = false;
                         let (x, y) = canvas_pos(state, mouse.column, mouse.row);
-                        // Press-drag-release over a dropdown option picks it
+                        // Press-drag-release over a dropdown row picks it
                         // (the browser's native `<select>` interaction), even
-                        // when the release lands off the press cell.
-                        if let Some(open) = state.open_select.clone() && let Some(idx) = hit_select_option(&open, x, y) {
-                                close_select(state, arena, Some(idx), msgs, &mut cmds);
+                        // when the release lands off the press cell. Rows map
+                        // to option indices like the mousedown pick above:
+                        // `<optgroup>` headers pick their first option.
+                        if let Some(open) = state.open_select.clone()
+                            && let Some(row) = hit_select_option(&open, x, y)
+                            && let Some(option_idx) = row_option(&open.rows, row)
+                        {
+                                close_select(state, arena, Some(option_idx), msgs, &mut cmds);
                                 return cmds;
                             
                         }

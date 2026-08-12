@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head><title>Form Elements</title></head>
+<body>
+  <script>
+    // The remaining form controls: `<output>` (value = text content),
+    // `<optgroup>` select grouping, `<datalist>` autocomplete, `<fieldset>` /
+    // `<legend>` framing, and the `<progress>` / `<meter>` bars.
+    function log(msg) {
+      document.getElementById('status').textContent = msg;
+    }
+    // `<output>`'s `value` setter replaces the text content (browser IDL).
+    function compute() {
+      var a = parseInt(document.getElementById('a').value || '0');
+      var b = parseInt(document.getElementById('b').value || '0');
+      var out = document.getElementById('sum');
+      out.value = String(a + b);
+      log('sum = ' + out.value);
+    }
+    function updateGauge() {
+      var v = parseFloat(document.getElementById('g').value || '0');
+      if (isNaN(v)) { v = 0; }
+      document.getElementById('pg').setAttribute('value', String(v));
+      document.getElementById('mt').setAttribute('value', String(v));
+      log('gauge = ' + v);
+    }
+    log('ready — click Compute / Apply, try the grouped select and the datalist');
+  </script>
+  <h1>form elements</h1>
+
+  <fieldset>
+    <legend>Calculator</legend>
+    <p>a = <input id="a" value="3" width="6">    b = <input id="b" value="4" width="6"></p>
+    <p>sum = <output id="sum">0</output></p>
+    <p><button id="compute-btn" onclick="compute()">Compute</button></p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Gauges</legend>
+    <p>level = <input id="g" value="0.5" width="6"></p>
+    <progress id="pg" value="0.5" max="1"></progress>
+    <meter id="mt" value="0.5" low="0.2" high="0.8" optimum="0.5"></meter>
+    <p><button onclick="updateGauge()">Apply</button></p>
+  </fieldset>
+
+  <h2>optgroup select</h2>
+  <p>Fruit: <select id="fruit">
+    <optgroup label="Citrus"><option value="orange">Orange</option><option value="lemon">Lemon</option></optgroup>
+    <optgroup label="Berries"><option value="strawberry">Strawberry</option><option value="blueberry">Blueberry</option></optgroup>
+    <option value="melon">Melon</option>
+  </select> — click it: the dimmed optgroup labels pick their group's
+     first option; the options below are selectable too.</p>
+
+  <h2>datalist autocomplete</h2>
+  <datalist id="langs">
+    <option value="Rust"></option>
+    <option value="Python"></option>
+    <option value="TypeScript"></option>
+    <option value="Go"></option>
+  </datalist>
+  <p>Language: <input id="lang" list="langs"> — click / type to see
+     suggestions; Enter fills the field.</p>
+
+  <p id="status">—</p>
+</body>
+</html>

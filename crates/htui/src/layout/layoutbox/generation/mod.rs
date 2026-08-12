@@ -303,6 +303,7 @@ fn is_non_rendered(node_type: &NodeType) -> bool {
             | NodeType::Base
             | NodeType::Noscript
             | NodeType::Template
+            | NodeType::Datalist
             | NodeType::Comment
             | NodeType::DocumentType
             | NodeType::DocumentFragment

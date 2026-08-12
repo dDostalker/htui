@@ -413,6 +413,7 @@ pub static DEFAULT_LAYOUT: &[LayoutFn] = &[
     inner_formatting_context::flow::layout_td,
     inner_formatting_context::flow::layout_th,
     inner_formatting_context::flow::layout_tr,
+    inner_formatting_context::flow::layout_progress,
     inner_formatting_context::flow::layout_summary,
     inner_formatting_context::flow::layout_generic,
 ];

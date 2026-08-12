@@ -109,6 +109,16 @@ fn dialog_opts() -> LayoutBlockOptions {
     }
 }
 
+/// `<fieldset>` keeps the browser UA default border plus one blank row of
+/// UA margin above / below, framing the control group.
+fn fieldset_opts() -> LayoutBlockOptions {
+    LayoutBlockOptions {
+        ua_border: Some(BorderSides::all(Border::new(1, BorderStyle::Solid, None))),
+        ua_margins: Some(EdgeSizes::new(1, 0, 1, 0)),
+        ..Default::default()
+    }
+}
+
 /// Plain block elements handled by [`layout_standard_block`].
 static STANDARD_BLOCK_ELEMENTS: &[BlockElementConfig] = &[
     BlockElementConfig {
@@ -170,6 +180,14 @@ static STANDARD_BLOCK_ELEMENTS: &[BlockElementConfig] = &[
     BlockElementConfig {
         node_type: NodeType::Dialog,
         opts: dialog_opts,
+    },
+    BlockElementConfig {
+        node_type: NodeType::Fieldset,
+        opts: fieldset_opts,
+    },
+    BlockElementConfig {
+        node_type: NodeType::Legend,
+        opts: default_opts,
     },
 ];
 

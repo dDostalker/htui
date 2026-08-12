@@ -199,9 +199,34 @@ pub enum NodeType {
     Form,
     Select,
     HtmlOption,
+    /// `<optgroup>` — a labelled group of `<option>`s inside a `<select>`. The
+    /// dropdown renders the `label` attribute as a non-selectable group header
+    /// row, with the group's options indented beneath it.
+    Optgroup,
+    /// `<datalist>` — a hidden suggestion source for `<input list="…">`.
+    /// The element never renders; its `<option>` children feed the
+    /// autocomplete dropdown of matching fields.
+    Datalist,
     Button,
     Textarea,
     Label,
+    /// `<output>` — the result of a form calculation. Inline element that
+    /// renders its text content; the `value` IDL property reads / replaces
+    /// that text (like a browser).
+    Output,
+    /// `<fieldset>` — a labelled group of form controls. Block element with
+    /// the browser UA default border; the first `<legend>` child renders as a
+    /// plain block inside it.
+    Fieldset,
+    /// `<legend>` — the caption of a `<fieldset>`. Plain block element.
+    Legend,
+    /// `<progress>` — a progress indicator. Block element that renders a
+    /// terminal bar (`█` filled / `░` empty) from the `value` / `max`
+    /// attributes.
+    Progress,
+    /// `<meter>` — a scalar gauge. Renders like `<progress>`, but the bar is
+    /// coloured by the value's position against `low` / `high` / `optimum`.
+    Meter,
     /// `<noscript>` — content shown only when scripting is disabled. This
     /// engine always runs its script layer, so the element never renders
     /// (mirroring a browser with JavaScript enabled); the content stays in
@@ -302,9 +327,16 @@ impl NodeType {
         NodeType::Form,
         NodeType::Select,
         NodeType::HtmlOption,
+        NodeType::Optgroup,
+        NodeType::Datalist,
         NodeType::Button,
         NodeType::Textarea,
         NodeType::Label,
+        NodeType::Output,
+        NodeType::Fieldset,
+        NodeType::Legend,
+        NodeType::Progress,
+        NodeType::Meter,
         NodeType::Noscript,
         NodeType::Template,
         NodeType::Style,
@@ -363,6 +395,7 @@ impl NodeType {
             | NodeType::Data
             | NodeType::Time
             | NodeType::Label
+            | NodeType::Output
             | NodeType::Br => CssDisplay::Inline,
             NodeType::Table => CssDisplay::Table,
             NodeType::Thead => CssDisplay::TableHeaderGroup,
@@ -494,9 +527,16 @@ impl NodeType {
             NodeType::Form => "form",
             NodeType::Select => "select",
             NodeType::HtmlOption => "option",
+            NodeType::Optgroup => "optgroup",
+            NodeType::Datalist => "datalist",
             NodeType::Button => "button",
             NodeType::Textarea => "textarea",
             NodeType::Label => "label",
+            NodeType::Output => "output",
+            NodeType::Fieldset => "fieldset",
+            NodeType::Legend => "legend",
+            NodeType::Progress => "progress",
+            NodeType::Meter => "meter",
             NodeType::Noscript => "noscript",
             NodeType::Template => "template",
             NodeType::Style => "style",

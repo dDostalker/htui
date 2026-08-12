@@ -173,6 +173,21 @@ pub fn layout_block(
             block_fg,
             block_bg,
         )]
+    } else if let Some(ratio) = opts.bar_fill {
+        // `<progress>` / `<meter>` paint a terminal bar: `█` for the filled
+        // part, `░` for the rest, spanning the content-box width. The filled
+        // cells carry `bar_color` (or the element fg); the empty cells keep
+        // the element fg so the whole run reads as one widget.
+        let width = geom.content_constraint.width.max(1);
+        let filled = ((width as f32) * ratio.clamp(0.0, 1.0)).round() as usize;
+        let mut run_text = "█".repeat(filled.min(width));
+        run_text.push_str(&"░".repeat(width.saturating_sub(filled)));
+        vec![InlineRun::new(
+            run_text,
+            block_font_style,
+            opts.bar_color.or(block_fg),
+            block_bg,
+        )]
     } else {
         body_runs
     };
