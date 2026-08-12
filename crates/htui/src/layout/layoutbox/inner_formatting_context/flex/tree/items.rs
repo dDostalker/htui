@@ -119,7 +119,15 @@ pub(super) fn layout_flex_items(
         let line_cross = match direction {
             FlexDirection::Row => {
                 if has_explicit_height && line_count == 1 {
-                    container_height
+                    // A single-line row container with an explicit height
+                    // sizes its line to that height (so `align-items:
+                    // stretch` fills the container). But never smaller than
+                    // the line's natural cross size: a flex item taller than
+                    // the container (e.g. nested content that measures
+                    // larger than the viewport-height constraint) must not
+                    // overflow into the paint clip, or its last rows are
+                    // silently dropped.
+                    container_height.max(natural_line_cross)
                 } else {
                     natural_line_cross
                 }

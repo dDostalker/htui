@@ -397,10 +397,23 @@ fn natural_intrinsic_size(
             .get_width(usize::MAX, child_context.font, child_context.viewport)
             .unwrap_or(content_w.max(FLEX_ITEM_MIN_CROSS))
             .max(FLEX_ITEM_MIN_CROSS);
+        // Some elements reserve trailing blank rows after their border-box
+        // (the browser UA stylesheet's `spacing_after`): `<hr>` leaves one
+        // row, `<header>` / `<footer>` two. The block layout adds these on
+        // top of `content_height`, so the intrinsic measurement must too —
+        // otherwise a flex item sized from the natural measure under-
+        // estimates its real height and the item's last row bleeds into the
+        // parent's paint clip (silently dropped).
+        let ua_spacing_after = match node.node_type {
+            NodeType::Hr => 1,
+            NodeType::Header | NodeType::Footer => 2,
+            _ => 0,
+        };
         let content_box_h = css
             .get_height(usize::MAX, child_context.font, child_context.viewport)
             .unwrap_or(content_h.max(FLEX_ITEM_MIN_CROSS))
-            .max(FLEX_ITEM_MIN_CROSS);
+            .max(FLEX_ITEM_MIN_CROSS)
+            .saturating_add(ua_spacing_after);
         // Report the border-box (outer) size, like the flex-container branch
         // above: padding + border sit on top of the content-box measurement
         // so the flex algorithm sizes the item's full border-box.

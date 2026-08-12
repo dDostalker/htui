@@ -1381,3 +1381,54 @@ fn test_flex_item_min_width_prevents_shrink_below_floor() {
     assert_eq!(pos_a, 0, "A starts at col 0");
     assert_eq!(pos_b, 14, "B starts after A's min-width floor of 14");
 }
+
+#[test]
+fn test_flex_item_content_taller_than_container_height_is_not_clipped() {
+    init();
+    // A flex item whose content is taller than the container's explicit
+    // `height` must not be clipped: the line's cross size grows to the
+    // natural content size, and the pre-allocated item rect expands to fit
+    // the content's real border-box height. Regression guard for the
+    // `<hr>`-inside-flex-item case where the natural measure used to
+    // under-count `spacing_after` and the item's last row bled into the
+    // parent's paint clip (silently dropped).
+    let html = r#"
+        <div class="container">
+            <div class="item">
+                <div>HEAD</div>
+                <hr>
+                <div>FOOT</div>
+            </div>
+        </div>
+    "#;
+    let css = r#"
+        .container { display: flex; height: 4; align-items: center; justify-content: center; }
+        .item { width: 20; border: 1px solid #888; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    let head = rows
+        .iter()
+        .position(|r| r.contains("HEAD"))
+        .expect("HEAD should render");
+    let foot = rows
+        .iter()
+        .position(|r| r.contains("FOOT"))
+        .expect("FOOT should render");
+    let bottom_border = rows
+        .iter()
+        .position(|r| r.contains("└") && r.contains("┘"))
+        .expect("item bottom border should render");
+    // HEAD above FOOT, FOOT above the bottom border: nothing clipped.
+    assert!(head < foot, "HEAD row {} above FOOT row {}", head, foot);
+    assert!(
+        foot < bottom_border,
+        "FOOT row {} above bottom border row {}",
+        foot,
+        bottom_border
+    );
+    assert_eq!(
+        rows[bottom_border].trim().chars().last(),
+        Some('┘'),
+        "bottom border row ends with the corner glyph"
+    );
+}
