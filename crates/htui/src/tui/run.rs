@@ -457,10 +457,10 @@ impl RenderState {
                 guard.clear();
             }
         }
-        let tl = self
-            .term_layout
-            .as_mut()
-            .expect("TermLayout just allocated above or reused from prior render");
+        let Some(tl) = self.term_layout.as_mut() else {
+            // `term_layout` is guaranteed `Some` by the branch above.
+            return;
+        };
 
         let boxes = tl.layout_only(&arena, root_id, term_map);
 

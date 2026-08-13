@@ -128,10 +128,9 @@ pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintC
     let placeholder = node.attributes.get("placeholder").cloned();
     let placeholder = placeholder.as_deref().filter(|p| !p.is_empty());
     let showing_placeholder = value.is_empty() && !focused && placeholder.is_some();
-    let display: &str = if showing_placeholder {
-        placeholder.expect("placeholder is Some when showing")
-    } else {
-        &value
+    let display: &str = match (showing_placeholder, placeholder) {
+        (true, Some(p)) => p,
+        _ => value.as_str(),
     };
 
     let disabled = node.attributes.contains_key("disabled");
