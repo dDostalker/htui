@@ -411,6 +411,29 @@ impl NodeType {
         }
     }
 
+    /// Browser user-agent declarations for inline text-level elements.
+    ///
+    /// Returns the CSS `(property, value)` pairs the UA stylesheet applies when
+    /// neither an author rule nor an inherited value has set the property. The
+    /// caller injects each pair only when [`CssAttr::is_set`] reports it unset.
+    ///
+    /// `<abbr>`'s underline additionally depends on a `title` attribute and is
+    /// handled by the caller; `<q>`'s generated quotes are not CSS declarations
+    /// and are handled by the layout code.
+    pub fn inline_ua_declarations(&self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            NodeType::Em | NodeType::I | NodeType::Cite | NodeType::Dfn | NodeType::Var => {
+                &[("font-style", "italic")]
+            }
+            NodeType::Strong | NodeType::B => &[("font-weight", "bold")],
+            NodeType::U | NodeType::Ins => &[("text-decoration", "underline")],
+            NodeType::S | NodeType::Del => &[("text-decoration", "line-through")],
+            NodeType::Mark => &[("color", "black"), ("background-color", "yellow")],
+            NodeType::A => &[("color", "blue"), ("text-decoration", "underline")],
+            _ => &[],
+        }
+    }
+
     /// CSS default `font-size` in `em` units for this element type.
     ///
     /// Browser defaults for headings (CSS 2.1 / user-agent stylesheet):

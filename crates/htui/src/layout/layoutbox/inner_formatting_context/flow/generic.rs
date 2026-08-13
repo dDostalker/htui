@@ -118,50 +118,22 @@ pub fn layout_inline_blockify(
 }
 
 /// Inject the browser-style inline UA defaults into a blockified inline
-/// element's `css_attr` (mirroring `apply_a_ua_defaults` in the `<a>` handler).
-/// Each default only lands when the cascade has not already set the
-/// matching property, so an author rule or inherited value always wins.
+/// element's `css_attr`. Each default only lands when the cascade has not
+/// already set the matching property, so an author rule or inherited value
+/// always wins.
 fn apply_inline_ua_defaults(node: &mut Node) {
-    let css = &mut node.css_attr;
-    match node.node_type {
-        NodeType::Em | NodeType::I | NodeType::Cite | NodeType::Dfn | NodeType::Var => {
-            if !css.is_set("font-style") {
-                css.0.insert("font-style".into(), "italic".into());
-            }
+    for &(prop, value) in node.node_type.inline_ua_declarations() {
+        if !node.css_attr.is_set(prop) {
+            node.css_attr.0.insert(prop.to_string(), value.to_string());
         }
-        NodeType::Strong | NodeType::B => {
-            if !css.is_set("font-weight") {
-                css.0.insert("font-weight".into(), "bold".into());
-            }
+    }
+    // `<abbr>`'s underline is conditional on a `title` attribute.
+    if node.node_type == NodeType::Abbr && node.attributes.get("title").is_some() {
+        if !node.css_attr.is_set("text-decoration") {
+            node.css_attr
+                .0
+                .insert("text-decoration".to_string(), "underline".to_string());
         }
-        NodeType::U | NodeType::Ins => {
-            if !css.is_set("text-decoration") {
-                css.0
-                    .insert("text-decoration".into(), "underline".into());
-            }
-        }
-        NodeType::S | NodeType::Del => {
-            if !css.is_set("text-decoration") {
-                css.0
-                    .insert("text-decoration".into(), "line-through".into());
-            }
-        }
-        NodeType::Mark => {
-            if !css.is_set("color") {
-                css.0.insert("color".into(), "black".into());
-            }
-            if !css.is_set("background-color") {
-                css.0
-                    .insert("background-color".into(), "yellow".into());
-            }
-        }
-        NodeType::Abbr if node.attributes.get("title").is_some() => {
-            if !css.is_set("text-decoration") {
-                css.0
-                    .insert("text-decoration".into(), "underline".into());
-            }
-        }
-        _ => {}
     }
 }
 

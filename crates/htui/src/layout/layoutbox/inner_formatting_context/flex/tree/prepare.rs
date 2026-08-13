@@ -4,7 +4,7 @@
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    html::css_parse::{AlignItems, AlignSelf, FlexDirection, Length, LengthContext, WhiteSpace},
+    html::css_parse::{AlignItems, AlignSelf, CssDisplay, FlexDirection, Length, LengthContext, WhiteSpace},
     layout::{
         InlineRun, LayoutContext,
         layoutbox::collect_runs,
@@ -191,7 +191,7 @@ fn measure_text_content_width_ws(
             // block's inline content; recurse so a block whose text lives
             // entirely inside inline elements still reports its intrinsic
             // width (flex-basis: auto relies on it).
-            _ if is_inline_text_level(&child.node_type) => {
+            _ if child.node_type.ua_default_display() == CssDisplay::Inline => {
                 let ws = child.white_space_or(white_space);
                 let w = measure_text_content_width_ws(arena, child_id, ws).unwrap_or(0);
                 let w = if child.node_type == NodeType::Q {
@@ -205,37 +205,6 @@ fn measure_text_content_width_ws(
         }
     }
     total
-}
-
-/// `true` for the inline text-level element kinds whose text folds into an
-/// ancestor block's inline runs.
-fn is_inline_text_level(node_type: &NodeType) -> bool {
-    matches!(
-        node_type,
-        NodeType::Span
-            | NodeType::A
-            | NodeType::Em
-            | NodeType::Strong
-            | NodeType::B
-            | NodeType::I
-            | NodeType::U
-            | NodeType::S
-            | NodeType::Del
-            | NodeType::Ins
-            | NodeType::Mark
-            | NodeType::Q
-            | NodeType::Abbr
-            | NodeType::Cite
-            | NodeType::Dfn
-            | NodeType::Var
-            | NodeType::Code
-            | NodeType::Kbd
-            | NodeType::Samp
-            | NodeType::Data
-            | NodeType::Time
-            | NodeType::Label
-            | NodeType::Output
-    )
 }
 
 /// Widest unbreakable segment in `node_id`'s inline text — the item's
@@ -263,7 +232,7 @@ pub(super) fn longest_breakable_width(arena: &NodeArena, node_id: NodeId) -> usi
                         }
                     }
                 }
-                _ if is_inline_text_level(&child.node_type) => {
+                _ if child.node_type.ua_default_display() == CssDisplay::Inline => {
                     let ws = child.white_space_or(white_space);
                     walk(arena, child_id, ws, max_w);
                 }

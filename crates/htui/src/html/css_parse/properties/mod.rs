@@ -63,6 +63,11 @@ impl CssAttr {
     pub fn is_set(&self, property: &str) -> bool {
         self.0.contains_key(property)
     }
+    /// Resolve a property with `parse`, falling back to `default` when the
+    /// property is absent or unparseable.
+    fn parse_or<T>(&self, key: &str, parse: fn(&str) -> Option<T>, default: T) -> T {
+        self.0.get(key).and_then(|s| parse(s.as_str())).unwrap_or(default)
+    }
     /// Foreground color (CSS `color`).
     pub fn get_color(&self) -> Option<Color> {
         self.0.get("color").and_then(|c| parse_color_str(c))
@@ -146,10 +151,7 @@ impl CssAttr {
     /// per-element break decisions are made by the layout-phase line
     /// breaker.
     pub fn get_word_break(&self) -> WordBreak {
-        self.0
-            .get("word-break")
-            .and_then(|s| parse_word_break(s.as_str()))
-            .unwrap_or_default()
+        self.parse_or("word-break", parse_word_break, WordBreak::default())
     }
     /// Overflow-wrap behaviour (CSS `overflow-wrap`, legacy
     /// `word-wrap`).
@@ -385,34 +387,22 @@ impl CssAttr {
 
     /// `flex-direction` (defaults to `Row`).
     pub fn get_flex_direction(&self) -> FlexDirection {
-        self.0
-            .get("flex-direction")
-            .and_then(|v| parse_flex_direction(v))
-            .unwrap_or(FlexDirection::Row)
+        self.parse_or("flex-direction", parse_flex_direction, FlexDirection::Row)
     }
 
     /// `flex-wrap` (defaults to `NoWrap`).
     pub fn get_flex_wrap(&self) -> FlexWrap {
-        self.0
-            .get("flex-wrap")
-            .and_then(|v| parse_flex_wrap(v))
-            .unwrap_or(FlexWrap::NoWrap)
+        self.parse_or("flex-wrap", parse_flex_wrap, FlexWrap::NoWrap)
     }
 
     /// `justify-content` (defaults to `FlexStart`).
     pub fn get_justify_content(&self) -> JustifyContent {
-        self.0
-            .get("justify-content")
-            .and_then(|v| parse_justify_content(v))
-            .unwrap_or(JustifyContent::FlexStart)
+        self.parse_or("justify-content", parse_justify_content, JustifyContent::FlexStart)
     }
 
     /// `align-items` for the container (defaults to `Stretch`).
     pub fn get_align_items(&self) -> AlignItems {
-        self.0
-            .get("align-items")
-            .and_then(|v| parse_align_items(v))
-            .unwrap_or(AlignItems::Stretch)
+        self.parse_or("align-items", parse_align_items, AlignItems::Stretch)
     }
 
     /// `align-self` for a single flex item (defaults to `Auto`).
@@ -440,34 +430,22 @@ impl CssAttr {
     /// `align-content` for multi-line flex containers (defaults to
     /// `FlexStart`).
     pub fn get_align_content(&self) -> JustifyContent {
-        self.0
-            .get("align-content")
-            .and_then(|v| parse_justify_content(v))
-            .unwrap_or(JustifyContent::FlexStart)
+        self.parse_or("align-content", parse_justify_content, JustifyContent::FlexStart)
     }
 
     /// `flex-grow` (defaults to `0`).
     pub fn get_flex_grow(&self) -> f32 {
-        self.0
-            .get("flex-grow")
-            .and_then(|v| parse_non_negative_number(v))
-            .unwrap_or(0.0)
+        self.parse_or("flex-grow", parse_non_negative_number, 0.0)
     }
 
     /// `flex-shrink` (defaults to `1`).
     pub fn get_flex_shrink(&self) -> f32 {
-        self.0
-            .get("flex-shrink")
-            .and_then(|v| parse_non_negative_number(v))
-            .unwrap_or(1.0)
+        self.parse_or("flex-shrink", parse_non_negative_number, 1.0)
     }
 
     /// `flex-basis` (defaults to `Auto`).
     pub fn get_flex_basis(&self) -> FlexBasis {
-        self.0
-            .get("flex-basis")
-            .and_then(|v| parse_flex_basis(v))
-            .unwrap_or(FlexBasis::Auto)
+        self.parse_or("flex-basis", parse_flex_basis, FlexBasis::Auto)
     }
 
     /// Resolve `flex-basis` against the containing main-axis size.
@@ -485,10 +463,7 @@ impl CssAttr {
 
     /// `order` (defaults to `0`).
     pub fn get_order(&self) -> i32 {
-        self.0
-            .get("order")
-            .and_then(|v| parse_order(v))
-            .unwrap_or(0)
+        self.parse_or("order", parse_order, 0)
     }
 
     /// Resolve `gap` / `row-gap` / `column-gap` into a [`GapSizes`].
@@ -547,10 +522,7 @@ impl CssAttr {
     /// Inherited, so the cascade already merged an ancestor's value into this
     /// node's `css_attr` when applicable.
     pub fn get_text_transform(&self) -> TextTransform {
-        self.0
-            .get("text-transform")
-            .and_then(|s| parse_text_transform(s))
-            .unwrap_or_default()
+        self.parse_or("text-transform", parse_text_transform, TextTransform::default())
     }
 
     /// Line-box height (CSS `line-height`). `normal` when unset.
@@ -559,10 +531,7 @@ impl CssAttr {
     /// node's `css_attr` when applicable. Resolve the row count with
     /// [`resolve_line_height_cells`](crate::html::css_parse::resolve_line_height_cells).
     pub fn get_line_height(&self) -> LineHeight {
-        self.0
-            .get("line-height")
-            .and_then(|s| parse_line_height(s))
-            .unwrap_or(LineHeight::Normal)
+        self.parse_or("line-height", parse_line_height, LineHeight::Normal)
     }
 
     /// Box sizing model (CSS `box-sizing`).
@@ -571,10 +540,7 @@ impl CssAttr {
     /// preserves the historical width semantics; an explicit `content-box`
     /// switches `width` / `height` to CSS content-box semantics.
     pub fn get_box_sizing(&self) -> BoxSizing {
-        self.0
-            .get("box-sizing")
-            .and_then(|s| parse_box_sizing(s))
-            .unwrap_or_default()
+        self.parse_or("box-sizing", parse_box_sizing, BoxSizing::default())
     }
 
     /// Corner radii (CSS `border-radius` shorthand).

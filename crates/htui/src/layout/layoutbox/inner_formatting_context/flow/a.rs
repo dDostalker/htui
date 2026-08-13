@@ -74,12 +74,9 @@ pub fn layout_a(
 /// second pass sees `is_set == true` and skips the insert, so re-running the
 /// layout (e.g. after an interactive refresh) does not stomp on anything.
 fn apply_a_ua_defaults(css_attr: &mut CssAttr) {
-    if !css_attr.is_set("color") {
-        css_attr.0.insert("color".to_string(), "blue".to_string());
-    }
-    if !css_attr.is_set("text-decoration") {
-        css_attr
-            .0
-            .insert("text-decoration".to_string(), "underline".to_string());
+    for &(prop, value) in NodeType::A.inline_ua_declarations() {
+        if !css_attr.is_set(prop) {
+            css_attr.0.insert(prop.to_string(), value.to_string());
+        }
     }
 }
