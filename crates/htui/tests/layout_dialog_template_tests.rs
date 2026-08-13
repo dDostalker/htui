@@ -293,18 +293,16 @@ fn test_dialog_input_submit_closes_and_fires_close() {
     // exactly like a `<button>` submit does (both activate the dialog's
     // default action).
     init();
-    let html = format!(
-        r#"<script>
+    let html = r#"<script>
           var closes = [];
           var d = document.getElementById('d');
-          d.addEventListener('close', function () {{ closes.push('closed'); }});
+          d.addEventListener('close', function () { closes.push('closed'); });
           globalThis.__closes = closes;
         </script>
         <dialog id="d" open>
           <form method="dialog"><input id="ok" type="submit"></form>
-        </dialog>"#
-    );
-    let (mut engine, geo) = build_geometry(&html);
+        </dialog>"#;
+    let (mut engine, geo) = build_geometry(html);
     let map = HitMap::build(&geo);
     let region = map.resolve_by_id("ok").expect("submit input region");
     let (x, y) = center(region.rect);

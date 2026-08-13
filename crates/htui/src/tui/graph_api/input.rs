@@ -489,7 +489,7 @@ pub fn apply_textarea_key(
 /// Move the caret one visual line up / down, keeping the current column
 /// (clamped to the target line's length). Returns `false` at the boundaries.
 fn textarea_move_vertical(
-    value: &mut String,
+    value: &str,
     cursor: &mut usize,
     content_width: usize,
     down: bool,
@@ -1258,8 +1258,8 @@ fn char_index_at_x(value: &str, cursor: usize, inner_width: usize, x: usize) -> 
     let (start, end) = value_window(value, cursor, inner_width);
     let v: Vec<char> = value.chars().collect();
     let mut col = 0usize;
-    for i in start..end {
-        let w = char_width(v[i]).max(1);
+    for (i, &ch) in v.iter().enumerate().take(end).skip(start) {
+        let w = char_width(ch).max(1);
         if x < col + w {
             return i;
         }
@@ -1744,16 +1744,12 @@ pub fn trigger_refresh(
             // keyboard while open — any other key closes it and is swallowed.
             // A datalist autocomplete instead lets the key edit the field
             // (fall through to the input block, which re-filters).
-            if state.open_select.is_some() {
+            if let Some(open) = state.open_select.as_ref() {
                 let Some(arena) = arena else {
                     return cmds;
                 };
-                let node_id = state
-                    .open_select
-                    .as_ref()
-                    .map(|o| o.node_id)
-                    .unwrap();
-                let kind = state.open_select.as_ref().map(|o| o.kind).unwrap();
+                let node_id = open.node_id;
+                let kind = open.kind;
                 match key.code {
                     KeyCode::Up | KeyCode::Down => {
                         let dir: i32 = if key.code == KeyCode::Up { -1 } else { 1 };
@@ -2151,13 +2147,12 @@ pub fn trigger_refresh(
             // them — then fire `input` and repaint. Nothing to do when no
             // field is focused (the terminal already showed the pasted text)
             // or the field is readonly.
-            if let Some(focused) = state.focused_input {
-                if !is_readonly_input(arena, focused)
-                    && paste_into_field(state, &pasted, focused, &mut cmds)
-                    && arena.is_some()
-                {
-                    msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
-                }
+            if let Some(focused) = state.focused_input
+                && !is_readonly_input(arena, focused)
+                && paste_into_field(state, &pasted, focused, &mut cmds)
+                && arena.is_some()
+            {
+                msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
             }
             cmds
         }

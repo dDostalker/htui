@@ -574,10 +574,10 @@ fn test_flex_basis_explicit_resolves_against_main_axis() {
 
 /// Depth-first search for the first box whose `inner_formatting_context`
 /// matches `ctx`.
-fn find_box_with_formatting_context<'a>(
-    boxes: &'a [htui::layout::LayoutBox],
+fn find_box_with_formatting_context(
+    boxes: &[htui::layout::LayoutBox],
     ctx: FormattingContext,
-) -> Option<&'a htui::layout::LayoutBox> {
+) -> Option<&htui::layout::LayoutBox> {
     for b in boxes {
         if b.inner_formatting_context == ctx {
             return Some(b);

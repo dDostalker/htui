@@ -583,7 +583,7 @@ fn test_aside_without_children_still_has_height_one() {
 // rendering matches a web browser (no "镂空" gaps on the parent's bg).
 // ============================================================
 
-fn cell_containing<'a>(tl: &'a TermLayout, ch: char) -> &'a htui::tui::graph_api::Block {
+fn cell_containing(tl: &TermLayout, ch: char) -> &htui::tui::graph_api::Block {
     let needle = ch.to_string();
     let idx = tl
         .layout

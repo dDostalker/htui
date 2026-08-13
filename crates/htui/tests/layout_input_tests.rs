@@ -66,10 +66,10 @@ fn layout_boxes(arena: &NodeArena, root: NodeId) -> Vec<htui::layout::LayoutBox>
 }
 
 /// Depth-first search for the first box belonging to `node_id`.
-fn find_box<'a>(
-    boxes: &'a [htui::layout::LayoutBox],
+fn find_box(
+    boxes: &[htui::layout::LayoutBox],
     node_id: NodeId,
-) -> Option<&'a htui::layout::LayoutBox> {
+) -> Option<&htui::layout::LayoutBox> {
     for b in boxes {
         if b.node_id == node_id {
             return Some(b);
@@ -171,7 +171,7 @@ fn input_renders_empty_field_without_panicking() {
     // An `<input>` with no `value` renders an empty bracketed field — the
     // caret window must not index past the empty character vector.
     let (rows, _) = render_rows(r#"<div><input></div>"#);
-    assert_eq!(rows[0].chars().nth(0), Some('['));
+    assert_eq!(rows[0].chars().next(), Some('['));
     assert_eq!(rows[0].chars().nth(7), Some(']'));
 }
 
@@ -211,7 +211,7 @@ fn input_renders_multibyte_values_at_display_width() {
     // (empty-word) cells, so the field reads `[你好  ]` and the right frame
     // bracket stays intact.
     let r = &rows[0];
-    assert_eq!(r.chars().nth(0), Some('['));
+    assert_eq!(r.chars().next(), Some('['));
     assert_eq!(r.chars().nth(1), Some('你'));
     assert_eq!(r.chars().nth(2), Some('好'));
     assert_eq!(r.chars().nth(3), Some(' '), "padding after the wide glyphs");
@@ -305,7 +305,7 @@ fn input_renders_as_bracketed_field_with_value() {
     init();
     let (rows, _) = render_rows(r#"<div><input value="hi"></div>"#);
     // Default field width = value + 2, clamped to a tappable minimum of 8.
-    assert_eq!(rows[0].chars().nth(0), Some('['));
+    assert_eq!(rows[0].chars().next(), Some('['));
     assert_eq!(rows[0].chars().nth(1), Some('h'));
     assert_eq!(rows[0].chars().nth(2), Some('i'));
     assert_eq!(rows[0].chars().nth(7), Some(']'), "field must close at col 7");
@@ -318,7 +318,7 @@ fn input_respects_width_attribute() {
     let (rows, _) = render_rows(r#"<div><input width="4" value="abc"></div>"#);
     // width=4 cells: the frame brackets + 2 content cells. The caret starts
     // at position 0, so the window shows `ab`.
-    assert_eq!(rows[0].chars().nth(0), Some('['));
+    assert_eq!(rows[0].chars().next(), Some('['));
     assert_eq!(rows[0].chars().nth(1), Some('a'));
     assert_eq!(rows[0].chars().nth(2), Some('b'));
     assert_eq!(rows[0].chars().nth(3), Some(']'), "close at width-1");

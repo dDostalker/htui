@@ -67,13 +67,12 @@ pub(crate) fn text_node_run(
     if child.node_type != NodeType::Text {
         return None;
     }
-    if child.text_is_painted(white_space) {
-        if let Some(s) = child.data.as_deref()
-            && !s.is_empty()
-        {
-            let text = apply_text_transform(s, transform);
-            return Some(InlineRun::owned(text, style, fg, bg, None));
-        }
+    if child.text_is_painted(white_space)
+        && let Some(s) = child.data.as_deref()
+        && !s.is_empty()
+    {
+        let text = apply_text_transform(s, transform);
+        return Some(InlineRun::owned(text, style, fg, bg, None));
     }
     None
 }
@@ -112,13 +111,12 @@ fn walk_runs(
                 // Whitespace-only text nodes are kept in the DOM but only
                 // become runs when the context preserves whitespace (see
                 // `Node::text_is_painted`).
-                if child.text_is_painted(white_space) {
-                    if let Some(s) = child.data.as_deref()
-                        && !s.is_empty()
-                    {
-                        let text = apply_text_transform(s, transform);
-                        runs.push(InlineRun::owned(text, style, fg, bg, owner));
-                    }
+                if child.text_is_painted(white_space)
+                    && let Some(s) = child.data.as_deref()
+                    && !s.is_empty()
+                {
+                    let text = apply_text_transform(s, transform);
+                    runs.push(InlineRun::owned(text, style, fg, bg, owner));
                 }
             }
             NodeType::Span => {
@@ -351,7 +349,7 @@ pub(crate) fn q_quote_pair(arena: &NodeArena, node_id: NodeId) -> (&'static str,
         }
         current = arena[pid].parent;
     }
-    if depth % 2 == 0 {
+    if depth.is_multiple_of(2) {
         ("\u{201C}", "\u{201D}")
     } else {
         ("\u{2018}", "\u{2019}")

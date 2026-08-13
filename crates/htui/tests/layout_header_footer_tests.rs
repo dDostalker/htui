@@ -132,19 +132,19 @@ fn test_header_width_50pct() {
     let block_start = 0;
     let block_end = cols / 2;
     let mut has_text = false;
-    for i in block_start..block_end {
+    for (i, cell) in row.iter().enumerate().take(block_end).skip(block_start) {
         assert!(
-            row[i].bcolor.is_some(),
+            cell.bcolor.is_some(),
             "block should have bg col={i} (flush left)"
         );
-        if row[i].word != " " {
+        if cell.word != " " {
             has_text = true;
         }
     }
     assert!(has_text, "block should contain text");
-    for i in block_end..cols {
+    for cell in row.iter().take(cols).skip(block_end) {
         assert!(
-            row[i].bcolor.is_none(),
+            cell.bcolor.is_none(),
             "cols cols/2..cols should be bg-free (outside the block)"
         );
     }

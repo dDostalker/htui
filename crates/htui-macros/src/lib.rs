@@ -8,8 +8,8 @@
 //!     [`HostFn`] (`name_command()`), or
 //!   - a zero-argument function returning a [`HostFn`] is registered as-is,
 //!     letting the returned closure capture arbitrary Rust state.
-//!   Accepts an optional `name = "..."` to control the JS-side name used by
-//!       `#[htui::commands]`.
+//!     Accepts an optional `name = "..."` to control the JS-side name used by
+//!     `#[htui::commands]`.
 //! - `#[htui::commands]` — collect every `#[htui::command]` function in a
 //!   module and generate one `register(&mut EventBindings)` entry point, plus
 //!   `js_bindings()` / `write_js_bindings(path)` that emit an auto-generated

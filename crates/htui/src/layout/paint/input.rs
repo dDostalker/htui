@@ -173,8 +173,7 @@ pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintC
     let is_password = input_type == "password" && !showing_placeholder;
 
     let mut col = 0usize;
-    for i in start..end {
-        let ch = v[i];
+    for (i, &ch) in v.iter().enumerate().take(end).skip(start) {
         let w = char_width(ch).max(1);
         let glyph = if is_password { '\u{2022}' } else { ch };
         let inverted = focused && i == cursor;

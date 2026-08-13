@@ -95,7 +95,7 @@ impl Default for Block {
     /// `" ".to_string()` at the call site.
     ///
     /// The `word` buffer is pre-sized to 32 bytes so painters can `clear()`
-    /// + `push_str(g)` any single grapheme cluster without triggering a
+    /// and `push_str(g)` any single grapheme cluster without triggering a
     /// reallocation. Practically every cluster (including the longest
     /// ZWJ-flag sequences we expect, such as 👨‍👩‍👧‍👦 plus regional
     /// indicators) fits comfortably under 32 bytes; background fills keep

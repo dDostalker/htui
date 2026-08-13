@@ -534,29 +534,29 @@ impl ScriptEngine {
             .arena
             .get(node_id)
             .and_then(|n| n.attributes.get("name").cloned());
-        if checked && is_radio {
-            if let Some(name) = name {
-                // Clear every same-`name` radio sibling (the clicked member
-                // is excluded here and set below).
-                let siblings: Vec<NodeId> = st
-                    .arena
-                    .iter()
-                    .filter(|(id, n)| {
-                        *id != node_id
-                            && n.node_type == NodeType::Input
-                            && n.get_type()
-                                .is_some_and(|t| t.eq_ignore_ascii_case("radio"))
-                            && n.attributes.get("name").is_some_and(|nm| *nm == name)
-                    })
-                    .map(|(id, _)| id)
-                    .collect();
-                for id in siblings {
-                    if let Some(n) = st.arena.get_mut(id) {
-                        if n.attributes.shift_remove("checked").is_some() {
-                            changed = true;
-                            st.dirty.nodes.push(id);
-                        }
-                    }
+        if checked && is_radio
+            && let Some(name) = name
+        {
+            // Clear every same-`name` radio sibling (the clicked member
+            // is excluded here and set below).
+            let siblings: Vec<NodeId> = st
+                .arena
+                .iter()
+                .filter(|(id, n)| {
+                    *id != node_id
+                        && n.node_type == NodeType::Input
+                        && n.get_type()
+                            .is_some_and(|t| t.eq_ignore_ascii_case("radio"))
+                        && n.attributes.get("name").is_some_and(|nm| *nm == name)
+                })
+                .map(|(id, _)| id)
+                .collect();
+            for id in siblings {
+                if let Some(n) = st.arena.get_mut(id)
+                    && n.attributes.shift_remove("checked").is_some()
+                {
+                    changed = true;
+                    st.dirty.nodes.push(id);
                 }
             }
         }
@@ -595,7 +595,7 @@ impl ScriptEngine {
         let old_children: Vec<NodeId> = st
             .arena
             .get_mut(node_id)
-            .map(|n| n.children.drain(..).collect())
+            .map(|n| std::mem::take(&mut n.children))
             .unwrap_or_default();
         for child in old_children {
             if let Some(c) = st.arena.get_mut(child) {
@@ -903,10 +903,10 @@ impl Drop for ScriptEngine {
 
 /// `event.stopPropagation()` — marks the event as stopped.
 fn stop_propagation(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
-    if let Ok(obj) = this.to_object(context) {
-        if let Err(e) = obj.set(js_string!("_stopped"), true, false, context) {
-            log::warn!("Failed to mark event stopped: {e}");
-        }
+    if let Ok(obj) = this.to_object(context)
+        && let Err(e) = obj.set(js_string!("_stopped"), true, false, context)
+    {
+        log::warn!("Failed to mark event stopped: {e}");
     }
     Ok(JsValue::undefined())
 }

@@ -37,7 +37,9 @@ pub struct AsyncResult {
 /// synchronously (in-memory registry); the caller decides when to drain `tx`.
 pub fn load_async(id: u32, path: String, tx: std::sync::mpsc::Sender<AsyncResult>) {
     let outcome = load(&path).map_err(|e| e.to_string());
-    let _ = tx.send(AsyncResult { id, url: path, outcome });
+    if tx.send(AsyncResult { id, url: path, outcome }).is_err() {
+        log::debug!("async resource load skipped: consumer already dropped");
+    }
 }
 
 /// Errors produced while resolving a resource.
@@ -136,5 +138,5 @@ pub fn load(path: &str) -> Result<Arc<Vec<u8>>, ResourceError> {
         .unwrap_or_else(|e| e.into_inner())
         .get(&key)
         .cloned()
-        .ok_or_else(|| ResourceError::MemNotFound { path: key })
+        .ok_or(ResourceError::MemNotFound { path: key })
 }

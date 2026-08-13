@@ -798,7 +798,7 @@ fn find_node_by_id(arena: &NodeArena, id: &str) -> NodeId {
 }
 
 /// Depth-first search for the first box belonging to `node_id`.
-fn find_box<'a>(boxes: &'a [htui::layout::LayoutBox], node_id: NodeId) -> Option<&'a htui::layout::LayoutBox> {
+fn find_box(boxes: &[htui::layout::LayoutBox], node_id: NodeId) -> Option<&htui::layout::LayoutBox> {
     for b in boxes {
         if b.node_id == node_id {
             return Some(b);

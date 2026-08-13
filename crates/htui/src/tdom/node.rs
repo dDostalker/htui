@@ -854,10 +854,10 @@ impl Node {
         let mut stack: Vec<NodeId> = self.children.iter().rev().copied().collect();
         while let Some(id) = stack.pop() {
             let node = &arena[id];
-            if let NodeType::Text = node.node_type {
-                if let Some(s) = &node.data {
-                    out.push_str(s);
-                }
+            if node.node_type == NodeType::Text
+                && let Some(s) = &node.data
+            {
+                out.push_str(s);
             }
             stack.extend(node.children.iter().rev().copied());
         }

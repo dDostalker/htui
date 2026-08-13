@@ -371,7 +371,7 @@ fn native_set_attribute(
 ) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let name = args
-        .get(0)
+        .first()
         .and_then(|v| v.as_string())
         .map(|s| s.to_std_string_lossy());
     let value = args
@@ -2235,10 +2235,10 @@ fn collect_text(arena: &NodeArena, node_id: NodeId) -> String {
     let mut stack = vec![node_id];
     while let Some(id) = stack.pop() {
         let Some(node) = arena.get(id) else { continue };
-        if let NodeType::Text = node.node_type {
-            if let Some(s) = &node.data {
-                out.push_str(s);
-            }
+        if node.node_type == NodeType::Text
+            && let Some(s) = &node.data
+        {
+            out.push_str(s);
         }
         stack.extend(node.children.iter().rev().copied());
     }

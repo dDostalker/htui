@@ -371,9 +371,9 @@ fn explicit_bg_with_large_font_size_clamps_to_text_row_and_width() {
     );
 
     // Cells past the text band stay bg-free on the text row.
-    for i in (col + 6)..cols {
+    for (i, cell) in cells.iter().enumerate().take(cols).skip(col + 6) {
         assert!(
-            cells[i].bcolor.is_none(),
+            cell.bcolor.is_none(),
             "cell {i} (past the text band) should not carry the bg"
         );
     }

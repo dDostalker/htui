@@ -81,9 +81,7 @@ pub fn layout_inline_blockify(
     if generated.kind != GeneratedBoxKind::Normal || !generated.outer_display.is_inline() {
         return None;
     }
-    if pre_allocated_rect.is_none() {
-        return None;
-    }
+    let pre_allocated_rect = pre_allocated_rect?;
 
     let mut node = arena[node_id].clone();
     apply_inline_ua_defaults(&mut node);
@@ -113,7 +111,7 @@ pub fn layout_inline_blockify(
         cursor,
         opts,
         context,
-        pre_allocated_rect,
+        Some(pre_allocated_rect),
     ))
 }
 
@@ -128,12 +126,13 @@ fn apply_inline_ua_defaults(node: &mut Node) {
         }
     }
     // `<abbr>`'s underline is conditional on a `title` attribute.
-    if node.node_type == NodeType::Abbr && node.attributes.get("title").is_some() {
-        if !node.css_attr.is_set("text-decoration") {
-            node.css_attr
-                .0
-                .insert("text-decoration".to_string(), "underline".to_string());
-        }
+    if node.node_type == NodeType::Abbr
+        && node.attributes.get("title").is_some()
+        && !node.css_attr.is_set("text-decoration")
+    {
+        node.css_attr
+            .0
+            .insert("text-decoration".to_string(), "underline".to_string());
     }
 }
 

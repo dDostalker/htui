@@ -55,11 +55,11 @@ fn find<'a>(
 fn flatten_text_contains(boxes: &[GeneratedBox], arena: &NodeArena, needle: &str) -> bool {
     fn walk(boxes: &[GeneratedBox], arena: &NodeArena, needle: &str, found: &mut bool) {
         for g in boxes {
-            if let NodeType::Text = arena[g.node_id].node_type {
-                if arena[g.node_id].data.as_deref() == Some(needle) {
-                    *found = true;
-                    return;
-                }
+            if arena[g.node_id].node_type == NodeType::Text
+                && arena[g.node_id].data.as_deref() == Some(needle)
+            {
+                *found = true;
+                return;
             }
             walk(&g.children, arena, needle, found);
             if *found {

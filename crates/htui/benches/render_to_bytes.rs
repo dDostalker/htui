@@ -42,7 +42,7 @@ fn bench_render_to_bytes_medium_scrolled(c: &mut Criterion) {
     let map = common::bench_term_map();
     let mut tl = TermLayout::new(&map, 1.0);
     tl.draw(&arena, root_id, &map);
-    tl.scroll_y = (tl.rendered_rows / 2).min(u32::MAX);
+    tl.scroll_y = tl.rendered_rows / 2;
 
     c.bench_function("render_to_bytes_medium_scrolled", |b| {
         b.iter(|| tl.render_to_bytes());

@@ -28,7 +28,7 @@ fn eval_str(engine: &mut ScriptEngine, expr: &str) -> String {
         .unwrap_or_default()
 }
 
-fn find_id<'a>(arena: &'a htui::tdom::node::NodeArena, id: &str) -> htui::tdom::node::NodeId {
+fn find_id(arena: &htui::tdom::node::NodeArena, id: &str) -> htui::tdom::node::NodeId {
     arena
         .iter()
         .find(|(_, n)| n.attributes.get("id").map(String::as_str) == Some(id))

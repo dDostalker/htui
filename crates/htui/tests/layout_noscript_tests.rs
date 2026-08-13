@@ -56,10 +56,10 @@ fn draw(html: &str) -> TermLayout {
 
 /// Recursively walk the layout tree (depth-first) and return whether any box
 /// belongs to `node_id`.
-fn box_for_node<'a>(
-    boxes: &'a [htui::layout::LayoutBox],
+fn box_for_node(
+    boxes: &[htui::layout::LayoutBox],
     node_id: NodeId,
-) -> Option<&'a htui::layout::LayoutBox> {
+) -> Option<&htui::layout::LayoutBox> {
     for b in boxes {
         if b.node_id == node_id {
             return Some(b);

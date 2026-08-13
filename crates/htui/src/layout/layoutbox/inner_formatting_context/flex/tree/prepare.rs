@@ -180,11 +180,11 @@ fn measure_text_content_width_ws(
         let child = &arena[child_id];
         match &child.node_type {
             NodeType::Text => {
-                if child.text_is_painted(white_space) {
-                    if let Some(s) = child.data.as_deref() {
-                        let w: usize = s.graphemes(true).map(grapheme_width).sum();
-                        total = Some(total.unwrap_or(0).saturating_add(w));
-                    }
+                if child.text_is_painted(white_space)
+                    && let Some(s) = child.data.as_deref()
+                {
+                    let w: usize = s.graphemes(true).map(grapheme_width).sum();
+                    total = Some(total.unwrap_or(0).saturating_add(w));
                 }
             }
             // Inline text-level wrappers hold the text that belongs to this
@@ -221,13 +221,13 @@ pub(super) fn longest_breakable_width(arena: &NodeArena, node_id: NodeId) -> usi
             let child = &arena[child_id];
             match &child.node_type {
                 NodeType::Text => {
-                    if child.text_is_painted(white_space) {
-                        if let Some(s) = child.data.as_deref() {
-                            for token in s.split_whitespace() {
-                                let w: usize = token.graphemes(true).map(grapheme_width).sum();
-                                if w > *max_w {
-                                    *max_w = w;
-                                }
+                    if child.text_is_painted(white_space)
+                        && let Some(s) = child.data.as_deref()
+                    {
+                        for token in s.split_whitespace() {
+                            let w: usize = token.graphemes(true).map(grapheme_width).sum();
+                            if w > *max_w {
+                                *max_w = w;
                             }
                         }
                     }

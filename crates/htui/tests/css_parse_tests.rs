@@ -247,24 +247,24 @@ fn test_nth_child_nth_expr_matches_predicate() {
     // Direct unit test on NthExpr — covers the even/odd constants and the
     // `a*n + b` math without needing an arena.
     init();
-    assert_eq!(NthExpr::EVEN.matches(1), false);
-    assert_eq!(NthExpr::EVEN.matches(2), true);
-    assert_eq!(NthExpr::EVEN.matches(3), false);
-    assert_eq!(NthExpr::EVEN.matches(4), true);
-    assert_eq!(NthExpr::ODD.matches(1), true);
-    assert_eq!(NthExpr::ODD.matches(2), false);
-    assert_eq!(NthExpr::ODD.matches(3), true);
+    assert!(!NthExpr::EVEN.matches(1));
+    assert!(NthExpr::EVEN.matches(2));
+    assert!(!NthExpr::EVEN.matches(3));
+    assert!(NthExpr::EVEN.matches(4));
+    assert!(NthExpr::ODD.matches(1));
+    assert!(!NthExpr::ODD.matches(2));
+    assert!(NthExpr::ODD.matches(3));
     let expr = NthExpr { a: 3, b: 2 };
-    assert_eq!(expr.matches(2), true);
-    assert_eq!(expr.matches(5), true);
-    assert_eq!(expr.matches(8), true);
-    assert_eq!(expr.matches(1), false);
-    assert_eq!(expr.matches(4), false);
+    assert!(expr.matches(2));
+    assert!(expr.matches(5));
+    assert!(expr.matches(8));
+    assert!(!expr.matches(1));
+    assert!(!expr.matches(4));
     // Degenerate a=0 → only the exact position matches.
     let single = NthExpr { a: 0, b: 3 };
-    assert_eq!(single.matches(3), true);
-    assert_eq!(single.matches(2), false);
-    assert_eq!(single.matches(4), false);
+    assert!(single.matches(3));
+    assert!(!single.matches(2));
+    assert!(!single.matches(4));
 }
 
 #[test]

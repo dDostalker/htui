@@ -49,14 +49,14 @@ fn mock_term_map() -> TermMap {
 
 /// Locate the column index of the first cell whose `word` matches `target`.
 /// Returns `None` when no such cell exists.
-fn find_cell<'a>(tl: &'a TermLayout, target: &str) -> Option<usize> {
+fn find_cell(tl: &TermLayout, target: &str) -> Option<usize> {
     tl.layout.iter().position(|b| b.word == target)
 }
 
 /// Locate the column index of the first cell whose `word` matches `target`
 /// *and* whose `style` satisfies `pred`.
-fn find_cell_with_style<'a, F: Fn(FontStyle) -> bool>(
-    tl: &'a TermLayout,
+fn find_cell_with_style<F: Fn(FontStyle) -> bool>(
+    tl: &TermLayout,
     target: &str,
     pred: F,
 ) -> Option<usize> {

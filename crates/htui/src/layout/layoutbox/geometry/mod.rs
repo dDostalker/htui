@@ -266,10 +266,10 @@ pub(crate) fn overlay_options(
     if node.node_type == NodeType::Select {
         return select_options(arena, node_id);
     }
-    if node.node_type == NodeType::Input {
-        if let Some(list) = node.attributes.get("list") {
-            return datalist_options(arena, list, filter.unwrap_or(""));
-        }
+    if node.node_type == NodeType::Input
+        && let Some(list) = node.attributes.get("list")
+    {
+        return datalist_options(arena, list, filter.unwrap_or(""));
     }
     Vec::new()
 }

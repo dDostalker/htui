@@ -40,10 +40,7 @@ pub fn layout_hn(
     pre_allocated_rect: Option<crate::layout::Rect>,
 ) -> Option<LayoutBox> {
     let node = &arena[node_id];
-    let prefix_text = match heading_prefix(&node.node_type) {
-        Some(p) => p,
-        None => return None,
-    };
+    let prefix_text = heading_prefix(&node.node_type)?;
 
     let block_fg = node.css_attr.get_color();
     let block_bg = node.css_attr.get_bg_color();
