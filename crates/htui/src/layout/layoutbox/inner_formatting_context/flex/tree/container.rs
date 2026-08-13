@@ -183,7 +183,16 @@ pub(super) fn layout_flex_container(
                     // items, mirroring how browsers treat every flex child
                     // as a block-level box.
                     let is_block_item = match generated.kind {
-                        GeneratedBoxKind::Normal => !generated.outer_display.is_inline(),
+                        GeneratedBoxKind::Normal => {
+                            // CSS Flexbox blockifies every in-flow child,
+                            // including inline-level elements (`<span>` /
+                            // `<a>` / `<em>`). `<q>` stays folded into the
+                            // container's text for now: its generated quote
+                            // marks need a suffix run the shared block
+                            // pipeline does not support yet.
+                            !generated.outer_display.is_inline()
+                                || arena[id].node_type != NodeType::Q
+                        }
                         GeneratedBoxKind::Replaced => true,
                         _ => false,
                     };

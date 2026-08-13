@@ -20,7 +20,7 @@ use htui::layout::layout::TermMap;
 use htui::layout::{BoxKind, FormattingContext};
 use htui::tdom::node::NodeArena;
 use htui::tdom::node::NodeId;
-use htui::tui::graph_api::TermLayout;
+use htui::tui::graph_api::{FontStyle, TermLayout};
 
 fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
@@ -67,6 +67,32 @@ fn render_rows(html: &str, css: &str) -> (Vec<String>, TermLayout) {
         rows.push(s);
     }
     (rows, tl)
+}
+
+#[test]
+fn test_flex_promotes_inline_children_to_items() {
+    init();
+    // Inline children (`<span>` / `<a>` / `<em>`) are blockified into flex
+    // items, not folded into the container's own inline text. They must
+    // share the first row side by side, with no duplicate container row
+    // above them, and keep their UA defaults (anchor underline / em italic).
+    let html = r#"<div class="container"><span>AAA</span><a>BB</a><em>C</em></div>"#;
+    let css = ".container { display: flex; }";
+    let (rows, tl) = render_rows(html, css);
+
+    assert!(
+        rows[0].starts_with("AAABBC"),
+        "inline flex items should share the first row: {:?}",
+        rows[0]
+    );
+
+    let copies: usize = rows.iter().map(|r| r.matches("AAA").count()).sum();
+    assert_eq!(copies, 1, "span item must not double-render: {:?}", rows);
+
+    let anchor = tl.layout.iter().position(|b| b.word == "B").expect("anchor cell");
+    let em = tl.layout.iter().position(|b| b.word == "C").expect("em cell");
+    assert!(tl.layout[anchor].style.contains(FontStyle::UNDERLINED));
+    assert!(tl.layout[em].style.contains(FontStyle::ITALIC));
 }
 
 #[test]

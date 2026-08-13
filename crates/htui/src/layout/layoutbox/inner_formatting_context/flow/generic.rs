@@ -4,6 +4,7 @@ use crate::{
     layout::{
         BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext,
         inner_formatting_context::flow::{LayoutBlockOptions, layout_block},
+        layoutbox::generation::{GeneratedBoxKind, generate_node},
     },
     tdom::node::{Node, NodeArena, NodeId, NodeType},
     tui::graph_api::block_style,
@@ -56,6 +57,94 @@ fn is_generic_block(node_type: &NodeType) -> bool {
             | NodeType::Select
             | NodeType::Pre
     )
+}
+
+/// Blockify an inline element that a flex container has promoted to a flex
+/// item.
+///
+/// CSS Flexbox blockifies every in-flow child: an inline `<span>` / `<em>` /
+/// `<label>` … lays out as a block box containing its own inline runs, not as
+/// a fragment of the flex container's text. This handler only claims inline
+/// normal boxes once a parent has pre-allocated their rectangle
+/// (`pre_allocated_rect.is_some()`). In ordinary block flow inline elements
+/// never reach the geometry dispatcher (their runs are folded into the parent
+/// by [`collect_runs`]), so returning `None` there keeps that path intact.
+pub fn layout_inline_blockify(
+    arena: &NodeArena,
+    node_id: NodeId,
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+    context: LayoutContext,
+    pre_allocated_rect: Option<crate::layout::Rect>,
+) -> Option<LayoutBox> {
+    let generated = generate_node(arena, node_id)?;
+    if generated.kind != GeneratedBoxKind::Normal || !generated.outer_display.is_inline() {
+        return None;
+    }
+    if pre_allocated_rect.is_none() {
+        return None;
+    }
+
+    let mut node = arena[node_id].clone();
+    apply_inline_ua_defaults(&mut node);
+    Some(layout_block(
+        arena,
+        &node,
+        node_id,
+        containing,
+        cursor,
+        LayoutBlockOptions::default(),
+        context,
+        pre_allocated_rect,
+    ))
+}
+
+/// Inject the browser-style inline UA defaults into a blockified inline
+/// element's `css_attr` (mirroring `apply_a_ua_defaults` in the `<a>` handler).
+/// Each default only lands when the cascade has not already set the
+/// matching property, so an author rule or inherited value always wins.
+fn apply_inline_ua_defaults(node: &mut Node) {
+    let css = &mut node.css_attr;
+    match node.node_type {
+        NodeType::Em | NodeType::I | NodeType::Cite | NodeType::Dfn | NodeType::Var => {
+            if !css.is_set("font-style") {
+                css.0.insert("font-style".into(), "italic".into());
+            }
+        }
+        NodeType::Strong | NodeType::B => {
+            if !css.is_set("font-weight") {
+                css.0.insert("font-weight".into(), "bold".into());
+            }
+        }
+        NodeType::U | NodeType::Ins => {
+            if !css.is_set("text-decoration") {
+                css.0
+                    .insert("text-decoration".into(), "underline".into());
+            }
+        }
+        NodeType::S | NodeType::Del => {
+            if !css.is_set("text-decoration") {
+                css.0
+                    .insert("text-decoration".into(), "line-through".into());
+            }
+        }
+        NodeType::Mark => {
+            if !css.is_set("color") {
+                css.0.insert("color".into(), "black".into());
+            }
+            if !css.is_set("background-color") {
+                css.0
+                    .insert("background-color".into(), "yellow".into());
+            }
+        }
+        NodeType::Abbr if node.attributes.get("title").is_some() => {
+            if !css.is_set("text-decoration") {
+                css.0
+                    .insert("text-decoration".into(), "underline".into());
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Build a [`LayoutBox`] for a `<summary>` element — the disclosure toggle of

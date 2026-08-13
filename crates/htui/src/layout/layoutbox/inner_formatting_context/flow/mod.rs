@@ -49,7 +49,7 @@ mod tree;
 
 pub use a::layout_a;
 pub use elements::layout_standard_block;
-pub use generic::{layout_generic, layout_hr, layout_progress, layout_summary};
+pub use generic::{layout_generic, layout_hr, layout_inline_blockify, layout_progress, layout_summary};
 pub use head::{layout_hn, layout_meta, layout_title};
 pub use img::{layout_img, layout_img_with_rect};
 pub use layout_block::{

@@ -65,6 +65,18 @@ fn walk_runs(
     // too — the same filter the box generation and block layout apply.
     for child_id in visible_children(arena, node_id) {
         let child = &arena[child_id];
+        // In a flex container every element child is a flex item (inline
+        // elements are blockified), so only raw text folds into the
+        // container's own inline runs. Block children are already skipped by
+        // the `match` fallthrough below; this additionally keeps inline
+        // children (`<span>` / `<em>` / …) out of the container's text so
+        // they are not rendered twice (once above the flex items and again
+        // as items).
+        if node.css_attr.display().is_some_and(|d| d.is_flex())
+            && !matches!(child.node_type, NodeType::Text)
+        {
+            continue;
+        }
         match &child.node_type {
             NodeType::Text => {
                 // Whitespace-only text nodes are kept in the DOM but only
