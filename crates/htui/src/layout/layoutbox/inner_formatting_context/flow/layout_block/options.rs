@@ -1,8 +1,7 @@
 //! Per-element differences layered on top of the shared block-layout pipeline.
 //!
 //! Each block-level element has its own quirks: `<h1>` needs a `# ` prefix,
-//! `<aside>` / `<header>` / `<footer>` paint with chrome regardless of
-//! background, `<li>` indents by nesting level and offsets its children's
+//! `<li>` indents by nesting level and offsets its children's
 //! containing block past the marker width, etc. All of those go through
 //! [`LayoutBlockOptions`]. The default value is "no special behaviour", so
 //! the common case is `LayoutBlockOptions::default()`.
@@ -23,13 +22,9 @@ pub struct LayoutBlockOptions {
     /// blockified `<q>`). Mirrors [`Self::prefix`] but lands on the last
     /// visual line.
     pub suffix: Option<InlineRun>,
-    /// When `true`, the rect's background is filled even without an explicit
-    /// CSS `background-color` — used by `<aside>` (solid stripe) and
-    /// `<header>` / `<footer>` (chrome bands).
-    pub fill_bg_default: bool,
     /// Trailing blank rows reserved below the rect (default 0). The paint
-    /// phase skips these rows when filling the background. `<header>` /
-    /// `<footer>` use 2 to leave breathing room before the next block.
+    /// phase skips these rows when filling the background. `<hr>` uses 1 to
+    /// leave breathing room before the next block.
     pub spacing_after: usize,
     /// Extra columns added to `containing.x` and subtracted from
     /// `containing.width` when computing the border-box rect (used by nested
@@ -40,12 +35,6 @@ pub struct LayoutBlockOptions {
     /// nested children past the marker width — `width_delta` is negative
     /// so the inner width shrinks by the same amount.
     pub child_containing_shift: Option<(usize, isize)>,
-    /// Marks the block as a chrome element (`<aside>`/`<header>`/`<footer>`)
-    /// whose background always covers the full border-box regardless of
-    /// inline content width or text-align. Also covers blocks that opted
-    /// into the same semantics via `fill_bg_default` (currently just the
-    /// chrome trio).
-    pub chrome: bool,
     /// Applies the browser user-agent `font-style: italic` default when no
     /// rule (author CSS or inherited value) has set `font-style` on the
     /// element — used by `<address>` the same way `<em>` does inline.

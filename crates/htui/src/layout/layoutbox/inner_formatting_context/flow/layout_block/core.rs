@@ -141,7 +141,7 @@ pub fn layout_block(
     } else {
         collect_runs(arena, node_id, node, block_fg, block_bg, block_font_style)
     };
-    let fill_bg = block_bg.is_some() || opts.fill_bg_default;
+    let fill_bg = block_bg.is_some();
 
     let child_containing = match opts.child_containing_shift {
         Some((x_off, w_delta)) => BoxConstraint {
@@ -326,7 +326,6 @@ pub fn layout_block(
     } else {
         opts.spacing_after
     };
-    let effective_chrome = opts.chrome || opts.fill_bg_default;
 
     let paint_style = PaintStyle {
         box_edges: edges,
@@ -342,7 +341,6 @@ pub fn layout_block(
             .get_border_radius(containing.width, child_context.font, child_context.viewport),
         fill_bg,
         spacing_after: effective_spacing_after,
-        chrome: effective_chrome,
     };
 
     LayoutBox::new_normal(

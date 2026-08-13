@@ -507,14 +507,12 @@ fn natural_intrinsic_size(
             .max(FLEX_ITEM_MIN_CROSS);
         // Some elements reserve trailing blank rows after their border-box
         // (the browser UA stylesheet's `spacing_after`): `<hr>` leaves one
-        // row, `<header>` / `<footer>` two. The block layout adds these on
-        // top of `content_height`, so the intrinsic measurement must too —
-        // otherwise a flex item sized from the natural measure under-
-        // estimates its real height and the item's last row bleeds into the
-        // parent's paint clip (silently dropped).
+        // row. The block layout adds this on top of `content_height`, so the
+        // intrinsic measurement must too — otherwise a flex item sized from
+        // the natural measure under-estimates its real height and the item's
+        // last row bleeds into the parent's paint clip (silently dropped).
         let ua_spacing_after = match node.node_type {
             NodeType::Hr => 1,
-            NodeType::Header | NodeType::Footer => 2,
             _ => 0,
         };
         let content_box_h = intrinsic_len(css.0.get("height").map(|s| s.as_str()), child_context)

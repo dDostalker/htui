@@ -145,7 +145,6 @@ pub fn layout_cell(
         border_radius: crate::html::css_parse::CornerRadii::default(),
         fill_bg,
         spacing_after: 0,
-        chrome: false,
     };
 
     LayoutBox::new_normal(

@@ -14,7 +14,7 @@ use crate::{
 /// rendering rules.
 ///
 /// This is the final block fallback in the registry. Specialised handlers for
-/// headings, lists, tables, images, chrome, and the document root run first;
+/// headings, lists, tables, images, and the document root run first;
 /// this handler keeps ordinary structural elements usable in both normal block
 /// flow and as flex items.
 pub fn layout_generic(

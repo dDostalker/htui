@@ -335,18 +335,6 @@ pub(super) fn layout_flex_container(
         }
     }
 
-    let chrome = matches!(
-        node.node_type,
-        NodeType::Aside | NodeType::Header | NodeType::Footer
-    );
-    let spacing_after = if preallocated_height.is_some() {
-        0
-    } else if matches!(node.node_type, NodeType::Header | NodeType::Footer) {
-        2
-    } else {
-        0
-    };
-
     // Only block flow advances the shared cursor. A flex item already owns its
     // position and size in its parent's formatting context.
     if preallocated_height.is_none() {
@@ -354,8 +342,7 @@ pub(super) fn layout_flex_container(
             .saturating_add(edges.border.top.thickness())
             .saturating_add(edges.padding.top)
             .saturating_add(edges.border.bottom.thickness())
-            .saturating_add(edges.padding.bottom)
-            .saturating_add(spacing_after);
+            .saturating_add(edges.padding.bottom);
         cursor.y = outer_y_top
             .saturating_add(total_box_height)
             .saturating_add(edges.margin.bottom);
@@ -370,9 +357,8 @@ pub(super) fn layout_flex_container(
             .saturating_add(edges.padding.top)
             .saturating_add(edges.border.bottom.thickness())
             .saturating_add(edges.padding.bottom)
-            .saturating_add(spacing_after)
     };
-    let fill_bg = block_bg.is_some() || chrome;
+    let fill_bg = block_bg.is_some();
     let rect = Rect::new(outer_x, outer_y_top, block_width, total_box_height);
 
     let paint_style = PaintStyle {
@@ -384,8 +370,7 @@ pub(super) fn layout_flex_container(
             .css_attr
             .get_border_radius(content_width, child_context.font, child_context.viewport),
         fill_bg,
-        spacing_after,
-        chrome,
+        spacing_after: 0,
     };
 
     LayoutBox::new_flex_container(

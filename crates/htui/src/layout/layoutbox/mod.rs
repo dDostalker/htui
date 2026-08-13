@@ -46,7 +46,7 @@
 //! (its UA `display: inline-block` is what makes it a block-level
 //! replaced inline-block box).
 //! Paint-only data (padding / border / margin / inline runs / background-fill
-//! flags / chrome / font-size) is collected in [`PaintStyle`] so [`LayoutBox`]
+//! flags / font-size) is collected in [`PaintStyle`] so [`LayoutBox`]
 //! itself only carries layout-classification fields. This keeps the layout
 //! tree small and makes the boundary between layout and paint explicit.
 //!

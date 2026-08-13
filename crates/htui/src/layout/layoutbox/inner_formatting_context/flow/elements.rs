@@ -26,23 +26,15 @@ fn default_opts() -> LayoutBlockOptions {
     LayoutBlockOptions::default()
 }
 
-/// `<aside>` reads as a solid stripe even without an explicit background.
+/// `<aside>` is a plain block — no browser UA default background or chrome.
 fn aside_opts() -> LayoutBlockOptions {
-    LayoutBlockOptions {
-        fill_bg_default: true,
-        chrome: true,
-        ..Default::default()
-    }
+    LayoutBlockOptions::default()
 }
 
-/// `<header>` / `<footer>` chrome bands with breathing room below.
+/// `<header>` / `<footer>` are plain blocks — no browser UA default chrome
+/// or trailing blank rows.
 fn header_footer_opts() -> LayoutBlockOptions {
-    LayoutBlockOptions {
-        fill_bg_default: true,
-        chrome: true,
-        spacing_after: 2,
-        ..Default::default()
-    }
+    LayoutBlockOptions::default()
 }
 
 /// `<address>` keeps the browser user-agent `font-style: italic` default.

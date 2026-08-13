@@ -56,7 +56,6 @@ pub(crate) fn paint_block(
     // cascade carries one — otherwise the padding cells of e.g. a bordered
     // `.btn:hover` keep the parent background and the highlight looks hollow.
     let fill_bg = lb.paint_style.fill_bg || my_bg.is_some();
-    let chrome = lb.paint_style.chrome;
     let spacing_after = lb.paint_style.spacing_after;
     let box_edges = &lb.paint_style.box_edges;
     let font = lb.paint_style.font_size_cells.max(1);
@@ -72,12 +71,9 @@ pub(crate) fn paint_block(
 
     if fill_bg {
         // Paint the background across every row of the rect that is *not* a
-        // trailing spacing row. `<aside>` opts into `fill_bg` unconditionally
-        // so it reads as a solid stripe even without an explicit
-        // `background-color`; other blocks only fill when CSS specifies a bg.
-        // For boxes with `height > 1 + spacing_after` (e.g. `<aside>` wrapping
-        // nested children) the bg covers all content rows; the trailing
-        // `spacing_after` rows reserved by `<header>`/`<footer>` stay blank.
+        // trailing spacing row. Only blocks with an explicit `background-color`
+        // fill here; the trailing `spacing_after` rows reserved by `<hr>` stay
+        // blank.
         //
         // CSS rule: the background-color paints the **padding-box** (the
         // border-box minus the border thickness), not the margin area. We
@@ -97,7 +93,7 @@ pub(crate) fn paint_block(
             + box_edges.padding.left
             > 0;
         let text_clamped =
-            my_bg.is_some() && !chrome && !has_padding && lb.paint_style.font_size_cells > 1;
+            my_bg.is_some() && !has_padding && lb.paint_style.font_size_cells > 1;
         let text_row_offset: usize = if text_clamped { glyph_row_within_line } else { 0 };
         let (bg_start_x, bg_width) = if text_clamped {
             if let Some(runs) = &lb.paint_style.runs {

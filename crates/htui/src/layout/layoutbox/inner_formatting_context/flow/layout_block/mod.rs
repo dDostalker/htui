@@ -4,8 +4,7 @@
 //! the same outer-geometry computation, the same cursor-driven border-box
 //! reservation, and the same `LayoutBlockOptions` shape for element-specific
 //! differences. This module owns the helpers so each per-element handler
-//! stays focused on its own concerns (prefix runs, fill-by-default, indent,
-//! chrome).
+//! stays focused on its own concerns (prefix runs, indent).
 //!
 //! ```text
 //! layout_block/

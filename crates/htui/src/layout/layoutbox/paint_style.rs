@@ -36,17 +36,12 @@ pub struct PaintStyle {
     /// paints with the rounded box-drawing corner glyphs.
     pub border_radius: CornerRadii,
     /// Whether the rect's background should be painted. `true` when the box
-    /// has an explicit CSS `background-color`, or when the element opts into
-    /// the chrome band semantics (`<aside>` / `<header>` / `<footer>`).
+    /// has an explicit CSS `background-color`.
     pub fill_bg: bool,
-    /// Trailing blank rows reserved below the rect (default 0). `<header>` /
-    /// `<footer>` use 2 to leave breathing room before the next block. These
-    /// rows are not filled with the rect's background.
+    /// Trailing blank rows reserved below the rect (default 0). `<hr>` uses 1
+    /// to leave breathing room before the next block. These rows are not
+    /// filled with the rect's background.
     pub spacing_after: usize,
-    /// `true` for chrome elements (`<aside>` / `<header>` / `<footer>`) whose
-    /// background always covers the full border-box regardless of inline
-    /// content width or text-align.
-    pub chrome: bool,
 }
 
 impl Default for PaintStyle {
@@ -59,7 +54,6 @@ impl Default for PaintStyle {
             border_radius: CornerRadii::default(),
             fill_bg: false,
             spacing_after: 0,
-            chrome: false,
         }
     }
 }

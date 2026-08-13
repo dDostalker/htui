@@ -449,73 +449,67 @@ fn test_aside_bg_covers_two_nested_p_rows() {
 }
 
 #[test]
-fn test_header_spacing_rows_remain_bg_free() {
-    // Regression guard: the multi-row bg fill must skip `spacing_after`
-    // rows, so header's two trailing blank rows stay blank even though
-    // the header rect.height is 3.
+fn test_header_has_no_trailing_spacing() {
+    // `<header>` is a plain block now: exactly one row, no two trailing
+    // blank rows baked in.
     init();
     let html = "<header>Pinned title</header><p>after</p>";
     let css = "header { background-color: green; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let cols = term_map.columns as usize;
 
-    let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map);
+    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor};
+    let containing = BoxConstraint::root(&term_map);
+    let mut cursor = Cursor::new();
+    let boxes = layout_tree(&arena, root_id, containing, &mut cursor, 80, 24);
 
-    // Row 0: header content row — must be filled.
-    let row0 = &tl.layout[0..cols];
-    assert!(
-        row0
-            .iter()
-            .all(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 128, b: 0 })),
-        "header content row should have bg"
-    );
-    // Rows 1 and 2: header spacing — must be bg-free.
-    let row1 = &tl.layout[cols..2 * cols];
-    let row2 = &tl.layout[2 * cols..3 * cols];
-    assert!(
-        row1.iter().all(|b| b.bcolor.is_none()),
-        "header's first spacing row must remain bg-free"
-    );
-    assert!(
-        row2.iter().all(|b| b.bcolor.is_none()),
-        "header's second spacing row must remain bg-free"
+    let header_box = find_box_by_type(&boxes, &NodeType::Header, &arena)
+        .expect("header box should be present");
+    assert_eq!(
+        header_box.rect.height, 1,
+        "header must not reserve trailing spacing rows"
     );
 }
 
 #[test]
-fn test_footer_spacing_rows_remain_bg_free() {
-    // Mirror regression guard for <footer>.
+fn test_footer_has_no_trailing_spacing() {
+    // `<footer>` is a plain block now: exactly one row, no two trailing
+    // blank rows baked in.
     init();
     let html = "<p>above</p><footer>tail</footer>";
     let css = "footer { background-color: red; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
-    let cols = term_map.columns as usize;
 
-    let mut tl = TermLayout::new(&term_map, 1.0);
-    tl.draw(&arena, root_id, &term_map);
+    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor};
+    let containing = BoxConstraint::root(&term_map);
+    let mut cursor = Cursor::new();
+    let boxes = layout_tree(&arena, root_id, containing, &mut cursor, 80, 24);
 
-    // Layout: row 0 = <p>, row 1 = footer content, rows 2 & 3 = spacing.
-    let footer_row_start = 1 * cols;
-    let footer_row = &tl.layout[footer_row_start..footer_row_start + cols];
-    assert!(
-        footer_row
-            .iter()
-            .all(|b| b.bcolor == Some(Color::Rgb { r: 255, g: 0, b: 0 })),
-        "footer content row should have bg"
+    let footer_box = find_box_by_type(&boxes, &NodeType::Footer, &arena)
+        .expect("footer box should be present");
+    assert_eq!(
+        footer_box.rect.height, 1,
+        "footer must not reserve trailing spacing rows"
     );
-    let spacing_row_1 = &tl.layout[2 * cols..3 * cols];
-    let spacing_row_2 = &tl.layout[3 * cols..4 * cols];
-    assert!(
-        spacing_row_1.iter().all(|b| b.bcolor.is_none()),
-        "footer's first spacing row must remain bg-free"
-    );
-    assert!(
-        spacing_row_2.iter().all(|b| b.bcolor.is_none()),
-        "footer's second spacing row must remain bg-free"
-    );
+}
+
+#[test]
+fn test_semantic_blocks_have_no_implicit_background() {
+    // `<aside>` / `<header>` / `<footer>` are plain blocks like `<div>`:
+    // no default background unless CSS sets one.
+    init();
+    for tag in ["aside", "header", "footer"] {
+        let html = format!("<{tag}>text</{tag}>");
+        let (root_id, arena) = setup(&html, "");
+        let term_map = mock_term_map();
+        let mut tl = TermLayout::new(&term_map, 1.0);
+        tl.draw(&arena, root_id, &term_map);
+        assert!(
+            tl.layout.iter().all(|b| b.bcolor.is_none()),
+            "<{tag}> must not paint an implicit background"
+        );
+    }
 }
 
 #[test]
