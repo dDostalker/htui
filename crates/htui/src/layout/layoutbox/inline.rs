@@ -48,6 +48,36 @@ pub fn collect_runs(
     runs
 }
 
+/// Collect a single raw text node's inline run (whitespace-collapsed and
+/// text-transformed), or `None` for empty / whitespace-only text.
+///
+/// Used by the flex container to promote its direct text children into
+/// anonymous flex items, mirroring the `NodeType::Text` branch of
+/// [`walk_runs`] without walking an element's children.
+pub(crate) fn text_node_run(
+    arena: &NodeArena,
+    text_node_id: NodeId,
+    fg: Option<Color>,
+    bg: Option<Color>,
+    style: FontStyle,
+    transform: TextTransform,
+    white_space: WhiteSpace,
+) -> Option<InlineRun> {
+    let child = &arena[text_node_id];
+    if child.node_type != NodeType::Text {
+        return None;
+    }
+    if child.text_is_painted(white_space) {
+        if let Some(s) = child.data.as_deref()
+            && !s.is_empty()
+        {
+            let text = apply_text_transform(s, transform);
+            return Some(InlineRun::owned(text, style, fg, bg, None));
+        }
+    }
+    None
+}
+
 fn walk_runs(
     arena: &NodeArena,
     node_id: NodeId,
@@ -312,7 +342,7 @@ fn walk_inline_children(
 /// Quote pair for a `<q>` element based on its nesting depth, mirroring the
 /// CSS `quotes` alternation: even depth uses double quotes (`“`/`”`), odd
 /// depth single quotes (`‘`/`’`).
-fn q_quote_pair(arena: &NodeArena, node_id: NodeId) -> (&'static str, &'static str) {
+pub(crate) fn q_quote_pair(arena: &NodeArena, node_id: NodeId) -> (&'static str, &'static str) {
     let mut depth = 0usize;
     let mut current = arena[node_id].parent;
     while let Some(pid) = current {

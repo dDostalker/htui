@@ -90,6 +90,7 @@ pub use cursor::Cursor;
 pub use generation::{GeneratedBox, GeneratedBoxKind, generate_box_tree, generate_node, visible_children};
 pub use geometry::{layout_generated_box, layout_generated_tree};
 pub use inline::collect_runs;
+pub(crate) use inline::{q_quote_pair, text_node_run};
 pub use inline_run::InlineRun;
 pub use inner_formatting_context::FormattingContext;
 pub use outer_display::OuterDisplay;

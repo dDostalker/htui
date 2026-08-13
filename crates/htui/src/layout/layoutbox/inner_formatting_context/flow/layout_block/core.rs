@@ -194,6 +194,9 @@ pub fn layout_block(
     if let Some(prefix) = opts.prefix.clone() {
         all_runs.insert(0, prefix);
     }
+    if let Some(suffix) = opts.suffix.clone() {
+        all_runs.push(suffix);
+    }
 
     // Wrap the inline content to the content-box width. The wrapped
     // line count drives the rect height; the per-line run list is

@@ -19,6 +19,10 @@ pub struct LayoutBlockOptions {
     /// `<li>`). The run uses the element's own fg / bg / font style so the
     /// body runs can layer additional styles on top.
     pub prefix: Option<InlineRun>,
+    /// Inline run appended to the body runs (e.g. the closing quote for a
+    /// blockified `<q>`). Mirrors [`Self::prefix`] but lands on the last
+    /// visual line.
+    pub suffix: Option<InlineRun>,
     /// When `true`, the rect's background is filled even without an explicit
     /// CSS `background-color` — used by `<aside>` (solid stripe) and
     /// `<header>` / `<footer>` (chrome bands).

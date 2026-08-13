@@ -4,7 +4,7 @@ use crate::{
     layout::{
         BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext,
         inner_formatting_context::flow::{LayoutBlockOptions, layout_block},
-        layoutbox::generation::{GeneratedBoxKind, generate_node},
+        layoutbox::{generation::{GeneratedBoxKind, generate_node}, q_quote_pair},
     },
     tdom::node::{Node, NodeArena, NodeId, NodeType},
     tui::graph_api::block_style,
@@ -68,7 +68,7 @@ fn is_generic_block(node_type: &NodeType) -> bool {
 /// normal boxes once a parent has pre-allocated their rectangle
 /// (`pre_allocated_rect.is_some()`). In ordinary block flow inline elements
 /// never reach the geometry dispatcher (their runs are folded into the parent
-/// by [`collect_runs`]), so returning `None` there keeps that path intact.
+/// by `collect_runs`), so returning `None` there keeps that path intact.
 pub fn layout_inline_blockify(
     arena: &NodeArena,
     node_id: NodeId,
@@ -87,13 +87,31 @@ pub fn layout_inline_blockify(
 
     let mut node = arena[node_id].clone();
     apply_inline_ua_defaults(&mut node);
+
+    // `<q>` carries generated quote marks around its content. The shared block
+    // pipeline renders them as a prepended open quote and an appended close
+    // quote, using the element's own fg / bg / font style.
+    let opts = if node.node_type == NodeType::Q {
+        let (open, close) = q_quote_pair(arena, node_id);
+        let fg = node.css_attr.get_color();
+        let bg = node.css_attr.get_bg_color();
+        let style = block_style(&node.css_attr);
+        LayoutBlockOptions {
+            prefix: Some(InlineRun::new(open, style, fg, bg)),
+            suffix: Some(InlineRun::new(close, style, fg, bg)),
+            ..Default::default()
+        }
+    } else {
+        LayoutBlockOptions::default()
+    };
+
     Some(layout_block(
         arena,
         &node,
         node_id,
         containing,
         cursor,
-        LayoutBlockOptions::default(),
+        opts,
         context,
         pre_allocated_rect,
     ))

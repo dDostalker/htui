@@ -2,17 +2,21 @@
 //! `justify-content` and `align-items`, recurse into the element registry.
 
 use crate::{
+    html::box_edges::BoxEdges,
     html::css_parse::{AlignItems, FlexDirection, FlexWrap, GapSizes, JustifyContent},
-    layout::{BoxConstraint, Cursor, LayoutBox, LayoutContext, Rect},
-    tdom::node::NodeArena,
+    layout::{
+        BoxConstraint, Cursor, LayoutBox, LayoutContext, OuterDisplay, PaintStyle, Rect,
+        layoutbox::wrap_runs,
+    },
+    tdom::node::{NodeArena, NodeId},
 };
 
 use super::algorithm::{
     align_content_spacing, align_on_cross_axis, distribute_main_axis, effective_align,
     justify_spacing, wrap_into_lines,
 };
-use super::container::{FLEX_ITEM_MIN_CROSS, FlexItemPrep};
-use super::prepare::{natural_cross_axis_size, prepare_flex_item, resolve_item_cross_size};
+use super::container::{FLEX_ITEM_MIN_CROSS, FlexItemPrep, FlexItemSource, AnonymousTextItem};
+use super::prepare::{natural_cross_axis_size_for_prep, resolve_item_cross_size};
 
 /// Lay out every flex item across one or more lines and return the
 /// positioned children plus the vertical extent they consume (used to size
@@ -20,7 +24,8 @@ use super::prepare::{natural_cross_axis_size, prepare_flex_item, resolve_item_cr
 #[allow(clippy::too_many_arguments)]
 pub(super) fn layout_flex_items(
     arena: &NodeArena,
-    item_ids: &[crate::tdom::node::NodeId],
+    container_node_id: NodeId,
+    mut preps: Vec<FlexItemPrep>,
     direction: FlexDirection,
     wrap: FlexWrap,
     justify: JustifyContent,
@@ -33,11 +38,7 @@ pub(super) fn layout_flex_items(
     has_explicit_height: bool,
     container_height: usize,
 ) -> (Vec<LayoutBox>, usize) {
-    // 1. Prepare + sort every item.
-    let mut preps: Vec<FlexItemPrep> = item_ids
-        .iter()
-        .map(|&id| prepare_flex_item(arena, id, direction, content.width, context, align_items))
-        .collect();
+    // 1. Sort every prepared item by `order`.
     preps.sort_by_key(|p| p.order);
 
     // 2. Split into lines based on `wrap`.
@@ -90,7 +91,7 @@ pub(super) fn layout_flex_items(
         // 3b. Compute the line's natural cross-axis size.
         let natural_line_cross = line_preps
             .iter()
-            .map(|p| natural_cross_axis_size(arena, p.node_id, direction, context))
+            .map(|p| natural_cross_axis_size_for_prep(arena, p, direction, context))
             .max()
             .unwrap_or(FLEX_ITEM_MIN_CROSS)
             .max(FLEX_ITEM_MIN_CROSS);
@@ -185,7 +186,7 @@ pub(super) fn layout_flex_items(
                 // for non-stretch alignments and for stretch when the
                 // container's cross-axis size is unknown).
                 let item_natural_cross =
-                    natural_cross_axis_size(arena, prep.node_id, direction, context);
+                    natural_cross_axis_size_for_prep(arena, prep, direction, context);
                 let item_cross_size = resolve_item_cross_size(
                     prep.align_self,
                     line_cross,
@@ -213,17 +214,25 @@ pub(super) fn layout_flex_items(
                         (x, cursor_main, item_cross_size, main_size)
                     }
                 };
-                let child_box = crate::layout::inner_formatting_context::flow::dispatch(
-                    arena,
-                    prep.node_id,
-                    BoxConstraint {
-                        x: item_x,
-                        width: item_w.max(1),
-                    },
-                    &mut Cursor { y: item_y },
-                    context,
-                    Some(Rect::new(item_x, item_y, item_w.max(1), item_h.max(1))),
-                );
+                let item_rect = Rect::new(item_x, item_y, item_w.max(1), item_h.max(1));
+                let child_box = match &prep.source {
+                    FlexItemSource::Node(item_id) => {
+                        crate::layout::inner_formatting_context::flow::dispatch(
+                            arena,
+                            *item_id,
+                            BoxConstraint {
+                                x: item_x,
+                                width: item_w.max(1),
+                            },
+                            &mut Cursor { y: item_y },
+                            context,
+                            Some(item_rect),
+                        )
+                    }
+                    FlexItemSource::AnonymousText(text) => {
+                        Some(layout_anonymous_text(text, item_rect, container_node_id))
+                    }
+                };
                 // Main-axis extent the item actually occupies, measured from
                 // the placement origin. For `row` it equals the distributed
                 // width; for `column` the laid-out box can grow taller than
@@ -256,10 +265,10 @@ pub(super) fn layout_flex_items(
                             .saturating_sub(cursor_main);
                     }
                     boxes.push(child_box);
-                } else {
+                } else if let FlexItemSource::Node(item_id) = &prep.source {
                     log::warn!(
                         "No layout handler for flex item {:?}",
-                        arena[prep.node_id].node_type
+                        arena[*item_id].node_type
                     );
                 }
                 let step = match direction {
@@ -356,4 +365,43 @@ pub(super) fn layout_flex_items(
     };
 
     (placed, total_height)
+}
+
+/// Lay out an anonymous text flex item: wrap its runs at the allocated width
+/// and build a block box. Anonymous items have no DOM node of their own, so
+/// the box reports the flex container's node id for hit-testing.
+fn layout_anonymous_text(
+    text: &AnonymousTextItem,
+    rect: Rect,
+    container_node_id: NodeId,
+) -> LayoutBox {
+    let wrapped = wrap_runs(
+        &text.runs,
+        rect.width.max(1),
+        text.font_size_cells,
+        text.white_space,
+        text.word_break,
+        text.overflow_wrap,
+    );
+    let has_lines = !wrapped.is_empty() && wrapped.iter().any(|l| !l.is_empty());
+    let inline_rows = if has_lines {
+        wrapped.len().saturating_mul(text.line_height_cells.max(1))
+    } else {
+        0
+    };
+    let rect_height = rect.height.max(inline_rows.max(1));
+    let paint_style = PaintStyle {
+        box_edges: BoxEdges::default(),
+        runs: if has_lines { Some(wrapped) } else { None },
+        font_size_cells: text.font_size_cells,
+        line_height_cells: text.line_height_cells,
+        ..PaintStyle::default()
+    };
+    LayoutBox::new_normal(
+        container_node_id,
+        Rect::new(rect.x, rect.y, rect.width, rect_height),
+        paint_style,
+        OuterDisplay::BlockLevel { container: true },
+        Vec::new(),
+    )
 }

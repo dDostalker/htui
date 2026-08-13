@@ -96,6 +96,53 @@ fn test_flex_promotes_inline_children_to_items() {
 }
 
 #[test]
+fn test_flex_promotes_raw_text_to_anonymous_item() {
+    init();
+    // Raw text directly inside a flex container becomes an anonymous flex
+    // item, laid out side by side with the element items instead of being a
+    // separate container row above them.
+    let html = r#"<div class="container">label<span>x</span></div>"#;
+    let css = ".container { display: flex; }";
+    let (rows, _tl) = render_rows(html, css);
+    assert!(
+        rows[0].starts_with("labelx"),
+        "anonymous text + span should share the first row: {:?}",
+        rows[0]
+    );
+    let copies: usize = rows.iter().map(|r| r.matches("label").count()).sum();
+    assert_eq!(copies, 1, "anonymous text must not double-render: {:?}", rows);
+}
+
+#[test]
+fn test_flex_anonymous_text_respects_document_order() {
+    init();
+    // Anonymous text items stay in document order relative to element items.
+    let html = r#"<div class="container"><span>a</span>mid<span>b</span></div>"#;
+    let css = ".container { display: flex; }";
+    let (rows, _tl) = render_rows(html, css);
+    assert!(
+        rows[0].starts_with("amidb"),
+        "items must keep document order: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn test_flex_blockifies_q_with_quotes() {
+    init();
+    // A `<q>` direct flex child is blockified like other inline elements and
+    // keeps its generated open/close quote marks.
+    let html = r#"<div class="container"><q>hi</q></div>"#;
+    let css = ".container { display: flex; }";
+    let (rows, _tl) = render_rows(html, css);
+    assert!(
+        rows[0].starts_with("\u{201C}hi\u{201D}"),
+        "q item must carry quotes: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
 fn flex_row_with_input_renders_the_field() {
     init();
     // An `<input>` as a flex item must render its bracketed field at the

@@ -6,7 +6,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::{
     html::css_parse::{AlignItems, AlignSelf, FlexDirection, WhiteSpace},
     layout::{
-        LayoutContext,
+        InlineRun, LayoutContext,
         layoutbox::collect_runs,
         layoutbox::generation::{GeneratedBoxKind, generate_node},
         layoutbox::geometry::select_options,
@@ -15,7 +15,7 @@ use crate::{
     tui::graph_api::{FontStyle, char_width, grapheme_width},
 };
 
-use super::container::{FLEX_ITEM_MIN_CROSS, FlexItemPrep};
+use super::container::{FLEX_ITEM_MIN_CROSS, FlexItemPrep, FlexItemSource, AnonymousTextItem};
 
 /// Build a [`FlexItemPrep`] for one block child: resolve `flex-basis`,
 /// read `flex-grow` / `flex-shrink` / `align-self` / `order`, and capture
@@ -94,7 +94,7 @@ pub(super) fn prepare_flex_item(
         }
     };
     FlexItemPrep {
-        node_id: item_id,
+        source: FlexItemSource::Node(item_id),
         basis: basis_resolved,
         min_main,
         css_min_main,
@@ -109,12 +109,64 @@ pub(super) fn prepare_flex_item(
     }
 }
 
+/// Build a [`FlexItemPrep`] for an anonymous text item: contiguous raw text
+/// children of a flex container. Anonymous items carry the initial flex
+/// properties (`flex: 0 1 auto`, `order: 0`, `align-self: auto`).
+pub(super) fn prepare_anonymous_text_item(
+    item: AnonymousTextItem,
+    direction: FlexDirection,
+    align_items: AlignItems,
+) -> FlexItemPrep {
+    let text_w = runs_total_width(&item.runs);
+    let (basis, min_main) = match direction {
+        FlexDirection::Row => (text_w.max(FLEX_ITEM_MIN_CROSS), runs_longest_word(&item.runs)),
+        FlexDirection::Column => (FLEX_ITEM_MIN_CROSS, FLEX_ITEM_MIN_CROSS),
+    };
+    FlexItemPrep {
+        source: FlexItemSource::AnonymousText(item),
+        basis,
+        min_main,
+        css_min_main: None,
+        css_max_main: None,
+        grow: 0.0,
+        shrink: 1.0,
+        align_self: align_items,
+        order: 0,
+    }
+}
+
+/// Sum the grapheme widths of every non-break run in `runs`.
+fn runs_total_width(runs: &[InlineRun]) -> usize {
+    runs.iter()
+        .filter(|r| !r.force_break)
+        .map(|r| r.text.graphemes(true).map(grapheme_width).sum::<usize>())
+        .sum()
+}
+
+/// Widest whitespace-delimited token in `runs` (the min-content width of the
+/// anonymous text item).
+fn runs_longest_word(runs: &[InlineRun]) -> usize {
+    runs.iter()
+        .filter(|r| !r.force_break)
+        .flat_map(|r| r.text.split_whitespace())
+        .map(|token| token.graphemes(true).map(grapheme_width).sum::<usize>())
+        .max()
+        .unwrap_or(0)
+        .max(1)
+}
+
 /// Sum the grapheme widths of every direct text leaf of `node_id`.
 pub(super) fn measure_text_content_width(arena: &NodeArena, node_id: NodeId) -> Option<usize> {
     let white_space = arena[node_id]
         .css_attr
         .get_white_space(&arena[node_id].node_type);
-    measure_text_content_width_ws(arena, node_id, white_space)
+    let mut w = measure_text_content_width_ws(arena, node_id, white_space)?;
+    // `<q>` generates open + close quote marks (one cell each) that are not
+    // part of its text children but still contribute to its intrinsic width.
+    if arena[node_id].node_type == NodeType::Q {
+        w = w.saturating_add(2);
+    }
+    Some(w)
 }
 
 fn measure_text_content_width_ws(
@@ -135,20 +187,55 @@ fn measure_text_content_width_ws(
                     }
                 }
             }
-            // Inline wrappers (`<span>` / `<a>` / `<em>`) hold the text that
-            // belongs to this block's inline content; recurse so a block whose
-            // text lives entirely inside inline elements still reports its
-            // intrinsic width (flex-basis: auto relies on it).
-            NodeType::Span | NodeType::A | NodeType::Em => {
+            // Inline text-level wrappers hold the text that belongs to this
+            // block's inline content; recurse so a block whose text lives
+            // entirely inside inline elements still reports its intrinsic
+            // width (flex-basis: auto relies on it).
+            _ if is_inline_text_level(&child.node_type) => {
                 let ws = child.white_space_or(white_space);
-                if let Some(w) = measure_text_content_width_ws(arena, child_id, ws) {
-                    total = Some(total.unwrap_or(0).saturating_add(w));
-                }
+                let w = measure_text_content_width_ws(arena, child_id, ws).unwrap_or(0);
+                let w = if child.node_type == NodeType::Q {
+                    w.saturating_add(2)
+                } else {
+                    w
+                };
+                total = Some(total.unwrap_or(0).saturating_add(w));
             }
             _ => {}
         }
     }
     total
+}
+
+/// `true` for the inline text-level element kinds whose text folds into an
+/// ancestor block's inline runs.
+fn is_inline_text_level(node_type: &NodeType) -> bool {
+    matches!(
+        node_type,
+        NodeType::Span
+            | NodeType::A
+            | NodeType::Em
+            | NodeType::Strong
+            | NodeType::B
+            | NodeType::I
+            | NodeType::U
+            | NodeType::S
+            | NodeType::Del
+            | NodeType::Ins
+            | NodeType::Mark
+            | NodeType::Q
+            | NodeType::Abbr
+            | NodeType::Cite
+            | NodeType::Dfn
+            | NodeType::Var
+            | NodeType::Code
+            | NodeType::Kbd
+            | NodeType::Samp
+            | NodeType::Data
+            | NodeType::Time
+            | NodeType::Label
+            | NodeType::Output
+    )
 }
 
 /// Widest unbreakable segment in `node_id`'s inline text — the item's
@@ -176,7 +263,7 @@ pub(super) fn longest_breakable_width(arena: &NodeArena, node_id: NodeId) -> usi
                         }
                     }
                 }
-                NodeType::Span | NodeType::A | NodeType::Em => {
+                _ if is_inline_text_level(&child.node_type) => {
                     let ws = child.white_space_or(white_space);
                     walk(arena, child_id, ws, max_w);
                 }
@@ -477,6 +564,25 @@ pub(super) fn natural_cross_axis_size(
         FlexDirection::Column => intrinsic.width,
     }
     .max(FLEX_ITEM_MIN_CROSS)
+}
+
+/// Natural cross-axis size of a prepared flex item, handling both DOM nodes
+/// and anonymous text items.
+pub(super) fn natural_cross_axis_size_for_prep(
+    arena: &NodeArena,
+    prep: &FlexItemPrep,
+    direction: FlexDirection,
+    context: LayoutContext,
+) -> usize {
+    match &prep.source {
+        FlexItemSource::Node(node_id) => {
+            natural_cross_axis_size(arena, *node_id, direction, context)
+        }
+        FlexItemSource::AnonymousText(text) => match direction {
+            FlexDirection::Row => text.line_height_cells.max(FLEX_ITEM_MIN_CROSS),
+            FlexDirection::Column => runs_total_width(&text.runs).max(FLEX_ITEM_MIN_CROSS),
+        },
+    }
 }
 
 /// Resolve an item's cross-axis size in the current line.

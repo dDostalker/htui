@@ -2,15 +2,14 @@
 //! the container's [`LayoutBox`].
 
 use crate::{
-    html::css_parse::BoxSizing,
+    html::css_parse::{BoxSizing, OverflowWrap, WhiteSpace, WordBreak},
     layout::{
-        BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, Rect,
+        BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext, PaintStyle, Rect,
         inner_formatting_context::flow::{constrained_block_width, dispatch},
         layoutbox::{
-            collect_runs,
             generation::{GeneratedBoxKind, generate_node},
+            text_node_run,
             visible_children,
-            wrap_runs,
         },
     },
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
@@ -21,6 +20,7 @@ use crate::html::css_parse::Position;
 use crate::html::css_parse::resolve_line_height_cells;
 
 use super::items::layout_flex_items;
+use super::prepare::{prepare_anonymous_text_item, prepare_flex_item};
 
 /// Minimum cross-axis size of any flex item (1 row by default).
 ///
@@ -28,10 +28,27 @@ use super::items::layout_flex_items;
 /// that floor so the line-height calculation can't go below it.
 pub(super) const FLEX_ITEM_MIN_CROSS: usize = 1;
 
-/// One block child of a flex container, prepared for the two-phase
-/// algorithm.
+/// Where a flex item's content comes from: a DOM element or an anonymous
+/// text item synthesised from the container's raw text children.
+pub(super) enum FlexItemSource {
+    Node(NodeId),
+    AnonymousText(AnonymousTextItem),
+}
+
+/// Styling + text runs of an anonymous flex item (contiguous raw text
+/// children of a flex container).
+pub(super) struct AnonymousTextItem {
+    pub(super) runs: Vec<InlineRun>,
+    pub(super) font_size_cells: usize,
+    pub(super) line_height_cells: usize,
+    pub(super) white_space: WhiteSpace,
+    pub(super) word_break: WordBreak,
+    pub(super) overflow_wrap: OverflowWrap,
+}
+
+/// One child of a flex container, prepared for the two-phase algorithm.
 pub(super) struct FlexItemPrep {
-    pub(super) node_id: NodeId,
+    pub(super) source: FlexItemSource,
     /// Resolved `flex-basis` (0 when `auto` falls through to no value —
     /// the size is supplied by the grow / shrink distribution).
     pub(super) basis: usize,
@@ -136,110 +153,124 @@ pub(super) fn layout_flex_container(
         });
     let has_explicit_height = container_css_height.is_some();
 
-    // 5. Inline runs (container's own text / span / a / em children).
-    //    These are rendered as the container's own row, ABOVE the flex
-    //    items. v1 doesn't promote raw text into anonymous flex items.
+    // 5. Build flex items in document order. Every in-flow element child
+    //    becomes a flex item (block, blockified inline, or replaced);
+    //    contiguous raw text children are wrapped into anonymous flex items
+    //    (CSS Flexbox §4).
     let block_fg = node.css_attr.get_color();
     let block_bg = node.css_attr.get_bg_color();
     let block_font_style = block_style(&node.css_attr);
-    let body_runs = collect_runs(arena, node_id, node, block_fg, block_bg, block_font_style);
+    let transform = node.css_attr.get_text_transform();
+    let white_space = node.css_attr.get_white_space(&node.node_type);
+    let word_break = node.css_attr.get_word_break();
+    let overflow_wrap = node.css_attr.get_overflow_wrap();
 
-    // Wrap the container's own inline text so its rect grows to fit
-    // the wrapped line count, and so the flex items are pushed down
-    // by the height of the wrapped text.
-    let flex_inline_lines = if body_runs.is_empty() {
-        Vec::new()
-    } else {
-        wrap_runs(
-            &body_runs,
-            content_constraint.width.max(1),
-            own_font_size_cells,
-            node.css_attr.get_white_space(&node.node_type),
-            node.css_attr.get_word_break(),
-            node.css_attr.get_overflow_wrap(),
-        )
-    };
-    let inline_line_count = flex_inline_lines.len();
-    let inline_rows = inline_line_count.saturating_mul(line_height_cells.max(1));
-    // Flex items begin below the container's own wrapped text.
-    let content_y_with_inline = content_y.saturating_add(inline_rows);
-
-    // 6. Flex items: the container's `BoxKind::Normal` children in document
-    //    order. Inline and text nodes are already wrapped by the generator
-    //    into anonymous boxes that contribute their runs to the container
-    //    itself rather than participating as flex items. A closed `<details>`
-    //    only offers its first `<summary>` child (see [`visible_children`]).
     let mut positioned_boxes: Vec<LayoutBox> = Vec::new();
-    let block_child_ids: Vec<NodeId> = visible_children(arena, node_id)
-        .iter()
-        .copied()
-        .filter(|&id| {
-            generate_node(arena, id)
-                .map(|generated| {
-                    // Only block-level children become flex items. Inline
-                    // children (`<span>` / `<a>` / `<em>`) are folded into
-                    // the container's own runs by `collect_runs`. Replaced
-                    // elements (`<img>` / `<input>`) blockify into flex
-                    // items, mirroring how browsers treat every flex child
-                    // as a block-level box.
-                    let is_block_item = match generated.kind {
-                        GeneratedBoxKind::Normal => {
-                            // CSS Flexbox blockifies every in-flow child,
-                            // including inline-level elements (`<span>` /
-                            // `<a>` / `<em>`). `<q>` stays folded into the
-                            // container's text for now: its generated quote
-                            // marks need a suffix run the shared block
-                            // pipeline does not support yet.
-                            !generated.outer_display.is_inline()
-                                || arena[id].node_type != NodeType::Q
-                        }
-                        GeneratedBoxKind::Replaced => true,
-                        _ => false,
-                    };
-                    if !is_block_item {
-                        return false;
-                    }
-                    let positioning = arena[id].css_attr.get_positioning(
-                        content_width,
-                        child_context.font,
-                        child_context.viewport,
-                    );
-                    match positioning.position {
-                        // Detached from the flex layout: lay out against a
-                        // local cursor (no row claims) and let the post-layout
-                        // pass anchor it to its containing block.
-                        Position::Absolute | Position::Fixed => {
-                            let mut local_cursor = Cursor { y: 0 };
-                            if let Some(b) = dispatch(
-                                arena,
-                                id,
-                                content_constraint,
-                                &mut local_cursor,
-                                child_context,
-                                None,
-                            ) {
-                                positioned_boxes.push(b);
-                            }
-                            false
-                        }
-                        _ => true,
-                    }
-                })
-                .unwrap_or(false)
-        })
-        .collect();
+    let mut item_preps: Vec<FlexItemPrep> = Vec::new();
+    let mut text_runs: Vec<InlineRun> = Vec::new();
+
+    for &child_id in &visible_children(arena, node_id) {
+        let child = &arena[child_id];
+        if child.node_type == NodeType::Text {
+            if let Some(run) = text_node_run(
+                arena,
+                child_id,
+                block_fg,
+                block_bg,
+                block_font_style,
+                transform,
+                white_space,
+            ) {
+                text_runs.push(run);
+            }
+            continue;
+        }
+
+        // Flush the preceding raw text into an anonymous flex item.
+        if !text_runs.is_empty() {
+            item_preps.push(prepare_anonymous_text_item(
+                AnonymousTextItem {
+                    runs: std::mem::take(&mut text_runs),
+                    font_size_cells: own_font_size_cells,
+                    line_height_cells,
+                    white_space,
+                    word_break,
+                    overflow_wrap,
+                },
+                direction,
+                align_items,
+            ));
+        }
+
+        let Some(generated) = generate_node(arena, child_id) else {
+            continue;
+        };
+        if !matches!(
+            generated.kind,
+            GeneratedBoxKind::Normal | GeneratedBoxKind::Replaced
+        ) {
+            continue;
+        }
+
+        // Detached positioned children lay out against a local cursor (no row
+        // claims) and are re-attached below the flex layout.
+        let positioning = arena[child_id].css_attr.get_positioning(
+            content_width,
+            child_context.font,
+            child_context.viewport,
+        );
+        match positioning.position {
+            Position::Absolute | Position::Fixed => {
+                let mut local_cursor = Cursor { y: 0 };
+                if let Some(b) = dispatch(
+                    arena,
+                    child_id,
+                    content_constraint,
+                    &mut local_cursor,
+                    child_context,
+                    None,
+                ) {
+                    positioned_boxes.push(b);
+                }
+            }
+            _ => item_preps.push(prepare_flex_item(
+                arena,
+                child_id,
+                direction,
+                content_width,
+                child_context,
+                align_items,
+            )),
+        }
+    }
+
+    // Flush trailing raw text.
+    if !text_runs.is_empty() {
+        item_preps.push(prepare_anonymous_text_item(
+            AnonymousTextItem {
+                runs: std::mem::take(&mut text_runs),
+                font_size_cells: own_font_size_cells,
+                line_height_cells,
+                white_space,
+                word_break,
+                overflow_wrap,
+            },
+            direction,
+            align_items,
+        ));
+    }
 
     // A flex item is laid out by recursively dispatching its own element
-    // handler with the rectangle allocated by the flex algorithm. This preserves
-    // special item behaviour such as image painting, chrome, tables, and nested
-    // flex containers.
-    // (block_child_ids already excludes detached positioned children.)
-    let (mut child_boxes, lines_total_height) = if block_child_ids.is_empty() {
+    // handler with the rectangle allocated by the flex algorithm; anonymous
+    // text items wrap their runs directly. Detached positioned children are
+    // excluded above and re-attached below.
+    let (mut child_boxes, lines_total_height) = if item_preps.is_empty() {
         (Vec::new(), 0usize)
     } else {
         layout_flex_items(
             arena,
-            &block_child_ids,
+            node_id,
+            item_preps,
             direction,
             wrap,
             justify,
@@ -247,7 +278,7 @@ pub(super) fn layout_flex_container(
             align_content,
             gap,
             content_constraint,
-            content_y_with_inline,
+            content_y,
             child_context,
             has_explicit_height,
             container_css_height.unwrap_or(0),
@@ -269,11 +300,7 @@ pub(super) fn layout_flex_container(
                 + edges.padding.bottom
                 + edges.border.top.thickness()
                 + edges.border.bottom.thickness();
-            height.max(
-                lines_total_height
-                    .saturating_add(inline_rows)
-                    .saturating_add(inner_v),
-            )
+            height.max(lines_total_height.saturating_add(inner_v))
         }
         None if has_explicit_height => container_css_height.unwrap_or(0).max(lines_total_height),
         None => lines_total_height,
@@ -350,11 +377,7 @@ pub(super) fn layout_flex_container(
 
     let paint_style = PaintStyle {
         box_edges: edges,
-        runs: if flex_inline_lines.is_empty() || flex_inline_lines.iter().all(|l| l.is_empty()) {
-            None
-        } else {
-            Some(flex_inline_lines)
-        },
+        runs: None,
         font_size_cells: own_font_size_cells,
         line_height_cells,
         border_radius: node
