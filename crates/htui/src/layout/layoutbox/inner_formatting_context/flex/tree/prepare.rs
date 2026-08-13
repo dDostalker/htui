@@ -4,7 +4,7 @@
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    html::css_parse::{AlignItems, AlignSelf, FlexDirection, WhiteSpace},
+    html::css_parse::{AlignItems, AlignSelf, FlexDirection, Length, LengthContext, WhiteSpace},
     layout::{
         InlineRun, LayoutContext,
         layoutbox::collect_runs,
@@ -279,6 +279,28 @@ pub(super) fn longest_breakable_width(arena: &NodeArena, node_id: NodeId) -> usi
     max_w
 }
 
+/// Resolve an explicit `width` / `height` for intrinsic measurement.
+///
+/// A percentage against an unknown (indefinite) containing block resolves to
+/// `auto` (`None`), matching CSS — resolving `100%` against the `usize::MAX`
+/// sentinel would otherwise produce a huge size and overflow the canvas later.
+/// Any other length resolves normally against a zero containing width (unused
+/// by non-percentage lengths).
+fn intrinsic_len(raw: Option<&str>, context: LayoutContext) -> Option<usize> {
+    let len = Length::parse(raw?)?;
+    match len {
+        Length::Auto | Length::Pct(_) => None,
+        len => Some(
+            len.resolve(LengthContext {
+                containing: 0,
+                font: context.font,
+                viewport: context.viewport,
+            })
+            .max(1),
+        ),
+    }
+}
+
 /// Intrinsic outer (border-box) size of one block node, computed
 /// recursively so nested flex containers report the real dimensions of
 /// their children rather than collapsing to a font-size placeholder.
@@ -480,8 +502,7 @@ fn natural_intrinsic_size(
             content_h = content_h.saturating_add(own_font_size_cells.max(1));
         }
 
-        let content_box_w = css
-            .get_width(usize::MAX, child_context.font, child_context.viewport)
+        let content_box_w = intrinsic_len(css.0.get("width").map(|s| s.as_str()), child_context)
             .unwrap_or(content_w.max(FLEX_ITEM_MIN_CROSS))
             .max(FLEX_ITEM_MIN_CROSS);
         // Some elements reserve trailing blank rows after their border-box
@@ -496,8 +517,7 @@ fn natural_intrinsic_size(
             NodeType::Header | NodeType::Footer => 2,
             _ => 0,
         };
-        let content_box_h = css
-            .get_height(usize::MAX, child_context.font, child_context.viewport)
+        let content_box_h = intrinsic_len(css.0.get("height").map(|s| s.as_str()), child_context)
             .unwrap_or(content_h.max(FLEX_ITEM_MIN_CROSS))
             .max(FLEX_ITEM_MIN_CROSS)
             .saturating_add(ua_spacing_after);

@@ -143,6 +143,21 @@ fn test_flex_blockifies_q_with_quotes() {
 }
 
 #[test]
+fn test_flex_item_height_percentage_resolves_to_auto() {
+    init();
+    // `height: 100%` against an indefinite (auto-height) flex container must
+    // resolve to `auto` (content height), not overflow into a huge canvas.
+    let html = r#"<div class="container"><div class="side">x</div><div class="main">y</div></div>"#;
+    let css = ".container { display: flex; } .side { height: 100%; }";
+    let (rows, _tl) = render_rows(html, css);
+    assert!(
+        rows[0].starts_with("xy"),
+        "percentage height should fall back to content height: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
 fn flex_row_with_input_renders_the_field() {
     init();
     // An `<input>` as a flex item must render its bracketed field at the
