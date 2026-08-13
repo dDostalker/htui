@@ -24,7 +24,7 @@ use slotmap::Key;
 
 use crate::{
     events::EventType,
-    html::css_parse::{CssSelector, parse_declaration_text, selector_chain_matches},
+    html::css_parse::{CssSelector, SUPPORTED_PROPERTIES, parse_declaration_text, selector_chain_matches},
     resources,
     tdom::node::{Node, NodeArena, NodeId, NodeType, document_base_href},
     tui::graph_api::RenderCmd,
@@ -1375,21 +1375,24 @@ fn native_get_style(this: &JsValue, _args: &[JsValue], context: &mut Context) ->
     // Build all accessor functions before the `ObjectInitializer` takes its
     // `&mut Context` borrow.
     let mut accessors: Vec<(JsString, Option<JsFunction>, Option<JsFunction>)> = Vec::new();
-    for (camel, kebab) in STYLE_PROPS {
-        let kebab_capture = *kebab;
+    for (idx, kebab) in SUPPORTED_PROPERTIES.iter().enumerate() {
+        let idx = idx as u32;
+        let camel = kebab_to_camel(kebab);
         let getter = NativeFunction::from_copy_closure_with_captures(
-            |this, _args, kebab: &&'static str, context| style_get(this, kebab, context),
-            kebab_capture,
+            |this, _args, idx: &u32, context| {
+                style_get(this, &SUPPORTED_PROPERTIES[*idx as usize], context)
+            },
+            idx,
         );
         let setter = NativeFunction::from_copy_closure_with_captures(
-            |this, args, kebab: &&'static str, context| {
-                style_set(this, kebab, args.first(), context)
+            |this, args, idx: &u32, context| {
+                style_set(this, &SUPPORTED_PROPERTIES[*idx as usize], args.first(), context)
             },
-            kebab_capture,
+            idx,
         );
         let get = js_fn(context, getter);
         let set = js_fn(context, setter);
-        accessors.push((js_string!(*camel), Some(get), Some(set)));
+        accessors.push((js_string!(camel), Some(get), Some(set)));
     }
     // `cssText` gives access to the raw style attribute.
     let get_css = js_fn(context, NativeFunction::from_fn_ptr(style_get_css_text));
@@ -1404,42 +1407,23 @@ fn native_get_style(this: &JsValue, _args: &[JsValue], context: &mut Context) ->
     Ok(init.build().into())
 }
 
-/// (camelCase JS property, kebab-case CSS property) pairs exposed on `el.style`.
-const STYLE_PROPS: &[(&str, &str)] = &[
-    ("color", "color"),
-    ("backgroundColor", "background-color"),
-    ("fontSize", "font-size"),
-    ("fontWeight", "font-weight"),
-    ("fontStyle", "font-style"),
-    ("textAlign", "text-align"),
-    ("textDecoration", "text-decoration"),
-    ("textTransform", "text-transform"),
-    ("lineHeight", "line-height"),
-    ("display", "display"),
-    ("width", "width"),
-    ("height", "height"),
-    ("padding", "padding"),
-    ("paddingTop", "padding-top"),
-    ("paddingRight", "padding-right"),
-    ("paddingBottom", "padding-bottom"),
-    ("paddingLeft", "padding-left"),
-    ("margin", "margin"),
-    ("marginTop", "margin-top"),
-    ("marginRight", "margin-right"),
-    ("marginBottom", "margin-bottom"),
-    ("marginLeft", "margin-left"),
-    ("border", "border"),
-    ("borderWidth", "border-width"),
-    ("borderStyle", "border-style"),
-    ("borderColor", "border-color"),
-    ("whiteSpace", "white-space"),
-    ("flexDirection", "flex-direction"),
-    ("flexWrap", "flex-wrap"),
-    ("justifyContent", "justify-content"),
-    ("alignItems", "align-items"),
-    ("alignContent", "align-content"),
-    ("gap", "gap"),
-];
+/// Convert a kebab-case CSS property name to its camelCase JS `style`
+/// property name (`background-color` → `backgroundColor`).
+fn kebab_to_camel(kebab: &str) -> String {
+    let mut out = String::with_capacity(kebab.len());
+    let mut upper_next = false;
+    for ch in kebab.chars() {
+        if ch == '-' {
+            upper_next = true;
+        } else if upper_next {
+            out.extend(ch.to_uppercase());
+            upper_next = false;
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
 
 /// The element's style attribute as a declaration map.
 fn style_map(st: &ScriptState, node_id: NodeId) -> indexmap::IndexMap<String, String> {

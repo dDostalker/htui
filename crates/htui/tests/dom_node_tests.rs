@@ -285,3 +285,37 @@ fn whitespace_and_comments_do_not_change_rendering() {
         "whitespace text nodes and comments must not change painted output"
     );
 }
+
+#[test]
+fn style_camel_case_flex_and_order_props() {
+    // `el.style` derives its camelCase accessors from `SUPPORTED_PROPERTIES`,
+    // so flex/order/positioning longhands must round-trip through the style
+    // attribute instead of silently becoming plain JS expando properties.
+    let mut e = engine(r#"<div id="d">x</div>"#);
+    eval(&mut e, "var el = document.getElementById('d')");
+
+    eval(&mut e, "el.style.flexGrow = '30'");
+    assert_eq!(eval_str(&mut e, "el.style.flexGrow"), "30");
+    assert!(eval_str(&mut e, "el.getAttribute('style')").contains("flex-grow: 30"));
+
+    eval(&mut e, "el.style.flexShrink = '0'");
+    assert_eq!(eval_str(&mut e, "el.style.flexShrink"), "0");
+
+    eval(&mut e, "el.style.flexBasis = '40%'");
+    assert_eq!(eval_str(&mut e, "el.style.flexBasis"), "40%");
+
+    eval(&mut e, "el.style.order = '-1'");
+    assert_eq!(eval_str(&mut e, "el.style.order"), "-1");
+    assert!(eval_str(&mut e, "el.getAttribute('style')").contains("order: -1"));
+
+    // Unset properties read as the empty string, matching CSSStyleDeclaration.
+    assert_eq!(eval_str(&mut e, "el.style.zIndex"), "");
+
+    eval(&mut e, "el.style.zIndex = '10'");
+    assert_eq!(eval_str(&mut e, "el.style.zIndex"), "10");
+    assert!(eval_str(&mut e, "el.getAttribute('style')").contains("z-index: 10"));
+
+    eval(&mut e, "el.style.alignSelf = 'flex-end'");
+    assert_eq!(eval_str(&mut e, "el.style.alignSelf"), "flex-end");
+    assert!(eval_str(&mut e, "el.getAttribute('style')").contains("align-self: flex-end"));
+}
