@@ -54,6 +54,25 @@ pub fn pin_fixed_boxes(boxes: &mut [LayoutBox], viewport: Rect) {
     }
 }
 
+/// Re-anchor every `position: sticky` box relative to the *current* scroll
+/// offset, in document coordinates.
+///
+/// Sticky boxes keep their normal-flow slot at layout time; this pass clamps
+/// their rectangle into the viewport as the document scrolls (the v1
+/// constraint rectangle is the viewport itself, matching the engine's
+/// whole-document scroll model). The caller re-runs it from a fresh layout
+/// tree whenever `scroll_y` changes, exactly like [`pin_fixed_boxes`].
+/// `top` clamps the box to the viewport top once its flow position scrolls
+/// past the offset; `bottom` clamps it to the viewport bottom instead.
+pub fn pin_sticky_boxes(boxes: &mut [LayoutBox], viewport: Rect) {
+    for b in boxes {
+        if matches!(b.positioning.position, Position::Sticky) {
+            stick(b, viewport);
+        }
+        pin_sticky_boxes(&mut b.children, viewport);
+    }
+}
+
 /// Offset a `position: relative` box by its insets.
 ///
 /// The box keeps its flow slot; only its painted position shifts (and with
@@ -107,6 +126,14 @@ fn resolve_positioned_box(b: &mut LayoutBox, pos_ancestor: Option<Rect>, viewpor
                 resolve_positioned_box(child, Some(b.rect), viewport);
             }
         }
+        Position::Sticky => {
+            // Sticky keeps its flow slot (no inline offset) and is a
+            // positioned ancestor for its descendants; the scroll clamp is
+            // applied by [`pin_sticky_boxes`].
+            for child in &mut b.children {
+                resolve_positioned_box(child, Some(b.rect), viewport);
+            }
+        }
     }
 }
 
@@ -142,6 +169,47 @@ fn reposition(b: &mut LayoutBox, cb: Rect) {
     let dx = new_x as i64 - b.rect.x as i64;
     let dy = new_y as i64 - b.rect.y as i64;
     translate_subtree(b, dx, dy);
+}
+
+/// Clamp a sticky box's vertical position into the viewport.
+///
+/// The box's rect may already be pinned to a previous scroll offset (the
+/// geometry cache keeps pinned boxes across scrolls), so the **normal-flow**
+/// row is captured on the first pin — when the rect still carries the flow
+/// position — and reused afterwards. `top` (or `bottom`, when set) is the gap
+/// kept between the box and the viewport edge. The horizontal axis is
+/// untouched (the engine scrolls vertically only).
+fn stick(b: &mut LayoutBox, viewport: Rect) {
+    if b.sticky_flow_y.is_none() {
+        b.sticky_flow_y = Some(b.rect.y);
+    }
+    let flow_y = b.sticky_flow_y.unwrap_or(b.rect.y);
+    let h = b.rect.height;
+    let top_inset = b.positioning.inset.top.unwrap_or(0);
+    let bottom_inset = b.positioning.inset.bottom.unwrap_or(0);
+    let min_y = viewport.y.saturating_add(top_inset);
+    let max_y = viewport
+        .y
+        .saturating_add(viewport.height)
+        .saturating_sub(bottom_inset)
+        .saturating_sub(h);
+    let target_y = if max_y < min_y {
+        // The box is taller than the available viewport — anchor at the top.
+        min_y
+    } else if flow_y < min_y {
+        min_y
+    } else if flow_y > max_y {
+        max_y
+    } else {
+        flow_y
+    };
+    // Translate from the *current* rect (which may already be pinned to a
+    // previous scroll) to the target — the recorded flow row is only the
+    // clamp input, not the box's current position.
+    let dy = target_y as i64 - b.rect.y as i64;
+    if dy != 0 {
+        translate_subtree(b, 0, dy);
+    }
 }
 
 /// Shift a box's rect (and every descendant's) by `dx` / `dy`.

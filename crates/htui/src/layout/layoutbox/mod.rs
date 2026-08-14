@@ -97,7 +97,7 @@ pub use inline_run::InlineRun;
 pub use inner_formatting_context::FormattingContext;
 pub use outer_display::OuterDisplay;
 pub use paint_style::PaintStyle;
-pub use position::{apply_relative_offset, pin_fixed_boxes, resolve_positioned_rects};
+pub use position::{apply_relative_offset, pin_fixed_boxes, pin_sticky_boxes, resolve_positioned_rects};
 pub use rect::Rect;
 pub use wrap::{is_cjk_break_opportunity, wrap_runs, wrapped_size};
 
@@ -134,6 +134,11 @@ pub struct LayoutBox {
     /// How this box arranges its own children.
     pub inner_formatting_context: FormattingContext,
     pub positioning: Positioning,
+    /// Normal-flow document row of a `position: sticky` box, captured on the
+    /// first pin (right after layout, before the rect moves). The geometry
+    /// cache holds already-pinned boxes across scrolls, so later pins reuse
+    /// this instead of re-reading the moved rect. `None` for every other box.
+    pub sticky_flow_y: Option<usize>,
     pub children: Vec<LayoutBox>,
 }
 
@@ -181,6 +186,7 @@ impl LayoutBox {
             outer_display,
             inner_formatting_context,
             positioning: Positioning::default(),
+            sticky_flow_y: None,
             children,
         }
     }
@@ -228,6 +234,7 @@ impl LayoutBox {
             outer_display: OuterDisplay::BlockLevel { container: false },
             inner_formatting_context: FormattingContext::Flow,
             positioning: Positioning::default(),
+            sticky_flow_y: None,
             children: Vec::new(),
         }
     }
@@ -254,6 +261,7 @@ impl LayoutBox {
             outer_display: OuterDisplay::BlockLevel { container: true },
             inner_formatting_context: FormattingContext::Flow,
             positioning: Positioning::default(),
+            sticky_flow_y: None,
             children,
         }
     }

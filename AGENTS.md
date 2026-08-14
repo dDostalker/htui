@@ -211,16 +211,13 @@ htui/
 │       ├── configurator/ # 配置器设置表单演示（input + 原生 select 下拉 + JS 开关 + 实时预览 + 保存/重置）
 │       ├── fetch_demo/   # fetch 演示：<script src="mem://…"> 加载 + fetch 经 Promise 微任务事件循环写 DOM
 │       └── viewport_units/
-└── example/              # 完整交互示例（cargo run -p example -- codex|snake|sysmon|yazi）
+└── example/              # 完整交互示例（cargo run -p example -- music|music-light|codex|sticky）
     └── src/
         ├── main.rs      # 运行器：dump（headless 预览）/ render_with_events 分派
-        ├── snake.rs     # 贪吃蛇绑定（无命令；游戏循环由 JS setInterval 驱动）
-        ├── sysmon.rs    # 系统监控器宿主命令（sysinfo 后台采样 + 快照发布）
-        ├── yazi.rs      # yazi 文件管理器宿主命令（listDir 读真实目录）
+        ├── music/       # "Neon" 深色 Spotify 风格音乐界面
+        ├── music_light/ # "Paper" 浅色极简居中卡片
         ├── codex/       # Codex CLI 风格聊天界面（input + change 提交，无执行）
-        ├── snake/       # 贪吃蛇（森林风：方向键/WASD 转向 + 空格暂停 + r 重开 + 吃食物加速）
-        ├── sysmon/      # 系统状态监控器（JS setInterval 每 200ms 触发，分层采样 CPU/内存/磁盘并重建页面）
-        └── yazi/        # Yazi 风格文件管理器（点击导航目录/文件 + [ .. ] 返回）
+        └── sticky/      # sticky 定位演示（长列表 + 顶部/底部钉住条，j/k 滚动）
 ```
 
 ## 架构

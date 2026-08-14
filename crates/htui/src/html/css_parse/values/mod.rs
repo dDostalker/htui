@@ -184,6 +184,11 @@ pub enum Position {
     Absolute,
     /// `fixed` — removed from flow and positioned against the viewport.
     Fixed,
+    /// `sticky` — keeps its normal-flow slot; while scrolling, the box is
+    /// clamped into the viewport once its flow position would move past the
+    /// inset offset (v1 subset: the constraint rectangle is the viewport,
+    /// not the nearest scrolling ancestor's content box).
+    Sticky,
 }
 
 /// CSS `visibility` value.
@@ -242,6 +247,7 @@ pub fn parse_position(s: &str) -> Option<Position> {
         "relative" => Some(Position::Relative),
         "absolute" => Some(Position::Absolute),
         "fixed" => Some(Position::Fixed),
+        "sticky" => Some(Position::Sticky),
         "static" => Some(Position::Static),
         _ => None,
     }

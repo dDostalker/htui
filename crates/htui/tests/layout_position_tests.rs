@@ -15,6 +15,8 @@
 use crossterm::style::Color;
 use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
+use htui::layout::layoutbox::pin_sticky_boxes;
+use htui::layout::Rect;
 use htui::tdom::node::NodeArena;
 use htui::tdom::node::NodeId;
 use htui::tui::graph_api::TermLayout;
@@ -404,4 +406,133 @@ fn absolute_box_keeps_its_background() {
         Some(Color::Rgb { r: 255, g: 0, b: 0 }),
         "absolute box must paint its background"
     );
+}
+
+#[test]
+fn sticky_keeps_its_flow_slot() {
+    init();
+    // `position: sticky` stays in normal flow: the sibling flows below the
+    // sticky box, and at scroll 0 (top: 0) the box sits at its flow row.
+    let html = r#"
+        <div class="stick">S</div>
+        <div class="body">B</div>
+    "#;
+    let css = r#"
+        .stick { position: sticky; top: 0; height: 2; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    assert_eq!(cell(&rows, 0, 0), Some('S'), "sticky box at its flow row");
+    assert_eq!(
+        cell(&rows, 0, 2),
+        Some('B'),
+        "sibling must flow below the sticky box"
+    );
+}
+
+#[test]
+fn sticky_clamps_to_viewport_top_when_scrolled() {
+    init();
+    // Scrolling past the sticky box clamps it to the viewport top (document
+    // row scroll_y + top), so it stays visible at a constant screen row.
+    let html = r#"
+        <div class="stick">S</div>
+        <div class="body">B</div>
+    "#;
+    let css = r#"
+        .stick { position: sticky; top: 0; }
+    "#;
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let cols = term_map.columns as usize;
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    assert_eq!(
+        tl.layout[0 * cols].word, "S",
+        "at scroll 0 the sticky box stays at its flow row"
+    );
+
+    tl.scroll_y = 10;
+    tl.draw(&arena, root_id, &term_map);
+    assert_eq!(
+        tl.layout[10 * cols].word, "S",
+        "sticky box must sit at document row scroll_y + top"
+    );
+}
+
+#[test]
+fn sticky_bottom_clamps_deep_box_to_viewport_bottom() {
+    init();
+    // A sticky box deep in the document (flow row 23) is clamped to the
+    // viewport bottom edge by `bottom: 1` → row rows - 2.
+    let html = r#"
+        <div class="pad"></div>
+        <div class="stick">S</div>
+    "#;
+    let css = r#"
+        .pad { height: 23; }
+        .stick { position: sticky; bottom: 1; }
+    "#;
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let cols = term_map.columns as usize;
+    let rows = term_map.rows as usize;
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    assert_eq!(
+        tl.layout[(rows - 2) * cols].word, "S",
+        "sticky bottom clamps the box to the viewport bottom"
+    );
+}
+
+#[test]
+fn sticky_repin_uses_recorded_flow_row() {
+    init();
+    // The render thread re-pins the *cached* boxes (already moved by the
+    // previous scroll) on every scroll change. The clamp must be computed
+    // from the recorded normal-flow row, not the moved rect — otherwise a
+    // deep sticky box sticks at a stale offset instead of returning to its
+    // document position once the viewport scrolls to it.
+    let html = r#"
+        <div style="height: 30;">pad</div>
+        <div class="stick">S</div>
+    "#;
+    let css = r#"
+        .stick { position: sticky; top: 0; }
+    "#;
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let cols = term_map.columns as usize;
+    let rows = term_map.rows as usize;
+    let mut tl = TermLayout::new(&term_map, 1.0);
+
+    // First layout pins at scroll 0: the flow row (30) is recorded, and the
+    // box is clamped to the viewport bottom (row rows - 1).
+    let mut boxes = tl.layout_only(&arena, root_id, &term_map);
+    let s_y = |b: &[htui::layout::LayoutBox]| -> usize {
+        fn find(boxes: &[htui::layout::LayoutBox]) -> Option<usize> {
+            for b in boxes {
+                if matches!(b.positioning.position, htui::html::css_parse::Position::Sticky) {
+                    return Some(b.rect.y);
+                }
+                if let Some(y) = find(&b.children) {
+                    return Some(y);
+                }
+            }
+            None
+        }
+        find(b).unwrap()
+    };
+    assert_eq!(s_y(&boxes), rows - 1, "clamped to the viewport bottom");
+
+    // Scroll down 10 rows: S returns to its document row (30) — inside the
+    // new viewport [10, 10 + rows), so no clamp applies.
+    let viewport = Rect::new(0, 10, cols, rows);
+    pin_sticky_boxes(&mut boxes, viewport);
+    assert_eq!(s_y(&boxes), 30, "S returns to its flow row once visible");
+
+    // Scroll down further (40): the flow row (30) is now above the viewport
+    // top, so S clamps to the viewport top again.
+    let viewport = Rect::new(0, 40, cols, rows);
+    pin_sticky_boxes(&mut boxes, viewport);
+    assert_eq!(s_y(&boxes), 40, "S clamps to the new viewport top");
 }

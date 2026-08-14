@@ -32,7 +32,7 @@ use crate::{
     layout::layoutbox::geometry::{
         SelectRow, overlay_options, select_item_indices, select_overlay_rect, select_rows,
     },
-    layout::layoutbox::pin_fixed_boxes,
+    layout::layoutbox::{pin_fixed_boxes, pin_sticky_boxes},
     layout::{LayoutBox, Rect},
     script::{ScriptMsg, ScriptResponse, run_script_thread},
     tdom::node::{NodeArena, NodeId, NodeType},
@@ -231,9 +231,10 @@ struct RenderState {
     geometry: Option<Arc<Geometry>>,
     /// Whether the current document contains any `position: fixed` box. When
     /// true, scrolling re-anchors the fixed boxes to the new scroll offset
-    /// (a targeted region repaint) so they stay pinned to the screen; without
-    /// fixed boxes scrolling keeps the cheap canvas re-slice.
-    has_fixed: bool,
+    /// The document contains `position: fixed` / `sticky` boxes, so scrolling
+    /// re-pins them (a targeted region repaint) so they stay on screen;
+    /// without pinned boxes scrolling keeps the cheap canvas re-slice.
+    has_pinned: bool,
     /// Active page text selection (canvas-space endpoints + shape); `None`
     /// while no selection exists.
     text_selection: Option<TextSel>,
@@ -546,9 +547,9 @@ impl RenderState {
 
         let boxes = tl.layout_only(&arena, root_id, term_map);
         // Whether the document contains any `position: fixed` box: scrolling
-        // re-pins fixed boxes to the new scroll offset (a targeted repaint)
-        // instead of the cheap canvas re-slice.
-        self.has_fixed = !fixed_boxes_rects(&boxes).is_empty();
+        // re-pins fixed / sticky boxes to the new scroll offset (a targeted
+        // repaint) instead of the cheap canvas re-slice.
+        self.has_pinned = !pinned_boxes_rects(&boxes).is_empty();
 
         // Install the document `<title>` as the terminal window title once
         // per session. The DOM is re-parsed on every `Redraw` but the title
@@ -778,16 +779,16 @@ impl RenderState {
         flush_frame(out);
     }
 
-    /// Re-anchor `position: fixed` boxes to the current scroll offset and
-    /// repaint the cells they occupy, then re-publish the geometry.
+    /// Re-anchor `position: fixed` / `sticky` boxes to the current scroll
+    /// offset and repaint the cells they occupy, then re-publish the geometry.
     ///
     /// The cached boxes were pinned to the *previous* scroll; this moves them
     /// by the scroll delta (document coordinates) so the canvas slice shows
     /// them at their constant screen position. Only the union of the old and
-    /// new fixed areas is repainted (a small region), and the fresh geometry
+    /// new pinned areas is repainted (a small region), and the fresh geometry
     /// is forwarded to the hit-test thread so hit regions stay in sync. Backs
     /// the scroll-aware path of [`RenderCmd::Rerender`] when the document has
-    /// fixed boxes; the caller renders the frame afterwards.
+    /// pinned boxes; the caller renders the frame afterwards.
     fn pin_fixed_and_repaint(&mut self, geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>) {
         let Some(tl) = self.term_layout.as_mut() else {
             return;
@@ -795,13 +796,13 @@ impl RenderState {
         let Some(geo) = self.geometry.clone() else {
             return;
         };
-        let old_rects = fixed_boxes_rects(&geo.boxes);
+        let old_rects = pinned_boxes_rects(&geo.boxes);
         let mut boxes = geo.boxes.clone();
-        pin_fixed_boxes(
-            &mut boxes,
-            Rect::new(0, tl.scroll_y as usize, tl.columns as usize, tl.rows as usize),
-        );
-        let new_rects = fixed_boxes_rects(&boxes);
+        let viewport =
+            Rect::new(0, tl.scroll_y as usize, tl.columns as usize, tl.rows as usize);
+        pin_fixed_boxes(&mut boxes, viewport);
+        pin_sticky_boxes(&mut boxes, viewport);
+        let new_rects = pinned_boxes_rects(&boxes);
         let fresh = Arc::new(Geometry {
             arena: geo.arena.clone(),
             boxes,
@@ -1117,15 +1118,19 @@ fn collect_box_rects(boxes: &[LayoutBox]) -> Vec<(NodeId, Rect)> {
     out
 }
 
-/// Every `position: fixed` box's rect (document coordinates), in tree order.
+/// Every `position: fixed` / `sticky` box's rect (document coordinates), in
+/// tree order.
 ///
-/// Used to compute the repaint region when fixed boxes are re-anchored to a
-/// new scroll offset, and to detect whether the document has any fixed box
+/// Used to compute the repaint region when pinned boxes are re-anchored to a
+/// new scroll offset, and to detect whether the document has any pinned box
 /// (the scroll-aware repaint only runs when it does).
-fn fixed_boxes_rects(boxes: &[LayoutBox]) -> Vec<Rect> {
+fn pinned_boxes_rects(boxes: &[LayoutBox]) -> Vec<Rect> {
     fn walk(boxes: &[LayoutBox], out: &mut Vec<Rect>) {
         for b in boxes {
-            if matches!(b.positioning.position, Position::Fixed) {
+            if matches!(
+                b.positioning.position,
+                Position::Fixed | Position::Sticky
+            ) {
                 out.push(b.rect);
             }
             walk(&b.children, out);
@@ -1203,7 +1208,7 @@ fn render_thread(
         term_layout: None,
         title_set: false,
         geometry: None,
-        has_fixed: false,
+        has_pinned: false,
         dynamic: DynamicState::default(),
         text_selection: None,
         selection_text,
@@ -1379,9 +1384,9 @@ fn render_thread(
                     // Scroll-aware `position: fixed`: re-anchor the fixed boxes
                     // to the new scroll offset and repaint the cells they occupy
                     // (old + new areas), so they stay pinned to their screen
-                    // position. Documents without fixed boxes keep the cheap
+                    // position. Documents without pinned boxes keep the cheap
                     // canvas re-slice below.
-                    if state.has_fixed {
+                    if state.has_pinned {
                         state.pin_fixed_and_repaint(&geo_tx);
                     }
                     // The incremental renderer diffs the shifted viewport against

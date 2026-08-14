@@ -4,7 +4,7 @@ use crate::{
     layout::{
         BoxConstraint, Cursor, LayoutBox, Rect,
         inner_formatting_context::flow::layout_tree,
-        layoutbox::pin_fixed_boxes,
+        layoutbox::{pin_fixed_boxes, pin_sticky_boxes},
         paint::{paint_layout_tree, paint_layout_tree_region},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
@@ -157,13 +157,18 @@ impl TermLayout {
             term_map.columns as usize,
             term_map.rows as usize,
         );
-        // Re-anchor `position: fixed` boxes to the *current* scroll offset so
-        // they stay pinned to their screen position while the document is
-        // scrolled (the layout tree anchored them to the top of the document).
-        pin_fixed_boxes(
-            &mut boxes,
-            Rect::new(0, self.scroll_y as usize, term_map.columns as usize, term_map.rows as usize),
+        // Re-anchor `position: fixed` / `sticky` boxes to the *current*
+        // scroll offset so they stay pinned to their screen position while the
+        // document is scrolled (the layout tree anchored them to the top of
+        // the document).
+        let viewport = Rect::new(
+            0,
+            self.scroll_y as usize,
+            term_map.columns as usize,
+            term_map.rows as usize,
         );
+        pin_fixed_boxes(&mut boxes, viewport);
+        pin_sticky_boxes(&mut boxes, viewport);
         boxes
     }
 

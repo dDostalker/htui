@@ -2,8 +2,14 @@
 <html>
 <head>
 <style>
-  body { background-color: #1a1b26; color: #c0caf5; }
+  body { background-color: #1a1b26; color: #c0caf5; font-family: monospace; line-height: 1; }
   h2 { margin: 1; }
+  .stickheader {
+    position: sticky;
+    top: 0;
+    background-color: #7aa2f7;
+    color: #1a1b26;
+  }
   .frame {
     position: relative;
     width: 60;
@@ -30,6 +36,8 @@
 </head>
 <body>
   <h2>Positioned layout demo</h2>
+
+  <div class="stickheader">sticky header — pinned to the top while scrolling</div>
 
   <div class="frame">
     <div class="row static">static content line one</div>
