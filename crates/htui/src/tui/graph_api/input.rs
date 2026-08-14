@@ -2138,11 +2138,7 @@ pub fn trigger_refresh(
                         close_select(state, arena, None, msgs, &mut cmds);
                     }
                     if ctrl {
-                        state.zoom = (state.zoom - ZOOM_STEP).max(ZOOM_MIN);
-                        return vec![RenderCmd::Redraw {
-                            scroll_y: state.scroll_y,
-                            zoom: state.zoom,
-                        }];
+                        return cmds;
                     }
                     if state.scroll_y == 0 {
                         return cmds;
@@ -2160,11 +2156,7 @@ pub fn trigger_refresh(
                         close_select(state, arena, None, msgs, &mut cmds);
                     }
                     if ctrl {
-                        state.zoom = (state.zoom + ZOOM_STEP).min(ZOOM_MAX);
-                        return vec![RenderCmd::Redraw {
-                            scroll_y: state.scroll_y,
-                            zoom: state.zoom,
-                        }];
+                        return cmds;
                     }
                     if state.scroll_y >= max_scroll {
                         return cmds;
@@ -2320,8 +2312,6 @@ pub fn paste_into_field(
 /// The page-level built-in action for a key that no `<select>` dropdown or
 /// focused `<input>` consumed: `Ctrl` zoom / document jumps, page text-
 /// selection clearing, `Shift`+Space page-up, plain Space / PageUp / PageDown /
-/// arrows / `g` / `G` / `j` / `k` scrolling, `Home` / `End`, `q` / `Esc` quit
-/// and `Tab` / `Shift`+`Tab` focus cycling.
 ///
 /// Returns the render commands the key produces (empty = no built-in action,
 /// e.g. a scroll key already at the page boundary). With the script layer
@@ -2413,7 +2403,10 @@ fn page_level_builtins(
     }
 
     match key.code {
-        KeyCode::Esc | KeyCode::Char('q') => cmds.push(RenderCmd::Quit),
+        // `Esc` quits the engine; plain `q` is deliberately not bound (it
+        // types into focused fields and matches the browser, which has no
+        // terminal quit key).
+        KeyCode::Esc => cmds.push(RenderCmd::Quit),
 
         // vim-style document jumps: `g` to the top, `G` to the bottom
         // (shifted `g` — the shift modifier is read via the `Char('G')` code
@@ -2481,7 +2474,7 @@ fn page_level_builtins(
             }
         }
 
-        KeyCode::Up | KeyCode::Char('k') => {
+        KeyCode::Up => {
             // Already at the top boundary — drop the event instead of
             // forwarding a no-op scroll to the render thread.
             if state.scroll_y == 0 {
@@ -2492,7 +2485,7 @@ fn page_level_builtins(
                 scroll_y: state.scroll_y,
             });
         }
-        KeyCode::Down | KeyCode::Char('j') => {
+        KeyCode::Down => {
             // Already at the bottom boundary — drop the event.
             if state.scroll_y >= max_scroll {
                 return cmds;

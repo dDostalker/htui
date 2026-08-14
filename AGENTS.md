@@ -217,7 +217,7 @@ htui/
         ├── music/       # "Neon" 深色 Spotify 风格音乐界面
         ├── music_light/ # "Paper" 浅色极简居中卡片
         ├── codex/       # Codex CLI 风格聊天界面（input + change 提交，无执行）
-        └── sticky/      # sticky 定位演示（长列表 + 顶部/底部钉住条，j/k 滚动）
+        └── sticky/      # sticky 定位演示（长列表 + 顶部/底部钉住条，方向键/滚轮滚动）
 ```
 
 ## 架构
