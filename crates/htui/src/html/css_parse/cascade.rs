@@ -215,6 +215,11 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "right",
     "bottom",
     "left",
+    // Visibility / overflow
+    "visibility",
+    "overflow",
+    "overflow-x",
+    "overflow-y",
 ];
 
 /// Inheritable subset of [`SUPPORTED_PROPERTIES`]: a child without an explicit
@@ -231,6 +236,7 @@ pub const INHERITED_PROPS: &[&str] = &[
     "font-size",
     "text-transform",
     "line-height",
+    "visibility",
 ];
 
 fn inherit_css(arena: &mut NodeArena, node_id: NodeId, parent_attrs: &IndexMap<String, String>) {

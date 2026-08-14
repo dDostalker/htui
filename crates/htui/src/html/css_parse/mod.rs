@@ -23,6 +23,6 @@ pub use values::{
     AlignItems, BoxSizing, CornerRadii, CssDisplay, FlexBasis, FlexDirection, FlexWrap,
     FontContext, FontStyleKind, FontWeight, GapSizes, InsetSides, JustifyContent, Length,
     LengthContext, LineHeight, OverflowWrap, PX_PER_CELL, Position, Positioning, TextAlign,
-    TextDecoration, TextTransform, Viewport, WhiteSpace, WordBreak, parse_color_str,
-    parse_position, resolve_line_height_cells,
+    TextDecoration, TextTransform, Viewport, Visibility, WhiteSpace, WordBreak, parse_color_str,
+    parse_position, parse_visibility, resolve_line_height_cells,
 };

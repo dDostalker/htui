@@ -25,13 +25,14 @@ use crossterm::{
 use crate::{
     events::{EventBindings, Geometry, HitMap},
     html::css_parse::{
-        self, CssRule, DynamicState, PseudoClass, PseudoClassSet, css_into_node_with_state,
+        self, CssRule, DynamicState, Position, PseudoClass, PseudoClassSet, css_into_node_with_state,
         css_pseudo_rule_set, reset_css_attr, selector_chain_matches_with_state,
     },
     layout::layout::{MAX_TERM_COLS, MAX_TERM_ROWS, TermMap},
     layout::layoutbox::geometry::{
         SelectRow, overlay_options, select_item_indices, select_overlay_rect, select_rows,
     },
+    layout::layoutbox::pin_fixed_boxes,
     layout::{LayoutBox, Rect},
     script::{ScriptMsg, ScriptResponse, run_script_thread},
     tdom::node::{NodeArena, NodeId, NodeType},
@@ -228,6 +229,11 @@ struct RenderState {
     /// / `RenderCmd::Focus` can re-style the document for CSS `:hover` /
     /// `:focus` rules and repaint without re-parsing or re-laying out.
     geometry: Option<Arc<Geometry>>,
+    /// Whether the current document contains any `position: fixed` box. When
+    /// true, scrolling re-anchors the fixed boxes to the new scroll offset
+    /// (a targeted region repaint) so they stay pinned to the screen; without
+    /// fixed boxes scrolling keeps the cheap canvas re-slice.
+    has_fixed: bool,
     /// Active page text selection (canvas-space endpoints + shape); `None`
     /// while no selection exists.
     text_selection: Option<TextSel>,
@@ -539,6 +545,10 @@ impl RenderState {
         };
 
         let boxes = tl.layout_only(&arena, root_id, term_map);
+        // Whether the document contains any `position: fixed` box: scrolling
+        // re-pins fixed boxes to the new scroll offset (a targeted repaint)
+        // instead of the cheap canvas re-slice.
+        self.has_fixed = !fixed_boxes_rects(&boxes).is_empty();
 
         // Install the document `<title>` as the terminal window title once
         // per session. The DOM is re-parsed on every `Redraw` but the title
@@ -766,6 +776,59 @@ impl RenderState {
         }
         tl.render(out);
         flush_frame(out);
+    }
+
+    /// Re-anchor `position: fixed` boxes to the current scroll offset and
+    /// repaint the cells they occupy, then re-publish the geometry.
+    ///
+    /// The cached boxes were pinned to the *previous* scroll; this moves them
+    /// by the scroll delta (document coordinates) so the canvas slice shows
+    /// them at their constant screen position. Only the union of the old and
+    /// new fixed areas is repainted (a small region), and the fresh geometry
+    /// is forwarded to the hit-test thread so hit regions stay in sync. Backs
+    /// the scroll-aware path of [`RenderCmd::Rerender`] when the document has
+    /// fixed boxes; the caller renders the frame afterwards.
+    fn pin_fixed_and_repaint(&mut self, geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>) {
+        let Some(tl) = self.term_layout.as_mut() else {
+            return;
+        };
+        let Some(geo) = self.geometry.clone() else {
+            return;
+        };
+        let old_rects = fixed_boxes_rects(&geo.boxes);
+        let mut boxes = geo.boxes.clone();
+        pin_fixed_boxes(
+            &mut boxes,
+            Rect::new(0, tl.scroll_y as usize, tl.columns as usize, tl.rows as usize),
+        );
+        let new_rects = fixed_boxes_rects(&boxes);
+        let fresh = Arc::new(Geometry {
+            arena: geo.arena.clone(),
+            boxes,
+            root_id: geo.root_id,
+        });
+        self.geometry = Some(Arc::clone(&fresh));
+        if let Some(tx) = geo_tx
+            && let Err(e) = tx.send(Arc::clone(&fresh))
+        {
+            log::debug!("Hit-test channel closed: {}", e);
+        }
+        let Some(region) = old_rects
+            .into_iter()
+            .chain(new_rects)
+            .reduce(|a, b| union_rect(a, b))
+        else {
+            return;
+        };
+        tl.repaint_region(&fresh.arena, &fresh.boxes, region);
+        // The repaint reset the region; re-apply the active overlays on top.
+        if let Some(sel) = &self.text_selection {
+            let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
+            tl.apply_text_selection(&lines, SELECTION_BG);
+        }
+        if let Some(open) = &self.open_select {
+            apply_select_overlay(tl, open);
+        }
     }
 
     /// Replace the session document and fully re-render it, keeping the
@@ -1054,6 +1117,25 @@ fn collect_box_rects(boxes: &[LayoutBox]) -> Vec<(NodeId, Rect)> {
     out
 }
 
+/// Every `position: fixed` box's rect (document coordinates), in tree order.
+///
+/// Used to compute the repaint region when fixed boxes are re-anchored to a
+/// new scroll offset, and to detect whether the document has any fixed box
+/// (the scroll-aware repaint only runs when it does).
+fn fixed_boxes_rects(boxes: &[LayoutBox]) -> Vec<Rect> {
+    fn walk(boxes: &[LayoutBox], out: &mut Vec<Rect>) {
+        for b in boxes {
+            if matches!(b.positioning.position, Position::Fixed) {
+                out.push(b.rect);
+            }
+            walk(&b.children, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(boxes, &mut out);
+    out
+}
+
 /// Union of every box rect that a dynamic pseudo-class's state target being
 /// `target` can change: the target plus (for `:hover`) each ancestor that
 /// matches a rule of that pseudo-class. Candidates that match no rule are
@@ -1121,6 +1203,7 @@ fn render_thread(
         term_layout: None,
         title_set: false,
         geometry: None,
+        has_fixed: false,
         dynamic: DynamicState::default(),
         text_selection: None,
         selection_text,
@@ -1273,23 +1356,39 @@ fn render_thread(
                 RenderCmd::Quit => break,
 
                 RenderCmd::Rerender { scroll_y } => {
-                    let Some(tl) = state.term_layout.as_mut() else {
-                        continue;
-                    };
-                    let prev = tl.scroll_y;
-                    tl.scroll_y = scroll_y;
-                    tl.clamp_scroll();
-                    // Defense in depth: drop rerenders whose resolved scroll
-                    // position is unchanged after clamping. Most such events are
-                    // already filtered in the input thread, but if a `Rerender`
-                    // slips past (e.g. races between a Redraw updating the
-                    // max_scroll ceiling and a queued scroll event) we still
-                    // avoid the diff pass.
-                    if tl.scroll_y == prev {
-                        continue;
+                    // Resolve the new scroll position (with clamping) inside a
+                    // scoped borrow so the fixed-box repin below can borrow the
+                    // whole state.
+                    {
+                        let Some(tl) = state.term_layout.as_mut() else {
+                            continue;
+                        };
+                        let prev = tl.scroll_y;
+                        tl.scroll_y = scroll_y;
+                        tl.clamp_scroll();
+                        // Defense in depth: drop rerenders whose resolved scroll
+                        // position is unchanged after clamping. Most such events
+                        // are already filtered in the input thread, but if a
+                        // `Rerender` slips past (e.g. races between a Redraw
+                        // updating the max_scroll ceiling and a queued scroll
+                        // event) we still avoid the diff pass.
+                        if tl.scroll_y == prev {
+                            continue;
+                        }
+                    }
+                    // Scroll-aware `position: fixed`: re-anchor the fixed boxes
+                    // to the new scroll offset and repaint the cells they occupy
+                    // (old + new areas), so they stay pinned to their screen
+                    // position. Documents without fixed boxes keep the cheap
+                    // canvas re-slice below.
+                    if state.has_fixed {
+                        state.pin_fixed_and_repaint(&geo_tx);
                     }
                     // The incremental renderer diffs the shifted viewport against
                     // the previous frame, so scrolling needs no full-screen Clear.
+                    let Some(tl) = state.term_layout.as_mut() else {
+                        continue;
+                    };
                     tl.render(&mut out);
                     flush_frame(&mut out);
                 }

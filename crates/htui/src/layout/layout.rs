@@ -4,6 +4,7 @@ use crate::{
     layout::{
         BoxConstraint, Cursor, LayoutBox, Rect,
         inner_formatting_context::flow::layout_tree,
+        layoutbox::pin_fixed_boxes,
         paint::{paint_layout_tree, paint_layout_tree_region},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
@@ -148,14 +149,22 @@ impl TermLayout {
         assert_eq!(root.node_type, NodeType::Document);
         let containing = BoxConstraint::root(term_map);
         let mut cursor = Cursor::new();
-        layout_tree(
+        let mut boxes = layout_tree(
             arena,
             root_id,
             containing,
             &mut cursor,
             term_map.columns as usize,
             term_map.rows as usize,
-        )
+        );
+        // Re-anchor `position: fixed` boxes to the *current* scroll offset so
+        // they stay pinned to their screen position while the document is
+        // scrolled (the layout tree anchored them to the top of the document).
+        pin_fixed_boxes(
+            &mut boxes,
+            Rect::new(0, self.scroll_y as usize, term_map.columns as usize, term_map.rows as usize),
+        );
+        boxes
     }
 
     /// Repaint only the cells inside `region` from an existing layout,

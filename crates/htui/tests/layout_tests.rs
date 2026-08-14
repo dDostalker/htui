@@ -249,6 +249,67 @@ fn test_layout_p_text_align_default_left() {
 // Terminal-size sanity bounds
 // ============================================================
 
+/// Render the document and collect each canvas row's text (trailing spaces
+/// trimmed), for layout-space assertions.
+fn canvas_rows(tl: &TermLayout, cols: usize) -> Vec<String> {
+    tl.layout
+        .chunks(cols)
+        .map(|row| {
+            let s: String = row.iter().map(|b| b.word.as_str()).collect();
+            s.trim_end().to_string()
+        })
+        .collect()
+}
+
+#[test]
+fn visibility_hidden_keeps_layout_space_but_paints_nothing() {
+    init();
+    // `visibility: hidden` removes the content visually but keeps the box's
+    // layout space (unlike `display: none`): the paragraph after the hidden
+    // one must still start on the next row.
+    let html = "<div><p>a</p><p class=\"hid\">b</p><p>c</p></div>";
+    let css = ".hid { visibility: hidden; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let rows = canvas_rows(&tl, term_map.columns as usize);
+    assert!(
+        !rows.iter().any(|r| r.contains('b')),
+        "hidden content must not paint"
+    );
+    let row_a = rows.iter().position(|r| r.contains('a')).expect("a row");
+    let row_c = rows.iter().position(|r| r.contains('c')).expect("c row");
+    assert_eq!(
+        row_c, row_a + 2,
+        "the hidden <p> keeps its layout space, so c sits two rows below a"
+    );
+}
+
+#[test]
+fn visibility_hidden_child_block_with_visible_restores() {
+    init();
+    // `visibility` is inherited: a hidden parent hides its own content, but a
+    // block child with an explicit `visible` still paints (browser behaviour).
+    let html = "<div class=\"hid\">x<div class=\"vis\">y</div></div>";
+    let css = ".hid { visibility: hidden; } .vis { visibility: visible; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
+    assert!(
+        !canvas.contains('x'),
+        "the hidden parent's own content must not paint"
+    );
+    assert!(
+        canvas.contains('y'),
+        "a block child overriding visibility: visible must paint"
+    );
+}
+
 #[test]
 fn term_layout_caps_a_pathological_viewport_size() {
     // A transiently-inverted Windows `SMALL_RECT` during a resize can make

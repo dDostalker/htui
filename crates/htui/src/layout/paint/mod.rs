@@ -30,7 +30,7 @@ use std::collections::HashMap;
 use crossterm::style::Color;
 
 use crate::{
-    html::css_parse::Position,
+    html::css_parse::{Position, Visibility},
     layout::{BoxKind, LayoutBox, Rect, ReplacedContent},
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{Block, ImageCache, InputRenderState, TermLayout},
@@ -372,28 +372,36 @@ fn paint_box(
         BoxKind::Replaced(_) => None,
         BoxKind::Anonymous => None,
     };
-    match &lb.kind {
-        BoxKind::Normal => {
-            paint_block(lb, arena, canvas, my_bg, parent_bg, own_clip);
-        }
-        BoxKind::Replaced(ReplacedContent::Image { cols, rows, .. }) => {
-            paint_image(lb, canvas, *cols, *rows, own_clip);
-        }
-        BoxKind::Replaced(ReplacedContent::Input) => {
-            paint_input(lb, arena, canvas, own_clip);
-        }
-        BoxKind::Replaced(ReplacedContent::Select) => {
-            paint_select(lb, arena, canvas, own_clip);
-        }
-        BoxKind::Replaced(ReplacedContent::Textarea) => {
-            paint_textarea(lb, arena, canvas, own_clip);
-        }
-        BoxKind::Replaced(ReplacedContent::Button) => {
-            paint_button(lb, arena, canvas, own_clip);
-        }
-        BoxKind::Anonymous => {
-            // Anonymous boxes have no chrome of their own; their visible
-            // background is whatever their children paint, so just descend.
+    // `visibility: hidden` (inherited, so a child's `visible` re-shows it):
+    // the box keeps its layout space but paints nothing of its own chrome /
+    // inline content. Children still descend — each node checks its own
+    // resolved visibility, exactly like the browser.
+    let visibility_hidden =
+        matches!(arena[lb.node_id].css_attr.get_visibility(), Visibility::Hidden);
+    if !visibility_hidden {
+        match &lb.kind {
+            BoxKind::Normal => {
+                paint_block(lb, arena, canvas, my_bg, parent_bg, own_clip);
+            }
+            BoxKind::Replaced(ReplacedContent::Image { cols, rows, .. }) => {
+                paint_image(lb, canvas, *cols, *rows, own_clip);
+            }
+            BoxKind::Replaced(ReplacedContent::Input) => {
+                paint_input(lb, arena, canvas, own_clip);
+            }
+            BoxKind::Replaced(ReplacedContent::Select) => {
+                paint_select(lb, arena, canvas, own_clip);
+            }
+            BoxKind::Replaced(ReplacedContent::Textarea) => {
+                paint_textarea(lb, arena, canvas, own_clip);
+            }
+            BoxKind::Replaced(ReplacedContent::Button) => {
+                paint_button(lb, arena, canvas, own_clip);
+            }
+            BoxKind::Anonymous => {
+                // Anonymous boxes have no chrome of their own; their visible
+                // background is whatever their children paint, so just descend.
+            }
         }
     }
     // The effective bg visible at this box's rect becomes the parent bg for

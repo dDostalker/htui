@@ -711,6 +711,33 @@ fn test_supported_properties_lists_known_names() {
     assert!(SUPPORTED_PROPERTIES.contains(&"border-width"));
     assert!(SUPPORTED_PROPERTIES.contains(&"border-style"));
     assert!(SUPPORTED_PROPERTIES.contains(&"border-color"));
+    // Visibility / overflow (overflow keeps the renderer's default clip).
+    assert!(SUPPORTED_PROPERTIES.contains(&"visibility"));
+    assert!(SUPPORTED_PROPERTIES.contains(&"overflow"));
+}
+
+#[test]
+fn visibility_is_supported_and_inheritable() {
+    init();
+    assert!(SUPPORTED_PROPERTIES.contains(&"visibility"));
+    assert!(INHERITED_PROPS.contains(&"visibility"));
+}
+
+#[test]
+fn overflow_hidden_is_parsed_and_kept_by_the_cascade() {
+    init();
+    // `overflow` is a supported property: the declaration survives the
+    // cascade (the renderer's default already clips a box's static children
+    // to its content area, so `overflow: hidden` matches that behaviour).
+    let mut arena = NodeArena::default();
+    let (root, div) = build_test(&mut arena);
+    let css = Parser::new("div { overflow: hidden }").parse();
+    css_into_node(&mut arena, root, &css);
+    assert_eq!(
+        arena[div].css_attr.0.get("overflow").map(String::as_str),
+        Some("hidden"),
+        "overflow: hidden must survive the cascade"
+    );
 }
 
 #[test]

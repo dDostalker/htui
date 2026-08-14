@@ -35,12 +35,12 @@ use crate::html::box_edges::{Border, BorderSides, BoxEdges, EdgeSizes};
 use super::values::{
     AlignItems, BoxSizing, CornerRadii, CssDisplay, FlexBasis, FlexDirection, FlexWrap,
     FontStyleKind, FontWeight, GapSizes, JustifyContent, Length, LineHeight, OverflowWrap,
-    TextAlign, TextDecoration, TextTransform, WhiteSpace, WordBreak, parse_align_items,
+    TextAlign, TextDecoration, TextTransform, Visibility, WhiteSpace, WordBreak, parse_align_items,
     parse_border_radius, parse_border_side, parse_border_style, parse_border_width,
     parse_box_sizing, parse_color_str, parse_edge_sizes, parse_flex_basis, parse_flex_direction,
     parse_flex_wrap, parse_gap_shorthand, parse_justify_content, parse_line_height,
     parse_non_negative_number, parse_order, parse_overflow_wrap, parse_text_transform,
-    parse_white_space, parse_word_break, resolve_flex_basis,
+    parse_visibility, parse_white_space, parse_word_break, resolve_flex_basis,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -168,6 +168,16 @@ impl CssAttr {
             .get("overflow-wrap")
             .or_else(|| self.0.get("word-wrap"))
             .and_then(|s| parse_overflow_wrap(s.as_str()))
+            .unwrap_or_default()
+    }
+    /// Element visibility (CSS `visibility`). Inherited, so a child without
+    /// an explicit value picks up its parent's. `Hidden` keeps the box's
+    /// layout space but paints nothing; a descendant with an explicit
+    /// `visible` still paints (each node decides at paint time).
+    pub fn get_visibility(&self) -> Visibility {
+        self.0
+            .get("visibility")
+            .and_then(|s| parse_visibility(s.as_str()))
             .unwrap_or_default()
     }
     /// Element width (CSS `width`).

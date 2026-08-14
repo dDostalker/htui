@@ -185,6 +185,30 @@ pub enum Position {
     Fixed,
 }
 
+/// CSS `visibility` value.
+///
+/// Inherited: `hidden` on a parent hides its own content but a descendant
+/// with an explicit `visible` still paints (each node decides at paint time).
+/// `collapse` behaves like `hidden` except on table rows / columns, which a
+/// terminal table renderer does not distinguish — it is treated as `hidden`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Visibility {
+    #[default]
+    Visible,
+    /// `hidden` / `collapse` — the box keeps its layout space but paints
+    /// nothing of its own chrome / inline content.
+    Hidden,
+}
+
+#[doc(hidden)]
+pub fn parse_visibility(s: &str) -> Option<Visibility> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "visible" => Some(Visibility::Visible),
+        "hidden" | "collapse" => Some(Visibility::Hidden),
+        _ => None,
+    }
+}
+
 /// CSS `top` / `right` / `bottom` / `left`, resolved to cells.
 ///
 /// Each side is `None` when the property is unset / `auto`, in which case

@@ -191,6 +191,67 @@ fn fixed_anchors_to_viewport() {
 }
 
 #[test]
+fn fixed_stays_pinned_to_the_screen_when_scrolled() {
+    init();
+    // `position: fixed` is scroll-aware: the layout re-anchors the fixed box
+    // to the current scroll offset, so the viewport slice keeps it at its
+    // constant screen position instead of scrolling away with the document.
+    let html = r#"
+        <div class="abs">F</div>
+        <div>G</div>
+    "#;
+    let css = r#"
+        .abs { position: fixed; top: 1; left: 5; }
+    "#;
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let cols = term_map.columns as usize;
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    // At scroll 0 the fixed box sits at viewport row 1.
+    assert_eq!(tl.layout[1 * cols + 5].word, "F");
+
+    // Scroll down 10 rows: the re-layout moves the fixed box to document row
+    // 11 (= scroll + top), so the slice still shows it at screen row 1.
+    tl.scroll_y = 10;
+    tl.draw(&arena, root_id, &term_map);
+    assert_eq!(
+        tl.layout[11 * cols + 5].word, "F",
+        "fixed box must sit at document row scroll_y + top"
+    );
+}
+
+#[test]
+fn fixed_right_bottom_anchors_follow_the_scrolled_viewport() {
+    init();
+    // right / bottom insets keep anchoring against the viewport edge after a
+    // scroll: at scroll_y = 10 the box's document x / y are computed from the
+    // scrolled viewport's right / bottom.
+    let html = r#"
+        <div class="abs">F</div>
+        <div>G</div>
+    "#;
+    let css = r#"
+        .abs { position: fixed; right: 1; bottom: 1; width: 3; }
+    "#;
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let cols = term_map.columns as usize;
+    let rows = term_map.rows as usize;
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.scroll_y = 10;
+    tl.draw(&arena, root_id, &term_map);
+    // x = viewport_width - width - right = cols - 3 - 1;
+    // y = scroll_y + viewport_rows - height - bottom = 10 + rows - 1 - 1.
+    let x = cols - 4;
+    let y = 10 + rows - 2;
+    assert_eq!(
+        tl.layout[y * cols + x].word, "F",
+        "fixed right/bottom anchors must follow the scrolled viewport"
+    );
+}
+
+#[test]
 fn relative_offsets_without_moving_siblings() {
     init();
     let html = r#"

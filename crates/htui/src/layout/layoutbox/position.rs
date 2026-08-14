@@ -16,10 +16,10 @@
 //!
 //! - `absolute` — the nearest positioned ancestor's padding-box, or the
 //!   initial containing block (the viewport) when none exists.
-//! - `fixed` — the viewport.
-//!
-//! Known v1 limitation: `fixed` boxes are anchored to the viewport top-left
-//! (cell 0,0) but still scroll with the document (no scroll-aware anchoring).
+//! - `fixed` — the viewport, scroll-aware: the layout anchors fixed boxes to
+//!   the top-of-document viewport, and [`pin_fixed_boxes`] re-anchors them to
+//!   the *current* scroll offset whenever it changes, so a fixed element stays
+//!   pinned to its screen position while the document scrolls.
 
 use crate::html::css_parse::{InsetSides, Position};
 use crate::layout::{LayoutBox, Rect};
@@ -33,6 +33,24 @@ use crate::layout::{LayoutBox, Rect};
 pub fn resolve_positioned_rects(boxes: &mut [LayoutBox], viewport: Rect) {
     for b in boxes {
         resolve_positioned_box(b, None, viewport);
+    }
+}
+
+/// Re-anchor every `position: fixed` box to the viewport at the *current*
+/// scroll offset, in document coordinates.
+///
+/// Fixed boxes are laid out against the top-of-document viewport; scrolling
+/// re-slices the canvas without re-laying-out, so the render thread calls
+/// this whenever `scroll_y` changes (only when the document contains fixed
+/// boxes). It moves fixed boxes by the scroll delta so the canvas slice shows
+/// them at their constant screen position; unanchored `absolute` boxes are
+/// untouched (they anchor to the document, not the viewport).
+pub fn pin_fixed_boxes(boxes: &mut [LayoutBox], viewport: Rect) {
+    for b in boxes {
+        if matches!(b.positioning.position, Position::Fixed) {
+            reposition(b, viewport);
+        }
+        pin_fixed_boxes(&mut b.children, viewport);
     }
 }
 
