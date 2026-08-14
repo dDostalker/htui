@@ -3,7 +3,9 @@ use std::fmt;
 use indexmap::IndexMap;
 use slotmap::{Key, SlotMap, new_key_type};
 
-use crate::html::css_parse::{CssAttr, CssDisplay, FontContext, LengthContext, Viewport, WhiteSpace};
+use crate::html::css_parse::{
+    CssAttr, CssDisplay, FontContext, LengthContext, Viewport, WhiteSpace,
+};
 
 // ============================================================
 // NodeId — slotmap 生成的类型安全索引
@@ -811,10 +813,7 @@ impl Node {
     /// Returns `None` for inputs that are not push-buttons.
     pub fn input_button_label(&self) -> Option<String> {
         let input_type = self.get_type()?.to_ascii_lowercase();
-        if !matches!(
-            input_type.as_str(),
-            "button" | "submit" | "reset" | "image"
-        ) {
+        if !matches!(input_type.as_str(), "button" | "submit" | "reset" | "image") {
             return None;
         }
         let value = self.attributes.get("value").cloned().unwrap_or_default();

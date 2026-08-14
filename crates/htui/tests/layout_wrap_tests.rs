@@ -370,7 +370,8 @@ fn nbsp_entity_is_preserved() {
     let html = "<p>a&nbsp;&nbsp;&nbsp;b</p>";
     let (rows, _) = render_rows(html, "");
     assert!(
-        rows.iter().any(|r| r.contains("a\u{00A0}\u{00A0}\u{00A0}b")),
+        rows.iter()
+            .any(|r| r.contains("a\u{00A0}\u{00A0}\u{00A0}b")),
         "&nbsp; must survive as non-collapsible spaces, rows = {:?}",
         rows
     );

@@ -38,8 +38,16 @@ pub(crate) fn paint_button(
     let fg = node.css_attr.get_color().unwrap_or(Color::White);
     let bg = node.css_attr.get_bg_color();
     // A disabled button is dimmed (frame and text both grey).
-    let frame = if disabled { Some(Color::DarkGrey) } else { Some(fg) };
-    let text_fg = if disabled { Some(Color::DarkGrey) } else { Some(fg) };
+    let frame = if disabled {
+        Some(Color::DarkGrey)
+    } else {
+        Some(fg)
+    };
+    let text_fg = if disabled {
+        Some(Color::DarkGrey)
+    } else {
+        Some(fg)
+    };
 
     // `[ text ]`: frame brackets, one padding column each side, then the
     // text content clipped to the box.

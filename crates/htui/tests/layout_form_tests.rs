@@ -65,8 +65,14 @@ fn layout_boxes(html: &str) -> (Vec<htui::layout::LayoutBox>, NodeArena) {
     let (root_id, arena) = setup(html, "");
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
-    let boxes =
-        layout_tree(&arena, root_id, containing, &mut cursor, COLS as usize, ROWS as usize);
+    let boxes = layout_tree(
+        &arena,
+        root_id,
+        containing,
+        &mut cursor,
+        COLS as usize,
+        ROWS as usize,
+    );
     (boxes, arena)
 }
 
@@ -177,7 +183,8 @@ fn eval_str(engine: &mut ScriptEngine, expr: &str) -> String {
 fn test_hidden_input_produces_no_box() {
     // `<input type=hidden>` renders nothing (like `display: none`) while
     // surrounding text keeps flowing.
-    let (boxes, arena) = layout_boxes(r#"<div id="wrap">a<input id="h" type="hidden" value="x">b</div>"#);
+    let (boxes, arena) =
+        layout_boxes(r#"<div id="wrap">a<input id="h" type="hidden" value="x">b</div>"#);
     let h = find_node_by_id(&arena, "h");
     assert!(
         find_box(&boxes, h).is_none(),
@@ -207,7 +214,11 @@ fn test_hidden_input_stays_in_dom() {
     );
     let h = find_node_by_id(&arena, "h");
     let n = &arena[h];
-    assert_eq!(n.node_type, NodeType::Input, "hidden input stays a DOM node");
+    assert_eq!(
+        n.node_type,
+        NodeType::Input,
+        "hidden input stays a DOM node"
+    );
     assert_eq!(
         n.attributes.get("value").map(String::as_str),
         Some("abc"),
@@ -222,17 +233,14 @@ fn test_hidden_input_stays_in_dom() {
 #[test]
 fn test_password_input_masks_value() {
     let (_, tl) = draw(r#"<input type="password" value="secret">"#, "");
-    let bullets = tl
-        .layout
-        .iter()
-        .filter(|b| b.word == "\u{2022}")
-        .count();
+    let bullets = tl.layout.iter().filter(|b| b.word == "\u{2022}").count();
     assert_eq!(bullets, 6, "every password character must be masked as `•`");
     assert!(
-        !tl
-            .layout
-            .iter()
-            .any(|b| b.word == "s" || b.word == "e" || b.word == "c" || b.word == "r" || b.word == "t"),
+        !tl.layout.iter().any(|b| b.word == "s"
+            || b.word == "e"
+            || b.word == "c"
+            || b.word == "r"
+            || b.word == "t"),
         "the plaintext must never be painted"
     );
 }
@@ -295,11 +303,17 @@ fn test_paste_into_single_line_input_collapses_newlines() {
     state.input_value = "ab".to_string();
     state.input_cursor = 2;
     let mut cmds = Vec::new();
-    assert!(paste_into_field(&mut state, "xy\nz", NodeId::default(), &mut cmds));
+    assert!(paste_into_field(
+        &mut state,
+        "xy\nz",
+        NodeId::default(),
+        &mut cmds
+    ));
     assert_eq!(state.input_value, "abxyz");
     assert_eq!(state.input_cursor, 5, "caret advances past the pasted text");
     assert!(
-        cmds.iter().any(|c| matches!(c, RenderCmd::RenderInput { .. })),
+        cmds.iter()
+            .any(|c| matches!(c, RenderCmd::RenderInput { .. })),
         "paste must repaint the field"
     );
 }
@@ -312,8 +326,16 @@ fn test_paste_into_textarea_keeps_newlines() {
     state.input_value = "ab".to_string();
     state.input_cursor = 2;
     let mut cmds = Vec::new();
-    assert!(paste_into_field(&mut state, "xy\nz", NodeId::default(), &mut cmds));
-    assert_eq!(state.input_value, "abxy\nz", "textarea keeps pasted newlines");
+    assert!(paste_into_field(
+        &mut state,
+        "xy\nz",
+        NodeId::default(),
+        &mut cmds
+    ));
+    assert_eq!(
+        state.input_value, "abxy\nz",
+        "textarea keeps pasted newlines"
+    );
     assert_eq!(state.input_cursor, 6);
 }
 
@@ -324,7 +346,12 @@ fn test_paste_at_caret_inserts_in_middle() {
     state.input_value = "abcd".to_string();
     state.input_cursor = 2;
     let mut cmds = Vec::new();
-    assert!(paste_into_field(&mut state, "XY", NodeId::default(), &mut cmds));
+    assert!(paste_into_field(
+        &mut state,
+        "XY",
+        NodeId::default(),
+        &mut cmds
+    ));
     assert_eq!(state.input_value, "abXYcd");
     assert_eq!(state.input_cursor, 4);
 }
@@ -353,23 +380,39 @@ fn test_checkbox_toggle_flips_checked_attribute() {
     let map = HitMap::build(&geo);
     let c = find_node_by_id(&engine.arena(), "c");
     assert!(
-        !engine.arena().get(c).unwrap().attributes.contains_key("checked"),
+        !engine
+            .arena()
+            .get(c)
+            .unwrap()
+            .attributes
+            .contains_key("checked"),
         "starts unchecked"
     );
 
     let cmds = apply(&mut engine, &map, ScriptMsg::ToggleCheck { node_id: c });
     assert!(
-        engine.arena().get(c).unwrap().attributes.contains_key("checked"),
+        engine
+            .arena()
+            .get(c)
+            .unwrap()
+            .attributes
+            .contains_key("checked"),
         "first click checks the box"
     );
     assert!(
-        cmds.iter().any(|cmd| matches!(cmd, RenderCmd::RenderArena { .. })),
+        cmds.iter()
+            .any(|cmd| matches!(cmd, RenderCmd::RenderArena { .. })),
         "toggle must mark the node dirty for re-render"
     );
 
     apply(&mut engine, &map, ScriptMsg::ToggleCheck { node_id: c });
     assert!(
-        !engine.arena().get(c).unwrap().attributes.contains_key("checked"),
+        !engine
+            .arena()
+            .get(c)
+            .unwrap()
+            .attributes
+            .contains_key("checked"),
         "second click unchecks the box"
     );
 }
@@ -383,7 +426,14 @@ fn test_radio_group_mutual_exclusion() {
     let map = HitMap::build(&geo);
     let a = find_node_by_id(&engine.arena(), "a");
     let b = find_node_by_id(&engine.arena(), "b");
-    assert!(engine.arena().get(a).unwrap().attributes.contains_key("checked"));
+    assert!(
+        engine
+            .arena()
+            .get(a)
+            .unwrap()
+            .attributes
+            .contains_key("checked")
+    );
 
     apply(&mut engine, &map, ScriptMsg::ToggleCheck { node_id: b });
 
@@ -401,14 +451,18 @@ fn test_radio_group_mutual_exclusion() {
 #[test]
 fn test_radio_reclick_keeps_selection() {
     // Clicking an already-selected radio is a no-op in browsers.
-    let (mut engine, geo) = build_geometry(
-        r#"<div><input id="a" type="radio" name="g" checked></div>"#,
-    );
+    let (mut engine, geo) =
+        build_geometry(r#"<div><input id="a" type="radio" name="g" checked></div>"#);
     let map = HitMap::build(&geo);
     let a = find_node_by_id(&engine.arena(), "a");
     apply(&mut engine, &map, ScriptMsg::ToggleCheck { node_id: a });
     assert!(
-        engine.arena().get(a).unwrap().attributes.contains_key("checked"),
+        engine
+            .arena()
+            .get(a)
+            .unwrap()
+            .attributes
+            .contains_key("checked"),
         "radio stays selected on re-click"
     );
 }
@@ -435,7 +489,12 @@ fn test_checkbox_click_full_path_toggles_and_fires_change() {
     click(&mut state, &mut engine, &map, x, y);
     let c = find_node_by_id(&engine.arena(), "c");
     assert!(
-        engine.arena().get(c).unwrap().attributes.contains_key("checked"),
+        engine
+            .arena()
+            .get(c)
+            .unwrap()
+            .attributes
+            .contains_key("checked"),
         "click must check the box"
     );
     assert_eq!(
@@ -446,7 +505,12 @@ fn test_checkbox_click_full_path_toggles_and_fires_change() {
 
     click(&mut state, &mut engine, &map, x, y);
     assert!(
-        !engine.arena().get(c).unwrap().attributes.contains_key("checked"),
+        !engine
+            .arena()
+            .get(c)
+            .unwrap()
+            .attributes
+            .contains_key("checked"),
         "second click unchecks"
     );
     assert_eq!(
@@ -466,7 +530,10 @@ fn test_label_renders_inline_with_surrounding_text() {
     // the surrounding paragraph text and it has no layout box of its own.
     let (boxes, arena) = layout_boxes(r#"<p>fo<label id="l">la</label></p>"#);
     let l = find_node_by_id(&arena, "l");
-    assert!(find_box(&boxes, l).is_none(), "inline label must not produce a box");
+    assert!(
+        find_box(&boxes, l).is_none(),
+        "inline label must not produce a box"
+    );
 
     let (term_map, tl) = draw(r#"<p>fo<label id="l">la</label></p>"#, "");
     let cols = term_map.columns as usize;
@@ -490,15 +557,17 @@ fn test_label_owns_hit_region_over_its_text() {
     let (_, geo) = build_geometry(r#"<p>fo<label id="l">la</label></p>"#);
     let map = HitMap::build(&geo);
     let region = map.resolve_by_id("l").expect("label hit region exists");
-    assert_eq!(region.rect.width, 2, "region covers the label's `la` text slice");
+    assert_eq!(
+        region.rect.width, 2,
+        "region covers the label's `la` text slice"
+    );
     assert_eq!(region.rect.height, 1);
 }
 
 #[test]
 fn test_label_for_click_focuses_input() {
-    let (mut engine, geo) = build_geometry(
-        r#"<label id="l" for="f">Name:</label><input id="f" type="text">"#,
-    );
+    let (mut engine, geo) =
+        build_geometry(r#"<label id="l" for="f">Name:</label><input id="f" type="text">"#);
     let map = HitMap::build(&geo);
     let f = find_node_by_id(&engine.arena(), "f");
     let region = map.resolve_by_id("l").expect("label hit region");
@@ -515,9 +584,8 @@ fn test_label_for_click_focuses_input() {
 
 #[test]
 fn test_label_wrapping_checkbox_toggles_on_click() {
-    let (mut engine, geo) = build_geometry(
-        r#"<label id="l"><input id="c" type="checkbox"> Agree</label>"#,
-    );
+    let (mut engine, geo) =
+        build_geometry(r#"<label id="l"><input id="c" type="checkbox"> Agree</label>"#);
     let map = HitMap::build(&geo);
     let c = find_node_by_id(&engine.arena(), "c");
     let region = map.resolve_by_id("l").expect("label hit region");
@@ -526,7 +594,12 @@ fn test_label_wrapping_checkbox_toggles_on_click() {
     let mut state = InputState::new();
     click(&mut state, &mut engine, &map, x, y);
     assert!(
-        engine.arena().get(c).unwrap().attributes.contains_key("checked"),
+        engine
+            .arena()
+            .get(c)
+            .unwrap()
+            .attributes
+            .contains_key("checked"),
         "clicking a wrapping label must activate its control"
     );
 }
@@ -540,7 +613,10 @@ fn test_label_wrapped_checkbox_renders_box() {
         layout_boxes(r#"<p><label><input id="c" type="checkbox"> Agree</label></p>"#);
     let c = find_node_by_id(&arena, "c");
     let b = find_box(&boxes, c).expect("wrapped checkbox must keep its box");
-    assert_eq!(b.rect.width, 2, "toggle control is glyph + one spacing cell");
+    assert_eq!(
+        b.rect.width, 2,
+        "toggle control is glyph + one spacing cell"
+    );
 
     let (_, tl) = draw(r#"<p><label><input type="checkbox"> Agree</label></p>"#, "");
     assert!(
@@ -815,9 +891,8 @@ fn test_input_type_button_does_not_submit() {
 #[test]
 fn test_input_submit_click_does_not_focus() {
     // A button input activates on click but never takes text focus.
-    let (mut engine, geo) = build_geometry(
-        r#"<input id="f" type="text"><input id="s" type="submit">"#,
-    );
+    let (mut engine, geo) =
+        build_geometry(r#"<input id="f" type="text"><input id="s" type="submit">"#);
     let map = HitMap::build(&geo);
     let region = map.resolve_by_id("s").expect("submit input region");
     let (x, y) = center(region.rect);
@@ -830,7 +905,10 @@ fn test_input_submit_click_does_not_focus() {
         "clicking a submit input must blur any focused text field"
     );
     assert_eq!(
-        eval_str(&mut engine, "document.getElementById('s').getAttribute('type')"),
+        eval_str(
+            &mut engine,
+            "document.getElementById('s').getAttribute('type')"
+        ),
         "submit",
         "the button input stays a submit input"
     );

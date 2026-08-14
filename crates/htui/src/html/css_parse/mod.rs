@@ -10,7 +10,9 @@ pub use cascade::{
     INHERITED_PROPS, SUPPORTED_PROPERTIES, css_into_node, css_into_node_with_hover,
     css_into_node_with_state, css_pseudo_rule_set, reset_css_attr,
 };
-pub use matcher::{selector_chain_matches, selector_chain_matches_with_hover, selector_chain_matches_with_state};
+pub use matcher::{
+    selector_chain_matches, selector_chain_matches_with_hover, selector_chain_matches_with_state,
+};
 pub use properties::{AlignSelf, CssAttr};
 pub use selector::{
     Combinator, CompoundSelector, CssSelector, DynamicState, NthExpr, PseudoClass, PseudoClassSet,

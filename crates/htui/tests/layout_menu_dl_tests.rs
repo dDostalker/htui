@@ -70,8 +70,14 @@ fn layout_boxes(html: &str, css: &str) -> (Vec<htui::layout::LayoutBox>, NodeAre
     let (root_id, arena) = setup(html, css);
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
-    let boxes =
-        layout_tree(&arena, root_id, containing, &mut cursor, COLS as usize, ROWS as usize);
+    let boxes = layout_tree(
+        &arena,
+        root_id,
+        containing,
+        &mut cursor,
+        COLS as usize,
+        ROWS as usize,
+    );
     (boxes, arena)
 }
 
@@ -87,7 +93,10 @@ fn draw(html: &str, css: &str) -> (TermMap, TermLayout) {
 #[test]
 fn test_parse_tag_map_menu_dl_dt_dd_search() {
     init();
-    assert_eq!(html_parse::tag_name_to_node_type("menu"), Some(NodeType::Menu));
+    assert_eq!(
+        html_parse::tag_name_to_node_type("menu"),
+        Some(NodeType::Menu)
+    );
     assert_eq!(html_parse::tag_name_to_node_type("dl"), Some(NodeType::Dl));
     assert_eq!(html_parse::tag_name_to_node_type("dt"), Some(NodeType::Dt));
     assert_eq!(html_parse::tag_name_to_node_type("dd"), Some(NodeType::Dd));
@@ -133,8 +142,8 @@ fn test_nested_menu_indents_per_level() {
 fn test_menu_produces_own_box() {
     init();
     let (boxes, arena) = layout_boxes("<menu><li>Item</li></menu>", "");
-    let menu = find_box_by_type(&boxes, &NodeType::Menu, &arena)
-        .expect("menu should produce its own box");
+    let menu =
+        find_box_by_type(&boxes, &NodeType::Menu, &arena).expect("menu should produce its own box");
     assert_eq!(menu.rect.x, 0);
     assert_eq!(menu.rect.y, 0);
     assert_eq!(menu.rect.width, 80);

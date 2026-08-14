@@ -89,8 +89,16 @@ fn test_flex_promotes_inline_children_to_items() {
     let copies: usize = rows.iter().map(|r| r.matches("AAA").count()).sum();
     assert_eq!(copies, 1, "span item must not double-render: {:?}", rows);
 
-    let anchor = tl.layout.iter().position(|b| b.word == "B").expect("anchor cell");
-    let em = tl.layout.iter().position(|b| b.word == "C").expect("em cell");
+    let anchor = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "B")
+        .expect("anchor cell");
+    let em = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "C")
+        .expect("em cell");
     assert!(tl.layout[anchor].style.contains(FontStyle::UNDERLINED));
     assert!(tl.layout[em].style.contains(FontStyle::ITALIC));
 }
@@ -110,7 +118,11 @@ fn test_flex_promotes_raw_text_to_anonymous_item() {
         rows[0]
     );
     let copies: usize = rows.iter().map(|r| r.matches("label").count()).sum();
-    assert_eq!(copies, 1, "anonymous text must not double-render: {:?}", rows);
+    assert_eq!(
+        copies, 1,
+        "anonymous text must not double-render: {:?}",
+        rows
+    );
 }
 
 #[test]
@@ -179,7 +191,11 @@ fn flex_row_with_input_renders_the_field() {
     assert!(
         joined.contains("[abc"),
         "flex input must render its field; rows:\n{}",
-        rows.iter().filter(|r| !r.trim().is_empty()).map(|s| s.as_str()).collect::<Vec<_>>().join("\n")
+        rows.iter()
+            .filter(|r| !r.trim().is_empty())
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 
@@ -901,7 +917,14 @@ fn test_flex_nested_row_inside_row_stacks_three_rows() {
     for row in 0..3 {
         let yellow_count = tl.layout[row * COLS as usize..(row + 1) * COLS as usize]
             .iter()
-            .filter(|cell| cell.bcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }))
+            .filter(|cell| {
+                cell.bcolor
+                    == Some(Color::Rgb {
+                        r: 255,
+                        g: 255,
+                        b: 0,
+                    })
+            })
             .count();
         assert_eq!(
             yellow_count,

@@ -20,7 +20,9 @@ pub fn layout_flex_dispatch(
     pre_allocated_rect: Option<Rect>,
 ) -> Option<LayoutBox> {
     if !crate::layout::layoutbox::generation::generate_node(arena, node_id)
-        .map(|generated| generated.inner_formatting_context == crate::layout::FormattingContext::Flex)
+        .map(|generated| {
+            generated.inner_formatting_context == crate::layout::FormattingContext::Flex
+        })
         .unwrap_or(false)
     {
         return None;

@@ -5,8 +5,8 @@ use crossterm::style::Color;
 
 use crate::{
     html::css_parse::parse_color_str,
-    layout::{LayoutBox, Rect},
     layout::layoutbox::geometry::select_options,
+    layout::{LayoutBox, Rect},
     tdom::node::NodeArena,
     tui::graph_api::{FontStyle, char_width},
 };
@@ -49,12 +49,7 @@ pub(crate) fn paint_select(
         .iter()
         .find(|o| o.value == value)
         .map(|o| o.label.clone())
-        .unwrap_or_else(|| {
-            options
-                .first()
-                .map(|o| o.label.clone())
-                .unwrap_or_default()
-        });
+        .unwrap_or_else(|| options.first().map(|o| o.label.clone()).unwrap_or_default());
 
     let inner_width = r.width.saturating_sub(2);
     // The chevron occupies the last content cell; the label is truncated to
@@ -95,7 +90,9 @@ pub(crate) fn paint_select(
         col += w;
     }
     // Chevron sits in the last content cell, right before `]`.
-    let chevron_col = inner_x.saturating_add(inner_width).saturating_sub(chevron_w);
+    let chevron_col = inner_x
+        .saturating_add(inner_width)
+        .saturating_sub(chevron_w);
     if chevron_col >= visible.x && chevron_col < visible.x.saturating_add(visible.width) {
         put(
             canvas,

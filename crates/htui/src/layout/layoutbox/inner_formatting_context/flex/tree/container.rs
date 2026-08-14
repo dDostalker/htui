@@ -8,8 +8,7 @@ use crate::{
         inner_formatting_context::flow::{constrained_block_width, dispatch},
         layoutbox::{
             generation::{GeneratedBoxKind, generate_node},
-            text_node_run,
-            visible_children,
+            text_node_run, visible_children,
         },
     },
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
@@ -366,9 +365,11 @@ pub(super) fn layout_flex_container(
         runs: None,
         font_size_cells: own_font_size_cells,
         line_height_cells,
-        border_radius: node
-            .css_attr
-            .get_border_radius(content_width, child_context.font, child_context.viewport),
+        border_radius: node.css_attr.get_border_radius(
+            content_width,
+            child_context.font,
+            child_context.viewport,
+        ),
         fill_bg,
         spacing_after: 0,
     };

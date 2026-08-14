@@ -14,17 +14,14 @@
 use crate::{
     html::css_parse::{FontContext, Viewport},
     layout::{
-        BoxConstraint, Cursor, LayoutBox, LayoutContext, Rect,
+        BoxConstraint, Cursor, DEFAULT_LAYOUT, LayoutBox, LayoutContext, Rect,
         layoutbox::{
-            generate_box_tree, generate_node, layout_generated_box, layout_generated_tree,
-            resolve_positioned_rects, GeneratedBoxKind,
+            GeneratedBoxKind, generate_box_tree, generate_node, layout_generated_box,
+            layout_generated_tree, resolve_positioned_rects,
         },
-        DEFAULT_LAYOUT,
     },
     tdom::node::{NodeArena, NodeId},
 };
-
-
 
 /// Build a layout forest for `root_id`'s block children.
 ///
@@ -81,22 +78,12 @@ pub fn layout_children(
         // below the parent's text line like any other inline-level child.
         if generated.kind == GeneratedBoxKind::Normal && generated.outer_display.is_inline() {
             boxes.extend(layout_inline_container_descendants(
-                arena,
-                child_id,
-                containing,
-                cursor,
-                context,
+                arena, child_id, containing, cursor, context,
             ));
             continue;
         }
-        if let Some(b) = layout_generated_box(
-            arena,
-            &generated,
-            containing,
-            cursor,
-            context,
-            None,
-        ) {
+        if let Some(b) = layout_generated_box(arena, &generated, containing, cursor, context, None)
+        {
             boxes.push(b);
         }
     }
@@ -125,7 +112,8 @@ fn layout_inline_container_descendants(
             // Text is handled by the parent's run collection; no box.
             continue;
         }
-        if let Some(b) = layout_generated_box(arena, &generated, containing, cursor, context, None) {
+        if let Some(b) = layout_generated_box(arena, &generated, containing, cursor, context, None)
+        {
             boxes.push(b);
         } else {
             // Another inline container (nested `<label>` / `<span>` …):
@@ -171,7 +159,14 @@ pub(crate) fn dispatch_flow_geometry(
     pre_allocated_rect: Option<Rect>,
 ) -> Option<LayoutBox> {
     for layout_fn in DEFAULT_LAYOUT {
-        if let Some(b) = layout_fn(arena, node_id, containing, cursor, context, pre_allocated_rect) {
+        if let Some(b) = layout_fn(
+            arena,
+            node_id,
+            containing,
+            cursor,
+            context,
+            pre_allocated_rect,
+        ) {
             return Some(b);
         }
     }

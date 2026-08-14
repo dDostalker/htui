@@ -66,7 +66,10 @@ impl CssAttr {
     /// Resolve a property with `parse`, falling back to `default` when the
     /// property is absent or unparseable.
     fn parse_or<T>(&self, key: &str, parse: fn(&str) -> Option<T>, default: T) -> T {
-        self.0.get(key).and_then(|s| parse(s.as_str())).unwrap_or(default)
+        self.0
+            .get(key)
+            .and_then(|s| parse(s.as_str()))
+            .unwrap_or(default)
     }
     /// Foreground color (CSS `color`).
     pub fn get_color(&self) -> Option<Color> {
@@ -196,7 +199,7 @@ impl CssAttr {
                 containing: term_columns,
                 font: font_ctx,
                 viewport,
-            }))
+            })),
         }
     }
 
@@ -351,14 +354,18 @@ impl CssAttr {
     /// Raw author-declared `display` value as a typed enum, or `None`
     /// when the property is absent.
     pub fn display(&self) -> Option<CssDisplay> {
-        self.0.get("display").map(String::as_str).and_then(CssDisplay::parse)
+        self.0
+            .get("display")
+            .map(String::as_str)
+            .and_then(CssDisplay::parse)
     }
 
     /// Author-declared `display` if present, otherwise the UA default
     /// for `node_type`. `display: none` and `display: contents` are
     /// preserved here so the caller can branch on them.
     fn display_or_ua(&self, node_type: &NodeType) -> CssDisplay {
-        self.display().unwrap_or_else(|| node_type.ua_default_display())
+        self.display()
+            .unwrap_or_else(|| node_type.ua_default_display())
     }
 
     /// Outer display role derived from CSS `display` (with UA default
@@ -397,7 +404,11 @@ impl CssAttr {
 
     /// `justify-content` (defaults to `FlexStart`).
     pub fn get_justify_content(&self) -> JustifyContent {
-        self.parse_or("justify-content", parse_justify_content, JustifyContent::FlexStart)
+        self.parse_or(
+            "justify-content",
+            parse_justify_content,
+            JustifyContent::FlexStart,
+        )
     }
 
     /// `align-items` for the container (defaults to `Stretch`).
@@ -430,7 +441,11 @@ impl CssAttr {
     /// `align-content` for multi-line flex containers (defaults to
     /// `FlexStart`).
     pub fn get_align_content(&self) -> JustifyContent {
-        self.parse_or("align-content", parse_justify_content, JustifyContent::FlexStart)
+        self.parse_or(
+            "align-content",
+            parse_justify_content,
+            JustifyContent::FlexStart,
+        )
     }
 
     /// `flex-grow` (defaults to `0`).
@@ -485,14 +500,26 @@ impl CssAttr {
             .0
             .get("row-gap")
             .and_then(|v| Length::parse(v))
-            .map(|l| l.resolve(LengthContext { containing: usize::MAX, font: font_ctx, viewport }))
+            .map(|l| {
+                l.resolve(LengthContext {
+                    containing: usize::MAX,
+                    font: font_ctx,
+                    viewport,
+                })
+            })
             .or_else(|| shorthand.map(|g| g.row))
             .unwrap_or(0);
         let column = self
             .0
             .get("column-gap")
             .and_then(|v| Length::parse(v))
-            .map(|l| l.resolve(LengthContext { containing: usize::MAX, font: font_ctx, viewport }))
+            .map(|l| {
+                l.resolve(LengthContext {
+                    containing: usize::MAX,
+                    font: font_ctx,
+                    viewport,
+                })
+            })
             .or_else(|| shorthand.map(|g| g.column))
             .unwrap_or(0);
         GapSizes { row, column }
@@ -513,7 +540,11 @@ impl CssAttr {
         let raw = self.0.get("height")?;
         match Length::parse(raw)? {
             Length::Auto => None,
-            len => Some(len.resolve(LengthContext { containing: containing_width, font: font_ctx, viewport })),
+            len => Some(len.resolve(LengthContext {
+                containing: containing_width,
+                font: font_ctx,
+                viewport,
+            })),
         }
     }
 
@@ -522,7 +553,11 @@ impl CssAttr {
     /// Inherited, so the cascade already merged an ancestor's value into this
     /// node's `css_attr` when applicable.
     pub fn get_text_transform(&self) -> TextTransform {
-        self.parse_or("text-transform", parse_text_transform, TextTransform::default())
+        self.parse_or(
+            "text-transform",
+            parse_text_transform,
+            TextTransform::default(),
+        )
     }
 
     /// Line-box height (CSS `line-height`). `normal` when unset.

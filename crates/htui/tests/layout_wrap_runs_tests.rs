@@ -5,7 +5,7 @@
 //! so each break policy can be asserted against exact run lists.
 
 use htui::html::css_parse::{OverflowWrap, WhiteSpace, WordBreak};
-use htui::layout::layoutbox::{wrap_runs, InlineRun};
+use htui::layout::layoutbox::{InlineRun, wrap_runs};
 use htui::tui::graph_api::FontStyle;
 
 fn run(s: &str, width: usize) -> Vec<Vec<InlineRun>> {
@@ -133,7 +133,14 @@ fn overflow_normal_does_not_split() {
 
 #[test]
 fn empty_input_yields_one_empty_line() {
-    let lines = wrap_runs(&[], 80, 1, WhiteSpace::Normal, WordBreak::Normal, OverflowWrap::Normal);
+    let lines = wrap_runs(
+        &[],
+        80,
+        1,
+        WhiteSpace::Normal,
+        WordBreak::Normal,
+        OverflowWrap::Normal,
+    );
     assert_eq!(lines.len(), 1);
     assert!(lines[0].is_empty());
 }

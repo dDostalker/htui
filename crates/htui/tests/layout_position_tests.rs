@@ -89,7 +89,11 @@ fn absolute_positions_within_relative_parent() {
         .abs { position: absolute; top: 1; left: 2; }
     "#;
     let (rows, _) = render_rows(html, css);
-    assert_eq!(cell(&rows, 2, 1), Some('A'), "A must sit at (2, 1) inside the parent");
+    assert_eq!(
+        cell(&rows, 2, 1),
+        Some('A'),
+        "A must sit at (2, 1) inside the parent"
+    );
     assert!(is_blank(&rows, 2, 0), "nothing above A");
 }
 
@@ -109,8 +113,16 @@ fn absolute_does_not_consume_flow_space() {
     let (rows, _) = render_rows(html, css);
     // The absolute box claims no flow rows: the (min-height 1) wrapper is
     // followed by the sibling on the next row.
-    assert_eq!(cell(&rows, 0, 1), Some('B'), "sibling must start right after the wrapper");
-    assert_eq!(cell(&rows, 0, 3), Some('A'), "absolute box must sit at row 3");
+    assert_eq!(
+        cell(&rows, 0, 1),
+        Some('B'),
+        "sibling must start right after the wrapper"
+    );
+    assert_eq!(
+        cell(&rows, 0, 3),
+        Some('A'),
+        "absolute box must sit at row 3"
+    );
 }
 
 #[test]
@@ -166,8 +178,16 @@ fn fixed_anchors_to_viewport() {
     let (rows, _) = render_rows(html, css);
     // Fixed anchors to the viewport, independent of flow: F at (5, 1) while
     // the static sibling occupies row 0.
-    assert_eq!(cell(&rows, 5, 1), Some('F'), "F must anchor to the viewport");
-    assert_eq!(cell(&rows, 0, 0), Some('G'), "static content must be on row 0");
+    assert_eq!(
+        cell(&rows, 5, 1),
+        Some('F'),
+        "F must anchor to the viewport"
+    );
+    assert_eq!(
+        cell(&rows, 0, 0),
+        Some('G'),
+        "static content must be on row 0"
+    );
 }
 
 #[test]
@@ -203,7 +223,11 @@ fn z_index_paints_high_value_on_top() {
         .b { position: absolute; top: 0; left: 0; z-index: 1; }
     "#;
     let (rows, _) = render_rows(html, css);
-    assert_eq!(cell(&rows, 0, 0), Some('B'), "higher z-index must paint on top");
+    assert_eq!(
+        cell(&rows, 0, 0),
+        Some('B'),
+        "higher z-index must paint on top"
+    );
 }
 
 #[test]
@@ -260,7 +284,11 @@ fn absolute_detaches_from_flex_container() {
     // The absolute child detaches from the flex layout: B is the only flex
     // item and starts at the container origin; A is anchored to the initial
     // containing block and paints above it.
-    assert_eq!(cell(&rows, 0, 0), Some('A'), "positioned A must paint on top");
+    assert_eq!(
+        cell(&rows, 0, 0),
+        Some('A'),
+        "positioned A must paint on top"
+    );
 }
 
 #[test]
@@ -282,8 +310,16 @@ fn relative_box_inside_relative_frame_renders_offset_text() {
     let (rows, _) = render_rows(html, css);
     // .row margin:1 → one(y=1, x=1), shifted flow y=4 offset → (5, 6), three(y=7).
     assert_eq!(cell(&rows, 1, 1), Some('o'), "first row at its flow slot");
-    assert_eq!(cell(&rows, 5, 6), Some('s'), "shifted text must render at (5, 6)");
-    assert_eq!(cell(&rows, 1, 7), Some('t'), "third row at its flow slot y=7");
+    assert_eq!(
+        cell(&rows, 5, 6),
+        Some('s'),
+        "shifted text must render at (5, 6)"
+    );
+    assert_eq!(
+        cell(&rows, 1, 7),
+        Some('t'),
+        "third row at its flow slot y=7"
+    );
 }
 
 #[test]

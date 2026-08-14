@@ -47,17 +47,29 @@ const DOC: &str = r#"<div class="panel">
 fn test_query_selector_tag_and_id_and_class() {
     init();
     assert_eq!(
-        run(DOC, "globalThis.__t = document.querySelector('p').textContent;", "__t"),
+        run(
+            DOC,
+            "globalThis.__t = document.querySelector('p').textContent;",
+            "__t"
+        ),
         "hello",
         "tag selector returns the first match in document order"
     );
     assert_eq!(
-        run(DOC, "globalThis.__i = document.querySelector('#intro').textContent;", "__i"),
+        run(
+            DOC,
+            "globalThis.__i = document.querySelector('#intro').textContent;",
+            "__i"
+        ),
         "hello",
         "id selector"
     );
     assert_eq!(
-        run(DOC, "globalThis.__c = document.querySelector('.lead').textContent;", "__c"),
+        run(
+            DOC,
+            "globalThis.__c = document.querySelector('.lead').textContent;",
+            "__c"
+        ),
         "hello",
         "class selector returns the first `.lead`"
     );
@@ -67,19 +79,31 @@ fn test_query_selector_tag_and_id_and_class() {
 fn test_query_selector_combinators() {
     init();
     assert_eq!(
-        run(DOC, "globalThis.__d = document.querySelector('div span em').textContent;", "__d"),
+        run(
+            DOC,
+            "globalThis.__d = document.querySelector('div span em').textContent;",
+            "__d"
+        ),
         "em",
         "descendant chain"
     );
     assert_eq!(
-        run(DOC, "globalThis.__c = document.querySelector('div > p').id;", "__c"),
+        run(
+            DOC,
+            "globalThis.__c = document.querySelector('div > p').id;",
+            "__c"
+        ),
         "intro",
         "child combinator"
     );
     // `~` walks every previous sibling (text nodes between elements do not
     // block it), so the span matches the earlier `<p>`s.
     assert_eq!(
-        run(DOC, "globalThis.__s = document.querySelector('p ~ span') === null ? 'none' : 'hit';", "__s"),
+        run(
+            DOC,
+            "globalThis.__s = document.querySelector('p ~ span') === null ? 'none' : 'hit';",
+            "__s"
+        ),
         "hit",
         "subsequent sibling combinator"
     );
@@ -87,12 +111,20 @@ fn test_query_selector_combinators() {
     // between them); use adjacent tags with no whitespace text between.
     let html = "<i>a</i><b>b</b><div>d</div>";
     assert_eq!(
-        run(html, "globalThis.__a = document.querySelector('i + b').textContent;", "__a"),
+        run(
+            html,
+            "globalThis.__a = document.querySelector('i + b').textContent;",
+            "__a"
+        ),
         "b",
         "adjacent sibling combinator"
     );
     assert_eq!(
-        run(html, "globalThis.__u = document.querySelector('*').nodeType;", "__u"),
+        run(
+            html,
+            "globalThis.__u = document.querySelector('*').nodeType;",
+            "__u"
+        ),
         "1",
         "universal selector matches an element node"
     );
@@ -106,7 +138,11 @@ fn test_query_selector_nth_child() {
     // stylesheet matcher).
     let html = "<ul><li>a</li><li>b</li><li>c</li></ul>";
     assert_eq!(
-        run(html, "globalThis.__n = document.querySelector('li:nth-child(2)').textContent;", "__n"),
+        run(
+            html,
+            "globalThis.__n = document.querySelector('li:nth-child(2)').textContent;",
+            "__n"
+        ),
         "b",
         ":nth-child(2) picks the second li"
     );
@@ -116,7 +152,11 @@ fn test_query_selector_nth_child() {
 fn test_query_selector_no_match_returns_null() {
     init();
     assert_eq!(
-        run(DOC, "globalThis.__n = document.querySelector('article') === null;", "__n"),
+        run(
+            DOC,
+            "globalThis.__n = document.querySelector('article') === null;",
+            "__n"
+        ),
         "true",
         "no match returns null"
     );
@@ -153,12 +193,20 @@ fn test_query_selector_all_document_order() {
         "querySelectorAll returns every match in document order"
     );
     assert_eq!(
-        run(DOC, "globalThis.__n = document.querySelectorAll('.lead').length;", "__n"),
+        run(
+            DOC,
+            "globalThis.__n = document.querySelectorAll('.lead').length;",
+            "__n"
+        ),
         "2",
         "compound class selector matches both leads"
     );
     assert_eq!(
-        run(DOC, "globalThis.__n = document.querySelectorAll('*').length;", "__n"),
+        run(
+            DOC,
+            "globalThis.__n = document.querySelectorAll('*').length;",
+            "__n"
+        ),
         "12",
         "universal selector enumerates every element (incl. html/head/body)"
     );
@@ -185,7 +233,11 @@ fn test_element_query_selector_scoped() {
     );
     // The document query still sees everything.
     assert_eq!(
-        run(html, "globalThis.__all = document.querySelectorAll('p').length;", "__all"),
+        run(
+            html,
+            "globalThis.__all = document.querySelectorAll('p').length;",
+            "__all"
+        ),
         "2",
         "document.querySelectorAll spans the whole document"
     );

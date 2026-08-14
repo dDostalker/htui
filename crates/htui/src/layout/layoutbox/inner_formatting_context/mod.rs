@@ -17,8 +17,8 @@
 //! - [`FormattingContext::Grid`] — CSS grid container (reserved). Lives in
 //!   [`grid`](self::grid).
 
-pub mod flow;
 pub mod flex;
+pub mod flow;
 pub mod grid;
 
 /// Formatting context established by a box for its children.

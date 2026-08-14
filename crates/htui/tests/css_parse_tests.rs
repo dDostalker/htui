@@ -569,38 +569,22 @@ fn test_color_rgba_and_modern_syntax() {
     // Legacy comma syntax with a 4th alpha component.
     assert_eq!(
         parse_color_str("rgba(255, 0, 0, 0.5)"),
-        Some(Color::Rgb {
-            r: 255,
-            g: 0,
-            b: 0
-        }),
+        Some(Color::Rgb { r: 255, g: 0, b: 0 }),
         "rgba alpha is dropped (opaque)"
     );
     // CSS Color 4 space syntax with a `/ alpha` separator.
     assert_eq!(
         parse_color_str("rgb(255 0 0 / 50%)"),
-        Some(Color::Rgb {
-            r: 255,
-            g: 0,
-            b: 0
-        })
+        Some(Color::Rgb { r: 255, g: 0, b: 0 })
     );
     // Percentage components + out-of-range clamping (CSS Color 4).
     assert_eq!(
         parse_color_str("rgb(100% 0% 0%)"),
-        Some(Color::Rgb {
-            r: 255,
-            g: 0,
-            b: 0
-        })
+        Some(Color::Rgb { r: 255, g: 0, b: 0 })
     );
     assert_eq!(
         parse_color_str("rgb(300, 0, 0)"),
-        Some(Color::Rgb {
-            r: 255,
-            g: 0,
-            b: 0
-        }),
+        Some(Color::Rgb { r: 255, g: 0, b: 0 }),
         "out-of-range components clamp to 0–255"
     );
     assert_eq!(
@@ -618,37 +602,21 @@ fn test_color_hsl_parsing() {
     // hsl(0, 100%, 50%) == red; hsl(120, 100%, 50%) == green.
     assert_eq!(
         parse_color_str("hsl(0, 100%, 50%)"),
-        Some(Color::Rgb {
-            r: 255,
-            g: 0,
-            b: 0
-        })
+        Some(Color::Rgb { r: 255, g: 0, b: 0 })
     );
     assert_eq!(
         parse_color_str("hsl(120, 100%, 50%)"),
-        Some(Color::Rgb {
-            r: 0,
-            g: 255,
-            b: 0
-        })
+        Some(Color::Rgb { r: 0, g: 255, b: 0 })
     );
     // Space syntax + `/ alpha` (dropped).
     assert_eq!(
         parse_color_str("hsl(120 100% 50% / 0.25)"),
-        Some(Color::Rgb {
-            r: 0,
-            g: 255,
-            b: 0
-        })
+        Some(Color::Rgb { r: 0, g: 255, b: 0 })
     );
     // Hue wraps: 480° ≡ 120°.
     assert_eq!(
         parse_color_str("hsl(480, 100%, 50%)"),
-        Some(Color::Rgb {
-            r: 0,
-            g: 255,
-            b: 0
-        })
+        Some(Color::Rgb { r: 0, g: 255, b: 0 })
     );
     // Zero saturation → gray.
     assert_eq!(
@@ -662,11 +630,7 @@ fn test_color_hsl_parsing() {
     // hsla legacy comma syntax with the 4th alpha component.
     assert_eq!(
         parse_color_str("hsla(0, 100%, 50%, 0.5)"),
-        Some(Color::Rgb {
-            r: 255,
-            g: 0,
-            b: 0
-        })
+        Some(Color::Rgb { r: 255, g: 0, b: 0 })
     );
 }
 
@@ -674,20 +638,12 @@ fn test_color_hsl_parsing() {
 fn test_color_hex_alpha_parsing() {
     assert_eq!(
         parse_color_str("#ff000080"),
-        Some(Color::Rgb {
-            r: 255,
-            g: 0,
-            b: 0
-        }),
+        Some(Color::Rgb { r: 255, g: 0, b: 0 }),
         "#RRGGBBAA drops the alpha channel"
     );
     assert_eq!(
         parse_color_str("#f008"),
-        Some(Color::Rgb {
-            r: 255,
-            g: 0,
-            b: 0
-        }),
+        Some(Color::Rgb { r: 255, g: 0, b: 0 }),
         "#RGBA drops the alpha channel"
     );
 }
@@ -856,7 +812,10 @@ fn test_parse_splits_important_declarations() {
     let css = Parser::new("p { color: red !important; width: 10px }").parse();
     assert_eq!(css.0.len(), 1);
     let entry = &css.0[0];
-    assert_eq!(entry.normal.0.get("width").map(String::as_str), Some("10px"));
+    assert_eq!(
+        entry.normal.0.get("width").map(String::as_str),
+        Some("10px")
+    );
     assert!(entry.normal.0.get("color").is_none());
     assert_eq!(
         entry.important.0.get("color").map(String::as_str),
@@ -1207,10 +1166,12 @@ fn length_parse_cells_px_multiply_matches_raw_value_when_ratio_is_one() {
     init();
     assert_eq!(
         (40.0_f32 * PX_PER_CELL).round() as usize,
-        Length::parse("40px").map(|l| match l {
-            Length::Px(n) => n as usize,
-            _ => panic!("expected Px"),
-        }).unwrap()
+        Length::parse("40px")
+            .map(|l| match l {
+                Length::Px(n) => n as usize,
+                _ => panic!("expected Px"),
+            })
+            .unwrap()
     );
 }
 
@@ -1293,10 +1254,7 @@ fn length_parse_rejects_signed_and_junk() {
 #[test]
 fn length_resolve_auto_and_cells() {
     init();
-    assert_eq!(
-        Length::Auto.resolve(length_ctx(80, default_font_ctx())),
-        80
-    );
+    assert_eq!(Length::Auto.resolve(length_ctx(80, default_font_ctx())), 80);
     assert_eq!(
         Length::Cells(40.0).resolve(length_ctx(80, default_font_ctx())),
         40
@@ -1406,10 +1364,19 @@ fn length_resolve_vw_vh_anchor_to_viewport() {
     // `containing` is intentionally a different number to prove `vw` does
     // NOT anchor to the containing block — it always uses the viewport.
     assert_eq!(Length::Vw(50.0).resolve(length_ctx(80, font_ctx(1, 1))), 40); // 50 * 80 / 100
-    assert_eq!(Length::Vw(100.0).resolve(length_ctx(80, font_ctx(1, 1))), 80);
-    assert_eq!(Length::Vw(50.0).resolve(length_ctx(999, font_ctx(1, 1))), 40); // containing irrelevant
+    assert_eq!(
+        Length::Vw(100.0).resolve(length_ctx(80, font_ctx(1, 1))),
+        80
+    );
+    assert_eq!(
+        Length::Vw(50.0).resolve(length_ctx(999, font_ctx(1, 1))),
+        40
+    ); // containing irrelevant
     assert_eq!(Length::Vh(50.0).resolve(length_ctx(80, font_ctx(1, 1))), 12); // 50 * 24 / 100
-    assert_eq!(Length::Vh(100.0).resolve(length_ctx(80, font_ctx(1, 1))), 24);
+    assert_eq!(
+        Length::Vh(100.0).resolve(length_ctx(80, font_ctx(1, 1))),
+        24
+    );
     // Rounding: 33.3 * 80 / 100 = 26.64 → 27.
     assert_eq!(Length::Vw(33.3).resolve(length_ctx(80, font_ctx(1, 1))), 27);
     // Min-1 clamp: 0.5vw at viewport_cols=80 → 0.4 → 1.
@@ -1427,7 +1394,11 @@ fn css_attr_get_width_end_to_end() {
     decls.insert("width".into(), "auto".into());
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
+        attr.get_width(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        ),
         None
     );
 
@@ -1436,7 +1407,11 @@ fn css_attr_get_width_end_to_end() {
     decls.insert("width".into(), "40px".into());
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
+        attr.get_width(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        ),
         Some(40)
     );
 
@@ -1445,7 +1420,11 @@ fn css_attr_get_width_end_to_end() {
     decls.insert("width".into(), "50%".into());
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
+        attr.get_width(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        ),
         Some(40)
     );
 
@@ -1454,7 +1433,11 @@ fn css_attr_get_width_end_to_end() {
     decls.insert("width".into(), "2em".into());
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
+        attr.get_width(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        ),
         Some(2)
     );
 
@@ -1463,7 +1446,11 @@ fn css_attr_get_width_end_to_end() {
     decls.insert("width".into(), "1.5em".into());
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
+        attr.get_width(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        ),
         Some(2)
     ); // 1.5 rounds away
 
@@ -1472,7 +1459,11 @@ fn css_attr_get_width_end_to_end() {
     decls.insert("width".into(), "2rem".into());
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
+        attr.get_width(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        ),
         Some(2)
     );
 
@@ -1482,7 +1473,11 @@ fn css_attr_get_width_end_to_end() {
     decls.insert("width".into(), "50vw".into());
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
+        attr.get_width(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        ),
         Some(40)
     );
 
@@ -1492,13 +1487,21 @@ fn css_attr_get_width_end_to_end() {
     decls.insert("width".into(), "50vh".into());
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
+        attr.get_width(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        ),
         Some(12)
     );
 
     // Missing property → None.
     assert_eq!(
-        CssAttr::new().get_width(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
+        CssAttr::new().get_width(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        ),
         None
     );
 }
@@ -1518,7 +1521,11 @@ fn attr_from_decl(name: &str, value: &str) -> CssAttr {
 #[test]
 fn padding_shorthand_one_value_fills_all_sides() {
     let attr = attr_from_decl("padding", "5px");
-    let edges = attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
+    let edges = attr.get_padding(
+        80,
+        font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+        viewport(),
+    );
     assert_eq!(edges, EdgeSizes::new(5, 5, 5, 5));
 }
 
@@ -1527,7 +1534,11 @@ fn padding_shorthand_two_values_vertical_horizontal() {
     // `padding: 10px 20px;` → top/bottom = 10, left/right = 20
     let attr = attr_from_decl("padding", "10px 20px");
     assert_eq!(
-        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
+        attr.get_padding(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        ),
         EdgeSizes::new(10, 20, 10, 20)
     );
 }
@@ -1537,7 +1548,11 @@ fn padding_shorthand_three_values_top_horizontal_bottom() {
     // `padding: 1px 2px 3px;` → top=1, left/right=2, bottom=3
     let attr = attr_from_decl("padding", "1px 2px 3px");
     assert_eq!(
-        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
+        attr.get_padding(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        ),
         EdgeSizes::new(1, 2, 3, 2)
     );
 }
@@ -1547,7 +1562,11 @@ fn padding_shorthand_four_values_clockwise() {
     // `padding: 1px 2px 3px 4px;` → top=1, right=2, bottom=3, left=4
     let attr = attr_from_decl("padding", "1px 2px 3px 4px");
     assert_eq!(
-        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
+        attr.get_padding(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        ),
         EdgeSizes::new(1, 2, 3, 4)
     );
 }
@@ -1561,7 +1580,11 @@ fn padding_longhands_override_shorthand() {
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));
     assert_eq!(
-        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
+        attr.get_padding(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        ),
         EdgeSizes::new(7, 0, 0, 0)
     );
 }
@@ -1570,14 +1593,22 @@ fn padding_longhands_override_shorthand() {
 fn padding_supports_percent_and_em() {
     let attr = attr_from_decl("padding", "50%");
     assert_eq!(
-        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport())
-            .left,
+        attr.get_padding(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        )
+        .left,
         40
     );
     let attr = attr_from_decl("padding-top", "3em");
     assert_eq!(
-        attr.get_padding(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport())
-            .top,
+        attr.get_padding(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        )
+        .top,
         3
     );
 }
@@ -1586,12 +1617,20 @@ fn padding_supports_percent_and_em() {
 fn margin_shorthand_mirrors_padding() {
     let attr = attr_from_decl("margin", "2px 4px");
     assert_eq!(
-        attr.get_margin(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
+        attr.get_margin(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        ),
         EdgeSizes::new(2, 4, 2, 4)
     );
     let attr = attr_from_decl("margin-left", "6px");
     assert_eq!(
-        attr.get_margin(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
+        attr.get_margin(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        ),
         EdgeSizes::new(0, 0, 0, 6)
     );
 }
@@ -1602,7 +1641,11 @@ fn margin_auto_collapses_to_zero() {
     // don't need a special case.
     let attr = attr_from_decl("margin", "auto");
     assert_eq!(
-        attr.get_margin(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport()),
+        attr.get_margin(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport()
+        ),
         EdgeSizes::default()
     );
 }
@@ -1610,7 +1653,11 @@ fn margin_auto_collapses_to_zero() {
 #[test]
 fn border_shorthand_solid_parses_width_and_style() {
     let attr = attr_from_decl("border", "1px solid red");
-    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
+    let sides = attr.get_border(
+        80,
+        font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+        viewport(),
+    );
     assert_eq!(sides.top.width, 1);
     assert_eq!(sides.top.style, BorderStyle::Solid);
     assert_eq!(
@@ -1631,28 +1678,28 @@ fn border_shorthand_parses_functional_colors() {
     // `border: 1px solid rgb(255, 0, 0)` — the parenthesised color must stay
     // one token through the shorthand's whitespace split.
     let attr = attr_from_decl("border", "1px solid rgb(255, 0, 0)");
-    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
+    let sides = attr.get_border(
+        80,
+        font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+        viewport(),
+    );
     assert_eq!(
         sides.top.color,
-        Some(Color::Rgb {
-            r: 255,
-            g: 0,
-            b: 0
-        }),
+        Some(Color::Rgb { r: 255, g: 0, b: 0 }),
         "comma-syntax rgb() must survive the border shorthand"
     );
     assert_eq!(sides.top.style, BorderStyle::Solid);
 
     // Space-syntax hsl() with internal spaces also works.
     let attr = attr_from_decl("border", "2px solid hsl(120 100% 50%)");
-    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
+    let sides = attr.get_border(
+        80,
+        font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+        viewport(),
+    );
     assert_eq!(
         sides.top.color,
-        Some(Color::Rgb {
-            r: 0,
-            g: 255,
-            b: 0
-        }),
+        Some(Color::Rgb { r: 0, g: 255, b: 0 }),
         "space-syntax hsl() must survive the border shorthand"
     );
     assert_eq!(sides.top.width, 2);
@@ -1661,7 +1708,11 @@ fn border_shorthand_parses_functional_colors() {
 #[test]
 fn border_shorthand_style_alone_applies_to_all_sides() {
     let attr = attr_from_decl("border", "solid");
-    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
+    let sides = attr.get_border(
+        80,
+        font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+        viewport(),
+    );
     assert_eq!(sides.top.style, BorderStyle::Solid);
     assert_eq!(sides.bottom.style, BorderStyle::Solid);
     assert_eq!(sides.left.style, BorderStyle::Solid);
@@ -1677,7 +1728,11 @@ fn border_longhand_overrides_universal_shorthand() {
     decls.insert("border-top".into(), "3px solid blue".into());
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));
-    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
+    let sides = attr.get_border(
+        80,
+        font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+        viewport(),
+    );
     assert_eq!(sides.top.width, 3);
     assert_eq!(
         sides.top.color,
@@ -1708,7 +1763,11 @@ fn border_universal_width_style_color_layers_correctly() {
     decls.insert("border-color".into(), "green".into());
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));
-    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
+    let sides = attr.get_border(
+        80,
+        font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+        viewport(),
+    );
     assert_eq!(sides.top.width, 2);
     assert_eq!(sides.top.style, BorderStyle::Solid);
     assert_eq!(
@@ -1724,7 +1783,11 @@ fn border_universal_width_style_color_layers_correctly() {
 #[test]
 fn border_style_none_hides_the_border() {
     let attr = attr_from_decl("border-style", "none");
-    let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
+    let sides = attr.get_border(
+        80,
+        font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+        viewport(),
+    );
     assert!(!sides.any_visible());
 }
 
@@ -1733,7 +1796,11 @@ fn border_unknown_style_falls_back_to_solid() {
     // `dashed`, `dotted`, `double` etc. all render as solid in the terminal.
     for keyword in ["dashed", "dotted", "double", "groove"] {
         let attr = attr_from_decl("border", &format!("1px {keyword} red"));
-        let sides = attr.get_border(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
+        let sides = attr.get_border(
+            80,
+            font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+            viewport(),
+        );
         assert_eq!(
             sides.top.style,
             BorderStyle::Solid,
@@ -1750,7 +1817,11 @@ fn get_box_edges_returns_combined_padding_border_margin() {
     decls.insert("border".into(), "1px solid red".into());
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));
-    let edges = attr.get_box_edges(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
+    let edges = attr.get_box_edges(
+        80,
+        font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+        viewport(),
+    );
     assert_eq!(edges.padding.top, 2);
     assert_eq!(edges.margin.left, 4);
     assert_eq!(edges.border.top.width, 1);
@@ -1855,7 +1926,10 @@ fn line_height_parses_normal_number_and_length() {
     let attr = attr_from_decl("line-height", "2em");
     assert_eq!(attr.get_line_height(), LineHeight::Length(Length::Em(2.0)));
     let attr = attr_from_decl("line-height", "150%");
-    assert_eq!(attr.get_line_height(), LineHeight::Length(Length::Pct(150.0)));
+    assert_eq!(
+        attr.get_line_height(),
+        LineHeight::Length(Length::Pct(150.0))
+    );
     assert_eq!(CssAttr::new().get_line_height(), LineHeight::Normal);
 }
 
@@ -1973,7 +2047,10 @@ fn border_radius_parses_one_to_four_values() {
         }
     );
     // Unset -> square corners.
-    assert_eq!(CssAttr::new().get_border_radius(80, default_font_ctx(), viewport()), CornerRadii::default());
+    assert_eq!(
+        CssAttr::new().get_border_radius(80, default_font_ctx(), viewport()),
+        CornerRadii::default()
+    );
 }
 
 #[test]

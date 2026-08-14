@@ -1,7 +1,7 @@
 use crossterm::style::Color;
 use htui::{
     html::{css_parse, html_parse},
-    layout::layout::TermMap,
+    layout::{Rect, layout::TermMap},
     tdom::node::{Node, NodeArena, NodeId, NodeType},
     tui::graph_api::TermLayout,
 };
@@ -24,10 +24,7 @@ fn find_id(arena: &NodeArena, target: &str) -> Option<NodeId> {
         if node.attributes.get("id").is_some_and(|v| v == target) {
             return Some(id);
         }
-        node
-            .children
-            .iter()
-            .find_map(|&c| walk(arena, c, target))
+        node.children.iter().find_map(|&c| walk(arena, c, target))
     }
     let root = arena
         .iter()
@@ -94,7 +91,10 @@ fn scroll_bound_never_exceeds_the_canvas_buffer() {
     }
     html.push_str("</div>");
     let (root_id, arena) = setup(&html);
-    let map = TermMap { columns: 10, rows: 4 };
+    let map = TermMap {
+        columns: 10,
+        rows: 4,
+    };
     let mut tl = TermLayout::new(&map, 1.0);
     tl.draw(&arena, root_id, &map);
 
@@ -169,7 +169,10 @@ fn changed_content_emits_smaller_diff_than_full_frame() {
     tl.draw(&arena2, root2, &map);
     let diff = tl.render_diff_to_bytes();
     assert!(!diff.is_empty(), "changed frame must emit something");
-    assert!(diff.len() < full.len(), "diff must stay below full-frame size");
+    assert!(
+        diff.len() < full.len(),
+        "diff must stay below full-frame size"
+    );
     assert!(
         String::from_utf8_lossy(&diff).contains("second"),
         "diff must carry the new text"
@@ -255,7 +258,10 @@ fn region_repaint_emits_only_the_changed_text() {
 
     let diff = tl.render_diff_to_bytes();
     let text = String::from_utf8_lossy(&diff);
-    assert!(text.contains("helpx"), "region repaint must show the new text");
+    assert!(
+        text.contains("helpx"),
+        "region repaint must show the new text"
+    );
     assert!(
         !text.contains("world"),
         "unchanged sibling must not be re-emitted by a region repaint"
@@ -296,7 +302,11 @@ fn region_repaint_preserves_ancestor_background() {
     let text_cell = &tl.layout[rect.y.saturating_mul(cols).saturating_add(rect.x)];
     assert_eq!(
         text_cell.bcolor,
-        Some(Color::Rgb { r: 0, g: 255, b: 255 }),
+        Some(Color::Rgb {
+            r: 0,
+            g: 255,
+            b: 255
+        }),
         "region repaint must keep the ancestor background on text cells"
     );
 }
@@ -469,10 +479,7 @@ fn incremental_repaint_matches_full_repaint_after_value_changes() {
 fn same_canvas(a: &[htui::tui::graph_api::Block], b: &[htui::tui::graph_api::Block]) -> bool {
     a.len() == b.len()
         && a.iter().zip(b.iter()).all(|(x, y)| {
-            x.word == y.word
-                && x.fcolor == y.fcolor
-                && x.bcolor == y.bcolor
-                && x.style == y.style
+            x.word == y.word && x.fcolor == y.fcolor && x.bcolor == y.bcolor && x.style == y.style
         })
 }
 
@@ -534,5 +541,239 @@ fn viewport_resize_recreates_canvas_and_recovers() {
     assert!(
         !shrunk.render_diff_to_bytes().is_empty(),
         "shrunken viewport must re-emit content"
+    );
+}
+
+/// The page-selection highlight must preserve background-driven widgets.
+///
+/// The music example's progress bar is a flex row of two background-only divs
+/// (fill / rest) with no glyphs. The old highlight unconditionally overwrote
+/// every selected cell's background with the flat selection colour, erasing
+/// the fill / rest boundary — the bar became invisible under the selection.
+/// It must instead blend an existing RGB background with the selection colour
+/// so the two halves stay distinguishable (tinted, browser-like translucent
+/// `::selection`).
+#[test]
+fn selection_highlight_preserves_progress_bar_colors() {
+    let html = r#"
+      <style>
+        .prog { display: flex; }
+        .fill { background-color: #bb9af7; }
+        .rest { background-color: #2f334d; }
+      </style>
+      <div class="prog">
+        <div class="fill" style="flex-grow: 30;"></div>
+        <div class="rest" style="flex-grow: 70;"></div>
+      </div>
+    "#;
+    let (root_id, arena) = setup(html);
+    let map = term_map();
+    let mut tl = TermLayout::new(&map, 1.0);
+    tl.draw(&arena, root_id, &map);
+
+    let fill = Color::Rgb {
+        r: 0xbb,
+        g: 0x9a,
+        b: 0xf7,
+    };
+    let rest = Color::Rgb {
+        r: 0x2f,
+        g: 0x33,
+        b: 0x4d,
+    };
+    let fill_idx: Vec<usize> = tl
+        .layout
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.bcolor == Some(fill))
+        .map(|(i, _)| i)
+        .collect();
+    let rest_idx: Vec<usize> = tl
+        .layout
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.bcolor == Some(rest))
+        .map(|(i, _)| i)
+        .collect();
+    assert!(!fill_idx.is_empty(), "fill half must render");
+    assert!(!rest_idx.is_empty(), "rest half must render");
+    let cols = tl.columns as usize;
+    assert_eq!(
+        fill_idx[0] / cols,
+        rest_idx[0] / cols,
+        "fill and rest share one bar row"
+    );
+
+    // Right-drag style block selection spanning the whole bar row.
+    let row = (fill_idx[0] / cols) as u32;
+    let xs = (fill_idx[0] % cols) as u32;
+    let xe = (rest_idx[rest_idx.len() - 1] % cols + 1) as u32;
+    tl.apply_text_selection(
+        &[(row, xs, xe)],
+        Color::Rgb {
+            r: 0x3b,
+            g: 0x42,
+            b: 0x61,
+        },
+    );
+
+    // Blended halves stay distinct — the bar boundary survives the highlight.
+    let blended_fill = Color::Rgb {
+        r: ((0xbb + 0x3b) / 2) as u8,
+        g: ((0x9a + 0x42) / 2) as u8,
+        b: ((0xf7 + 0x61) / 2) as u8,
+    };
+    let blended_rest = Color::Rgb {
+        r: ((0x2f + 0x3b) / 2) as u8,
+        g: ((0x33 + 0x42) / 2) as u8,
+        b: ((0x4d + 0x61) / 2) as u8,
+    };
+    assert!(
+        fill_idx
+            .iter()
+            .all(|&i| tl.layout[i].bcolor == Some(blended_fill)),
+        "fill cells must keep a purple-tinted background under the highlight"
+    );
+    assert!(
+        rest_idx
+            .iter()
+            .all(|&i| tl.layout[i].bcolor == Some(blended_rest)),
+        "rest cells must keep a dark background under the highlight"
+    );
+    assert_ne!(blended_fill, blended_rest, "bar boundary must stay visible");
+}
+
+/// Cells without a background must keep the flat selection colour and their
+/// original foreground — the standard terminal highlight stays untouched.
+#[test]
+fn selection_highlight_keeps_plain_highlight_on_default_bg() {
+    let (root_id, arena) = setup(r#"<div>plain text</div>"#);
+    let map = term_map();
+    let mut tl = TermLayout::new(&map, 1.0);
+    tl.draw(&arena, root_id, &map);
+
+    let cols = tl.columns as usize;
+    let row = (0..tl.layout.len())
+        .find(|&i| !tl.layout[i].word.is_empty() && tl.layout[i].word != " ")
+        .map(|i| i / cols)
+        .expect("text row");
+    let fg = tl.layout[row * cols].fcolor;
+    let sel = Color::Rgb {
+        r: 0x3b,
+        g: 0x42,
+        b: 0x61,
+    };
+    tl.apply_text_selection(&[(row as u32, 0, 20)], sel);
+
+    for x in 0..20 {
+        let cell = &tl.layout[row * cols + x];
+        if !cell.word.is_empty() {
+            assert_eq!(cell.bcolor, Some(sel), "glyph cell takes the selection bg");
+            assert_eq!(cell.fcolor, fg, "glyph keeps its foreground");
+        }
+    }
+}
+
+/// A selection re-applied after a repaint must not darken.
+///
+/// The render thread repaints the selection bounds before re-applying the
+/// highlight (see `RenderState::layout_and_paint` / `repaint_dynamic`), so
+/// every selected cell is blended exactly once from its fresh paint colour.
+/// Blending a cell that already carries the highlight would darken it a step
+/// per repaint — a timer / hover repaint turns that into the bright / dark
+/// flicker.
+#[test]
+fn selection_reapply_after_full_repaint_keeps_single_blend() {
+    let html = r#"
+      <style>
+        .prog { display: flex; height: 1; }
+        .fill { background-color: #bb9af7; }
+        .rest { background-color: #2f334d; }
+      </style>
+      <div class="prog">
+        <div class="fill" style="flex-grow: 30;"></div>
+        <div class="rest" style="flex-grow: 70;"></div>
+      </div>
+    "#;
+    let (root_id, arena) = setup(html);
+    let map = term_map();
+    let mut tl = TermLayout::new(&map, 1.0);
+    tl.draw(&arena, root_id, &map);
+    let boxes = tl.layout_only(&arena, root_id, &map);
+
+    let fill = Color::Rgb {
+        r: 0xbb,
+        g: 0x9a,
+        b: 0xf7,
+    };
+    let rest = Color::Rgb {
+        r: 0x2f,
+        g: 0x33,
+        b: 0x4d,
+    };
+    let fill_idx: Vec<usize> = tl
+        .layout
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.bcolor == Some(fill))
+        .map(|(i, _)| i)
+        .collect();
+    let rest_idx: Vec<usize> = tl
+        .layout
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.bcolor == Some(rest))
+        .map(|(i, _)| i)
+        .collect();
+    assert!(!fill_idx.is_empty(), "fill half must render");
+    assert!(!rest_idx.is_empty(), "rest half must render");
+    let cols = tl.columns as usize;
+    let row = (fill_idx[0] / cols) as u32;
+    let xs = (fill_idx[0] % cols) as u32;
+    let xe = (rest_idx[rest_idx.len() - 1] % cols + 1) as u32;
+
+    let sel = Color::Rgb {
+        r: 0x3b,
+        g: 0x42,
+        b: 0x61,
+    };
+    let band = [(row, xs, xe)];
+    tl.apply_text_selection(&band, sel);
+
+    let blended_fill = Color::Rgb {
+        r: 123,
+        g: 110,
+        b: 172,
+    };
+    let blended_rest = Color::Rgb {
+        r: 53,
+        g: 58,
+        b: 87,
+    };
+    assert!(
+        fill_idx
+            .iter()
+            .all(|&i| tl.layout[i].bcolor == Some(blended_fill)),
+        "fill cells must show the single-blend colour after the first apply"
+    );
+
+    // Render-thread sequence when an animated widget repaints while the
+    // selection is active: a repaint covering the selection bounds restores
+    // the base colours, then the highlight is re-applied — one blend, same
+    // colour as before (no progressive darkening).
+    let sel_rect = Rect::new(xs as usize, row as usize, (xe - xs) as usize, 1);
+    tl.repaint_region(&arena, &boxes, sel_rect);
+    tl.apply_text_selection(&band, sel);
+    assert!(
+        fill_idx
+            .iter()
+            .all(|&i| tl.layout[i].bcolor == Some(blended_fill)),
+        "re-applied highlight must keep the single-blend colour (no darkening)"
+    );
+    assert!(
+        rest_idx
+            .iter()
+            .all(|&i| tl.layout[i].bcolor == Some(blended_rest)),
+        "rest cells must keep the single-blend colour under the re-applied highlight"
     );
 }

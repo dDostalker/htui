@@ -15,7 +15,7 @@ use super::algorithm::{
     align_content_spacing, align_on_cross_axis, distribute_main_axis, effective_align,
     justify_spacing, wrap_into_lines,
 };
-use super::container::{FLEX_ITEM_MIN_CROSS, FlexItemPrep, FlexItemSource, AnonymousTextItem};
+use super::container::{AnonymousTextItem, FLEX_ITEM_MIN_CROSS, FlexItemPrep, FlexItemSource};
 use super::prepare::{natural_cross_axis_size_for_prep, resolve_item_cross_size};
 
 /// Lay out every flex item across one or more lines and return the

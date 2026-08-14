@@ -58,7 +58,9 @@ impl<'a> HostCtx<'a> {
         if v.is_undefined() || v.is_null() {
             return Ok(None);
         }
-        T::from_js(v, self.context).map(Some).map_err(HostError::from)
+        T::from_js(v, self.context)
+            .map(Some)
+            .map_err(HostError::from)
     }
 
     /// Convert the i-th JS argument into `T`, erroring when it is absent.

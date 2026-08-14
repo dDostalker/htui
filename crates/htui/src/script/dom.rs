@@ -16,15 +16,17 @@ use std::time::{Duration, Instant};
 
 use boa_engine::{
     Context, JsNativeError, JsObject, JsResult, JsString, JsValue, NativeFunction, js_string,
-    object::{FunctionObjectBuilder, ObjectInitializer, builtins::JsFunction},
     object::builtins::JsPromise,
+    object::{FunctionObjectBuilder, ObjectInitializer, builtins::JsFunction},
     property::{Attribute, PropertyDescriptorBuilder},
 };
 use slotmap::Key;
 
 use crate::{
     events::EventType,
-    html::css_parse::{CssSelector, SUPPORTED_PROPERTIES, parse_declaration_text, selector_chain_matches},
+    html::css_parse::{
+        CssSelector, SUPPORTED_PROPERTIES, parse_declaration_text, selector_chain_matches,
+    },
     resources,
     tdom::node::{Node, NodeArena, NodeId, NodeType, document_base_href},
     tui::graph_api::RenderCmd,
@@ -137,14 +139,25 @@ fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsValue
     let get_text = js_fn(context, NativeFunction::from_fn_ptr(native_get_text));
     let set_text = js_fn(context, NativeFunction::from_fn_ptr(native_set_text));
     let get_parent = js_fn(context, NativeFunction::from_fn_ptr(native_get_parent));
-    let get_parent_element =
-        js_fn(context, NativeFunction::from_fn_ptr(native_get_parent_element));
+    let get_parent_element = js_fn(
+        context,
+        NativeFunction::from_fn_ptr(native_get_parent_element),
+    );
     let get_child_nodes = js_fn(context, NativeFunction::from_fn_ptr(native_get_child_nodes));
     let get_first_child = js_fn(context, NativeFunction::from_fn_ptr(native_get_first_child));
     let get_last_child = js_fn(context, NativeFunction::from_fn_ptr(native_get_last_child));
-    let get_prev_sibling = js_fn(context, NativeFunction::from_fn_ptr(native_get_prev_sibling));
-    let get_next_sibling = js_fn(context, NativeFunction::from_fn_ptr(native_get_next_sibling));
-    let get_owner_doc = js_fn(context, NativeFunction::from_fn_ptr(native_get_owner_document));
+    let get_prev_sibling = js_fn(
+        context,
+        NativeFunction::from_fn_ptr(native_get_prev_sibling),
+    );
+    let get_next_sibling = js_fn(
+        context,
+        NativeFunction::from_fn_ptr(native_get_next_sibling),
+    );
+    let get_owner_doc = js_fn(
+        context,
+        NativeFunction::from_fn_ptr(native_get_owner_document),
+    );
     let get_base_uri = js_fn(context, NativeFunction::from_fn_ptr(native_get_base_uri));
     let get_data = js_fn(context, NativeFunction::from_fn_ptr(native_get_data));
     let set_data = js_fn(context, NativeFunction::from_fn_ptr(native_set_data));
@@ -164,19 +177,84 @@ fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsValue
     init.property(js_string!("_nodeId"), node_key, hidden);
 
     // Common Node interface.
-    init.accessor(js_string!("nodeType"), Some(get_node_type), None, Attribute::all());
-    init.accessor(js_string!("nodeName"), Some(get_node_name), None, Attribute::all());
-    init.accessor(js_string!("textContent"), Some(get_text), Some(set_text), Attribute::all());
-    init.accessor(js_string!("nodeValue"), Some(get_node_value), Some(set_node_value), Attribute::all());
-    init.accessor(js_string!("parentNode"), Some(get_parent), None, Attribute::all());
-    init.accessor(js_string!("parentElement"), Some(get_parent_element), None, Attribute::all());
-    init.accessor(js_string!("childNodes"), Some(get_child_nodes), None, Attribute::all());
-    init.accessor(js_string!("firstChild"), Some(get_first_child), None, Attribute::all());
-    init.accessor(js_string!("lastChild"), Some(get_last_child), None, Attribute::all());
-    init.accessor(js_string!("previousSibling"), Some(get_prev_sibling), None, Attribute::all());
-    init.accessor(js_string!("nextSibling"), Some(get_next_sibling), None, Attribute::all());
-    init.accessor(js_string!("ownerDocument"), Some(get_owner_doc), None, Attribute::all());
-    init.accessor(js_string!("baseURI"), Some(get_base_uri), None, Attribute::all());
+    init.accessor(
+        js_string!("nodeType"),
+        Some(get_node_type),
+        None,
+        Attribute::all(),
+    );
+    init.accessor(
+        js_string!("nodeName"),
+        Some(get_node_name),
+        None,
+        Attribute::all(),
+    );
+    init.accessor(
+        js_string!("textContent"),
+        Some(get_text),
+        Some(set_text),
+        Attribute::all(),
+    );
+    init.accessor(
+        js_string!("nodeValue"),
+        Some(get_node_value),
+        Some(set_node_value),
+        Attribute::all(),
+    );
+    init.accessor(
+        js_string!("parentNode"),
+        Some(get_parent),
+        None,
+        Attribute::all(),
+    );
+    init.accessor(
+        js_string!("parentElement"),
+        Some(get_parent_element),
+        None,
+        Attribute::all(),
+    );
+    init.accessor(
+        js_string!("childNodes"),
+        Some(get_child_nodes),
+        None,
+        Attribute::all(),
+    );
+    init.accessor(
+        js_string!("firstChild"),
+        Some(get_first_child),
+        None,
+        Attribute::all(),
+    );
+    init.accessor(
+        js_string!("lastChild"),
+        Some(get_last_child),
+        None,
+        Attribute::all(),
+    );
+    init.accessor(
+        js_string!("previousSibling"),
+        Some(get_prev_sibling),
+        None,
+        Attribute::all(),
+    );
+    init.accessor(
+        js_string!("nextSibling"),
+        Some(get_next_sibling),
+        None,
+        Attribute::all(),
+    );
+    init.accessor(
+        js_string!("ownerDocument"),
+        Some(get_owner_doc),
+        None,
+        Attribute::all(),
+    );
+    init.accessor(
+        js_string!("baseURI"),
+        Some(get_base_uri),
+        None,
+        Attribute::all(),
+    );
 
     init.function(
         NativeFunction::from_fn_ptr(native_has_child_nodes),
@@ -203,10 +281,26 @@ fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsValue
         js_string!("replaceChild"),
         2,
     );
-    init.function(NativeFunction::from_fn_ptr(native_clone_node), js_string!("cloneNode"), 1);
-    init.function(NativeFunction::from_fn_ptr(native_contains), js_string!("contains"), 1);
-    init.function(NativeFunction::from_fn_ptr(native_is_same_node), js_string!("isSameNode"), 1);
-    init.function(NativeFunction::from_fn_ptr(native_is_equal_node), js_string!("isEqualNode"), 1);
+    init.function(
+        NativeFunction::from_fn_ptr(native_clone_node),
+        js_string!("cloneNode"),
+        1,
+    );
+    init.function(
+        NativeFunction::from_fn_ptr(native_contains),
+        js_string!("contains"),
+        1,
+    );
+    init.function(
+        NativeFunction::from_fn_ptr(native_is_same_node),
+        js_string!("isSameNode"),
+        1,
+    );
+    init.function(
+        NativeFunction::from_fn_ptr(native_is_equal_node),
+        js_string!("isEqualNode"),
+        1,
+    );
     init.function(
         NativeFunction::from_fn_ptr(native_add_event_listener),
         js_string!("addEventListener"),
@@ -220,12 +314,37 @@ fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsValue
 
     if is_element {
         init.accessor(js_string!("tagName"), Some(get_tag), None, Attribute::all());
-        init.accessor(js_string!("className"), Some(get_class), Some(set_class), Attribute::all());
-        init.accessor(js_string!("classList"), Some(get_class_list), None, Attribute::all());
-        init.accessor(js_string!("id"), Some(get_id), Some(set_id), Attribute::all());
-        init.accessor(js_string!("value"), Some(get_value), Some(set_value), Attribute::all());
+        init.accessor(
+            js_string!("className"),
+            Some(get_class),
+            Some(set_class),
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("classList"),
+            Some(get_class_list),
+            None,
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("id"),
+            Some(get_id),
+            Some(set_id),
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("value"),
+            Some(get_value),
+            Some(set_value),
+            Attribute::all(),
+        );
         init.accessor(js_string!("style"), Some(get_style), None, Attribute::all());
-        init.accessor(js_string!("innerHTML"), Some(get_inner_html), Some(set_inner_html), Attribute::all());
+        init.accessor(
+            js_string!("innerHTML"),
+            Some(get_inner_html),
+            Some(set_inner_html),
+            Attribute::all(),
+        );
         init.function(
             NativeFunction::from_fn_ptr(native_get_attribute),
             js_string!("getAttribute"),
@@ -251,11 +370,24 @@ fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsValue
             js_string!("querySelectorAll"),
             1,
         );
-        init.function(NativeFunction::from_fn_ptr(native_focus), js_string!("focus"), 0);
-        init.function(NativeFunction::from_fn_ptr(native_blur), js_string!("blur"), 0);
+        init.function(
+            NativeFunction::from_fn_ptr(native_focus),
+            js_string!("focus"),
+            0,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_blur),
+            js_string!("blur"),
+            0,
+        );
     }
     if is_text_like {
-        init.accessor(js_string!("data"), Some(get_data), Some(set_data), Attribute::all());
+        init.accessor(
+            js_string!("data"),
+            Some(get_data),
+            Some(set_data),
+            Attribute::all(),
+        );
     }
     let obj = init.build();
     Ok(obj.into())
@@ -349,9 +481,14 @@ fn native_get_attribute(
     context: &mut Context,
 ) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
-    let name = args.first().and_then(|v| v.as_string()).map(|s| s.to_std_string_lossy());
+    let name = args
+        .first()
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_std_string_lossy());
     let Some(name) = name else {
-        return Err(JsNativeError::typ().with_message("getAttribute expects a string").into());
+        return Err(JsNativeError::typ()
+            .with_message("getAttribute expects a string")
+            .into());
     };
     let Some(rc) = with_state() else {
         return Ok(JsValue::null());
@@ -361,7 +498,9 @@ fn native_get_attribute(
         .arena
         .get(node_id)
         .and_then(|n| n.attributes.get(&name).cloned());
-    Ok(value.map(|s| js_string!(s).into()).unwrap_or(JsValue::null()))
+    Ok(value
+        .map(|s| js_string!(s).into())
+        .unwrap_or(JsValue::null()))
 }
 
 fn native_set_attribute(
@@ -379,7 +518,9 @@ fn native_set_attribute(
         .and_then(|v| v.as_string())
         .map(|s| s.to_std_string_lossy());
     let (Some(name), Some(value)) = (name, value) else {
-        return Err(JsNativeError::typ().with_message("setAttribute expects two strings").into());
+        return Err(JsNativeError::typ()
+            .with_message("setAttribute expects two strings")
+            .into());
     };
     let Some(rc) = with_state() else {
         return Ok(JsValue::undefined());
@@ -398,9 +539,14 @@ fn native_remove_attribute(
     context: &mut Context,
 ) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
-    let name = args.first().and_then(|v| v.as_string()).map(|s| s.to_std_string_lossy());
+    let name = args
+        .first()
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_std_string_lossy());
     let Some(name) = name else {
-        return Err(JsNativeError::typ().with_message("removeAttribute expects a string").into());
+        return Err(JsNativeError::typ()
+            .with_message("removeAttribute expects a string")
+            .into());
     };
     let Some(rc) = with_state() else {
         return Ok(JsValue::undefined());
@@ -574,7 +720,11 @@ fn set_text_content(st: &mut ScriptState, node_id: NodeId, text: &str) -> JsResu
     Ok(JsValue::undefined())
 }
 
-fn native_get_inner_html(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn native_get_inner_html(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let Some(rc) = with_state() else {
         return Ok(js_string!().into());
@@ -584,7 +734,11 @@ fn native_get_inner_html(this: &JsValue, _args: &[JsValue], context: &mut Contex
     Ok(js_string!(html).into())
 }
 
-fn native_set_inner_html(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn native_set_inner_html(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let html = args
         .first()
@@ -695,7 +849,11 @@ fn native_set_class(this: &JsValue, args: &[JsValue], context: &mut Context) -> 
 /// closures read / write the attribute through the engine arena, so the
 /// returned object reflects later DOM mutations (browser `classList` is
 /// live).
-fn native_get_class_list(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn native_get_class_list(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let node_key = node_id_to_f64(node_id);
     let get_attr = js_fn(
@@ -803,7 +961,11 @@ fn native_set_id(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsR
     Ok(JsValue::undefined())
 }
 
-fn native_get_parent(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn native_get_parent(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let Some(rc) = with_state() else {
         return Ok(JsValue::null());
@@ -820,7 +982,11 @@ fn native_get_parent(this: &JsValue, _args: &[JsValue], context: &mut Context) -
 // Node interface natives (shared by every node kind)
 // ============================================================
 
-fn native_get_node_type(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn native_get_node_type(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let Some(rc) = with_state() else {
         return Ok(JsValue::null());
@@ -832,7 +998,11 @@ fn native_get_node_type(this: &JsValue, _args: &[JsValue], context: &mut Context
     Ok(JsValue::from(node.node_type_constant() as u32))
 }
 
-fn native_get_node_name(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn native_get_node_name(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let Some(rc) = with_state() else {
         return Ok(js_string!().into());
@@ -844,7 +1014,11 @@ fn native_get_node_name(this: &JsValue, _args: &[JsValue], context: &mut Context
     Ok(js_string!(node.node_name()).into())
 }
 
-fn native_get_tag_name(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn native_get_tag_name(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let Some(rc) = with_state() else {
         return Ok(js_string!().into());
@@ -859,7 +1033,11 @@ fn native_get_tag_name(this: &JsValue, _args: &[JsValue], context: &mut Context)
     Ok(js_string!(name).into())
 }
 
-fn native_get_node_value(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn native_get_node_value(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let Some(rc) = with_state() else {
         return Ok(JsValue::null());
@@ -876,7 +1054,11 @@ fn native_get_node_value(this: &JsValue, _args: &[JsValue], context: &mut Contex
     }
 }
 
-fn native_set_node_value(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn native_set_node_value(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let value = args
         .first()
@@ -907,16 +1089,12 @@ fn native_get_parent_element(
         return Ok(JsValue::null());
     };
     let st = rc.borrow();
-    let parent = st
-        .arena
-        .get(node_id)
-        .and_then(|n| n.parent)
-        .filter(|&pid| {
-            st.arena
-                .get(pid)
-                .map(|p| p.node_type_constant() == 1)
-                .unwrap_or(false)
-        });
+    let parent = st.arena.get(node_id).and_then(|n| n.parent).filter(|&pid| {
+        st.arena
+            .get(pid)
+            .map(|p| p.node_type_constant() == 1)
+            .unwrap_or(false)
+    });
     match parent {
         Some(pid) => node_wrapper(context, pid),
         None => Ok(JsValue::null()),
@@ -949,7 +1127,11 @@ fn call_live_list(context: &mut Context, node_id: NodeId) -> JsResult<JsValue> {
     let helper = global
         .get(js_string!("__htuiLiveList"), context)?
         .to_object(context)?;
-    helper.call(&JsValue::undefined(), &[get_len.into(), get_item.into()], context)
+    helper.call(
+        &JsValue::undefined(),
+        &[get_len.into(), get_item.into()],
+        context,
+    )
 }
 
 /// Live `NodeList.length` (reads the arena on every call).
@@ -1012,20 +1194,32 @@ fn native_get_first_child(
         return Ok(JsValue::null());
     };
     let st = rc.borrow();
-    let child = st.arena.get(node_id).and_then(|n| n.children.first()).copied();
+    let child = st
+        .arena
+        .get(node_id)
+        .and_then(|n| n.children.first())
+        .copied();
     match child {
         Some(cid) => node_wrapper(context, cid),
         None => Ok(JsValue::null()),
     }
 }
 
-fn native_get_last_child(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn native_get_last_child(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let Some(rc) = with_state() else {
         return Ok(JsValue::null());
     };
     let st = rc.borrow();
-    let child = st.arena.get(node_id).and_then(|n| n.children.last()).copied();
+    let child = st
+        .arena
+        .get(node_id)
+        .and_then(|n| n.children.last())
+        .copied();
     match child {
         Some(cid) => node_wrapper(context, cid),
         None => Ok(JsValue::null()),
@@ -1264,8 +1458,7 @@ fn clone_subtree(st: &mut ScriptState, node_id: NodeId, deep: bool) -> Option<No
 
 fn native_contains(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
-    let Some(other_id) =
-        this_node_id(args.first().unwrap_or(&JsValue::undefined()), context).ok()
+    let Some(other_id) = this_node_id(args.first().unwrap_or(&JsValue::undefined()), context).ok()
     else {
         return Ok(JsValue::from(false));
     };
@@ -1284,16 +1477,23 @@ fn native_contains(this: &JsValue, args: &[JsValue], context: &mut Context) -> J
     Ok(JsValue::from(false))
 }
 
-fn native_is_same_node(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn native_is_same_node(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let other = this_node_id(args.first().unwrap_or(&JsValue::undefined()), context).ok();
     Ok(JsValue::from(other == Some(node_id)))
 }
 
-fn native_is_equal_node(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn native_is_equal_node(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
-    let Some(other_id) =
-        this_node_id(args.first().unwrap_or(&JsValue::undefined()), context).ok()
+    let Some(other_id) = this_node_id(args.first().unwrap_or(&JsValue::undefined()), context).ok()
     else {
         return Ok(JsValue::from(false));
     };
@@ -1386,7 +1586,12 @@ fn native_get_style(this: &JsValue, _args: &[JsValue], context: &mut Context) ->
         );
         let setter = NativeFunction::from_copy_closure_with_captures(
             |this, args, idx: &u32, context| {
-                style_set(this, &SUPPORTED_PROPERTIES[*idx as usize], args.first(), context)
+                style_set(
+                    this,
+                    &SUPPORTED_PROPERTIES[*idx as usize],
+                    args.first(),
+                    context,
+                )
             },
             idx,
         );
@@ -1403,7 +1608,12 @@ fn native_get_style(this: &JsValue, _args: &[JsValue], context: &mut Context) ->
     for (name, get, set) in accessors {
         init.accessor(name, get, set, Attribute::all());
     }
-    init.accessor(js_string!("cssText"), Some(get_css), Some(set_css), Attribute::all());
+    init.accessor(
+        js_string!("cssText"),
+        Some(get_css),
+        Some(set_css),
+        Attribute::all(),
+    );
     Ok(init.build().into())
 }
 
@@ -1478,7 +1688,11 @@ fn style_set(
     Ok(JsValue::undefined())
 }
 
-fn style_get_css_text(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn style_get_css_text(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let Some(rc) = with_state() else {
         return Ok(js_string!().into());
@@ -1492,7 +1706,11 @@ fn style_get_css_text(this: &JsValue, _args: &[JsValue], context: &mut Context) 
     Ok(js_string!(value).into())
 }
 
-fn style_set_css_text(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+fn style_set_css_text(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let value = args
         .first()
@@ -1518,10 +1736,14 @@ fn native_add_event_listener(
     let node_id = this_node_id(this, context)?;
     let event_type = parse_event_type(args.first(), context)?;
     let Some(fn_val) = args.get(1) else {
-        return Err(JsNativeError::typ().with_message("addEventListener expects a function").into());
+        return Err(JsNativeError::typ()
+            .with_message("addEventListener expects a function")
+            .into());
     };
     if fn_val.as_object().is_none() || !fn_val.is_callable() {
-        return Err(JsNativeError::typ().with_message("listener is not a function").into());
+        return Err(JsNativeError::typ()
+            .with_message("listener is not a function")
+            .into());
     }
     add_listener(context, node_id, event_type, fn_val)?;
     Ok(JsValue::undefined())
@@ -1551,8 +1773,10 @@ fn native_append_child(
     let mut st = rc.borrow_mut();
     // Detach from any existing parent.
     let old_parent = st.arena.get(child_id).and_then(|c| c.parent);
-    if let Some(old_parent) = old_parent && let Some(op) = st.arena.get_mut(old_parent) {
-            op.children.retain(|c| *c != child_id);
+    if let Some(old_parent) = old_parent
+        && let Some(op) = st.arena.get_mut(old_parent)
+    {
+        op.children.retain(|c| *c != child_id);
     }
     if let Some(child) = st.arena.get_mut(child_id) {
         child.parent = Some(parent_id);
@@ -1614,7 +1838,9 @@ pub(crate) fn parse_event_type(
     context: &mut Context,
 ) -> JsResult<EventType> {
     let Some(arg) = arg else {
-        return Err(JsNativeError::typ().with_message("missing event type").into());
+        return Err(JsNativeError::typ()
+            .with_message("missing event type")
+            .into());
     };
     let s = arg.to_string(context)?.to_std_string_lossy();
     match s.as_str() {
@@ -1642,11 +1868,15 @@ pub(crate) fn add_listener(
     event_type: EventType,
     listener: &JsValue,
 ) -> JsResult<()> {
-    call_registry_helper(context, "__htuiAddListener", &[
-        js_string!(node_id_to_f64(node_id).to_string()).into(),
-        js_string!(event_type_str(event_type)).into(),
-        listener.clone(),
-    ])
+    call_registry_helper(
+        context,
+        "__htuiAddListener",
+        &[
+            js_string!(node_id_to_f64(node_id).to_string()).into(),
+            js_string!(event_type_str(event_type)).into(),
+            listener.clone(),
+        ],
+    )
 }
 
 /// Remove a JS listener (by identity) from the registry.
@@ -1658,7 +1888,9 @@ pub(crate) fn remove_listener(
 ) -> JsResult<()> {
     let key = node_id_to_f64(node_id).to_string();
     let global = context.global_object();
-    let registry = global.get(js_string!("__htuiListeners"), context)?.to_object(context)?;
+    let registry = global
+        .get(js_string!("__htuiListeners"), context)?
+        .to_object(context)?;
     let node_entry = registry.get(js_string!(key.clone()), context)?;
     if node_entry.is_undefined() {
         return Ok(());
@@ -1669,7 +1901,9 @@ pub(crate) fn remove_listener(
         return Ok(());
     }
     let arr_obj = arr.to_object(context)?;
-    let len = arr_obj.get(js_string!("length"), context)?.to_u32(context)?;
+    let len = arr_obj
+        .get(js_string!("length"), context)?
+        .to_u32(context)?;
     if let Some(listener) = listener {
         // Filter out the matching function (identity comparison).
         let mut new_arr = Vec::new();
@@ -1682,13 +1916,25 @@ pub(crate) fn remove_listener(
         }
         let new_js: JsValue = {
             let mut init = ObjectInitializer::new(context);
-            new_arr.into_iter().enumerate().fold(&mut init, |acc, (i, v)| {
-                acc.property(i, v, Attribute::WRITABLE | Attribute::ENUMERABLE | Attribute::CONFIGURABLE);
-                acc
-            });
+            new_arr
+                .into_iter()
+                .enumerate()
+                .fold(&mut init, |acc, (i, v)| {
+                    acc.property(
+                        i,
+                        v,
+                        Attribute::WRITABLE | Attribute::ENUMERABLE | Attribute::CONFIGURABLE,
+                    );
+                    acc
+                });
             init.build().into()
         };
-        node_obj.set(js_string!(event_type_str(event_type)), new_js, false, context)?;
+        node_obj.set(
+            js_string!(event_type_str(event_type)),
+            new_js,
+            false,
+            context,
+        )?;
     }
     Ok(())
 }
@@ -1700,7 +1946,9 @@ pub(crate) fn get_listeners(
     event_type: EventType,
 ) -> JsResult<Vec<JsValue>> {
     let global = context.global_object();
-    let helper = global.get(js_string!("__htuiGetListeners"), context)?.to_object(context)?;
+    let helper = global
+        .get(js_string!("__htuiGetListeners"), context)?
+        .to_object(context)?;
     let arr = helper.call(
         &JsValue::undefined(),
         &[
@@ -1710,7 +1958,9 @@ pub(crate) fn get_listeners(
         context,
     )?;
     let arr_obj = arr.to_object(context)?;
-    let len = arr_obj.get(js_string!("length"), context)?.to_u32(context)?;
+    let len = arr_obj
+        .get(js_string!("length"), context)?
+        .to_u32(context)?;
     let mut out = Vec::with_capacity(len as usize);
     for i in 0..len {
         out.push(arr_obj.get(i, context)?);
@@ -1719,11 +1969,7 @@ pub(crate) fn get_listeners(
 }
 
 /// Call a registry helper defined in the bootstrap script.
-fn call_registry_helper(
-    context: &mut Context,
-    name: &str,
-    args: &[JsValue],
-) -> JsResult<()> {
+fn call_registry_helper(context: &mut Context, name: &str, args: &[JsValue]) -> JsResult<()> {
     let global = context.global_object();
     let helper = global.get(js_string!(name), context)?.to_object(context)?;
     helper.call(&JsValue::undefined(), args, context)?;
@@ -1749,21 +1995,54 @@ pub(crate) fn install_builtins(context: &mut Context) -> JsResult<()> {
     let doc_obj = document.to_object(context)?;
 
     for (name, native) in [
-        ("getElementById", NativeFunction::from_fn_ptr(native_get_element_by_id)),
-        ("querySelector", NativeFunction::from_fn_ptr(native_query_selector)),
-        ("querySelectorAll", NativeFunction::from_fn_ptr(native_query_selector_all)),
-        ("createElement", NativeFunction::from_fn_ptr(native_create_element)),
-        ("createTextNode", NativeFunction::from_fn_ptr(native_create_text_node)),
-        ("createComment", NativeFunction::from_fn_ptr(native_create_comment)),
-        ("createDocumentFragment", NativeFunction::from_fn_ptr(native_create_document_fragment)),
+        (
+            "getElementById",
+            NativeFunction::from_fn_ptr(native_get_element_by_id),
+        ),
+        (
+            "querySelector",
+            NativeFunction::from_fn_ptr(native_query_selector),
+        ),
+        (
+            "querySelectorAll",
+            NativeFunction::from_fn_ptr(native_query_selector_all),
+        ),
+        (
+            "createElement",
+            NativeFunction::from_fn_ptr(native_create_element),
+        ),
+        (
+            "createTextNode",
+            NativeFunction::from_fn_ptr(native_create_text_node),
+        ),
+        (
+            "createComment",
+            NativeFunction::from_fn_ptr(native_create_comment),
+        ),
+        (
+            "createDocumentFragment",
+            NativeFunction::from_fn_ptr(native_create_document_fragment),
+        ),
     ] {
         doc_obj.set(js_string!(name), js_fn(context, native), false, context)?;
     }
     for (name, native) in [
-        ("documentElement", NativeFunction::from_fn_ptr(native_get_document_element)),
-        ("body", NativeFunction::from_fn_ptr(native_get_document_body)),
-        ("head", NativeFunction::from_fn_ptr(native_get_document_head)),
-        ("doctype", NativeFunction::from_fn_ptr(native_get_document_doctype)),
+        (
+            "documentElement",
+            NativeFunction::from_fn_ptr(native_get_document_element),
+        ),
+        (
+            "body",
+            NativeFunction::from_fn_ptr(native_get_document_body),
+        ),
+        (
+            "head",
+            NativeFunction::from_fn_ptr(native_get_document_head),
+        ),
+        (
+            "doctype",
+            NativeFunction::from_fn_ptr(native_get_document_doctype),
+        ),
     ] {
         let desc = PropertyDescriptorBuilder::new()
             .get(js_fn(context, native))
@@ -1777,11 +2056,7 @@ pub(crate) fn install_builtins(context: &mut Context) -> JsResult<()> {
     // console
     let console = {
         let mut console = ObjectInitializer::new(context);
-        for (name, lvl) in [
-            ("log", 0u8),
-            ("warn", 1),
-            ("error", 2),
-        ] {
+        for (name, lvl) in [("log", 0u8), ("warn", 1), ("error", 2)] {
             let native = match lvl {
                 0 => NativeFunction::from_fn_ptr(console_log),
                 1 => NativeFunction::from_fn_ptr(console_warn),
@@ -1807,10 +2082,26 @@ pub(crate) fn install_builtins(context: &mut Context) -> JsResult<()> {
 
     // timers (scheduled on the script thread; see `ScriptEngine::run_due_timers`)
     for (name, arity, native) in [
-        ("setTimeout", 2usize, NativeFunction::from_fn_ptr(native_set_timeout)),
-        ("setInterval", 2, NativeFunction::from_fn_ptr(native_set_interval)),
-        ("clearTimeout", 1, NativeFunction::from_fn_ptr(native_clear_timeout)),
-        ("clearInterval", 1, NativeFunction::from_fn_ptr(native_clear_interval)),
+        (
+            "setTimeout",
+            2usize,
+            NativeFunction::from_fn_ptr(native_set_timeout),
+        ),
+        (
+            "setInterval",
+            2,
+            NativeFunction::from_fn_ptr(native_set_interval),
+        ),
+        (
+            "clearTimeout",
+            1,
+            NativeFunction::from_fn_ptr(native_clear_timeout),
+        ),
+        (
+            "clearInterval",
+            1,
+            NativeFunction::from_fn_ptr(native_clear_interval),
+        ),
     ] {
         context.register_global_builtin_callable(js_string!(name), arity, native)?;
     }
@@ -1898,15 +2189,16 @@ pub(crate) fn response_object(
     bytes: std::sync::Arc<Vec<u8>>,
 ) -> JsResult<JsValue> {
     let text = js_string!(String::from_utf8_lossy(bytes.as_ref()).into_owned());
-    let text_native = |_this: &JsValue, _args: &[JsValue], captured: &JsString, ctx: &mut Context| {
-        let (promise, resolvers) = JsPromise::new_pending(ctx);
-        resolvers.resolve.call(
-            &JsValue::undefined(),
-            &[JsValue::from(captured.clone())],
-            ctx,
-        )?;
-        Ok(promise.into())
-    };
+    let text_native =
+        |_this: &JsValue, _args: &[JsValue], captured: &JsString, ctx: &mut Context| {
+            let (promise, resolvers) = JsPromise::new_pending(ctx);
+            resolvers.resolve.call(
+                &JsValue::undefined(),
+                &[JsValue::from(captured.clone())],
+                ctx,
+            )?;
+            Ok(promise.into())
+        };
     let text_fn = js_fn(
         context,
         NativeFunction::from_copy_closure_with_captures(text_native, text),
@@ -1914,7 +2206,11 @@ pub(crate) fn response_object(
     let mut init = ObjectInitializer::new(context);
     init.property(js_string!("status"), JsValue::from(200), Attribute::all());
     init.property(js_string!("ok"), JsValue::from(true), Attribute::all());
-    init.property(js_string!("url"), JsValue::from(js_string!(url)), Attribute::all());
+    init.property(
+        js_string!("url"),
+        JsValue::from(js_string!(url)),
+        Attribute::all(),
+    );
     init.property(js_string!("text"), text_fn, Attribute::all());
     Ok(init.build().into())
 }
@@ -2014,9 +2310,10 @@ fn clear_timer(context: &mut Context, args: &[JsValue]) -> JsResult<JsValue> {
     let global = context.global_object();
     if let Ok(registry) = global
         .get(js_string!("__htuiTimers"), context)
-        .and_then(|v| v.to_object(context)) && let Err(e) = registry.delete_property_or_throw(js_string!(id.to_string()), context) {
-            log::warn!("Failed to clear timer callback: {e}");
-        
+        .and_then(|v| v.to_object(context))
+        && let Err(e) = registry.delete_property_or_throw(js_string!(id.to_string()), context)
+    {
+        log::warn!("Failed to clear timer callback: {e}");
     }
     Ok(JsValue::undefined())
 }
@@ -2026,7 +2323,10 @@ fn native_get_element_by_id(
     args: &[JsValue],
     context: &mut Context,
 ) -> JsResult<JsValue> {
-    let id = args.first().map(|v| v.to_string(context).map(|s| s.to_std_string_lossy())).transpose()?;
+    let id = args
+        .first()
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?;
     let Some(id) = id else {
         return Ok(JsValue::null());
     };
@@ -2154,7 +2454,10 @@ fn native_create_element(
     args: &[JsValue],
     context: &mut Context,
 ) -> JsResult<JsValue> {
-    let tag = args.first().map(|v| v.to_string(context).map(|s| s.to_std_string_lossy())).transpose()?;
+    let tag = args
+        .first()
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?;
     let tag = tag.unwrap_or_else(|| "div".to_string());
     let node_type = crate::html::html_parse::tag_name_to_node_type(&tag).unwrap_or(NodeType::Div);
     let Some(rc) = with_state() else {

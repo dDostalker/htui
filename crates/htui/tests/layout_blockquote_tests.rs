@@ -69,8 +69,14 @@ fn layout_boxes(html: &str, css: &str) -> (Vec<htui::layout::LayoutBox>, NodeAre
     let (root_id, arena) = setup(html, css);
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
-    let boxes =
-        layout_tree(&arena, root_id, containing, &mut cursor, COLS as usize, ROWS as usize);
+    let boxes = layout_tree(
+        &arena,
+        root_id,
+        containing,
+        &mut cursor,
+        COLS as usize,
+        ROWS as usize,
+    );
     (boxes, arena)
 }
 
@@ -118,7 +124,10 @@ fn test_blockquote_margin_creates_gap_between_siblings() {
     // Two blockquotes: bottom margin of the first (1) + top margin of the
     // second (1) keep them two rows apart (the engine does not collapse
     // adjacent margins, same as every other element here).
-    let (term_map, tl) = draw("<blockquote>One</blockquote><blockquote>Two</blockquote>", "");
+    let (term_map, tl) = draw(
+        "<blockquote>One</blockquote><blockquote>Two</blockquote>",
+        "",
+    );
     let cols = term_map.columns as usize;
     let one = tl
         .layout
@@ -139,7 +148,10 @@ fn test_blockquote_margin_creates_gap_between_siblings() {
 #[test]
 fn test_blockquote_author_margin_zero_removes_ua_defaults() {
     init();
-    let (_, tl) = draw("<blockquote>Quote</blockquote>", "blockquote { margin: 0; }");
+    let (_, tl) = draw(
+        "<blockquote>Quote</blockquote>",
+        "blockquote { margin: 0; }",
+    );
     let idx = tl
         .layout
         .iter()
@@ -154,10 +166,11 @@ fn test_blockquote_author_margin_left_override_drops_only_that_side() {
     // `margin-left: 0` drops the left UA margin only: text moves to col 0
     // but still sits one row down (top UA margin intact) and the right UA
     // margin still shrinks the box width to 76.
-    let (boxes, arena) =
-        layout_boxes("<blockquote>Quote</blockquote>", "blockquote { margin-left: 0; }");
-    let bq = find_box_by_type(&boxes, &NodeType::BlockQuote, &arena)
-        .expect("blockquote box");
+    let (boxes, arena) = layout_boxes(
+        "<blockquote>Quote</blockquote>",
+        "blockquote { margin-left: 0; }",
+    );
+    let bq = find_box_by_type(&boxes, &NodeType::BlockQuote, &arena).expect("blockquote box");
     assert_eq!(bq.rect.x, 0, "left UA margin dropped");
     assert_eq!(bq.rect.width, 76, "only the right margin (4) remains");
     assert_eq!(bq.rect.y, 1, "top UA margin still applies");
@@ -167,8 +180,7 @@ fn test_blockquote_author_margin_left_override_drops_only_that_side() {
 fn test_blockquote_nested_p_child_shares_row() {
     init();
     let (boxes, arena) = layout_boxes("<blockquote><p>Inner</p></blockquote>", "");
-    let bq = find_box_by_type(&boxes, &NodeType::BlockQuote, &arena)
-        .expect("blockquote box");
+    let bq = find_box_by_type(&boxes, &NodeType::BlockQuote, &arena).expect("blockquote box");
     let p = find_box_by_type(&boxes, &NodeType::P, &arena).expect("nested p box");
     assert_eq!(bq.rect.x, 4);
     assert_eq!(bq.rect.y, 1);
@@ -189,15 +201,30 @@ fn test_blockquote_background_fills_box_only() {
         let start = row * cols;
         tl.layout[start..start + cols]
             .iter()
-            .filter(|b| b.bcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }))
+            .filter(|b| {
+                b.bcolor
+                    == Some(Color::Rgb {
+                        r: 255,
+                        g: 255,
+                        b: 0,
+                    })
+            })
             .count()
     };
     assert!(
         bg_in_row(1) > 0,
         "row 1 is the blockquote rect and carries the bg"
     );
-    assert_eq!(bg_in_row(0), 0, "row 0 is the top margin and must be bg-free");
-    assert_eq!(bg_in_row(2), 0, "row 2 is the bottom margin and must be bg-free");
+    assert_eq!(
+        bg_in_row(0),
+        0,
+        "row 0 is the top margin and must be bg-free"
+    );
+    assert_eq!(
+        bg_in_row(2),
+        0,
+        "row 2 is the bottom margin and must be bg-free"
+    );
 }
 
 #[test]
@@ -219,8 +246,7 @@ fn test_blockquote_border_insets_content() {
         "<blockquote>Quote</blockquote>",
         "blockquote { border: 1px solid red; }",
     );
-    let bq = find_box_by_type(&boxes, &NodeType::BlockQuote, &arena)
-        .expect("blockquote box");
+    let bq = find_box_by_type(&boxes, &NodeType::BlockQuote, &arena).expect("blockquote box");
     assert_eq!(bq.rect.height, 3, "content row + top/bottom borders");
 }
 
@@ -229,10 +255,9 @@ fn test_nested_blockquote_indents_further() {
     init();
     // Each nesting level re-applies the UA margins, so the inner quote is
     // shifted 4 more columns right and one row down.
-    let (boxes, arena) =
-        layout_boxes("<blockquote><blockquote>Deep</blockquote></blockquote>", "");
-    let outer = find_box_by_type(&boxes, &NodeType::BlockQuote, &arena)
-        .expect("outer blockquote box");
+    let (boxes, arena) = layout_boxes("<blockquote><blockquote>Deep</blockquote></blockquote>", "");
+    let outer =
+        find_box_by_type(&boxes, &NodeType::BlockQuote, &arena).expect("outer blockquote box");
     assert_eq!(outer.rect.x, 4);
     assert_eq!(outer.rect.y, 1);
     assert_eq!(outer.rect.width, 72);
@@ -246,7 +271,10 @@ fn test_nested_blockquote_indents_further() {
 #[test]
 fn test_blockquote_css_type_selector_applies_color() {
     init();
-    let (_, tl) = draw("<blockquote>Quote</blockquote>", "blockquote { color: blue; }");
+    let (_, tl) = draw(
+        "<blockquote>Quote</blockquote>",
+        "blockquote { color: blue; }",
+    );
     let idx = tl
         .layout
         .iter()

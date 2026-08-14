@@ -74,6 +74,9 @@ impl OuterDisplay {
     /// `true` for boxes that establish a new formatting context for
     /// their children (block container or inline-block).
     pub fn establishes_formatting_context(self) -> bool {
-        matches!(self, OuterDisplay::BlockLevel { container: true } | OuterDisplay::Inline { block: true })
+        matches!(
+            self,
+            OuterDisplay::BlockLevel { container: true } | OuterDisplay::Inline { block: true }
+        )
     }
 }

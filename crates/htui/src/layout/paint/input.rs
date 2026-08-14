@@ -10,8 +10,8 @@ use crate::{
     tui::graph_api::{FontStyle, char_width},
 };
 
-use super::{PaintCanvas, intersect_rects};
 use super::button::paint_button;
+use super::{PaintCanvas, intersect_rects};
 
 /// Frame colour for a focused field (Tokyo Night accent cyan).
 const FOCUS_FRAME: &str = "#2ac3de";
@@ -34,7 +34,10 @@ pub(crate) fn value_window(value: &str, caret: usize, inner_width: usize) -> (us
     let mut start = caret;
     let mut before_w = 0usize;
     while start > 0
-        && before_w.saturating_add(widths[start - 1]).saturating_add(caret_w) <= inner_width
+        && before_w
+            .saturating_add(widths[start - 1])
+            .saturating_add(caret_w)
+            <= inner_width
     {
         before_w += widths[start - 1];
         start -= 1;
@@ -49,7 +52,12 @@ pub(crate) fn value_window(value: &str, caret: usize, inner_width: usize) -> (us
     (start, end)
 }
 
-pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintCanvas<'_>, clip: Rect) {
+pub(crate) fn paint_input(
+    lb: &LayoutBox,
+    arena: &NodeArena,
+    canvas: &mut PaintCanvas<'_>,
+    clip: Rect,
+) {
     let r = lb.rect;
     let canvas_cols = canvas.columns as usize;
     if r.x >= canvas_cols || r.width == 0 || r.height == 0 {
@@ -80,9 +88,9 @@ pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintC
         let checked = node.attributes.contains_key("checked");
         let disabled = node.attributes.contains_key("disabled");
         let glyph = match (input_type.as_str(), checked) {
-            ("checkbox", true) => '\u{2611}', // ☑
+            ("checkbox", true) => '\u{2611}',  // ☑
             ("checkbox", false) => '\u{2610}', // ☐
-            ("radio", true) => '\u{25C9}',    // ◉
+            ("radio", true) => '\u{25C9}',     // ◉
             _ => '\u{25CB}',                   // ○
         };
         // A disabled toggle is dimmed grey (the click is already swallowed by
@@ -93,7 +101,13 @@ pub(crate) fn paint_input(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintC
             node.css_attr.get_color().unwrap_or(Color::White)
         };
         let bg = node.css_attr.get_bg_color();
-        put(canvas, cell_index(canvas, r.x, r.y), Some(glyph), Some(fg), bg);
+        put(
+            canvas,
+            cell_index(canvas, r.x, r.y),
+            Some(glyph),
+            Some(fg),
+            bg,
+        );
         // The second cell is a spacing column so the toggle never glues onto
         // adjacent text (checkbox `☐` followed directly by a label).
         put(

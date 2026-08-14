@@ -35,7 +35,12 @@ pub fn parse_color_str(s: &str) -> Option<Color> {
 
     // 2. Functional colors. Longer names first so `rgba` matches before
     //    `rgb` (and `hsla` before `hsl`).
-    for (name, has_alpha) in [("rgba", true), ("rgb", false), ("hsla", true), ("hsl", false)] {
+    for (name, has_alpha) in [
+        ("rgba", true),
+        ("rgb", false),
+        ("hsla", true),
+        ("hsl", false),
+    ] {
         if let Some(rest) = lower.strip_prefix(name)
             && let Some(inner) = rest.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
         {

@@ -58,8 +58,14 @@ fn layout_boxes(html: &str, css: &str) -> (Vec<htui::layout::LayoutBox>, NodeAre
     let (root_id, arena) = setup(html, css);
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
-    let boxes =
-        layout_tree(&arena, root_id, containing, &mut cursor, COLS as usize, ROWS as usize);
+    let boxes = layout_tree(
+        &arena,
+        root_id,
+        containing,
+        &mut cursor,
+        COLS as usize,
+        ROWS as usize,
+    );
     (boxes, arena)
 }
 
@@ -125,8 +131,8 @@ fn test_dialog_without_open_renders_nothing() {
 fn test_dialog_open_renders_content() {
     init();
     let (boxes, arena) = layout_boxes("<dialog open><p>Shown</p></dialog>", "");
-    let dlg = find_box_by_type(&boxes, &NodeType::Dialog, &arena)
-        .expect("open dialog produces a box");
+    let dlg =
+        find_box_by_type(&boxes, &NodeType::Dialog, &arena).expect("open dialog produces a box");
     assert_eq!(dlg.rect.x, 0, "dialog spans the full width");
     assert_eq!(dlg.rect.height, 3, "border top/bottom + one content row");
     assert!(
@@ -152,9 +158,18 @@ fn test_dialog_author_border_style_none_removes_ua_border() {
     init();
     // The author's `border-style: none` beats the UA style component: the
     // frame disappears entirely.
-    let tl = draw("<dialog open>Hello</dialog>", "dialog { border-style: none; }");
-    assert!(!canvas_has_word(&tl, BOX_TL), "no frame with border-style: none");
-    let (boxes, arena) = layout_boxes("<dialog open>Hello</dialog>", "dialog { border-style: none; }");
+    let tl = draw(
+        "<dialog open>Hello</dialog>",
+        "dialog { border-style: none; }",
+    );
+    assert!(
+        !canvas_has_word(&tl, BOX_TL),
+        "no frame with border-style: none"
+    );
+    let (boxes, arena) = layout_boxes(
+        "<dialog open>Hello</dialog>",
+        "dialog { border-style: none; }",
+    );
     let dlg = find_box_by_type(&boxes, &NodeType::Dialog, &arena).expect("dialog box");
     assert_eq!(dlg.rect.height, 1, "no top/bottom border rows");
 }
@@ -164,7 +179,10 @@ fn test_dialog_author_border_color_applies_keeping_ua_width() {
     init();
     // `border-color` overrides only the color component: the UA width (1) and
     // style (solid) remain, so the frame still draws in the author's color.
-    let tl = draw("<dialog open>Hello</dialog>", "dialog { border-color: red; }");
+    let tl = draw(
+        "<dialog open>Hello</dialog>",
+        "dialog { border-color: red; }",
+    );
     let red = Color::Rgb { r: 255, g: 0, b: 0 };
     let border_color = |tl: &TermLayout| {
         tl.layout
@@ -173,7 +191,10 @@ fn test_dialog_author_border_color_applies_keeping_ua_width() {
             .map(|b| b.fcolor)
     };
     assert_eq!(border_color(&tl), Some(Some(red)), "frame draws in red");
-    assert!(canvas_has_word(&tl, BOX_H), "UA width/style keep the frame visible");
+    assert!(
+        canvas_has_word(&tl, BOX_H),
+        "UA width/style keep the frame visible"
+    );
 }
 
 #[test]
@@ -181,20 +202,17 @@ fn test_dialog_author_display_renders_when_closed() {
     init();
     // Author `display` beats the UA `dialog:not([open]) { display: none }`,
     // so an explicit block display renders even without the open attribute.
-    let tl = draw(
-        "<dialog style=\"display: block\">visible</dialog>",
-        "",
+    let tl = draw("<dialog style=\"display: block\">visible</dialog>", "");
+    assert!(
+        canvas_has_word(&tl, "v"),
+        "author display overrides the closed state"
     );
-    assert!(canvas_has_word(&tl, "v"), "author display overrides the closed state");
 }
 
 #[test]
 fn test_dialog_author_display_none_hides_when_open() {
     init();
-    let (boxes, arena) = layout_boxes(
-        "<dialog open style=\"display: none\">hidden</dialog>",
-        "",
-    );
+    let (boxes, arena) = layout_boxes("<dialog open style=\"display: none\">hidden</dialog>", "");
     assert!(
         find_box_by_type(&boxes, &NodeType::Dialog, &arena).is_none(),
         "display: none wins even over an open dialog"
@@ -411,8 +429,7 @@ fn test_template_parses_and_keeps_dom_tree() {
 #[test]
 fn test_template_never_renders() {
     init();
-    let (boxes, arena) =
-        layout_boxes("<div>shown</div><template><p>inert</p></template>", "");
+    let (boxes, arena) = layout_boxes("<div>shown</div><template><p>inert</p></template>", "");
     let _t = find_node_by_type(&arena, &NodeType::Template).expect("template in DOM");
     assert!(
         find_box_by_type(&boxes, &NodeType::Template, &arena).is_none(),
@@ -478,10 +495,7 @@ fn visual_test_dialog_template_document_initializes() {
     let map = HitMap::build(&geo);
 
     assert_eq!(
-        eval_str(
-            &mut engine,
-            "document.getElementById('status').textContent"
-        ),
+        eval_str(&mut engine, "document.getElementById('status').textContent"),
         "template holds: Inert template content — never rendered, but addressable via JS. Not clickable",
         "the demo boots: template content is addressable, the template itself stays hidden"
     );

@@ -70,8 +70,15 @@ fn el_focus_focuses_the_field_and_fires_focus_event() {
     let arena = engine.arena();
     let a = find_node_by_id(&arena, "a");
     let cmds = drive(&mut engine, &mut state, &arena);
-    assert_eq!(state.focused_input, Some(a), "el.focus() must focus the field");
-    assert_eq!(eval_str(&mut engine, "globalThis.__seen.join(',')"), "a-focus");
+    assert_eq!(
+        state.focused_input,
+        Some(a),
+        "el.focus() must focus the field"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__seen.join(',')"),
+        "a-focus"
+    );
     assert!(
         cmds.iter().any(|c| {
             matches!(c, RenderCmd::RenderInput { node_id, focused: true, .. } if *node_id == a)
@@ -106,7 +113,10 @@ fn el_focus_switches_focus_blurring_the_previous_field() {
         .expect("focus a");
     drive(&mut engine, &mut state, &arena);
     assert_eq!(state.focused_input, Some(a));
-    assert_eq!(eval_str(&mut engine, "globalThis.__seen.join(',')"), "a-focus");
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__seen.join(',')"),
+        "a-focus"
+    );
 
     // Focusing `b` blurs `a` first (browser order: blur then focus).
     engine
@@ -149,8 +159,11 @@ fn el_focus_on_already_focused_field_is_a_noop() {
 
 #[test]
 fn el_focus_works_on_textarea() {
-    let mut engine = ScriptEngine::new(r#"<textarea id="t">hello</textarea>"#, EventBindings::default())
-        .expect("engine initializes");
+    let mut engine = ScriptEngine::new(
+        r#"<textarea id="t">hello</textarea>"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
     let mut state = InputState::new();
     let arena = engine.arena();
     let t = find_node_by_id(&arena, "t");
@@ -159,14 +172,23 @@ fn el_focus_works_on_textarea() {
         .expect("focus textarea");
     drive(&mut engine, &mut state, &arena);
     assert_eq!(state.focused_input, Some(t));
-    assert!(state.focused_is_textarea, "textarea must enter multi-line editing");
-    assert_eq!(state.input_value, "hello", "edit buffer seeds from the text content");
+    assert!(
+        state.focused_is_textarea,
+        "textarea must enter multi-line editing"
+    );
+    assert_eq!(
+        state.input_value, "hello",
+        "edit buffer seeds from the text content"
+    );
 }
 
 #[test]
 fn el_focus_on_non_focusable_element_is_a_noop() {
-    let mut engine = ScriptEngine::new(r#"<div id="d"></div><input id="a">"#, EventBindings::default())
-        .expect("engine initializes");
+    let mut engine = ScriptEngine::new(
+        r#"<div id="d"></div><input id="a">"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
     let mut state = InputState::new();
     let arena = engine.arena();
     engine
@@ -175,7 +197,9 @@ fn el_focus_on_non_focusable_element_is_a_noop() {
     let cmds = drive(&mut engine, &mut state, &arena);
     assert_eq!(state.focused_input, None, "div is not focusable");
     assert!(
-        !cmds.iter().any(|c| matches!(c, RenderCmd::RenderInput { .. })),
+        !cmds
+            .iter()
+            .any(|c| matches!(c, RenderCmd::RenderInput { .. })),
         "no field repaint for a non-focusable target"
     );
 }
@@ -206,7 +230,10 @@ fn el_blur_removes_focus_from_the_focused_field() {
         .expect("focus a");
     drive(&mut engine, &mut state, &arena);
     assert_eq!(state.focused_input, Some(a));
-    assert_eq!(eval_str(&mut engine, "globalThis.__seen.join(',')"), "a-focus");
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__seen.join(',')"),
+        "a-focus"
+    );
 
     engine
         .eval_source("document.getElementById('a').blur()")
@@ -294,7 +321,11 @@ fn focus_pseudo_class_styles_only_the_focused_field() {
         arena[a].css_attr.get_color().is_some(),
         "the focused field must match :focus"
     );
-    assert_eq!(arena[b].css_attr.get_color(), None, "sibling stays unstyled");
+    assert_eq!(
+        arena[b].css_attr.get_color(),
+        None,
+        "sibling stays unstyled"
+    );
 }
 
 #[test]
@@ -302,8 +333,7 @@ fn focus_pseudo_class_matches_only_the_element_itself() {
     // Unlike `:hover` (which matches every ancestor of the hovered node),
     // `:focus` matches only the focused element — `:focus-within` would match
     // the ancestor chain.
-    let mut parser =
-        html_parse::Parser::new(r#"<div id="wrap"><input id="a"></div>"#);
+    let mut parser = html_parse::Parser::new(r#"<div id="wrap"><input id="a"></div>"#);
     let (root_id, mut arena, _embedded) = parser.parse();
     let rules = css_parse::Parser::new("div:focus { color: red; }").parse();
     let wrap = find_node_by_id(&arena, "wrap");
@@ -349,9 +379,8 @@ fn el_focus_pushes_focus_command_for_the_render_thread() {
     let cmds = drive(&mut engine, &mut state, &arena);
     assert_eq!(state.focused_input, Some(a));
     assert!(
-        cmds.iter().any(|c| {
-            matches!(c, RenderCmd::Focus { node_id: Some(id) } if *id == a)
-        }),
+        cmds.iter()
+            .any(|c| { matches!(c, RenderCmd::Focus { node_id: Some(id) } if *id == a) }),
         "focusing must publish a Focus command for the render thread's :focus cascade"
     );
     // And blurring clears it.
@@ -361,7 +390,8 @@ fn el_focus_pushes_focus_command_for_the_render_thread() {
     let cmds = drive(&mut engine, &mut state, &arena);
     assert_eq!(state.focused_input, None);
     assert!(
-        cmds.iter().any(|c| matches!(c, RenderCmd::Focus { node_id: None })),
+        cmds.iter()
+            .any(|c| matches!(c, RenderCmd::Focus { node_id: None })),
         "blurring must publish Focus{{node_id: None}} to clear the highlight"
     );
 }
@@ -377,9 +407,8 @@ fn autofocus_attribute_focuses_the_first_field_on_load() {
     let a = find_node_by_id(&arena, "a");
     let cmds = engine.take_pending_cmds();
     assert!(
-        cmds.iter().any(|c| {
-            matches!(c, RenderCmd::FocusRequest { node_id } if *node_id == a)
-        }),
+        cmds.iter()
+            .any(|c| { matches!(c, RenderCmd::FocusRequest { node_id } if *node_id == a) }),
         "autofocus must request focus for the first autofocus element"
     );
     // Full round trip: the request reaches the input loop and focuses it.
@@ -387,9 +416,8 @@ fn autofocus_attribute_focuses_the_first_field_on_load() {
     let cmds = apply_focus_requests(&mut state, cmds, Some(&arena), &mut Vec::new());
     assert_eq!(state.focused_input, Some(a), "autofocus must take effect");
     assert!(
-        cmds.iter().any(|c| {
-            matches!(c, RenderCmd::Focus { node_id: Some(id) } if *id == a)
-        }),
+        cmds.iter()
+            .any(|c| { matches!(c, RenderCmd::Focus { node_id: Some(id) } if *id == a) }),
         "autofocus must publish the :focus repaint"
     );
 }
@@ -397,14 +425,13 @@ fn autofocus_attribute_focuses_the_first_field_on_load() {
 #[test]
 fn autofocus_ignores_non_focusable_elements() {
     // `autofocus` on a `<div>` must not focus anything (browser behaviour).
-    let mut engine = ScriptEngine::new(
-        r#"<div id="d" autofocus></div>"#,
-        EventBindings::default(),
-    )
-    .expect("engine initializes");
+    let mut engine = ScriptEngine::new(r#"<div id="d" autofocus></div>"#, EventBindings::default())
+        .expect("engine initializes");
     let cmds = engine.take_pending_cmds();
     assert!(
-        !cmds.iter().any(|c| matches!(c, RenderCmd::FocusRequest { .. })),
+        !cmds
+            .iter()
+            .any(|c| matches!(c, RenderCmd::FocusRequest { .. })),
         "autofocus on a non-focusable element must be ignored"
     );
 }
@@ -418,8 +445,11 @@ fn el_blur_commits_edited_value_back_to_the_dom() {
     // A blur() triggered by JS commits the edit buffer like a click-outside
     // blur would: the arena text content / value attribute is updated and a
     // dirty marker routes the re-render.
-    let mut engine = ScriptEngine::new(r#"<textarea id="t">old</textarea>"#, EventBindings::default())
-        .expect("engine initializes");
+    let mut engine = ScriptEngine::new(
+        r#"<textarea id="t">old</textarea>"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
     let mut state = InputState::new();
     let arena = engine.arena();
     let t = find_node_by_id(&arena, "t");

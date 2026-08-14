@@ -12,7 +12,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use htui::tui::graph_api::TermLayout;
 
 /// Allocate a fresh `TermLayout` per iteration. Captures the cost of

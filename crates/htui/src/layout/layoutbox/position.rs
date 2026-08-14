@@ -102,22 +102,22 @@ fn reposition(b: &mut LayoutBox, cb: Rect) {
     let new_x = match inset.left {
         Some(l) => cb.x.saturating_add(l),
         None => match inset.right {
-            Some(r) => cb
-                .x
-                .saturating_add(cb.width)
-                .saturating_sub(b.rect.width)
-                .saturating_sub(r),
+            Some(r) => {
+                cb.x.saturating_add(cb.width)
+                    .saturating_sub(b.rect.width)
+                    .saturating_sub(r)
+            }
             None => cb.x,
         },
     };
     let new_y = match inset.top {
         Some(t) => cb.y.saturating_add(t),
         None => match inset.bottom {
-            Some(bot) => cb
-                .y
-                .saturating_add(cb.height)
-                .saturating_sub(b.rect.height)
-                .saturating_sub(bot),
+            Some(bot) => {
+                cb.y.saturating_add(cb.height)
+                    .saturating_sub(b.rect.height)
+                    .saturating_sub(bot)
+            }
             None => cb.y,
         },
     };

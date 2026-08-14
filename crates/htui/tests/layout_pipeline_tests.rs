@@ -2,8 +2,7 @@ use htui::{
     html::{css_parse, html_parse},
     layout::{
         BoxConstraint, Cursor, FormattingContext, GeneratedBox, GeneratedBoxKind, LayoutBox,
-        generate_box_tree, inner_formatting_context::flow::layout_tree,
-        layout::TermMap,
+        generate_box_tree, inner_formatting_context::flow::layout_tree, layout::TermMap,
     },
     tdom::node::{Node, NodeArena, NodeId, NodeType},
     tui::graph_api::TermLayout,
@@ -71,8 +70,10 @@ fn box_generation_classifies_flow_flex_table_and_replaced_boxes() {
     let (root_id, arena) = setup(html, "section { display: flex; }");
     let generated = generate_box_tree(&arena, root_id);
 
-    let div = find_generated(&generated, &arena, |node_type| matches!(node_type, NodeType::Div))
-        .expect("div should generate a box");
+    let div = find_generated(&generated, &arena, |node_type| {
+        matches!(node_type, NodeType::Div)
+    })
+    .expect("div should generate a box");
     assert_eq!(div.inner_formatting_context, FormattingContext::Flow);
     assert!(
         div.children
@@ -93,8 +94,10 @@ fn box_generation_classifies_flow_flex_table_and_replaced_boxes() {
     .expect("table should generate a box");
     assert_eq!(table.inner_formatting_context, FormattingContext::Table);
 
-    let image = find_generated(&generated, &arena, |node_type| matches!(node_type, NodeType::Img))
-        .expect("image should generate a box");
+    let image = find_generated(&generated, &arena, |node_type| {
+        matches!(node_type, NodeType::Img)
+    })
+    .expect("image should generate a box");
     assert_eq!(image.kind, GeneratedBoxKind::Replaced);
 }
 
@@ -116,17 +119,23 @@ fn geometry_pass_dispatches_flow_flex_table_and_replaced_boxes() {
         map.rows as usize,
     );
 
-    let flex = find_layout(&boxes, &arena, |node_type| matches!(node_type, NodeType::Section))
-        .expect("flex geometry should be produced");
+    let flex = find_layout(&boxes, &arena, |node_type| {
+        matches!(node_type, NodeType::Section)
+    })
+    .expect("flex geometry should be produced");
     assert_eq!(flex.inner_formatting_context, FormattingContext::Flex);
     assert_eq!(flex.children.len(), 2);
 
-    let table = find_layout(&boxes, &arena, |node_type| matches!(node_type, NodeType::Table))
-        .expect("table geometry should be produced");
+    let table = find_layout(&boxes, &arena, |node_type| {
+        matches!(node_type, NodeType::Table)
+    })
+    .expect("table geometry should be produced");
     assert!(!table.children.is_empty());
 
-    let image = find_layout(&boxes, &arena, |node_type| matches!(node_type, NodeType::Img))
-        .expect("replaced geometry should be produced");
+    let image = find_layout(&boxes, &arena, |node_type| {
+        matches!(node_type, NodeType::Img)
+    })
+    .expect("replaced geometry should be produced");
     assert!(matches!(image.kind, htui::layout::BoxKind::Replaced(_)));
 }
 

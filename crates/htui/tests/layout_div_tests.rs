@@ -72,10 +72,14 @@ fn test_div_background_color() {
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map);
-    let has_bg = tl
-        .layout
-        .iter()
-        .any(|b| b.bcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }));
+    let has_bg = tl.layout.iter().any(|b| {
+        b.bcolor
+            == Some(Color::Rgb {
+                r: 255,
+                g: 255,
+                b: 0,
+            })
+    });
     assert!(has_bg, "div background-color should be applied");
 }
 
@@ -333,10 +337,14 @@ fn test_div_color_inherited_by_p() {
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map);
-    let has_color = tl
-        .layout
-        .iter()
-        .any(|b| b.fcolor == Some(Color::Rgb { r: 255, g: 0, b: 255 }));
+    let has_color = tl.layout.iter().any(|b| {
+        b.fcolor
+            == Some(Color::Rgb {
+                r: 255,
+                g: 0,
+                b: 255,
+            })
+    });
     assert!(has_color, "div color should inherit to <p> descendant");
 }
 
@@ -366,8 +374,14 @@ fn test_long_p_text_does_not_overflow_into_next_row() {
         // either the empty default (no fg, no bg) or get overwritten by
         // the next paint pass for the <h2>. We assert no p-coloured
         // character remains in those cells.
-        let has_p_text =
-            !cell.word.is_empty() && cell.word != " " && cell.fcolor == Some(Color::Rgb { r: 128, g: 128, b: 128 });
+        let has_p_text = !cell.word.is_empty()
+            && cell.word != " "
+            && cell.fcolor
+                == Some(Color::Rgb {
+                    r: 128,
+                    g: 128,
+                    b: 128,
+                });
         assert!(
             !has_p_text,
             "p text should not bleed past row 0 — found {:?} at cell index {}",
@@ -397,11 +411,13 @@ fn test_long_p_text_stops_at_content_box_right_edge() {
     let p_chars_on_row1 = tl.layout[row1_start..row1_end]
         .iter()
         .filter(|c| {
-            c.fcolor == Some(Color::Rgb {
-                r: 128,
-                g: 128,
-                b: 128,
-            }) && c.word == "x"
+            c.fcolor
+                == Some(Color::Rgb {
+                    r: 128,
+                    g: 128,
+                    b: 128,
+                })
+                && c.word == "x"
         })
         .count();
     assert_eq!(

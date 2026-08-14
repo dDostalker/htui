@@ -114,7 +114,14 @@ fn padding_background_fills_padding_box() {
     let row0 = &tl.layout[0..cols];
     let cyan_count = row0
         .iter()
-        .filter(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 255, b: 255 }))
+        .filter(|b| {
+            b.bcolor
+                == Some(Color::Rgb {
+                    r: 0,
+                    g: 255,
+                    b: 255,
+                })
+        })
         .count();
     assert_eq!(
         cyan_count, cols,
@@ -298,11 +305,7 @@ fn border_color_overrides_text_color() {
     for b in &border_cells {
         assert_eq!(
             b.fcolor,
-            Some(Color::Rgb {
-                r: 0,
-                g: 128,
-                b: 0
-            }),
+            Some(Color::Rgb { r: 0, g: 128, b: 0 }),
             "border glyphs should pick up the border's color"
         );
     }
@@ -322,20 +325,12 @@ fn border_per_side_longhand_overrides_universal() {
     let left_color = tl.layout[cols].fcolor;
     assert_eq!(
         top_color,
-        Some(Color::Rgb {
-            r: 0,
-            g: 0,
-            b: 255
-        }),
+        Some(Color::Rgb { r: 0, g: 0, b: 255 }),
         "top border should be blue"
     );
     assert_eq!(
         left_color,
-        Some(Color::Rgb {
-            r: 255,
-            g: 0,
-            b: 0
-        }),
+        Some(Color::Rgb { r: 255, g: 0, b: 0 }),
         "left border should be red"
     );
 }
@@ -429,7 +424,14 @@ fn combined_padding_border_margin_size_correctly() {
         .layout
         .iter()
         .enumerate()
-        .filter(|(_, b)| b.bcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }))
+        .filter(|(_, b)| {
+            b.bcolor
+                == Some(Color::Rgb {
+                    r: 255,
+                    g: 255,
+                    b: 0,
+                })
+        })
         .map(|(i, _)| i / cols)
         .collect::<std::collections::HashSet<_>>();
     // Expected rows: 3 (margin-top) + 1 (border-top) + 2 (padding-top)
@@ -623,9 +625,6 @@ fn border_radius_renders_rounded_corner_glyphs() {
     assert_eq!(word_at(&tl, 5, 2), "╯", "bottom-right corner");
 
     // Control: without `border-radius` the corners stay square.
-    let (_, tl) = draw(
-        "<div>X</div>",
-        "div { border: 1px solid red; width: 6px; }",
-    );
+    let (_, tl) = draw("<div>X</div>", "div { border: 1px solid red; width: 6px; }");
     assert_eq!(word_at(&tl, 0, 0), "┌", "square corner without radius");
 }

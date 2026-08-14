@@ -47,8 +47,14 @@ fn layout_boxes(html: &str) -> (Vec<htui::layout::LayoutBox>, NodeArena) {
     let (root_id, arena) = setup(html);
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
-    let boxes =
-        layout_tree(&arena, root_id, containing, &mut cursor, COLS as usize, ROWS as usize);
+    let boxes = layout_tree(
+        &arena,
+        root_id,
+        containing,
+        &mut cursor,
+        COLS as usize,
+        ROWS as usize,
+    );
     (boxes, arena)
 }
 
@@ -126,7 +132,10 @@ fn test_closed_details_renders_only_first_summary() {
         "hidden content must not produce a box"
     );
     let (_, tl) = draw("<details><summary>More</summary><p>Secret</p></details>");
-    assert!(canvas_has_word(&tl, "▸"), "closed details shows the closed marker");
+    assert!(
+        canvas_has_word(&tl, "▸"),
+        "closed details shows the closed marker"
+    );
     assert!(canvas_has_word(&tl, "M"), "summary text renders");
     assert!(!canvas_has_word(&tl, "S"), "hidden content must not paint");
 }
@@ -134,12 +143,16 @@ fn test_closed_details_renders_only_first_summary() {
 #[test]
 fn test_open_details_renders_all_children() {
     init();
-    let (boxes, arena) = layout_boxes("<details open><summary>More</summary><p>Shown</p></details>");
+    let (boxes, arena) =
+        layout_boxes("<details open><summary>More</summary><p>Shown</p></details>");
     assert!(find_box_by_type(&boxes, &NodeType::Summary, &arena).is_some());
     let p = find_box_by_type(&boxes, &NodeType::P, &arena).expect("open details shows content");
     assert_eq!(p.rect.y, 1, "content starts below the summary row");
     let (_, tl) = draw("<details open><summary>More</summary><p>Shown</p></details>");
-    assert!(canvas_has_word(&tl, "▾"), "open details shows the open marker");
+    assert!(
+        canvas_has_word(&tl, "▾"),
+        "open details shows the open marker"
+    );
     assert!(canvas_has_word(&tl, "S"), "content paints when open");
 }
 
@@ -166,14 +179,16 @@ fn test_closed_details_keeps_only_the_first_summary() {
     // Content before the summary is hidden too; a second `<summary>` is
     // hidden exactly like any other non-first child (browsers only special
     // case the first summary).
-    let html =
-        "<details><p>before</p><summary>Toggle</summary><p>between</p><summary>again</summary></details>";
+    let html = "<details><p>before</p><summary>Toggle</summary><p>between</p><summary>again</summary></details>";
     let (boxes, arena) = layout_boxes(html);
-    let summary = find_box_by_type(&boxes, &NodeType::Summary, &arena)
-        .expect("first summary renders");
+    let summary =
+        find_box_by_type(&boxes, &NodeType::Summary, &arena).expect("first summary renders");
     let mut summary_count = 0;
     collect_box_count(&boxes, &NodeType::Summary, &arena, &mut summary_count);
-    assert_eq!(summary_count, 1, "only the first summary renders when closed");
+    assert_eq!(
+        summary_count, 1,
+        "only the first summary renders when closed"
+    );
     assert!(summary.rect.height == 1);
     assert!(
         find_box_by_type(&boxes, &NodeType::P, &arena).is_none(),
@@ -181,12 +196,26 @@ fn test_closed_details_keeps_only_the_first_summary() {
     );
     let (_, tl) = draw(html);
     assert!(canvas_has_word(&tl, "T"));
-    assert!(!canvas_has_word(&tl, "f"), "content before the summary stays hidden");
-    assert!(!canvas_has_word(&tl, "w"), "content after the summary stays hidden");
-    assert!(!canvas_has_word(&tl, "i"), "the second summary stays hidden");
+    assert!(
+        !canvas_has_word(&tl, "f"),
+        "content before the summary stays hidden"
+    );
+    assert!(
+        !canvas_has_word(&tl, "w"),
+        "content after the summary stays hidden"
+    );
+    assert!(
+        !canvas_has_word(&tl, "i"),
+        "the second summary stays hidden"
+    );
 }
 
-fn collect_box_count(boxes: &[htui::layout::LayoutBox], target: &NodeType, arena: &NodeArena, out: &mut usize) {
+fn collect_box_count(
+    boxes: &[htui::layout::LayoutBox],
+    target: &NodeType,
+    arena: &NodeArena,
+    out: &mut usize,
+) {
     for b in boxes {
         if &arena[b.node_id].node_type == target {
             *out += 1;
@@ -202,7 +231,10 @@ fn test_summary_outside_details_has_no_marker() {
     // exists inside a `<details>` (browser UA `summary::marker`).
     let (_, tl) = draw("<summary>plain</summary>");
     assert!(canvas_has_word(&tl, "p"));
-    assert!(!canvas_has_word(&tl, "▸"), "no disclosure marker outside details");
+    assert!(
+        !canvas_has_word(&tl, "▸"),
+        "no disclosure marker outside details"
+    );
     assert!(!canvas_has_word(&tl, "▾"));
 }
 
@@ -217,20 +249,22 @@ fn test_summary_marker_styles_with_css() {
         .position(|b| b.word == "▸")
         .expect("marker cell");
     assert_eq!(
-        tl.layout[idx].fcolor,
-        None,
+        tl.layout[idx].fcolor, None,
         "default fg is the terminal's own"
     );
-    let (_, tl) = draw(
-        "<style>summary { color: blue; }</style><details><summary>More</summary></details>",
-    );
+    let (_, tl) =
+        draw("<style>summary { color: blue; }</style><details><summary>More</summary></details>");
     let idx = tl
         .layout
         .iter()
         .position(|b| b.word == "▸")
         .expect("marker cell");
     let blue = Color::Rgb { r: 0, g: 0, b: 255 };
-    assert_eq!(tl.layout[idx].fcolor, Some(blue), "marker inherits summary color");
+    assert_eq!(
+        tl.layout[idx].fcolor,
+        Some(blue),
+        "marker inherits summary color"
+    );
 }
 
 #[test]
@@ -254,7 +288,9 @@ fn test_clicking_summary_toggles_open_and_fires_toggle() {
     let mut hover = HoverState::new();
     let ev = apply_message(&mut engine, &mut hover, &map, ScriptMsg::Click { x, y });
     assert!(
-        engine.arena()[region.node_id].attributes.contains_key("open"),
+        engine.arena()[region.node_id]
+            .attributes
+            .contains_key("open"),
         "clicking the summary must set the open attribute"
     );
     assert!(ev.dirty.is_some(), "the toggle marks the details dirty");
@@ -267,7 +303,9 @@ fn test_clicking_summary_toggles_open_and_fires_toggle() {
     // Second click closes it again.
     let _ev = apply_message(&mut engine, &mut hover, &map, ScriptMsg::Click { x, y });
     assert!(
-        !engine.arena()[region.node_id].attributes.contains_key("open"),
+        !engine.arena()[region.node_id]
+            .attributes
+            .contains_key("open"),
         "second click removes the open attribute"
     );
     assert_eq!(
@@ -325,9 +363,8 @@ fn test_toggle_mutation_reflows_to_reveal_content() {
     init();
     // After the toggle marks the details dirty, a re-layout from the engine's
     // live arena must show the newly revealed content (and the open marker).
-    let (mut engine, geo) = build_geometry(
-        r#"<details id="d"><summary>More</summary><p>Secret</p></details>"#,
-    );
+    let (mut engine, geo) =
+        build_geometry(r#"<details id="d"><summary>More</summary><p>Secret</p></details>"#);
     let map = HitMap::build(&geo);
     let region = map.resolve_by_id("d").expect("details region");
     let (x, y) = center(region.rect);
@@ -409,8 +446,14 @@ fn test_closed_details_hides_own_inline_text() {
     );
     let (_, tl) = draw("<details>lead<summary>s</summary>tail</details>");
     assert!(canvas_has_word(&tl, "s"), "summary text paints");
-    assert!(!canvas_has_word(&tl, "l"), "text before the summary stays hidden");
-    assert!(!canvas_has_word(&tl, "t"), "text after the summary stays hidden");
+    assert!(
+        !canvas_has_word(&tl, "l"),
+        "text before the summary stays hidden"
+    );
+    assert!(
+        !canvas_has_word(&tl, "t"),
+        "text after the summary stays hidden"
+    );
 }
 
 #[test]

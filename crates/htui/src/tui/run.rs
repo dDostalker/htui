@@ -7,16 +7,14 @@
 //! events into `RenderCmd`s.
 
 use std::io::{BufWriter, Write, stdout};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crossterm::{
     cursor::{Hide, Show},
-    event::{
-        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    },
+    event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
     execute,
     style::Color,
     terminal::{
@@ -30,11 +28,11 @@ use crate::{
         self, CssRule, DynamicState, PseudoClass, PseudoClassSet, css_into_node_with_state,
         css_pseudo_rule_set, reset_css_attr, selector_chain_matches_with_state,
     },
+    layout::layout::{MAX_TERM_COLS, MAX_TERM_ROWS, TermMap},
     layout::layoutbox::geometry::{
         SelectRow, overlay_options, select_item_indices, select_overlay_rect, select_rows,
     },
     layout::{LayoutBox, Rect},
-    layout::layout::{MAX_TERM_COLS, MAX_TERM_ROWS, TermMap},
     script::{ScriptMsg, ScriptResponse, run_script_thread},
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{
@@ -396,6 +394,84 @@ impl RenderState {
         }
     }
 
+    /// Apply one page-selection update: repaint the union of the old / new
+    /// highlight bounds (the paint phase has no selection knowledge) and
+    /// overlay the new highlight, then refresh the copyable text.
+    ///
+    /// Backs `RenderCmd::TextSelection`, which is *incremental* rather than a
+    /// complete snapshot: the repaint region is derived from the previous
+    /// selection, so the command must never be superseded by a same-batch
+    /// `RenderArena` / `Hover` — the batch merge defers it and runs it after
+    /// the snapshot command instead (see the render thread's coalescing pass).
+    fn apply_text_selection_cmd<W: Write>(
+        &mut self,
+        out: &mut BufWriter<W>,
+        anchor: Option<(u32, u32)>,
+        end: Option<(u32, u32)>,
+        mode: SelectionMode,
+    ) {
+        let new_sel = match (anchor, end) {
+            (Some(a), Some(b)) => Some(TextSel {
+                mode,
+                anchor: a,
+                end: b,
+            }),
+            _ => None,
+        };
+        let prev = self.text_selection;
+        self.text_selection = new_sel;
+        let Some(tl) = self.term_layout.as_mut() else {
+            return;
+        };
+        let Some(geo) = self.geometry.as_ref() else {
+            return;
+        };
+        let cols = tl.columns as u32;
+        // Highlight bands are the actual cells the selection covers: flow
+        // selections clip to the text columns, block selections keep the
+        // rectangle.
+        let prev_lines = match &prev {
+            Some(n) => highlight_lines(&geo.arena, &geo.boxes, n, cols),
+            None => Vec::new(),
+        };
+        let new_lines = match &new_sel {
+            Some(n) => highlight_lines(&geo.arena, &geo.boxes, n, cols),
+            None => Vec::new(),
+        };
+        // Repaint the union of the old and new selection bounds: the old
+        // highlight must be cleared, the new one painted.
+        let region = match (lines_bounds(&prev_lines), lines_bounds(&new_lines)) {
+            (Some(a), Some(b)) => Some(union_rect(a, b)),
+            (Some(a), None) => Some(a),
+            (None, Some(b)) => Some(b),
+            (None, None) => None,
+        };
+        if let Some(r) = region {
+            tl.repaint_region(&geo.arena, &geo.boxes, r);
+            tl.apply_text_selection(&new_lines, SELECTION_BG);
+        }
+        tl.render(out);
+        flush_frame(out);
+        // Refresh the copyable text of the selection (or clear it). Flow
+        // selections are rebuilt from the layout's inline runs so wrapped
+        // lines inside one block stay continuous (browser behaviour); block
+        // selections keep the canvas extraction.
+        let raw_lines = match &new_sel {
+            Some(n) => selection_lines(n, cols),
+            None => Vec::new(),
+        };
+        let text = match &new_sel {
+            Some(n) if n.mode == SelectionMode::Flow => {
+                crate::layout::extract_flow_text(&geo.arena, &geo.boxes, &raw_lines)
+            }
+            Some(_) => extract_selection(tl, &new_lines),
+            None => String::new(),
+        };
+        if let Ok(mut guard) = self.selection_text.lock() {
+            *guard = text;
+        }
+    }
+
     /// Parse the current session document and cascade its styles.
     fn parse_and_apply(&self) -> (NodeId, NodeArena) {
         parse_and_apply(&self.html, &self.css_rules)
@@ -469,9 +545,8 @@ impl RenderState {
         // is static, so this only runs on the first successful layout.
         if !self.title_set {
             if let Some(title) = extract_title(&arena, root_id) {
-                execute!(stdout(), crossterm::terminal::SetTitle(title)).unwrap_or_else(|e| {
-                    log::error!("Failed to set terminal title: {}", e)
-                });
+                execute!(stdout(), crossterm::terminal::SetTitle(title))
+                    .unwrap_or_else(|e| log::error!("Failed to set terminal title: {}", e));
             }
             self.title_set = true;
         }
@@ -489,7 +564,7 @@ impl RenderState {
         // avoids clearing and re-painting the whole buffer. Any mismatch — a
         // moved / reflowed box, a hover change, a canvas resize — falls back
         // to the full repaint.
-        let region = if !size_changed
+        let mut region = if !size_changed
             && let Some(dirty) = dirty
             && !dirty.is_empty()
             && let Some(prev) = &self.geometry
@@ -509,6 +584,24 @@ impl RenderState {
             // No hit-test thread is listening (plain `render`), so the
             // snapshot has no consumer — benign.
             log::debug!("Hit-test channel closed: {}", e);
+        }
+
+        // The selection re-apply below blends each selected cell from its
+        // freshly painted colour. Cells outside an *incremental* repaint
+        // region would keep the previous frame's highlight and be blended
+        // again — a step darker per repaint, which an animated widget (a
+        // timer / hover repaint) turns into a visible bright / dark flicker.
+        // Extend the incremental region to the selection bounds so every
+        // selected cell is painted fresh exactly once before the highlight is
+        // overlaid. A `None` region stays `None`: the full repaint already
+        // covers the selection.
+        if let Some(r) = region
+            && let Some(sel) = &self.text_selection
+        {
+            let sel_lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
+            if let Some(sel_rect) = lines_bounds(&sel_lines) {
+                region = Some(union_rect(r, sel_rect));
+            }
         }
 
         match region {
@@ -537,7 +630,7 @@ impl RenderState {
         // never spills over borders / padding / trailing whitespace.
         if let Some(sel) = &self.text_selection {
             let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
-            apply_selection_lines(tl, &lines);
+            tl.apply_text_selection(&lines, SELECTION_BG);
         }
         // Re-apply an open dropdown overlay (a repaint would clear it).
         if let Some(open) = &self.open_select {
@@ -647,15 +740,26 @@ impl RenderState {
             (None, Some(b)) => Some(b),
             (None, None) => None,
         };
-        let Some(r) = region else {
+        let Some(mut r) = region else {
             return;
         };
+        // Extend the repaint to the active selection bounds: the selection
+        // re-apply below blends each selected cell from its freshly painted
+        // colour, so cells outside `r` would keep the previous frame's
+        // highlight and be blended again (a step darker per hover / focus
+        // repaint — the bright / dark flicker).
+        if let Some(sel) = &self.text_selection {
+            let sel_lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
+            if let Some(sel_rect) = lines_bounds(&sel_lines) {
+                r = union_rect(r, sel_rect);
+            }
+        }
         tl.repaint_region(&arena, &geo.boxes, r);
         // The repaint reset the canvas (or part of it); the active selection
         // highlight must be overlaid again.
         if let Some(sel) = &self.text_selection {
             let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
-            apply_selection_lines(tl, &lines);
+            tl.apply_text_selection(&lines, SELECTION_BG);
         }
         if let Some(open) = &self.open_select {
             apply_select_overlay(tl, open);
@@ -751,10 +855,9 @@ fn union_rect(a: Rect, b: Rect) -> Rect {
     let left = a.x.min(b.x);
     let top = a.y.min(b.y);
     let right = a.x.saturating_add(a.width).max(b.x.saturating_add(b.width));
-    let bottom = a
-        .y
-        .saturating_add(a.height)
-        .max(b.y.saturating_add(b.height));
+    let bottom =
+        a.y.saturating_add(a.height)
+            .max(b.y.saturating_add(b.height));
     Rect::new(left, top, right - left, bottom - top)
 }
 
@@ -844,11 +947,7 @@ fn apply_select_overlay(tl: &mut TermLayout, open: &OpenSelect) {
         tl.layout.resize(needed, Block::default());
     }
     let max = tl.layout.len();
-    let x_end = open
-        .rect
-        .x
-        .saturating_add(open.rect.width)
-        .min(cols);
+    let x_end = open.rect.x.saturating_add(open.rect.width).min(cols);
     for (row_idx, row) in open.rows.iter().enumerate() {
         let row_start = open.rect.y.saturating_add(row_idx).saturating_mul(cols);
         if row_start >= max {
@@ -900,38 +999,16 @@ fn apply_select_overlay(tl: &mut TermLayout, open: &OpenSelect) {
         }
     }
 }
-fn highlight_lines(arena: &NodeArena, boxes: &[LayoutBox], sel: &TextSel, cols: u32) -> Vec<(u32, u32, u32)> {
+fn highlight_lines(
+    arena: &NodeArena,
+    boxes: &[LayoutBox],
+    sel: &TextSel,
+    cols: u32,
+) -> Vec<(u32, u32, u32)> {
     let raw = selection_lines(sel, cols);
     match sel.mode {
-        SelectionMode::Flow => {
-            crate::layout::selection_text_lines(arena, boxes, &raw)
-        }
+        SelectionMode::Flow => crate::layout::selection_text_lines(arena, boxes, &raw),
         SelectionMode::Block => raw,
-    }
-}
-
-/// Overlay the page-selection highlight on every cell inside the line bands.
-///
-/// The paint phase knows nothing about the selection, so this is applied after
-/// each repaint. Filler cells (empty word, the second half of a wide glyph)
-/// get the background too so the highlight reads as a continuous band; the
-/// diff renderer skips them, so only glyph-bearing cells change the output.
-fn apply_selection_lines(tl: &mut TermLayout, lines: &[(u32, u32, u32)]) {
-    let cols = tl.columns as usize;
-    let max = tl.layout.len();
-    for &(y, xs, xe) in lines {
-        let row_start = (y as usize).saturating_mul(cols);
-        if row_start >= max {
-            continue;
-        }
-        let xe = (xe as usize).min(cols);
-        for x in (xs as usize)..xe {
-            let idx = row_start.saturating_add(x);
-            if idx >= max {
-                break;
-            }
-            tl.layout[idx].bcolor = Some(SELECTION_BG);
-        }
     }
 }
 
@@ -1085,9 +1162,24 @@ fn render_thread(
         //   `RenderHtml` / `Hover` / `Quit`) — each carries a complete final
         //   state, so a later one safely supersedes an earlier one; only the
         //   last of the batch is kept.
+        // - `TextSelection` is *incremental*: its repaint region derives from
+        //   the previously applied selection, so superseding it with a
+        //   same-batch snapshot (a `RenderArena` triggered by a timer / hover
+        //   mid-drag) would leave the render thread re-applying the stale
+        //   highlight and make the next selection jump the edge forward — the
+        //   visible flicker. It is deferred instead and applied after the
+        //   snapshot command, on the fresh canvas.
+        // - A `Hover` arriving after a pending `RenderArena` is likewise
+        //   deferred: superseding the arena render (whose `dynamic.hovered`
+        //   was captured when the DOM change was folded) would drop the DOM
+        //   mutation — an animated widget under the pointer (e.g. the music
+        //   demo's progress bar) would then update in irregular jumps. The
+        //   deferred hover repaint re-applies the newer highlight on top.
         let mut pending_inputs: Vec<(NodeId, String, usize, bool, Option<(usize, usize)>)> =
             Vec::new();
         let mut pending_selects: Vec<RenderCmd> = Vec::new();
+        let mut pending_text_sel: Option<RenderCmd> = None;
+        let mut pending_hover: Option<RenderCmd> = None;
         let mut cmd = match first {
             RenderCmd::RenderInput {
                 node_id,
@@ -1105,6 +1197,10 @@ fn render_thread(
                 pending_selects.push(sel);
                 None
             }
+            other @ RenderCmd::TextSelection { .. } => {
+                pending_text_sel = Some(other);
+                None
+            }
             other => Some(other),
         };
         while let Ok(next) = rx.try_recv() {
@@ -1119,6 +1215,19 @@ fn render_thread(
                 sel @ (RenderCmd::SelectOpen { .. }
                 | RenderCmd::SelectClose { .. }
                 | RenderCmd::SelectMove { .. }) => pending_selects.push(sel),
+                other @ RenderCmd::TextSelection { .. } => {
+                    // Only the latest selection matters; earlier ones in the
+                    // same batch are intermediates.
+                    pending_text_sel = Some(other);
+                }
+                other @ RenderCmd::Hover { .. }
+                    if matches!(cmd, Some(RenderCmd::RenderArena { .. })) =>
+                {
+                    // The arena render re-cascades with the hover state it
+                    // carried; the newer hover repaint must not swallow the
+                    // DOM mutations, so defer it (see the merge comment).
+                    pending_hover = Some(other);
+                }
                 other => {
                     cmd = Some(other);
                     // Quit supersedes anything still queued in the batch.
@@ -1149,210 +1258,171 @@ fn render_thread(
         );
         last_frame_at = Some(Instant::now());
 
-        let Some(cmd) = cmd else { continue };
-        let batch_t0 = Instant::now();
-        match cmd {
-            RenderCmd::Quit => break,
+        // Process the deferred `TextSelection` *before* the snapshot command:
+        // its repaint uses the current canvas (the union of the old and new
+        // bounds), and the snapshot re-applies it on the fresh canvas — so it
+        // is never lost to a snapshot arm's early `continue` (see the merge
+        // comment above).
+        if let Some(RenderCmd::TextSelection { anchor, end, mode }) = pending_text_sel {
+            state.apply_text_selection_cmd(&mut out, anchor, end, mode);
+        }
 
-            RenderCmd::Rerender { scroll_y } => {
-                let Some(tl) = state.term_layout.as_mut() else {
-                    continue;
-                };
-                let prev = tl.scroll_y;
-                tl.scroll_y = scroll_y;
-                tl.clamp_scroll();
-                // Defense in depth: drop rerenders whose resolved scroll
-                // position is unchanged after clamping. Most such events are
-                // already filtered in the input thread, but if a `Rerender`
-                // slips past (e.g. races between a Redraw updating the
-                // max_scroll ceiling and a queued scroll event) we still
-                // avoid the diff pass.
-                if tl.scroll_y == prev {
-                    continue;
+        if let Some(cmd) = cmd {
+            let batch_t0 = Instant::now();
+            match cmd {
+                RenderCmd::Quit => break,
+
+                RenderCmd::Rerender { scroll_y } => {
+                    let Some(tl) = state.term_layout.as_mut() else {
+                        continue;
+                    };
+                    let prev = tl.scroll_y;
+                    tl.scroll_y = scroll_y;
+                    tl.clamp_scroll();
+                    // Defense in depth: drop rerenders whose resolved scroll
+                    // position is unchanged after clamping. Most such events are
+                    // already filtered in the input thread, but if a `Rerender`
+                    // slips past (e.g. races between a Redraw updating the
+                    // max_scroll ceiling and a queued scroll event) we still
+                    // avoid the diff pass.
+                    if tl.scroll_y == prev {
+                        continue;
+                    }
+                    // The incremental renderer diffs the shifted viewport against
+                    // the previous frame, so scrolling needs no full-screen Clear.
+                    tl.render(&mut out);
+                    flush_frame(&mut out);
                 }
-                // The incremental renderer diffs the shifted viewport against
-                // the previous frame, so scrolling needs no full-screen Clear.
-                tl.render(&mut out);
-                flush_frame(&mut out);
-            }
 
-            RenderCmd::Redraw { scroll_y, zoom } => {
-                let term_map = match TermMap::get_ter_map() {
-                    Ok(m) => m,
-                    Err(e) => {
-                        log::error!("Failed to get terminal size: {}", e);
-                        continue;
-                    }
-                };
-                state.redraw(&mut out, &geo_tx, &term_map, scroll_y, zoom);
-            }
+                RenderCmd::Redraw { scroll_y, zoom } => {
+                    let term_map = match TermMap::get_ter_map() {
+                        Ok(m) => m,
+                        Err(e) => {
+                            log::error!("Failed to get terminal size: {}", e);
+                            continue;
+                        }
+                    };
+                    state.redraw(&mut out, &geo_tx, &term_map, scroll_y, zoom);
+                }
 
-            RenderCmd::RenderArena {
-                arena,
-                root_id,
-                scroll_y,
-                zoom,
-                dynamic,
-                dirty,
-            } => {
-                // A hover / focus change re-styles the whole tree (the
-                // `:hover` / `:focus` highlight may sit anywhere), so the
-                // incremental repaint is only valid when the interaction
-                // state is unchanged.
-                let state_changed = state.dynamic != dynamic;
-                state.dynamic = dynamic;
-                let term_map = match TermMap::get_ter_map() {
-                    Ok(m) => m,
-                    Err(e) => {
-                        log::error!("Failed to get terminal size: {}", e);
-                        continue;
-                    }
-                };
-                state.render_arena(
-                    &mut out,
-                    &geo_tx,
-                    &term_map,
-                    &arena,
+                RenderCmd::RenderArena {
+                    arena,
                     root_id,
                     scroll_y,
                     zoom,
+                    dynamic,
                     dirty,
-                    state_changed,
-                );
-            }
+                } => {
+                    // A hover / focus change re-styles the whole tree (the
+                    // `:hover` / `:focus` highlight may sit anywhere), so the
+                    // incremental repaint is only valid when the interaction
+                    // state is unchanged.
+                    let state_changed = state.dynamic != dynamic;
+                    state.dynamic = dynamic;
+                    let term_map = match TermMap::get_ter_map() {
+                        Ok(m) => m,
+                        Err(e) => {
+                            log::error!("Failed to get terminal size: {}", e);
+                            continue;
+                        }
+                    };
+                    state.render_arena(
+                        &mut out,
+                        &geo_tx,
+                        &term_map,
+                        &arena,
+                        root_id,
+                        scroll_y,
+                        zoom,
+                        dirty,
+                        state_changed,
+                    );
+                }
 
-            RenderCmd::RenderHtml { html } => {
-                let term_map = match TermMap::get_ter_map() {
-                    Ok(m) => m,
-                    Err(e) => {
-                        log::error!("Failed to get terminal size: {}", e);
+                RenderCmd::RenderHtml { html } => {
+                    let term_map = match TermMap::get_ter_map() {
+                        Ok(m) => m,
+                        Err(e) => {
+                            log::error!("Failed to get terminal size: {}", e);
+                            continue;
+                        }
+                    };
+                    state.render_html(&mut out, &geo_tx, &term_map, html);
+                }
+
+                RenderCmd::Hover { node_id } => {
+                    let prev = state.dynamic.hovered;
+                    state.dynamic.hovered = node_id;
+                    // Without any `:hover` rule the cascade is identical for every
+                    // pointer position, so nothing can change on screen — skip the
+                    // repaint entirely (browser behaviour: moving the pointer with
+                    // no `:hover` styles produces no drawing).
+                    if !state.pseudo_rules.contains_pseudo(PseudoClass::Hover) {
                         continue;
                     }
-                };
-                state.render_html(&mut out, &geo_tx, &term_map, html);
-            }
-
-            RenderCmd::Hover { node_id } => {
-                let prev = state.dynamic.hovered;
-                state.dynamic.hovered = node_id;
-                // Without any `:hover` rule the cascade is identical for every
-                // pointer position, so nothing can change on screen — skip the
-                // repaint entirely (browser behaviour: moving the pointer with
-                // no `:hover` styles produces no drawing).
-                if !state.pseudo_rules.contains_pseudo(PseudoClass::Hover) {
-                    continue;
+                    state.repaint_dynamic(&mut out, PseudoClass::Hover, prev, node_id);
                 }
-                state.repaint_dynamic(&mut out, PseudoClass::Hover, prev, node_id);
-            }
 
-            RenderCmd::Focus { node_id } => {
-                let prev = state.dynamic.focused;
-                state.dynamic.focused = node_id;
-                // Without any `:focus` rule the cascade is identical for every
-                // focus position, so nothing can change on screen — skip the
-                // repaint entirely (browser behaviour: focusing with no
-                // `:focus` styles produces no drawing).
-                if !state.pseudo_rules.contains_pseudo(PseudoClass::Focus) {
-                    continue;
-                }
-                state.repaint_dynamic(&mut out, PseudoClass::Focus, prev, node_id);
-            }
-
-            // Select dropdown commands share one handler so the pending pass
-            // can also run them (see `pending_selects` above).
-            RenderCmd::SelectOpen { .. }
-            | RenderCmd::SelectClose { .. }
-            | RenderCmd::SelectMove { .. } => {
-                state.handle_select(&mut out, cmd);
-            }
-
-            RenderCmd::TextSelection { anchor, end, mode } => {
-                let new_sel = match (anchor, end) {
-                    (Some(a), Some(b)) => Some(TextSel {
-                        mode,
-                        anchor: a,
-                        end: b,
-                    }),
-                    _ => None,
-                };
-                let prev = state.text_selection;
-                state.text_selection = new_sel;
-                let Some(tl) = state.term_layout.as_mut() else {
-                    continue;
-                };
-                let Some(geo) = state.geometry.as_ref() else {
-                    continue;
-                };
-                let cols = tl.columns as u32;
-                // Highlight bands are the actual cells the selection covers:
-                // flow selections clip to the text columns, block selections
-                // keep the rectangle.
-                let prev_lines = match &prev {
-                    Some(n) => highlight_lines(&geo.arena, &geo.boxes, n, cols),
-                    None => Vec::new(),
-                };
-                let new_lines = match &new_sel {
-                    Some(n) => highlight_lines(&geo.arena, &geo.boxes, n, cols),
-                    None => Vec::new(),
-                };
-                // Repaint the union of the old and new selection bounds: the
-                // old highlight must be cleared, the new one painted.
-                let region = match (lines_bounds(&prev_lines), lines_bounds(&new_lines)) {
-                    (Some(a), Some(b)) => Some(union_rect(a, b)),
-                    (Some(a), None) => Some(a),
-                    (None, Some(b)) => Some(b),
-                    (None, None) => None,
-                };
-                if let Some(r) = region {
-                    tl.repaint_region(&geo.arena, &geo.boxes, r);
-                    apply_selection_lines(tl, &new_lines);
-                }
-                tl.render(&mut out);
-                flush_frame(&mut out);
-                // Refresh the copyable text of the selection (or clear it).
-                // Flow selections are rebuilt from the layout's inline runs so
-                // wrapped lines inside one block stay continuous (browser
-                // behaviour); block selections keep the canvas extraction.
-                let raw_lines = match &new_sel {
-                    Some(n) => selection_lines(n, cols),
-                    None => Vec::new(),
-                };
-                let text = match &new_sel {
-                    Some(n) if n.mode == SelectionMode::Flow => {
-                        crate::layout::extract_flow_text(&geo.arena, &geo.boxes, &raw_lines)
+                RenderCmd::Focus { node_id } => {
+                    let prev = state.dynamic.focused;
+                    state.dynamic.focused = node_id;
+                    // Without any `:focus` rule the cascade is identical for every
+                    // focus position, so nothing can change on screen — skip the
+                    // repaint entirely (browser behaviour: focusing with no
+                    // `:focus` styles produces no drawing).
+                    if !state.pseudo_rules.contains_pseudo(PseudoClass::Focus) {
+                        continue;
                     }
-                    Some(_) => extract_selection(tl, &new_lines),
-                    None => String::new(),
-                };
-                if let Ok(mut guard) = state.selection_text.lock() {
-                    *guard = text;
+                    state.repaint_dynamic(&mut out, PseudoClass::Focus, prev, node_id);
+                }
+
+                // Select dropdown commands share one handler so the pending pass
+                // can also run them (see `pending_selects` above).
+                RenderCmd::SelectOpen { .. }
+                | RenderCmd::SelectClose { .. }
+                | RenderCmd::SelectMove { .. } => {
+                    state.handle_select(&mut out, cmd);
+                }
+
+                RenderCmd::TextSelection { anchor, end, mode } => {
+                    state.apply_text_selection_cmd(&mut out, anchor, end, mode);
+                }
+
+                RenderCmd::RenderInput {
+                    node_id,
+                    value,
+                    cursor,
+                    focused,
+                    selection,
+                } => {
+                    state.handle_input(&mut out, node_id, value, cursor, focused, selection);
+                }
+
+                // JS `el.focus()` / `el.blur()` requests are intercepted by the
+                // input loop (they mutate input-loop state); if one ever reaches
+                // the render thread it is stale — drop it.
+                RenderCmd::FocusRequest { .. } | RenderCmd::BlurRequest { .. } => {
+                    log::debug!("Focus request reached the render thread — dropping");
                 }
             }
 
-            RenderCmd::RenderInput {
-                node_id,
-                value,
-                cursor,
-                focused,
-                selection,
-            } => {
-                state.handle_input(&mut out, node_id, value, cursor, focused, selection);
-            }
-
-            // JS `el.focus()` / `el.blur()` requests are intercepted by the
-            // input loop (they mutate input-loop state); if one ever reaches
-            // the render thread it is stale — drop it.
-            RenderCmd::FocusRequest { .. } | RenderCmd::BlurRequest { .. } => {
-                log::debug!("Focus request reached the render thread — dropping");
+            // A single command batch taking this long usually means a bogus
+            // canvas size or a blocked console write — log it so a "freeze" can
+            // be traced to its exact cause instead of staying mysterious.
+            let elapsed = batch_t0.elapsed();
+            if elapsed > Duration::from_millis(200) {
+                log::warn!("渲染线程单批命令处理耗时 {elapsed:?}");
             }
         }
 
-        // A single command batch taking this long usually means a bogus
-        // canvas size or a blocked console write — log it so a "freeze" can
-        // be traced to its exact cause instead of staying mysterious.
-        let elapsed = batch_t0.elapsed();
-        if elapsed > Duration::from_millis(200) {
-            log::warn!("渲染线程单批命令处理耗时 {elapsed:?}");
+        // A deferred `Hover` runs last so its repaint re-applies the newer
+        // hover highlight on top of both the arena render and the selection.
+        if let Some(RenderCmd::Hover { node_id }) = pending_hover {
+            let prev = state.dynamic.hovered;
+            state.dynamic.hovered = node_id;
+            if state.pseudo_rules.contains_pseudo(PseudoClass::Hover) {
+                state.repaint_dynamic(&mut out, PseudoClass::Hover, prev, node_id);
+            }
         }
     }
 }
@@ -1408,7 +1478,7 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
     // install debug hook
     #[cfg(debug_assertions)]
     install_debug_panic_hook();
-    
+
     if let Err(e) = enable_raw_mode() {
         log::error!("Failed to enable raw mode: {}", e);
         return;
@@ -1582,11 +1652,7 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
         // A dead script thread must not be silently ignored either: without
         // this check the loop would keep sending messages into a void and
         // hover / events would freeze while scrolling still worked.
-        if events_active
-            && script_thread
-                .as_ref()
-                .is_some_and(|h| h.is_finished())
-        {
+        if events_active && script_thread.as_ref().is_some_and(|h| h.is_finished()) {
             log::error!("Script thread has terminated unexpectedly");
             break;
         }
@@ -1612,13 +1678,7 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
                 let r = r.clamp(1, MAX_TERM_ROWS);
                 size_changed = c != columns || r != rows;
                 if size_changed {
-                    log::info!(
-                        "终端尺寸变化: {}x{} -> {}x{}",
-                        columns,
-                        rows,
-                        c,
-                        r
-                    );
+                    log::info!("终端尺寸变化: {}x{} -> {}x{}", columns, rows, c, r);
                 }
                 columns = c;
                 rows = r;
@@ -1748,7 +1808,10 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
                     Err(RecvTimeoutError::Timeout) => {
                         // Script thread busy / blocked in a host function:
                         // fall back to the built-in so input stays responsive.
-                        log::debug!("Key gate timed out for key id {} — running built-in", gate.id);
+                        log::debug!(
+                            "Key gate timed out for key id {} — running built-in",
+                            gate.id
+                        );
                         cmds.extend(std::mem::take(&mut gate_cmds));
                         resolved = true;
                     }
@@ -1859,9 +1922,7 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
                 },
                 (other, _) => other,
             };
-            if was_redraw
-                && let Ok(map) = TermMap::get_ter_map()
-            {
+            if was_redraw && let Ok(map) = TermMap::get_ter_map() {
                 rows = map.rows;
             }
             if let Err(e) = tx.send(cmd) {
@@ -1888,7 +1949,10 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
     }
 
     if let Err(payload) = render_handle.join() {
-        log::error!("Render thread panicked: {}", panic_message(payload.as_ref()));
+        log::error!(
+            "Render thread panicked: {}",
+            panic_message(payload.as_ref())
+        );
     }
 
     if let Err(e) = execute!(
@@ -1905,11 +1969,11 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
     }
 }
 #[cfg(debug_assertions)]
+use std::backtrace::Backtrace;
+#[cfg(debug_assertions)]
 use std::panic;
 #[cfg(debug_assertions)]
 use std::sync::Once;
-#[cfg(debug_assertions)]
-use std::backtrace::Backtrace;
 
 #[cfg(debug_assertions)]
 fn install_debug_panic_hook() {

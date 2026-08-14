@@ -91,10 +91,14 @@ fn test_aside_with_color() {
         .layout
         .iter()
         .any(|b| b.fcolor == Some(Color::Rgb { r: 0, g: 0, b: 255 }));
-    let has_bg = tl
-        .layout
-        .iter()
-        .any(|b| b.bcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }));
+    let has_bg = tl.layout.iter().any(|b| {
+        b.bcolor
+            == Some(Color::Rgb {
+                r: 255,
+                g: 255,
+                b: 0,
+            })
+    });
     assert!(has_fg, "should have blue foreground");
     assert!(has_bg, "should have yellow background");
 }
@@ -193,14 +197,9 @@ fn test_aside_width_fixed_px() {
     // Block spans cols 0..20 (flush left, NOT cols 30..50).
     let block = &tl.layout[row_start..row_start + 20];
     assert!(
-        block.iter().all(|b| {
-            b.bcolor
-                == Some(Color::Rgb {
-                    r: 255,
-                    g: 0,
-                    b: 0
-                })
-        }),
+        block
+            .iter()
+            .all(|b| { b.bcolor == Some(Color::Rgb { r: 255, g: 0, b: 0 }) }),
         "cols 0..20 should all carry red bg (block is flush left, 20 wide)"
     );
     // Cols 20..30 must be bg-free.
@@ -390,7 +389,7 @@ fn test_aside_rect_height_includes_nested_children() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
 
-    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor};
+    use htui::layout::{BoxConstraint, Cursor, inner_formatting_context::flow::layout_tree};
     let containing = BoxConstraint::root(&term_map);
     let mut cursor = Cursor::new();
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor, 80, 24);
@@ -458,13 +457,13 @@ fn test_header_has_no_trailing_spacing() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
 
-    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor};
+    use htui::layout::{BoxConstraint, Cursor, inner_formatting_context::flow::layout_tree};
     let containing = BoxConstraint::root(&term_map);
     let mut cursor = Cursor::new();
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor, 80, 24);
 
-    let header_box = find_box_by_type(&boxes, &NodeType::Header, &arena)
-        .expect("header box should be present");
+    let header_box =
+        find_box_by_type(&boxes, &NodeType::Header, &arena).expect("header box should be present");
     assert_eq!(
         header_box.rect.height, 1,
         "header must not reserve trailing spacing rows"
@@ -481,13 +480,13 @@ fn test_footer_has_no_trailing_spacing() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
 
-    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor};
+    use htui::layout::{BoxConstraint, Cursor, inner_formatting_context::flow::layout_tree};
     let containing = BoxConstraint::root(&term_map);
     let mut cursor = Cursor::new();
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor, 80, 24);
 
-    let footer_box = find_box_by_type(&boxes, &NodeType::Footer, &arena)
-        .expect("footer box should be present");
+    let footer_box =
+        find_box_by_type(&boxes, &NodeType::Footer, &arena).expect("footer box should be present");
     assert_eq!(
         footer_box.rect.height, 1,
         "footer must not reserve trailing spacing rows"
@@ -560,7 +559,7 @@ fn test_aside_without_children_still_has_height_one() {
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
 
-    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor};
+    use htui::layout::{BoxConstraint, Cursor, inner_formatting_context::flow::layout_tree};
     let containing = BoxConstraint::root(&term_map);
     let mut cursor = Cursor::new();
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor, 80, 24);
@@ -619,11 +618,7 @@ fn test_nested_p_text_inherits_aside_bg() {
         );
         assert_eq!(
             cell.fcolor,
-            Some(Color::Rgb {
-                r: 0,
-                g: 0,
-                b: 0
-            }),
+            Some(Color::Rgb { r: 0, g: 0, b: 0 }),
             "text cell for {ch:?} must keep the black fg"
         );
     }
@@ -672,11 +667,7 @@ fn test_nested_p_inherits_through_intermediate_div() {
     let cell = cell_containing(&tl, 'X');
     assert_eq!(
         cell.bcolor,
-        Some(Color::Rgb {
-            r: 255,
-            g: 0,
-            b: 0
-        }),
+        Some(Color::Rgb { r: 255, g: 0, b: 0 }),
         "<p> text should inherit <div>'s red bg, not aside's blue"
     );
     assert_eq!(

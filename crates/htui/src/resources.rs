@@ -37,7 +37,14 @@ pub struct AsyncResult {
 /// synchronously (in-memory registry); the caller decides when to drain `tx`.
 pub fn load_async(id: u32, path: String, tx: std::sync::mpsc::Sender<AsyncResult>) {
     let outcome = load(&path).map_err(|e| e.to_string());
-    if tx.send(AsyncResult { id, url: path, outcome }).is_err() {
+    if tx
+        .send(AsyncResult {
+            id,
+            url: path,
+            outcome,
+        })
+        .is_err()
+    {
         log::debug!("async resource load skipped: consumer already dropped");
     }
 }

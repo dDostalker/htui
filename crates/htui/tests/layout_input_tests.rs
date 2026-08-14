@@ -10,12 +10,12 @@ use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
 use htui::script::ScriptEngine;
 use htui::tdom::node::{NodeArena, NodeId, NodeType};
+use htui::tui::graph_api::Block;
 use htui::tui::graph_api::{
     InputRenderState, InputState, TermLayout, apply_input_key, apply_input_word_key,
-    collect_input_ids, is_input_field_key, key_event_info, next_word_boundary, number_input_allows_char,
-    prev_word_boundary, selection_range,
+    collect_input_ids, is_input_field_key, key_event_info, next_word_boundary,
+    number_input_allows_char, prev_word_boundary, selection_range,
 };
-use htui::tui::graph_api::Block;
 
 fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
@@ -62,7 +62,14 @@ fn layout_boxes(arena: &NodeArena, root: NodeId) -> Vec<htui::layout::LayoutBox>
     use htui::layout::{BoxConstraint, Cursor, layout_tree};
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
-    layout_tree(arena, root, containing, &mut cursor, COLS as usize, ROWS as usize)
+    layout_tree(
+        arena,
+        root,
+        containing,
+        &mut cursor,
+        COLS as usize,
+        ROWS as usize,
+    )
 }
 
 /// Depth-first search for the first box belonging to `node_id`.
@@ -90,18 +97,23 @@ fn select_renders_as_frame_with_current_label() {
         r#"<div><select value="b"><option>A</option><option value="b">BB</option></select></div>"#,
     );
     let r = &rows[0];
-    assert!(r.contains("[BB"), "select must show the selected option; row={r:?}");
+    assert!(
+        r.contains("[BB"),
+        "select must show the selected option; row={r:?}"
+    );
 }
 
 #[test]
 fn select_renders_first_option_without_value() {
     init();
     // No `value` attribute → the first option is shown.
-    let (rows, _) = render_rows(
-        r#"<div><select><option>Alpha</option><option>Beta</option></select></div>"#,
-    );
+    let (rows, _) =
+        render_rows(r#"<div><select><option>Alpha</option><option>Beta</option></select></div>"#);
     let r = &rows[0];
-    assert!(r.contains("[Alpha"), "select must fall back to the first option; row={r:?}");
+    assert!(
+        r.contains("[Alpha"),
+        "select must fall back to the first option; row={r:?}"
+    );
 }
 
 /// Find the first node with `node_type == NodeType::Input`.
@@ -215,7 +227,11 @@ fn input_renders_multibyte_values_at_display_width() {
     assert_eq!(r.chars().nth(1), Some('你'));
     assert_eq!(r.chars().nth(2), Some('好'));
     assert_eq!(r.chars().nth(3), Some(' '), "padding after the wide glyphs");
-    assert_eq!(r.chars().nth(5), Some(']'), "right frame must survive wide glyphs");
+    assert_eq!(
+        r.chars().nth(5),
+        Some(']'),
+        "right frame must survive wide glyphs"
+    );
 }
 
 #[test]
@@ -308,7 +324,11 @@ fn input_renders_as_bracketed_field_with_value() {
     assert_eq!(rows[0].chars().next(), Some('['));
     assert_eq!(rows[0].chars().nth(1), Some('h'));
     assert_eq!(rows[0].chars().nth(2), Some('i'));
-    assert_eq!(rows[0].chars().nth(7), Some(']'), "field must close at col 7");
+    assert_eq!(
+        rows[0].chars().nth(7),
+        Some(']'),
+        "field must close at col 7"
+    );
     assert_eq!(rows[0].chars().nth(8), Some(' '), "field must not overflow");
 }
 
@@ -378,7 +398,11 @@ fn apply_input_key_home_end_and_limits() {
     assert_eq!(cursor, 0);
     // At the start, Left / Backspace are no-ops.
     assert!(!apply_input_key(&mut value, &mut cursor, KeyCode::Left));
-    assert!(!apply_input_key(&mut value, &mut cursor, KeyCode::Backspace));
+    assert!(!apply_input_key(
+        &mut value,
+        &mut cursor,
+        KeyCode::Backspace
+    ));
 
     assert!(apply_input_key(&mut value, &mut cursor, KeyCode::End));
     assert_eq!(cursor, 2);
@@ -450,7 +474,11 @@ fn word_boundaries_match_browser_semantics() {
     // `Ctrl`/`Alt`+←/→ word navigation: boundaries fall between word runs and
     // non-word / whitespace runs (browser / vim `b` / `w` semantics).
     let s = "hello brave new world";
-    assert_eq!(prev_word_boundary(s, 11), 6, "back to the previous word start");
+    assert_eq!(
+        prev_word_boundary(s, 11),
+        6,
+        "back to the previous word start"
+    );
     assert_eq!(next_word_boundary(s, 0), 5, "forward to the next word end");
     assert_eq!(
         next_word_boundary(s, 5),
@@ -609,15 +637,24 @@ fn apply_word_key_shift_extends_the_selection() {
 #[test]
 fn collect_input_ids_returns_document_order() {
     init();
-    let (root_id, arena) = setup(
-        r#"<div><input id="first"><p><input id="second"><input id="third"></p></div>"#,
-    );
+    let (root_id, arena) =
+        setup(r#"<div><input id="first"><p><input id="second"><input id="third"></p></div>"#);
     let ids = collect_input_ids(&arena);
     let labels: Vec<&str> = ids
         .iter()
-        .map(|&id| arena[id].attributes.get("id").map(String::as_str).unwrap_or("?"))
+        .map(|&id| {
+            arena[id]
+                .attributes
+                .get("id")
+                .map(String::as_str)
+                .unwrap_or("?")
+        })
         .collect();
-    assert_eq!(labels, vec!["first", "second", "third"], "Tab order follows DOM order");
+    assert_eq!(
+        labels,
+        vec!["first", "second", "third"],
+        "Tab order follows DOM order"
+    );
     assert!(ids.iter().all(|&id| id != root_id), "root is not an input");
 }
 
@@ -649,7 +686,10 @@ fn key_event_info_maps_every_key_to_browser_fields() {
     assert_eq!((info.key.as_str(), info.key_code), ("Enter", 13));
 
     info = key_event_info(&KeyEvent::new(KeyCode::F(5), KeyModifiers::NONE));
-    assert_eq!((info.key.as_str(), info.code.as_str(), info.key_code), ("F5", "F5", 116));
+    assert_eq!(
+        (info.key.as_str(), info.code.as_str(), info.key_code),
+        ("F5", "F5", 116)
+    );
 
     info = key_event_info(&KeyEvent::new(KeyCode::Esc, KeyModifiers::CONTROL));
     assert_eq!(info.key, "Escape");
@@ -663,7 +703,10 @@ fn key_event_info_maps_every_key_to_browser_fields() {
         state: KeyEventState::empty(),
     };
     info = key_event_info(&ev);
-    assert!(info.repeat, "repeat presses must be visible to JS listeners");
+    assert!(
+        info.repeat,
+        "repeat presses must be visible to JS listeners"
+    );
 }
 
 #[test]
@@ -702,9 +745,21 @@ fn input_button_types_render_as_bracketed_buttons() {
     let (rows, _) = render_rows(
         r#"<div><input type="button" value="X"><input type="submit" value="Save"><input type="reset" value="Clear"></div>"#,
     );
-    assert!(rows[0].contains("[ X ]"), "button input paints `[ label ]`; row={:?}", rows[0]);
-    assert!(rows[1].contains("[ Save ]"), "submit input paints its value label; row={:?}", rows[1]);
-    assert!(rows[2].contains("[ Clear ]"), "reset input paints its value label; row={:?}", rows[2]);
+    assert!(
+        rows[0].contains("[ X ]"),
+        "button input paints `[ label ]`; row={:?}",
+        rows[0]
+    );
+    assert!(
+        rows[1].contains("[ Save ]"),
+        "submit input paints its value label; row={:?}",
+        rows[1]
+    );
+    assert!(
+        rows[2].contains("[ Clear ]"),
+        "reset input paints its value label; row={:?}",
+        rows[2]
+    );
 }
 
 #[test]
@@ -712,8 +767,16 @@ fn input_button_default_labels_submit_reset() {
     init();
     // No `value` attribute → the browser default labels `Submit` / `Reset`.
     let (rows, _) = render_rows(r#"<div><input type="submit"><input type="reset"></div>"#);
-    assert!(rows[0].contains("[ Submit ]"), "default submit label; row={:?}", rows[0]);
-    assert!(rows[1].contains("[ Reset ]"), "default reset label; row={:?}", rows[1]);
+    assert!(
+        rows[0].contains("[ Submit ]"),
+        "default submit label; row={:?}",
+        rows[0]
+    );
+    assert!(
+        rows[1].contains("[ Reset ]"),
+        "default reset label; row={:?}",
+        rows[1]
+    );
 }
 
 #[test]
@@ -721,7 +784,9 @@ fn input_button_geometry_sizes_from_label() {
     init();
     // The button input width adapts to its label (`[ text ]`), like `<button>`
     // — not the fixed `width` attribute used for text fields.
-    let (root_id, arena) = setup(r#"<div><input id="sub" type="submit" value="Go"><input id="txt" type="text" width="20"></div>"#);
+    let (root_id, arena) = setup(
+        r#"<div><input id="sub" type="submit" value="Go"><input id="txt" type="text" width="20"></div>"#,
+    );
     let boxes = layout_boxes(&arena, root_id);
     let id_of = |id: &str| {
         arena
@@ -747,7 +812,13 @@ fn input_button_skipped_by_tab_focus_cycle() {
     let ids = collect_input_ids(&arena);
     let labels: Vec<&str> = ids
         .iter()
-        .map(|&id| arena[id].attributes.get("id").map(String::as_str).unwrap_or("?"))
+        .map(|&id| {
+            arena[id]
+                .attributes
+                .get("id")
+                .map(String::as_str)
+                .unwrap_or("?")
+        })
         .collect();
     assert_eq!(
         labels,
@@ -773,7 +844,10 @@ fn input_placeholder_shows_dimmed_hint_when_empty() {
         .collect();
     let text: String = hint_cells.iter().map(|b| b.word.as_str()).collect();
     let text = text.trim();
-    assert_eq!(text, "Type here", "placeholder must render in the empty field");
+    assert_eq!(
+        text, "Type here",
+        "placeholder must render in the empty field"
+    );
     // Every non-space placeholder glyph (the frame and blank padding cells
     // keep their own colours) must be dimmed grey.
     assert!(
@@ -813,7 +887,9 @@ fn input_disabled_field_is_dimmed() {
     let text: String = cells.iter().map(|b| b.word.as_str()).collect();
     assert_eq!(text, "[off]", "disabled field keeps its value");
     assert!(
-        cells.iter().all(|b| b.fcolor == Some(crossterm::style::Color::DarkGrey)),
+        cells
+            .iter()
+            .all(|b| b.fcolor == Some(crossterm::style::Color::DarkGrey)),
         "disabled field must be dimmed grey"
     );
 }
@@ -861,8 +937,16 @@ fn input_image_renders_as_button() {
     let (rows, _) = render_rows(
         r#"<div><input type="image" value="Go"><input type="image" alt="Logo"><input type="image"></div>"#,
     );
-    assert!(rows[0].contains("[ Go ]"), "image input uses its value label; row={:?}", rows[0]);
-    assert!(rows[1].contains("[ Logo ]"), "image input falls back to alt; row={:?}", rows[1]);
+    assert!(
+        rows[0].contains("[ Go ]"),
+        "image input uses its value label; row={:?}",
+        rows[0]
+    );
+    assert!(
+        rows[1].contains("[ Logo ]"),
+        "image input falls back to alt; row={:?}",
+        rows[1]
+    );
     assert!(
         rows[2].contains("[ Submit Query ]"),
         "image input defaults to `Submit Query`; row={:?}",

@@ -111,8 +111,7 @@ fn input_events_dispatch_via_listeners_and_onstar_attributes() {
 
     let seen = eval_str(&mut engine, "String(globalThis.__seen.join(','))");
     assert_eq!(
-        seen,
-        "a-focus,p-focus,i-input,a-input,i-change,a-change,a-blur,p-blur",
+        seen, "a-focus,p-focus,i-input,a-input,i-change,a-change,a-blur,p-blur",
         "on* attributes fire before addEventListener on the same element; target before ancestors"
     );
 }
@@ -303,8 +302,7 @@ fn drag_on_input_selects_a_character_range() {
     assert_eq!(state.input_cursor, 2, "drag to the third column → char 2");
     let sel = cmds.iter().find_map(|c| match c {
         RenderCmd::RenderInput {
-            selection: Some(s),
-            ..
+            selection: Some(s), ..
         } => Some(*s),
         _ => None,
     });
@@ -347,10 +345,8 @@ fn drag_on_page_text_emits_text_selection() {
 fn pressing_elsewhere_replaces_the_page_selection() {
     // A second press clears the previous selection (rendering it away) before
     // anchoring the new one — the render thread needs the explicit clear.
-    let (mut engine, geo) = build_geometry(
-        r#"<div id="a">some text</div>"#,
-        EventBindings::default(),
-    );
+    let (mut engine, geo) =
+        build_geometry(r#"<div id="a">some text</div>"#, EventBindings::default());
     let map = HitMap::build(&geo);
 
     let mut state = InputState::new();
@@ -429,9 +425,13 @@ fn click_select_opens_the_dropdown() {
     let open = state.open_select.clone().unwrap();
     assert_eq!(open.node_id, region.node_id);
     assert_eq!(open.options.len(), 2);
-    assert_eq!(open.highlight, 0, "first option highlighted when nothing selected");
+    assert_eq!(
+        open.highlight, 0,
+        "first option highlighted when nothing selected"
+    );
     assert!(
-        cmds.iter().any(|c| matches!(c, RenderCmd::SelectOpen { .. })),
+        cmds.iter()
+            .any(|c| matches!(c, RenderCmd::SelectOpen { .. })),
         "opening must queue a SelectOpen repaint"
     );
 }
@@ -466,9 +466,13 @@ fn picking_a_select_option_commits_the_value_and_fires_change() {
         open.rect.y as u32 + 1,
         MouseButton::Left,
     );
-    assert!(state.open_select.is_none(), "picking an option closes the dropdown");
     assert!(
-        cmds.iter().any(|c| matches!(c, RenderCmd::SelectClose { .. })),
+        state.open_select.is_none(),
+        "picking an option closes the dropdown"
+    );
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, RenderCmd::SelectClose { .. })),
         "closing must queue a SelectClose repaint"
     );
     let arena = engine.arena();
@@ -476,7 +480,11 @@ fn picking_a_select_option_commits_the_value_and_fires_change() {
         .get(region.node_id)
         .and_then(|n| n.attributes.get("value"))
         .cloned();
-    assert_eq!(value.as_deref(), Some("b"), "chosen option value must be committed");
+    assert_eq!(
+        value.as_deref(),
+        Some("b"),
+        "chosen option value must be committed"
+    );
     assert_eq!(
         eval_str(&mut engine, "String(globalThis.__seen.join(','))"),
         "b",
@@ -513,7 +521,8 @@ fn hovering_a_select_option_moves_the_highlight() {
         "hovering the second row must move the highlight"
     );
     assert!(
-        cmds.iter().any(|c| matches!(c, RenderCmd::SelectMove { highlight: 1, .. })),
+        cmds.iter()
+            .any(|c| matches!(c, RenderCmd::SelectMove { highlight: 1, .. })),
         "a hover move must queue a SelectMove repaint"
     );
 
@@ -526,7 +535,8 @@ fn hovering_a_select_option_moves_the_highlight() {
         open.rect.y as u32 + 1,
     );
     assert!(
-        cmds.iter().all(|c| !matches!(c, RenderCmd::SelectMove { .. })),
+        cmds.iter()
+            .all(|c| !matches!(c, RenderCmd::SelectMove { .. })),
         "an unchanged highlight must not repaint"
     );
 }
@@ -563,7 +573,8 @@ fn dragging_over_select_options_moves_the_highlight() {
         "dragging must highlight the bottommost option too"
     );
     assert!(
-        cmds.iter().any(|c| matches!(c, RenderCmd::SelectMove { highlight: 2, .. })),
+        cmds.iter()
+            .any(|c| matches!(c, RenderCmd::SelectMove { highlight: 2, .. })),
         "drag hover must queue a SelectMove"
     );
 }
@@ -590,7 +601,11 @@ fn clicking_outside_a_select_closes_it_without_changing_the_value() {
         .get(region.node_id)
         .and_then(|n| n.attributes.get("value"))
         .cloned();
-    assert_eq!(value.as_deref(), Some("a"), "dismissing must not change the value");
+    assert_eq!(
+        value.as_deref(),
+        Some("a"),
+        "dismissing must not change the value"
+    );
 }
 
 // ============================================================
@@ -621,7 +636,10 @@ fn flow_extraction_breaks_between_blocks() {
     );
     let lines = vec![(0u32, 0u32, 200u32), (1u32, 0u32, 200u32)];
     let copied = htui::layout::extract_flow_text(&geo.arena, &geo.boxes, &lines);
-    assert_eq!(copied, "alpha\nbeta", "blocks must be separated by a newline");
+    assert_eq!(
+        copied, "alpha\nbeta",
+        "blocks must be separated by a newline"
+    );
 }
 
 #[test]
@@ -652,7 +670,11 @@ fn selection_text_lines_clip_to_actual_text() {
     // whitespace.
     let (_, geo) = build_geometry(r#"<div>alpha</div>"#, EventBindings::default());
     let lines = htui::layout::selection_text_lines(&geo.arena, &geo.boxes, &[(0, 0, 200)]);
-    assert_eq!(lines, vec![(0, 0, 5)], "highlight must stop at the last glyph");
+    assert_eq!(
+        lines,
+        vec![(0, 0, 5)],
+        "highlight must stop at the last glyph"
+    );
 }
 
 #[test]
@@ -663,7 +685,10 @@ fn selection_text_lines_keep_partial_columns() {
     let lines = htui::layout::selection_text_lines(&geo.arena, &geo.boxes, &[(0, 2, 200)]);
     assert_eq!(lines, vec![(0, 2, 5)]);
     let past = htui::layout::selection_text_lines(&geo.arena, &geo.boxes, &[(0, 10, 200)]);
-    assert!(past.is_empty(), "a band past the text must highlight nothing");
+    assert!(
+        past.is_empty(),
+        "a band past the text must highlight nothing"
+    );
 }
 
 #[test]
@@ -798,7 +823,10 @@ fn find_node_by_id(arena: &NodeArena, id: &str) -> NodeId {
 }
 
 /// Depth-first search for the first box belonging to `node_id`.
-fn find_box(boxes: &[htui::layout::LayoutBox], node_id: NodeId) -> Option<&htui::layout::LayoutBox> {
+fn find_box(
+    boxes: &[htui::layout::LayoutBox],
+    node_id: NodeId,
+) -> Option<&htui::layout::LayoutBox> {
     for b in boxes {
         if b.node_id == node_id {
             return Some(b);
@@ -824,7 +852,9 @@ fn host_bindings(
     mut f: impl FnMut(&mut htui::script::HostCtx) -> JsValue + Send + 'static,
 ) -> EventBindings {
     let mut bindings = EventBindings::default();
-    bindings.host.insert(name.to_string(), Box::new(move |call| Ok(f(call))));
+    bindings
+        .host
+        .insert(name.to_string(), Box::new(move |call| Ok(f(call))));
     bindings
 }
 
@@ -986,7 +1016,8 @@ fn hit_test_prefers_the_deepest_element() {
 
 #[test]
 fn click_on_empty_space_dispatches_nothing() {
-    let (mut engine, geo) = build_geometry(r#"<div id="btn">click me</div>"#, EventBindings::default());
+    let (mut engine, geo) =
+        build_geometry(r#"<div id="btn">click me</div>"#, EventBindings::default());
     let map = HitMap::build(&geo);
     let mut hover = HoverState::new();
     // Below the document: no region, no event, no commands.
@@ -1204,7 +1235,10 @@ fn hover_fires_mouseover_and_mouseout_listeners() {
     // Move far away to leave.
     on_move(&mut hover, &map, &mut engine, 0, 1000);
 
-    assert_eq!(*hits.lock().unwrap(), vec!["enter".to_string(), "leave".to_string()]);
+    assert_eq!(
+        *hits.lock().unwrap(),
+        vec!["enter".to_string(), "leave".to_string()]
+    );
 }
 
 // ============================================================
@@ -1401,8 +1435,7 @@ fn invoke_action_calls_a_js_global_function() {
 
 #[test]
 fn unknown_action_is_ignored_without_error() {
-    let mut engine =
-        ScriptEngine::new("<p>x</p>", EventBindings::default()).expect("engine");
+    let mut engine = ScriptEngine::new("<p>x</p>", EventBindings::default()).expect("engine");
     // Must not panic, must not produce render commands.
     assert!(engine.invoke_action("nope").is_empty());
 }
@@ -1423,10 +1456,6 @@ fn visual_test_events_document_initializes() {
         "demo element btn-add must exist; got {ids:?}"
     );
 }
-
-
-
-
 
 #[test]
 fn sysmon_refresh_pipeline_updates_the_dom() {
@@ -1456,7 +1485,10 @@ fn sysmon_refresh_pipeline_updates_the_dom() {
     // Before refresh: initial script didn't call sample, so cpu is untouched.
     assert!(engine.take_dirty().is_empty());
     engine.invoke_action("refresh");
-    assert!(!engine.take_dirty().is_empty(), "refresh must mark the DOM dirty");
+    assert!(
+        !engine.take_dirty().is_empty(),
+        "refresh must mark the DOM dirty"
+    );
 
     let arena = engine.arena();
     let cpu = find_node_by_id(&arena, "cpu");
@@ -1529,16 +1561,16 @@ fn hover_pseudo_class_parses() {
     let selector = &entry.selector;
     // `#panel:hover` → one compound `[Id, PseudoClass]`, no combinators.
     assert!(selector.combinators.is_empty());
-    assert!(selector.compounds.iter().any(|c| c.iter().any(
-        |s| matches!(s, Selector::PseudoClass(PseudoClass::Hover))
-    )));
+    assert!(selector.compounds.iter().any(|c| {
+        c.iter()
+            .any(|s| matches!(s, Selector::PseudoClass(PseudoClass::Hover)))
+    }));
 }
 
 #[test]
 fn hover_pseudo_class_applies_only_to_the_hovered_node() {
-    let (root_id, mut arena) = setup(
-        r#"<div id="a" class="box">a</div><div id="b" class="box">b</div>"#,
-    );
+    let (root_id, mut arena) =
+        setup(r#"<div id="a" class="box">a</div><div id="b" class="box">b</div>"#);
     let mut css_parser = CssParser::new(".box:hover { background-color: #00ff00; }");
     let rules = css_parser.parse();
     let a = find_node_by_id(&arena, "a");
@@ -1546,7 +1578,10 @@ fn hover_pseudo_class_applies_only_to_the_hovered_node() {
 
     reset_css_attr(&mut arena, root_id);
     css_into_node_with_hover(&mut arena, root_id, &rules, Some(a));
-    assert_eq!(arena[a].css_attr.get_bg_color(), Some(Color::Rgb { r: 0, g: 255, b: 0 }));
+    assert_eq!(
+        arena[a].css_attr.get_bg_color(),
+        Some(Color::Rgb { r: 0, g: 255, b: 0 })
+    );
     assert_eq!(arena[b].css_attr.get_bg_color(), None);
 }
 
@@ -1562,7 +1597,11 @@ fn hover_pseudo_class_matches_ancestors_of_the_hovered_node() {
     let panel = find_node_by_id(&arena, "panel");
     assert_eq!(
         arena[panel].css_attr.get_bg_color(),
-        Some(Color::Rgb { r: 58, g: 58, b: 58 })
+        Some(Color::Rgb {
+            r: 58,
+            g: 58,
+            b: 58
+        })
     );
 }
 
@@ -1607,7 +1646,10 @@ fn hover_background_fills_padding_cells_not_just_the_text_run() {
     // command sees when it re-paints without re-laying-out.
     reset_css_attr(&mut arena, root_id);
     css_into_node(&mut arena, root_id, &rules);
-    let term_map = TermMap { columns: COLS, rows: ROWS };
+    let term_map = TermMap {
+        columns: COLS,
+        rows: ROWS,
+    };
     let containing = BoxConstraint::root(&term_map);
     let mut cursor = Cursor::new();
     let boxes = layout_tree(
@@ -1628,7 +1670,11 @@ fn hover_background_fills_padding_cells_not_just_the_text_run() {
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.repaint_from(&arena, &boxes);
 
-    let hover_bg = Some(Color::Rgb { r: 0x28, g: 0x30, b: 0x4d });
+    let hover_bg = Some(Color::Rgb {
+        r: 0x28,
+        g: 0x30,
+        b: 0x4d,
+    });
     let cols = COLS as usize;
     let content_row = (r.y + 1) as usize; // directly below the top border
     let left_padding = (r.x + 1) as usize; // after the left border

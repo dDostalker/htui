@@ -4,18 +4,22 @@
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    html::css_parse::{AlignItems, AlignSelf, CssDisplay, FlexDirection, Length, LengthContext, WhiteSpace},
+    html::css_parse::{
+        AlignItems, AlignSelf, CssDisplay, FlexDirection, Length, LengthContext, WhiteSpace,
+    },
     layout::{
         InlineRun, LayoutContext,
         layoutbox::collect_runs,
         layoutbox::generation::{GeneratedBoxKind, generate_node},
         layoutbox::geometry::select_options,
     },
-    tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells, is_collapsible_whitespace},
+    tdom::node::{
+        NodeArena, NodeId, NodeType, effective_font_size_cells, is_collapsible_whitespace,
+    },
     tui::graph_api::{FontStyle, char_width, grapheme_width},
 };
 
-use super::container::{FLEX_ITEM_MIN_CROSS, FlexItemPrep, FlexItemSource, AnonymousTextItem};
+use super::container::{AnonymousTextItem, FLEX_ITEM_MIN_CROSS, FlexItemPrep, FlexItemSource};
 
 /// Build a [`FlexItemPrep`] for one block child: resolve `flex-basis`,
 /// read `flex-grow` / `flex-shrink` / `align-self` / `order`, and capture
@@ -119,7 +123,10 @@ pub(super) fn prepare_anonymous_text_item(
 ) -> FlexItemPrep {
     let text_w = runs_total_width(&item.runs);
     let (basis, min_main) = match direction {
-        FlexDirection::Row => (text_w.max(FLEX_ITEM_MIN_CROSS), runs_longest_word(&item.runs)),
+        FlexDirection::Row => (
+            text_w.max(FLEX_ITEM_MIN_CROSS),
+            runs_longest_word(&item.runs),
+        ),
         FlexDirection::Column => (FLEX_ITEM_MIN_CROSS, FLEX_ITEM_MIN_CROSS),
     };
     FlexItemPrep {

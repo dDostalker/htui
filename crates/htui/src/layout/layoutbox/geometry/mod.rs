@@ -55,9 +55,11 @@ pub fn layout_generated_box(
     // classification dispatch: absolute / fixed lay out against a local
     // cursor (occupying no flow rows) and are repositioned by the
     // post-layout pass; relative keeps its flow slot and is offset in place.
-    let positioning = arena[generated.node_id]
-        .css_attr
-        .get_positioning(containing.width, context.font, context.viewport);
+    let positioning = arena[generated.node_id].css_attr.get_positioning(
+        containing.width,
+        context.font,
+        context.viewport,
+    );
     let detached = matches!(positioning.position, Position::Absolute | Position::Fixed);
     let mut local_cursor = Cursor { y: 0 };
     let working_cursor: &mut Cursor = if detached { &mut local_cursor } else { cursor };
@@ -258,7 +260,7 @@ fn option_value(arena: &NodeArena, option_id: NodeId, group: Option<String>) -> 
 pub(crate) fn overlay_options(
     arena: &NodeArena,
     node_id: NodeId,
-    filter: Option<&str>
+    filter: Option<&str>,
 ) -> Vec<SelectOption> {
     let Some(node) = arena.get(node_id) else {
         return Vec::new();
@@ -281,9 +283,7 @@ fn datalist_options(arena: &NodeArena, list_id: &str, filter: &str) -> Vec<Selec
     let f = filter.to_lowercase();
     let mut out = Vec::new();
     for (_, node) in arena.iter() {
-        if node.node_type != NodeType::Datalist
-            || !node.get_id().is_some_and(|id| id == list_id)
-        {
+        if node.node_type != NodeType::Datalist || !node.get_id().is_some_and(|id| id == list_id) {
             continue;
         }
         for &child_id in &node.children {
@@ -382,9 +382,9 @@ fn layout_input(
             // padding column each side); every other kind is a text field
             // sized from the HTML `width` attribute (cells) or a fixed default
             // width when absent.
-            let is_toggle = node.get_type().is_some_and(|t| {
-                matches!(t.to_ascii_lowercase().as_str(), "checkbox" | "radio")
-            });
+            let is_toggle = node
+                .get_type()
+                .is_some_and(|t| matches!(t.to_ascii_lowercase().as_str(), "checkbox" | "radio"));
             let block_width = if is_toggle {
                 2
             } else if let Some(label) = node.input_button_label() {

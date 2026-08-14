@@ -336,9 +336,11 @@ pub fn layout_block(
         },
         font_size_cells: own_font_size_cells,
         line_height_cells,
-        border_radius: node
-            .css_attr
-            .get_border_radius(containing.width, child_context.font, child_context.viewport),
+        border_radius: node.css_attr.get_border_radius(
+            containing.width,
+            child_context.font,
+            child_context.viewport,
+        ),
         fill_bg,
         spacing_after: effective_spacing_after,
     };

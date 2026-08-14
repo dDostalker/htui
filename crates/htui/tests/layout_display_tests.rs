@@ -79,8 +79,8 @@ fn display_none_excludes_box_from_tree() {
         "",
     );
     let boxes = generate_box_tree(&arena, root_id);
-    let div = find(&boxes, &arena, |nt| matches!(nt, NodeType::Div))
-        .expect("div should generate a box");
+    let div =
+        find(&boxes, &arena, |nt| matches!(nt, NodeType::Div)).expect("div should generate a box");
     let ps: Vec<&GeneratedBox> = div
         .children
         .iter()
@@ -103,7 +103,10 @@ fn display_none_subtree_also_excluded() {
     let has_div = boxes
         .iter()
         .any(|g| matches!(arena[g.node_id].node_type, NodeType::Div));
-    assert!(!has_div, "display: none div and all its descendants must be absent");
+    assert!(
+        !has_div,
+        "display: none div and all its descendants must be absent"
+    );
 }
 
 #[test]
@@ -113,8 +116,8 @@ fn display_contents_flattens_children_into_parent() {
         "",
     );
     let boxes = generate_box_tree(&arena, root_id);
-    let div = find(&boxes, &arena, |nt| matches!(nt, NodeType::Div))
-        .expect("div should generate a box");
+    let div =
+        find(&boxes, &arena, |nt| matches!(nt, NodeType::Div)).expect("div should generate a box");
     // The contents <span> itself must not appear as a box.
     assert!(
         div.children
@@ -131,13 +134,10 @@ fn display_contents_flattens_children_into_parent() {
 
 #[test]
 fn display_inline_flex_is_flex_formatting_context() {
-    let (root_id, arena) = setup(
-        "<div style=\"display: inline-flex\">x</div>",
-        "",
-    );
+    let (root_id, arena) = setup("<div style=\"display: inline-flex\">x</div>", "");
     let boxes = generate_box_tree(&arena, root_id);
-    let div = find(&boxes, &arena, |nt| matches!(nt, NodeType::Div))
-        .expect("div should generate a box");
+    let div =
+        find(&boxes, &arena, |nt| matches!(nt, NodeType::Div)).expect("div should generate a box");
     assert_eq!(div.inner_formatting_context, FormattingContext::Flex);
     assert!(
         matches!(div.outer_display, OuterDisplay::Inline { block: true }),
@@ -148,14 +148,14 @@ fn display_inline_flex_is_flex_formatting_context() {
 
 #[test]
 fn display_inline_block_is_inline_outer_with_block_fc() {
-    let (root_id, arena) = setup(
-        "<div style=\"display: inline-block\">x</div>",
-        "",
-    );
+    let (root_id, arena) = setup("<div style=\"display: inline-block\">x</div>", "");
     let boxes = generate_box_tree(&arena, root_id);
-    let div = find(&boxes, &arena, |nt| matches!(nt, NodeType::Div))
-        .expect("div should generate a box");
-    assert!(matches!(div.outer_display, OuterDisplay::Inline { block: true }));
+    let div =
+        find(&boxes, &arena, |nt| matches!(nt, NodeType::Div)).expect("div should generate a box");
+    assert!(matches!(
+        div.outer_display,
+        OuterDisplay::Inline { block: true }
+    ));
     assert_eq!(div.inner_formatting_context, FormattingContext::Flow);
 }
 
@@ -170,10 +170,13 @@ fn display_table_on_non_table_element_uses_table_fc() {
         "",
     );
     let boxes = generate_box_tree(&arena, root_id);
-    let div = find(&boxes, &arena, |nt| matches!(nt, NodeType::Div))
-        .expect("div should generate a box");
+    let div =
+        find(&boxes, &arena, |nt| matches!(nt, NodeType::Div)).expect("div should generate a box");
     assert_eq!(div.inner_formatting_context, FormattingContext::Table);
-    assert!(matches!(div.outer_display, OuterDisplay::BlockLevel { container: true }));
+    assert!(matches!(
+        div.outer_display,
+        OuterDisplay::BlockLevel { container: true }
+    ));
 }
 
 #[test]
@@ -198,7 +201,10 @@ fn img_explicit_block_outer_overrides_ua_default() {
         .expect("<img> should generate a box");
     assert_eq!(img.kind, GeneratedBoxKind::Replaced);
     assert!(
-        matches!(img.outer_display, OuterDisplay::BlockLevel { container: true }),
+        matches!(
+            img.outer_display,
+            OuterDisplay::BlockLevel { container: true }
+        ),
         "explicit display: block must win, got {:?}",
         img.outer_display
     );
@@ -206,12 +212,9 @@ fn img_explicit_block_outer_overrides_ua_default() {
 
 #[test]
 fn display_grid_is_grid_formatting_context() {
-    let (root_id, arena) = setup(
-        "<div style=\"display: grid\">x</div>",
-        "",
-    );
+    let (root_id, arena) = setup("<div style=\"display: grid\">x</div>", "");
     let boxes = generate_box_tree(&arena, root_id);
-    let div = find(&boxes, &arena, |nt| matches!(nt, NodeType::Div))
-        .expect("div should generate a box");
+    let div =
+        find(&boxes, &arena, |nt| matches!(nt, NodeType::Div)).expect("div should generate a box");
     assert_eq!(div.inner_formatting_context, FormattingContext::Grid);
 }

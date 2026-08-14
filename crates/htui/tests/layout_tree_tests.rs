@@ -99,7 +99,14 @@ fn nested_paragraph_shares_aside_row_with_bg() {
     let paragraph_row = tl
         .layout
         .iter()
-        .position(|b| b.fcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }))
+        .position(|b| {
+            b.fcolor
+                == Some(Color::Rgb {
+                    r: 255,
+                    g: 255,
+                    b: 0,
+                })
+        })
         .map(|i| i / cols)
         .expect("nested paragraph should still render yellow text");
     assert_eq!(
@@ -178,7 +185,7 @@ fn layout_box_rect_is_deterministic() {
     // Direct unit test on the layout tree: building it twice with the same
     // DOM must produce identical rectangles. This guards against the cursor
     // accidentally depending on HashMap iteration order or similar.
-    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor};
+    use htui::layout::{BoxConstraint, Cursor, inner_formatting_context::flow::layout_tree};
 
     let (root_id, arena) = setup(
         "<div>A</div><div>B</div><div>C</div>",
@@ -192,7 +199,10 @@ fn layout_box_rect_is_deterministic() {
     assert_eq!(boxes1.len(), boxes2.len());
     for (a, b) in boxes1.iter().zip(boxes2.iter()) {
         assert_eq!(a.rect, b.rect, "boxes must agree across runs");
-        assert_eq!(a.paint_style.runs, b.paint_style.runs, "runs must agree across runs");
+        assert_eq!(
+            a.paint_style.runs, b.paint_style.runs,
+            "runs must agree across runs"
+        );
     }
 }
 
@@ -218,7 +228,14 @@ fn rendered_rows_walks_full_layout_tree() {
     // Sanity-check via the layout tree itself.
     use htui::layout::{BoxConstraint, Cursor};
     let mut cursor = Cursor::new();
-    let boxes = layout_tree(&arena, root_id, BoxConstraint::root(&term_map), &mut cursor, 80, 24);
+    let boxes = layout_tree(
+        &arena,
+        root_id,
+        BoxConstraint::root(&term_map),
+        &mut cursor,
+        80,
+        24,
+    );
     let max_leaf = boxes
         .iter()
         .flat_map(|b| std::iter::once(b).chain(b.children.iter()))
@@ -284,7 +301,8 @@ fn layout_buffer_holds_full_document() {
         tl.rendered_rows as usize <= layout_rows,
         "rendered_rows ({}) must fit inside layout capacity ({} rows); \
          trailing content would be dropped before the user can scroll to it",
-        tl.rendered_rows, layout_rows,
+        tl.rendered_rows,
+        layout_rows,
     );
 }
 
@@ -296,10 +314,16 @@ fn draw_is_reusable_across_redraws() {
     // drawn into twice — the resulting `layout` Vec must be byte-identical.
     fn snapshot(html: &str) -> Vec<u8> {
         let (root_id, arena) = setup(html, "");
-        let term_map = TermMap { columns: 80, rows: 24 };
+        let term_map = TermMap {
+            columns: 80,
+            rows: 24,
+        };
         let mut tl = TermLayout::new(&term_map, 1.0);
         tl.draw(&arena, root_id, &term_map);
-        tl.layout.iter().flat_map(|b| b.word.as_bytes().iter().copied()).collect()
+        tl.layout
+            .iter()
+            .flat_map(|b| b.word.as_bytes().iter().copied())
+            .collect()
     }
 
     let first_html = "<p>hello world</p>";
@@ -307,14 +331,19 @@ fn draw_is_reusable_across_redraws() {
 
     let fresh = snapshot(second_html);
 
-    let term_map = TermMap { columns: 80, rows: 24 };
+    let term_map = TermMap {
+        columns: 80,
+        rows: 24,
+    };
     let mut tl = TermLayout::new(&term_map, 1.0);
     let (root1, arena1) = setup(first_html, "");
     tl.draw(&arena1, root1, &term_map);
     let (root2, arena2) = setup(second_html, "");
     tl.draw(&arena2, root2, &term_map);
 
-    let reused: Vec<u8> = tl.layout.iter()
+    let reused: Vec<u8> = tl
+        .layout
+        .iter()
         .flat_map(|b| b.word.as_bytes().iter().copied())
         .collect();
 

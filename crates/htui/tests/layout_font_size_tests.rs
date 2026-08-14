@@ -363,7 +363,14 @@ fn explicit_bg_with_large_font_size_clamps_to_text_row_and_width() {
     // The text row must carry cyan bg only across the 6 text cells.
     let cells = &tl.layout[rstart..rstart + cols];
     let cyan_in_text_band = (col..col + 6)
-        .filter(|&i| cells[i].bcolor == Some(CtColor::Rgb { r: 0, g: 255, b: 255 }))
+        .filter(|&i| {
+            cells[i].bcolor
+                == Some(CtColor::Rgb {
+                    r: 0,
+                    g: 255,
+                    b: 255,
+                })
+        })
         .count();
     assert_eq!(
         cyan_in_text_band, 6,
@@ -383,7 +390,14 @@ fn explicit_bg_with_large_font_size_clamps_to_text_row_and_width() {
         let s = (row - 1 + r_off) * cols;
         let cyan_count = tl.layout[s..s + cols]
             .iter()
-            .filter(|b| b.bcolor == Some(CtColor::Rgb { r: 0, g: 255, b: 255 }))
+            .filter(|b| {
+                b.bcolor
+                    == Some(CtColor::Rgb {
+                        r: 0,
+                        g: 255,
+                        b: 255,
+                    })
+            })
             .count();
         assert_eq!(
             cyan_count, 0,
@@ -442,11 +456,7 @@ fn bg_pad_cells_carry_space_and_bg_into_rendered_output() {
     assert_eq!(row_cells[0].word, "A");
     assert_eq!(
         row_cells[0].bcolor,
-        Some(CtColor::Rgb {
-            r: 0,
-            g: 100,
-            b: 0
-        }),
+        Some(CtColor::Rgb { r: 0, g: 100, b: 0 }),
         "glyph cell carries the run bg",
     );
     // The bg-pad cell must hold a space (not an empty string) so the
@@ -457,17 +467,16 @@ fn bg_pad_cells_carry_space_and_bg_into_rendered_output() {
     );
     assert_eq!(
         row_cells[1].bcolor,
-        Some(CtColor::Rgb {
-            r: 0,
-            g: 100,
-            b: 0
-        }),
+        Some(CtColor::Rgb { r: 0, g: 100, b: 0 }),
         "bg-pad cell carries the run bg",
     );
     // Slot for 'B' at font-size 2: cell 2 = 'B' (bg), cell 3 = pad (bg).
     assert_eq!(row_cells[2].word, "B");
     assert_eq!(row_cells[3].word, " ", "bg-pad after 'B' also keeps the bg");
-    assert_eq!(row_cells[3].bcolor, Some(CtColor::Rgb { r: 0, g: 100, b: 0 }));
+    assert_eq!(
+        row_cells[3].bcolor,
+        Some(CtColor::Rgb { r: 0, g: 100, b: 0 })
+    );
 }
 
 #[test]
@@ -487,11 +496,17 @@ fn render_to_bytes_includes_bg_sgr_on_pad_cells_for_padded_em_block() {
     let bytes = tl.render_to_bytes();
     let rendered = String::from_utf8_lossy(&bytes);
     let cols = term_map.columns as usize;
-    eprintln!("rendered (no escapes) = {:?}", rendered.replace('\x1B', "<ESC>"));
+    eprintln!(
+        "rendered (no escapes) = {:?}",
+        rendered.replace('\x1B', "<ESC>")
+    );
     eprintln!("row 1 cells (cols 0-25):");
     for i in 0..26 {
         let c = &tl.layout[cols + i];
-        eprintln!("  cell {i}: word={:?} fg={:?} bg={:?} style={:?}", c.word, c.fcolor, c.bcolor, c.style);
+        eprintln!(
+            "  cell {i}: word={:?} fg={:?} bg={:?} style={:?}",
+            c.word, c.fcolor, c.bcolor, c.style
+        );
     }
     let dark_green_sgr = "\x1B[48;2;0;100;0m"; // darkgreen is now truecolor #006400
     assert!(
@@ -560,10 +575,7 @@ fn text_transform_uppercase_renders() {
 #[test]
 fn text_transform_lowercase_and_capitalize_render() {
     init();
-    let (term_map, tl) = draw(
-        "<p>Hello WORLD</p>",
-        "p { text-transform: lowercase; }",
-    );
+    let (term_map, tl) = draw("<p>Hello WORLD</p>", "p { text-transform: lowercase; }");
     let cols = term_map.columns as usize;
     let row0: String = tl.layout[0..cols]
         .iter()
@@ -623,10 +635,7 @@ fn line_height_2_separates_wrapped_lines() {
     init();
     // "ab cd" wraps into two lines inside a 2-col box; with `line-height:
     // 2` the second line lands 2 rows below the first (instead of 1).
-    let (term_map, tl) = draw(
-        "<p>ab cd</p>",
-        "p { width: 2px; line-height: 2; }",
-    );
+    let (term_map, tl) = draw("<p>ab cd</p>", "p { width: 2px; line-height: 2; }");
     let cols = term_map.columns as usize;
     let a_idx = tl.layout.iter().position(|b| b.word == "a").unwrap();
     let c_idx = tl.layout.iter().position(|b| b.word == "c").unwrap();
@@ -644,5 +653,3 @@ fn line_height_normal_keeps_one_row_per_line() {
     let c_idx = tl.layout.iter().position(|b| b.word == "c").unwrap();
     assert_eq!(c_idx / cols, 1, "second line on row 1 without line-height");
 }
-
-

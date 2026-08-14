@@ -72,10 +72,14 @@ fn test_header_with_color() {
         .layout
         .iter()
         .any(|b| b.fcolor == Some(Color::Rgb { r: 0, g: 0, b: 255 }));
-    let has_bg = tl
-        .layout
-        .iter()
-        .any(|b| b.bcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }));
+    let has_bg = tl.layout.iter().any(|b| {
+        b.bcolor
+            == Some(Color::Rgb {
+                r: 255,
+                g: 255,
+                b: 0,
+            })
+    });
     assert!(has_fg, "should have blue foreground");
     assert!(has_bg, "should have yellow background");
 }
@@ -301,11 +305,7 @@ fn test_css_attr_bg_color() {
         if node.node_type == NodeType::Div {
             assert_eq!(
                 node.css_attr.get_bg_color(),
-                Some(Color::Rgb {
-                    r: 255,
-                    g: 0,
-                    b: 0
-                })
+                Some(Color::Rgb { r: 255, g: 0, b: 0 })
             );
             return;
         }
@@ -320,11 +320,7 @@ fn test_css_attr_bg_color_fallback() {
         if node.node_type == NodeType::Div {
             assert_eq!(
                 node.css_attr.get_bg_color(),
-                Some(Color::Rgb {
-                    r: 0,
-                    g: 128,
-                    b: 0
-                })
+                Some(Color::Rgb { r: 0, g: 128, b: 0 })
             );
             return;
         }

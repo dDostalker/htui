@@ -8,16 +8,18 @@
 //!     `LayoutBox::cols`, while `rect.width` was clamped to the terminal
 //!     width, so painting could overflow the rect into neighboring boxes.
 
+use crossterm::style::Color;
 use htui::html::html_parse;
-use htui::layout::layout::TermMap;
 use htui::layout::inner_formatting_context::flow::layout_img;
-use htui::layout::{BoxConstraint, BoxKind, Cursor, LayoutBox, LayoutContext, ReplacedContent, Viewport};
+use htui::layout::layout::TermMap;
+use htui::layout::{
+    BoxConstraint, BoxKind, Cursor, LayoutBox, LayoutContext, ReplacedContent, Viewport,
+};
 use htui::tdom::node::{self, NodeType};
 use htui::tui::graph_api::{
-    IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, ClipRect, ImageCache, TermLayout,
+    ClipRect, IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, ImageCache, TermLayout,
     render_image_at, render_image_at_slice,
 };
-use crossterm::style::Color;
 use image::{ImageBuffer, Rgb};
 
 fn init() {
@@ -168,8 +170,11 @@ fn register_test_png(tag: &str) -> String {
             Rgb([0, 0, 0])
         }
     });
-    img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
-        .expect("encode test png");
+    img.write_to(
+        &mut std::io::Cursor::new(&mut bytes),
+        image::ImageFormat::Png,
+    )
+    .expect("encode test png");
     htui::resources::register(&key, bytes).expect("register mem image");
     key
 }
@@ -181,8 +186,11 @@ fn register_wide_test_png(tag: &str) -> String {
     let key = format!("mem://img/{tag}_wide_{}", std::process::id());
     let mut bytes: Vec<u8> = Vec::new();
     let img = ImageBuffer::<Rgb<u8>, _>::from_fn(800, 200, |_, _| Rgb([200, 100, 50]));
-    img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
-        .expect("encode wide test png");
+    img.write_to(
+        &mut std::io::Cursor::new(&mut bytes),
+        image::ImageFormat::Png,
+    )
+    .expect("encode wide test png");
     htui::resources::register(&key, bytes).expect("register mem image");
     key
 }
@@ -375,8 +383,11 @@ fn render_image_at_slice_crops_to_clip_region() {
             Rgb([255, 255, 255])
         }
     });
-    img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
-        .expect("encode clip png");
+    img.write_to(
+        &mut std::io::Cursor::new(&mut bytes),
+        image::ImageFormat::Png,
+    )
+    .expect("encode clip png");
     htui::resources::register(&key, bytes).expect("register clip image");
 
     let term_map = mock_term_map();
@@ -471,12 +482,20 @@ fn svg_image_decodes_through_resvg() {
             );
             assert_eq!(
                 cell.fcolor,
-                Some(Color::Rgb { r: 0xff, g: 0x88, b: 0x00 }),
+                Some(Color::Rgb {
+                    r: 0xff,
+                    g: 0x88,
+                    b: 0x00
+                }),
                 "svg solid fill must land in fcolor"
             );
             assert_eq!(
                 cell.bcolor,
-                Some(Color::Rgb { r: 0xff, g: 0x88, b: 0x00 }),
+                Some(Color::Rgb {
+                    r: 0xff,
+                    g: 0x88,
+                    b: 0x00
+                }),
                 "svg solid fill must land in bcolor"
             );
         }
@@ -529,9 +548,8 @@ fn layout_img_resolves_src_against_document_base() {
     let key = format!("mem://dir/pic_{pid}.png");
     htui::resources::register(&key, vec![0u8; 16]).expect("register mem image");
 
-    let html = format!(
-        "<base href=\"mem://dir/\"><img src=\"pic_{pid}.png\" width=\"20\" height=\"10\">"
-    );
+    let html =
+        format!("<base href=\"mem://dir/\"><img src=\"pic_{pid}.png\" width=\"20\" height=\"10\">");
     let (root_id, arena, _) = html_parse::Parser::new(&html).parse();
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);

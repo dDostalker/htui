@@ -2,6 +2,7 @@ use std::{fmt::Display, io::Write};
 
 use crossterm::{
     cursor::MoveTo,
+    style::Color,
     terminal::{Clear, ClearType},
 };
 
@@ -31,6 +32,41 @@ impl Display for TermLayout {
     }
 }
 impl TermLayout {
+    /// Overlay the page-selection highlight on every cell inside the line
+    /// bands `lines` — `(row, col_start, col_end_exclusive)` triples, the
+    /// same shape the render thread's `TextSelection` handler computes.
+    ///
+    /// The paint phase knows nothing about the selection, so this is applied
+    /// after each repaint. Filler cells (empty word, the second half of a wide
+    /// glyph) get the background too so the highlight reads as a continuous
+    /// band; the diff renderer skips them, so only glyph-bearing cells change
+    /// the output.
+    ///
+    /// An existing RGB cell background is blended with `selection_bg` rather
+    /// than replaced: background-driven widgets (e.g. the filled / empty
+    /// halves of a flex progress bar) would otherwise collapse into one
+    /// uniform highlight band and become invisible under the selection.
+    /// Non-RGB backgrounds (or none) fall back to the plain `selection_bg`.
+    pub fn apply_text_selection(&mut self, lines: &[(u32, u32, u32)], selection_bg: Color) {
+        let cols = self.columns as usize;
+        let max = self.layout.len();
+        for &(y, xs, xe) in lines {
+            let row_start = (y as usize).saturating_mul(cols);
+            if row_start >= max {
+                continue;
+            }
+            let xe = (xe as usize).min(cols);
+            for x in (xs as usize)..xe {
+                let idx = row_start.saturating_add(x);
+                if idx >= max {
+                    break;
+                }
+                self.layout[idx].bcolor =
+                    Some(selection_blend(self.layout[idx].bcolor, selection_bg));
+            }
+        }
+    }
+
     /// Write the incremental frame to `out`.
     ///
     /// Only the cells that changed since the last call are written (see
@@ -251,4 +287,29 @@ fn block_state_eq(a: &Block, b: &Block) -> bool {
 /// `TermLayout::render_to_bytes`; exposed for tests.
 pub fn is_rendered_as_bare_space(cell: &Block) -> bool {
     cell.word == " " && cell.bcolor.is_none() && cell.style.is_empty()
+}
+
+/// Blend an existing cell background with the selection colour.
+///
+/// RGB backgrounds are averaged so the underlying colour stays visible
+/// through the highlight (browser-like translucent `::selection`); anything
+/// else (no background, ANSI / fixed / named colours) yields `selection_bg`
+/// unchanged.
+fn selection_blend(existing: Option<Color>, selection_bg: Color) -> Color {
+    let (
+        Some(Color::Rgb { r, g, b }),
+        Color::Rgb {
+            r: sr,
+            g: sg,
+            b: sb,
+        },
+    ) = (existing, selection_bg)
+    else {
+        return selection_bg;
+    };
+    Color::Rgb {
+        r: ((r as u16 + sr as u16) / 2) as u8,
+        g: ((g as u16 + sg as u16) / 2) as u8,
+        b: ((b as u16 + sb as u16) / 2) as u8,
+    }
 }

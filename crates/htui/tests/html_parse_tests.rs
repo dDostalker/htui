@@ -54,14 +54,8 @@ fn test_tag_map_heading_group_and_address() {
     // (they used to be flattened by the HTML parser), and the case
     // normalisation must match the browser's tag-name handling.
     init();
-    assert_eq!(
-        html_parse::tag_name_to_node_type("h6"),
-        Some(NodeType::H6)
-    );
-    assert_eq!(
-        html_parse::tag_name_to_node_type("H6"),
-        Some(NodeType::H6)
-    );
+    assert_eq!(html_parse::tag_name_to_node_type("h6"), Some(NodeType::H6));
+    assert_eq!(html_parse::tag_name_to_node_type("H6"), Some(NodeType::H6));
     assert_eq!(
         html_parse::tag_name_to_node_type("hgroup"),
         Some(NodeType::HGroup)
@@ -232,7 +226,11 @@ fn test_parse_title_preserves_tree() {
         .find(|&cid| arena[cid].node_type == NodeType::Title)
         .expect("<title> should be a child of <head>");
     let title_node = &arena[title_id];
-    assert_eq!(title_node.child_count(), 1, "<title> retains its text child");
+    assert_eq!(
+        title_node.child_count(),
+        1,
+        "<title> retains its text child"
+    );
     let text_child = &arena[title_node.children[0]];
     assert_eq!(text_child.node_type, NodeType::Text);
     assert_eq!(text_child.data.as_deref(), Some("My Doc"));
@@ -284,9 +282,7 @@ fn test_script_src_wins_over_inline() {
     let key = format!("mem://script/srcwin_{}.js", std::process::id());
     htui::resources::register(&key, b"globalThis.__ext = true;".to_vec())
         .expect("register mem script");
-    let html = format!(
-        "<script src=\"{key}\">globalThis.__inline = true;</script>"
-    );
+    let html = format!("<script src=\"{key}\">globalThis.__inline = true;</script>");
     let doc = Parser::new(&html).parse_with_scripts();
     assert!(
         doc.scripts.iter().any(|s| s.contains("__ext = true")),
@@ -322,11 +318,8 @@ fn test_link_href_loads_mem_stylesheet() {
     // layer.
     init();
     let key = format!("mem://css/{}.css", std::process::id());
-    htui::resources::register(&key, b"p { color: red; }".to_vec())
-        .expect("register mem css");
-    let html = format!(
-        "<link rel=\"stylesheet\" href=\"{key}\"><p>x</p>"
-    );
+    htui::resources::register(&key, b"p { color: red; }".to_vec()).expect("register mem css");
+    let html = format!("<link rel=\"stylesheet\" href=\"{key}\"><p>x</p>");
     let (_root, _arena, css) = Parser::new(&html).parse();
     assert!(
         css.contains("color: red"),
@@ -370,9 +363,7 @@ fn test_base_resolves_script_src() {
     let key = format!("mem://app/main_{pid}.js");
     htui::resources::register(&key, b"globalThis.__basedScript = true;".to_vec())
         .expect("register mem script");
-    let html = format!(
-        "<base href=\"mem://app/\"><script src=\"main_{pid}.js\"></script><p>x</p>"
-    );
+    let html = format!("<base href=\"mem://app/\"><script src=\"main_{pid}.js\"></script><p>x</p>");
     let doc = Parser::new(&html).parse_with_scripts();
     assert!(
         doc.scripts.iter().any(|s| s.contains("__basedScript")),
@@ -387,8 +378,7 @@ fn test_base_resolves_link_stylesheet_href() {
     init();
     let pid = std::process::id();
     let key = format!("mem://assets/style_{pid}.css");
-    htui::resources::register(&key, b"p { color: green; }".to_vec())
-        .expect("register mem css");
+    htui::resources::register(&key, b"p { color: green; }".to_vec()).expect("register mem css");
     let html = format!(
         "<base href=\"mem://assets/\"><link rel=\"stylesheet\" href=\"style_{pid}.css\"><p>x</p>"
     );
@@ -405,7 +395,8 @@ fn test_link_enters_dom_as_non_rendered_node() {
     // `<link>` is now a real DOM node (addressable by CSS / DOM queries),
     // while its stylesheet is still extracted during parsing.
     init();
-    let html = "<html><head><link rel=\"stylesheet\" href=\"mem://x/y.css\"></head><body></body></html>";
+    let html =
+        "<html><head><link rel=\"stylesheet\" href=\"mem://x/y.css\"></head><body></body></html>";
     let (root, arena, _) = Parser::new(html).parse();
     let html_id = arena[root].children[0];
     let head_id = arena[html_id].children[0];

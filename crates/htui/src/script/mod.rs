@@ -32,10 +32,10 @@ use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
-use boa_engine::object::builtins::JsFunction;
-use boa_engine::{Context, JsError, JsResult, JsValue, NativeFunction, Source, js_string};
 use boa_engine::object::ObjectInitializer;
+use boa_engine::object::builtins::JsFunction;
 use boa_engine::property::Attribute;
+use boa_engine::{Context, JsError, JsResult, JsValue, NativeFunction, Source, js_string};
 
 use crate::{
     events::{EventBindings, EventType, HitRegion, HtmlEvent, KeyEventInfo},
@@ -53,7 +53,9 @@ pub mod convert;
 
 pub use convert::{FromJs, HostError, IntoJs, JsObjectBuilder};
 pub use host::{HostCtx, HostFn, host_fn};
-pub use msg::{ScriptDirty, ScriptEvent, ScriptMsg, ScriptResponse, apply_message, run_script_thread};
+pub use msg::{
+    ScriptDirty, ScriptEvent, ScriptMsg, ScriptResponse, apply_message, run_script_thread,
+};
 
 use dom::{
     add_listener, get_listeners, install_builtins, node_wrapper, response_object, with_state,
@@ -500,7 +502,8 @@ impl ScriptEngine {
             return;
         }
         if let Some(node) = st.arena.get_mut(node_id) {
-            node.attributes.insert("value".to_string(), value.to_string());
+            node.attributes
+                .insert("value".to_string(), value.to_string());
         }
         st.dirty.nodes.push(node_id);
     }
@@ -526,15 +529,16 @@ impl ScriptEngine {
     pub fn set_checked(&mut self, node_id: NodeId, checked: bool) -> bool {
         let mut st = self.state.borrow_mut();
         let mut changed = false;
-        let is_radio = st
-            .arena
-            .get(node_id)
-            .is_some_and(|n| n.get_type().is_some_and(|t| t.eq_ignore_ascii_case("radio")));
+        let is_radio = st.arena.get(node_id).is_some_and(|n| {
+            n.get_type()
+                .is_some_and(|t| t.eq_ignore_ascii_case("radio"))
+        });
         let name = st
             .arena
             .get(node_id)
             .and_then(|n| n.attributes.get("name").cloned());
-        if checked && is_radio
+        if checked
+            && is_radio
             && let Some(name) = name
         {
             // Clear every same-`name` radio sibling (the clicked member
@@ -731,12 +735,16 @@ impl ScriptEngine {
             };
             // `currentTarget` must track the element being dispatched.
             if let Some(obj) = event.as_object()
-                && let Err(e) =
-                    obj.set(js_string!("currentTarget"), wrapper.clone(), false, &mut self.context)
-                {
-                    log::warn!("Failed to set event.currentTarget: {e}");
-                }
-            
+                && let Err(e) = obj.set(
+                    js_string!("currentTarget"),
+                    wrapper.clone(),
+                    false,
+                    &mut self.context,
+                )
+            {
+                log::warn!("Failed to set event.currentTarget: {e}");
+            }
+
             if let Some(ev) = &mut self.state.borrow_mut().current_event {
                 ev.current_target = element.id.clone();
             }
@@ -751,9 +759,9 @@ impl ScriptEngine {
 
             let mut stopped = false;
             for listener in listeners {
-                let call = listener
-                    .to_object(&mut self.context)
-                    .and_then(|f| f.call(&wrapper, std::slice::from_ref(&event), &mut self.context));
+                let call = listener.to_object(&mut self.context).and_then(|f| {
+                    f.call(&wrapper, std::slice::from_ref(&event), &mut self.context)
+                });
                 if let Err(e) = call {
                     log::warn!("Listener threw: {e}");
                 }
@@ -811,9 +819,7 @@ impl ScriptEngine {
             log::warn!("Action `{name}` is not a function");
             return Vec::new();
         }
-        if let Some(f) = f
-            .to_object(&mut self.context)
-            .ok()
+        if let Some(f) = f.to_object(&mut self.context).ok()
             && let Err(e) = f.call(&JsValue::undefined(), &[], &mut self.context)
         {
             log::warn!("Action `{name}` threw: {e}");
@@ -856,7 +862,11 @@ impl ScriptEngine {
         let mut init = ObjectInitializer::new(&mut self.context);
         init.property(js_string!("type"), js_string!(type_str), Attribute::all())
             .property(js_string!("target"), target, Attribute::all())
-            .property(js_string!("currentTarget"), JsValue::null(), Attribute::all())
+            .property(
+                js_string!("currentTarget"),
+                JsValue::null(),
+                Attribute::all(),
+            )
             .property(js_string!("x"), x as f64, Attribute::all())
             .property(js_string!("y"), y as f64, Attribute::all())
             .property(js_string!("bubbles"), true, Attribute::all())
@@ -872,25 +882,33 @@ impl ScriptEngine {
                 Attribute::WRITABLE | Attribute::NON_ENUMERABLE,
             );
         if let Some(k) = key {
-            init.property(js_string!("key"), js_string!(k.key.as_str()), Attribute::all())
-                .property(js_string!("code"), js_string!(k.code.as_str()), Attribute::all())
-                .property(js_string!("keyCode"), k.key_code as f64, Attribute::all())
-                .property(js_string!("shiftKey"), k.shift, Attribute::all())
-                .property(js_string!("ctrlKey"), k.ctrl, Attribute::all())
-                .property(js_string!("altKey"), k.alt, Attribute::all())
-                .property(js_string!("metaKey"), k.meta, Attribute::all())
-                .property(js_string!("repeat"), k.repeat, Attribute::all());
+            init.property(
+                js_string!("key"),
+                js_string!(k.key.as_str()),
+                Attribute::all(),
+            )
+            .property(
+                js_string!("code"),
+                js_string!(k.code.as_str()),
+                Attribute::all(),
+            )
+            .property(js_string!("keyCode"), k.key_code as f64, Attribute::all())
+            .property(js_string!("shiftKey"), k.shift, Attribute::all())
+            .property(js_string!("ctrlKey"), k.ctrl, Attribute::all())
+            .property(js_string!("altKey"), k.alt, Attribute::all())
+            .property(js_string!("metaKey"), k.meta, Attribute::all())
+            .property(js_string!("repeat"), k.repeat, Attribute::all());
         }
         init.function(
-                NativeFunction::from_fn_ptr(stop_propagation),
-                js_string!("stopPropagation"),
-                0,
-            )
-            .function(
-                NativeFunction::from_fn_ptr(prevent_default),
-                js_string!("preventDefault"),
-                0,
-            );
+            NativeFunction::from_fn_ptr(stop_propagation),
+            js_string!("stopPropagation"),
+            0,
+        )
+        .function(
+            NativeFunction::from_fn_ptr(prevent_default),
+            js_string!("preventDefault"),
+            0,
+        );
         Ok(init.build().into())
     }
 }
@@ -1015,7 +1033,10 @@ fn compile_attribute_listeners(
                 }
             };
             if let Err(e) = add_listener(context, node_id, event_type, &fn_val) {
-                log::warn!("Failed to register attribute handler for {:?}: {e}", node_id);
+                log::warn!(
+                    "Failed to register attribute handler for {:?}: {e}",
+                    node_id
+                );
             }
         }
     }

@@ -101,9 +101,11 @@ fn inner_html_getter_preserves_attribute_source_order() {
 fn inner_html_getter_tracks_set_and_remove_attribute_order() {
     // `setAttribute` appends new attributes; `removeAttribute` keeps the
     // remaining ones in their relative source order (browser behaviour).
-    let mut engine =
-        ScriptEngine::new(r#"<div id="d"><p class="x"></p></div>"#, EventBindings::default())
-            .expect("engine initializes");
+    let mut engine = ScriptEngine::new(
+        r#"<div id="d"><p class="x"></p></div>"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
     let html = eval_str(
         &mut engine,
         "(function(){ var el = document.querySelector('#d p'); el.setAttribute('a', '1'); el.setAttribute('b', '2'); el.removeAttribute('a'); return document.getElementById('d').innerHTML; })()",
@@ -115,7 +117,10 @@ fn inner_html_getter_tracks_set_and_remove_attribute_order() {
 fn inner_html_getter_empty_when_no_children() {
     let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
         .expect("engine initializes");
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').innerHTML"), "");
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('d').innerHTML"),
+        ""
+    );
 }
 
 // ============================================================
@@ -140,9 +145,17 @@ fn inner_html_setter_replaces_children() {
         .iter()
         .map(|&c| arena[c].node_type)
         .collect();
-    assert_eq!(children, vec![NodeType::Span, NodeType::P], "old children replaced");
+    assert_eq!(
+        children,
+        vec![NodeType::Span, NodeType::P],
+        "old children replaced"
+    );
     for &c in &arena[d].children {
-        assert_eq!(arena[c].parent, Some(d), "parsed children must link to the target");
+        assert_eq!(
+            arena[c].parent,
+            Some(d),
+            "parsed children must link to the target"
+        );
     }
     // Reading back round-trips the fragment.
     assert_eq!(
@@ -165,7 +178,10 @@ fn inner_html_setter_empty_clears_children() {
     eval_str(&mut engine, "document.getElementById('d').innerHTML = ''");
     let arena = engine.arena();
     let d = find_node_by_id(&arena, "d");
-    assert!(arena[d].children.is_empty(), "empty fragment must clear children");
+    assert!(
+        arena[d].children.is_empty(),
+        "empty fragment must clear children"
+    );
     assert_eq!(
         eval_str(&mut engine, "document.getElementById('d').textContent"),
         ""
@@ -191,7 +207,10 @@ fn inner_html_setter_parses_in_element_context() {
     let tr = arena[b].children[0];
     assert!(matches!(arena[tr].node_type, NodeType::Tr));
     assert_eq!(arena[tr].children.len(), 1);
-    assert!(matches!(arena[arena[tr].children[0]].node_type, NodeType::Td));
+    assert!(matches!(
+        arena[arena[tr].children[0]].node_type,
+        NodeType::Td
+    ));
 }
 
 #[test]
@@ -202,8 +221,14 @@ fn inner_html_content_is_query_selectorable() {
         &mut engine,
         "document.getElementById('d').innerHTML = '<p class=\"x\">hi</p><ul><li>1</li></ul>'",
     );
-    assert_eq!(eval_str(&mut engine, "document.querySelector('.x').textContent"), "hi");
-    assert_eq!(eval_str(&mut engine, "document.querySelectorAll('#d li').length"), "1");
+    assert_eq!(
+        eval_str(&mut engine, "document.querySelector('.x').textContent"),
+        "hi"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "document.querySelectorAll('#d li').length"),
+        "1"
+    );
 }
 
 // ============================================================
@@ -308,7 +333,10 @@ fn inner_html_setter_skips_scripts() {
         "document.getElementById('d').innerHTML = '<script>globalThis.__ran = true;</script><b>ok</b>'",
     );
     // The script source was never evaluated (browser `innerHTML` semantics).
-    assert_eq!(eval_str(&mut engine, "typeof globalThis.__ran"), "undefined");
+    assert_eq!(
+        eval_str(&mut engine, "typeof globalThis.__ran"),
+        "undefined"
+    );
     // ... and never became a DOM node.
     let arena = engine.arena();
     let d = find_node_by_id(&arena, "d");
@@ -329,10 +357,19 @@ fn inner_html_on_non_element_is_noop() {
     let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
         .expect("engine initializes");
     // `innerHTML` is an Element-only property: the document has none.
-    assert_eq!(eval_str(&mut engine, "String(document.innerHTML)"), "undefined");
+    assert_eq!(
+        eval_str(&mut engine, "String(document.innerHTML)"),
+        "undefined"
+    );
     // Setting it must neither crash nor mutate the document.
     eval_str(&mut engine, "document.innerHTML = '<p>nope</p>'");
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').childNodes.length"), "0");
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "document.getElementById('d').childNodes.length"
+        ),
+        "0"
+    );
 }
 
 #[test]
@@ -356,5 +393,8 @@ fn inner_html_click_handler_mutation_carries_style_css() {
     );
     let arena = engine.arena();
     let q = find_node_by_id(&arena, "q");
-    assert!(matches!(arena[q].node_type, NodeType::I), "fragment must be in the live DOM");
+    assert!(
+        matches!(arena[q].node_type, NodeType::I),
+        "fragment must be in the live DOM"
+    );
 }

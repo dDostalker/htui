@@ -40,8 +40,14 @@ fn layout_boxes(html: &str) -> (Vec<htui::layout::LayoutBox>, NodeArena) {
     let (root_id, arena) = setup(html);
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
-    let boxes =
-        layout_tree(&arena, root_id, containing, &mut cursor, COLS as usize, ROWS as usize);
+    let boxes = layout_tree(
+        &arena,
+        root_id,
+        containing,
+        &mut cursor,
+        COLS as usize,
+        ROWS as usize,
+    );
     (boxes, arena)
 }
 
@@ -86,8 +92,8 @@ fn test_noscript_parses_and_keeps_dom_tree() {
     // in the DOM and its content becomes a single text node, exactly like a
     // browser with JavaScript on.
     let (_, arena) = setup("<div>before</div><noscript><p>fallback</p></noscript>");
-    let noscript_id = find_node_by_type(&arena, &NodeType::Noscript)
-        .expect("noscript element stays in the DOM");
+    let noscript_id =
+        find_node_by_type(&arena, &NodeType::Noscript).expect("noscript element stays in the DOM");
     let children = arena[noscript_id].children.clone();
     assert_eq!(children.len(), 1, "the content stays as a single child");
     assert_eq!(
@@ -100,7 +106,9 @@ fn test_noscript_parses_and_keeps_dom_tree() {
         "<p>fallback</p>",
         "the raw markup is readable via textContent"
     );
-    let parent_id = arena[noscript_id].parent.expect("noscript is nested in the document");
+    let parent_id = arena[noscript_id]
+        .parent
+        .expect("noscript is nested in the document");
     assert_eq!(
         arena[parent_id].node_type,
         NodeType::Body,
@@ -113,9 +121,8 @@ fn test_noscript_produces_no_boxes() {
     init();
     // The element and its subtree generate no layout boxes — scripting is
     // always enabled in this engine.
-    let (boxes, arena) = layout_boxes(
-        "<div>shown</div><noscript><p>fallback</p></noscript><div>after</div>",
-    );
+    let (boxes, arena) =
+        layout_boxes("<div>shown</div><noscript><p>fallback</p></noscript><div>after</div>");
     let noscript_id = find_node_by_type(&arena, &NodeType::Noscript).expect("noscript in DOM");
     assert!(
         box_for_node(&boxes, noscript_id).is_none(),

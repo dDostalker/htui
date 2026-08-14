@@ -47,9 +47,12 @@ mod list;
 mod table;
 mod tree;
 
+pub use crate::html::css_parse::FontContext;
 pub use a::layout_a;
 pub use elements::layout_standard_block;
-pub use generic::{layout_generic, layout_hr, layout_inline_blockify, layout_progress, layout_summary};
+pub use generic::{
+    layout_generic, layout_hr, layout_inline_blockify, layout_progress, layout_summary,
+};
 pub use head::{layout_hn, layout_meta, layout_title};
 pub use img::{layout_img, layout_img_with_rect};
 pub use layout_block::{
@@ -58,6 +61,5 @@ pub use layout_block::{
 };
 pub use list::{layout_li, layout_menu, layout_ol, layout_ul};
 pub use table::{layout_row_group, layout_table, layout_td, layout_th, layout_tr};
-pub use crate::html::css_parse::FontContext;
 pub(crate) use tree::dispatch_flow_geometry;
 pub use tree::{dispatch, layout_children, layout_tree};

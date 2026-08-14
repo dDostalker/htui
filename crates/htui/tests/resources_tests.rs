@@ -27,8 +27,7 @@ fn register_rejects_empty_paths() {
 fn register_then_load_roundtrips_bytes() {
     init();
     let key = mem_key("roundtrip");
-    resources::register(&key, b"hello resource".to_vec())
-        .expect("register mem resource");
+    resources::register(&key, b"hello resource".to_vec()).expect("register mem resource");
     let loaded = resources::load(&key).expect("mem load succeeds");
     assert_eq!(&*loaded, b"hello resource");
     resources::unregister(&key);
@@ -78,14 +77,17 @@ fn unregister_returns_whether_key_existed() {
         resources::load(&key).is_err(),
         "after unregistering, loading must fail"
     );
-    assert!(!resources::unregister(&key), "missing key unregisters nothing");
+    assert!(
+        !resources::unregister(&key),
+        "missing key unregisters nothing"
+    );
 }
 
 #[test]
 fn load_missing_mem_key_errors() {
     init();
-    let err = resources::load("mem://does/not/exist")
-        .expect_err("unregistered mem:// key must error");
+    let err =
+        resources::load("mem://does/not/exist").expect_err("unregistered mem:// key must error");
     assert!(
         err.to_string().contains("not registered"),
         "error should mention the missing registration, got {err}"

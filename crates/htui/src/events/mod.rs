@@ -46,10 +46,7 @@
 
 use std::collections::HashMap;
 
-use crate::{
-    script::HostFn,
-    tdom::node::NodeId,
-};
+use crate::{script::HostFn, tdom::node::NodeId};
 
 mod geometry;
 mod hit_map;

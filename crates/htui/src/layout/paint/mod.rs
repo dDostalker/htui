@@ -216,7 +216,10 @@ fn fill_canvas_background(
     let region = canvas.region;
     for y in start_row..rows {
         let row_start = y * cols;
-        for (i, cell) in canvas.layout[row_start..row_start + cols].iter_mut().enumerate() {
+        for (i, cell) in canvas.layout[row_start..row_start + cols]
+            .iter_mut()
+            .enumerate()
+        {
             let in_region = match region {
                 None => true,
                 Some(r) => {
@@ -376,9 +379,7 @@ fn paint_box(
             .y
             .saturating_add(edges.border.top.thickness())
             .saturating_add(edges.padding.top),
-        lb.rect
-            .width
-            .saturating_sub(edges.inner_horizontal()),
+        lb.rect.width.saturating_sub(edges.inner_horizontal()),
         lb.rect.height.saturating_sub(edges.inner_vertical()),
     );
     let children_clip = intersect_rects(own_clip, content_area);

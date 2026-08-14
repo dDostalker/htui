@@ -6,7 +6,7 @@
 
 use htui::events::EventBindings;
 use htui::script::ScriptEngine;
-use htui::tdom::node::{NodeType};
+use htui::tdom::node::NodeType;
 
 /// Build a script engine over `html` (its `<script>` blocks run immediately).
 fn engine(html: &str) -> ScriptEngine {
@@ -42,9 +42,18 @@ fn node_type_node_name_tag_name() {
     assert_eq!(eval_str(&mut e, "document.nodeType"), "9");
     assert_eq!(eval_str(&mut e, "document.nodeName"), "#document");
     assert_eq!(eval_str(&mut e, "document.documentElement.tagName"), "HTML");
-    assert_eq!(eval_str(&mut e, "document.getElementById('d').nodeType"), "1");
-    assert_eq!(eval_str(&mut e, "document.getElementById('d').nodeName"), "DIV");
-    assert_eq!(eval_str(&mut e, "document.getElementById('d').tagName"), "DIV");
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('d').nodeType"),
+        "1"
+    );
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('d').nodeName"),
+        "DIV"
+    );
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('d').tagName"),
+        "DIV"
+    );
     // Text node: nodeType 3 / #text, content exposed via data / nodeValue.
     eval(&mut e, "var t = document.getElementById('d').childNodes[0]");
     assert_eq!(eval_str(&mut e, "t.nodeType"), "3");
@@ -66,13 +75,25 @@ fn parser_keeps_whitespace_text_comments_and_doctype() {
     );
     let arena = e.arena();
     assert!(
-        arena.iter().any(|(_, n)| n.node_type == NodeType::DocumentType),
+        arena
+            .iter()
+            .any(|(_, n)| n.node_type == NodeType::DocumentType),
         "doctype node must be kept"
     );
     let d = find_id(&arena, "d");
-    let kids: Vec<NodeType> = arena[d].children.iter().map(|&c| arena[c].node_type).collect();
-    assert!(kids.contains(&NodeType::Text), "whitespace text nodes kept: {kids:?}");
-    assert!(kids.contains(&NodeType::Comment), "comment node kept: {kids:?}");
+    let kids: Vec<NodeType> = arena[d]
+        .children
+        .iter()
+        .map(|&c| arena[c].node_type)
+        .collect();
+    assert!(
+        kids.contains(&NodeType::Text),
+        "whitespace text nodes kept: {kids:?}"
+    );
+    assert!(
+        kids.contains(&NodeType::Comment),
+        "comment node kept: {kids:?}"
+    );
     // The leading whitespace text node holds the exact source bytes.
     let first = arena[d].children[0];
     assert_eq!(arena[first].node_type, NodeType::Text);
@@ -94,9 +115,20 @@ fn child_nodes_is_a_true_live_list() {
     let mut e = engine(r#"<div id="d"><span>a</span></div>"#);
     eval(&mut e, "var nl = document.getElementById('d').childNodes");
     assert_eq!(eval_str(&mut e, "nl.length"), "1");
-    eval(&mut e, "document.getElementById('d').appendChild(document.createElement('p'))");
-    assert_eq!(eval_str(&mut e, "nl.length"), "2", "held list must see the append");
-    assert_eq!(eval_str(&mut e, "nl[1].tagName"), "P", "new index must resolve");
+    eval(
+        &mut e,
+        "document.getElementById('d').appendChild(document.createElement('p'))",
+    );
+    assert_eq!(
+        eval_str(&mut e, "nl.length"),
+        "2",
+        "held list must see the append"
+    );
+    assert_eq!(
+        eval_str(&mut e, "nl[1].tagName"),
+        "P",
+        "new index must resolve"
+    );
     // Item identity is stable (wrapper cache).
     assert_eq!(eval_str(&mut e, "nl[0] === nl[0]"), "true");
     // `in` and iteration reflect the live list.
@@ -116,7 +148,10 @@ fn parent_and_sibling_traversal() {
     assert_eq!(eval_str(&mut e, "a.parentNode.id"), "d");
     assert_eq!(eval_str(&mut e, "a.parentElement.id"), "d");
     assert_eq!(eval_str(&mut e, "a.nextSibling.id"), "b");
-    assert_eq!(eval_str(&mut e, "document.getElementById('b').previousSibling.id"), "a");
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('b').previousSibling.id"),
+        "a"
+    );
     assert_eq!(eval_str(&mut e, &format!("{d}.firstChild.id")), "a");
     assert_eq!(eval_str(&mut e, &format!("{d}.lastChild.id")), "b");
     assert_eq!(eval_str(&mut e, "a.firstChild.nodeType"), "3");
@@ -137,32 +172,60 @@ fn insert_before_and_replace_child() {
     assert_eq!(eval_str(&mut e, "d.childNodes[1].id"), "c");
     assert_eq!(eval_str(&mut e, "d.childNodes[2].id"), "b");
     // insertBefore with a null reference appends.
-    eval(&mut e, "var q = document.createElement('q'); q.id = 'z'; d.insertBefore(q, null)");
+    eval(
+        &mut e,
+        "var q = document.createElement('q'); q.id = 'z'; d.insertBefore(q, null)",
+    );
     assert_eq!(eval_str(&mut e, "d.lastChild.id"), "z");
     // replaceChild swaps in place and returns the removed child.
-    eval(&mut e, "var r = d.replaceChild(q, document.getElementById('a'))");
+    eval(
+        &mut e,
+        "var r = d.replaceChild(q, document.getElementById('a'))",
+    );
     assert_eq!(eval_str(&mut e, "r.id"), "a");
     assert_eq!(eval_str(&mut e, "d.childNodes[0].id"), "z");
-    assert_eq!(eval_str(&mut e, "document.getElementById('a').parentNode"), "null");
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('a').parentNode"),
+        "null"
+    );
 }
 
 #[test]
 fn clone_node_deep_is_detached_and_structural() {
     let mut e = engine(r#"<div id="d"><span class="s">text</span></div>"#);
-    eval(&mut e, "var c = document.getElementById('d').cloneNode(true)");
+    eval(
+        &mut e,
+        "var c = document.getElementById('d').cloneNode(true)",
+    );
     assert_eq!(eval_str(&mut e, "c.nodeType"), "1");
-    assert_eq!(eval_str(&mut e, "c.parentNode === null"), "true", "clone is detached");
+    assert_eq!(
+        eval_str(&mut e, "c.parentNode === null"),
+        "true",
+        "clone is detached"
+    );
     assert_eq!(eval_str(&mut e, "c.childNodes.length"), "1");
     assert_eq!(eval_str(&mut e, "c.childNodes[0].tagName"), "SPAN");
     assert_eq!(eval_str(&mut e, "c.childNodes[0].textContent"), "text");
     // Structural equality vs identity.
-    assert_eq!(eval_str(&mut e, "c.isEqualNode(document.getElementById('d'))"), "true");
-    assert_eq!(eval_str(&mut e, "c.isSameNode(document.getElementById('d'))"), "false");
+    assert_eq!(
+        eval_str(&mut e, "c.isEqualNode(document.getElementById('d'))"),
+        "true"
+    );
+    assert_eq!(
+        eval_str(&mut e, "c.isSameNode(document.getElementById('d'))"),
+        "false"
+    );
     // The clone is independent: mutating it leaves the original intact.
     eval(&mut e, "c.childNodes[0].textContent = 'changed'");
-    assert_eq!(eval_str(&mut e, "document.getElementById('d').textContent"), "text");
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('d').textContent"),
+        "text"
+    );
     // Shallow clone drops children.
-    eval(&mut e, "var s = document.getElementById('d').cloneNode(false)");
+    eval(
+        &mut e,
+        "var s = document.getElementById('d').cloneNode(false)",
+    );
     assert_eq!(eval_str(&mut e, "s.childNodes.length"), "0");
 }
 
@@ -173,10 +236,20 @@ fn create_text_comment_and_fragment_nodes() {
     assert_eq!(eval_str(&mut e, "t.nodeType"), "3");
     assert_eq!(eval_str(&mut e, "t.data"), "hi");
     assert_eq!(eval_str(&mut e, "t.nodeValue"), "hi");
-    assert_eq!(eval_str(&mut e, "t.parentNode === null"), "true", "detached until appended");
+    assert_eq!(
+        eval_str(&mut e, "t.parentNode === null"),
+        "true",
+        "detached until appended"
+    );
     eval(&mut e, "document.getElementById('d').appendChild(t)");
-    assert_eq!(eval_str(&mut e, "document.getElementById('d').textContent"), "hi");
-    assert_eq!(eval_str(&mut e, "document.getElementById('d').childNodes.length"), "1");
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('d').textContent"),
+        "hi"
+    );
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('d').childNodes.length"),
+        "1"
+    );
     // nodeValue writes back into data.
     eval(&mut e, "t.nodeValue = 'yo'");
     assert_eq!(eval_str(&mut e, "t.data"), "yo");
@@ -187,7 +260,10 @@ fn create_text_comment_and_fragment_nodes() {
     assert_eq!(eval_str(&mut e, "c.data"), "note");
     // Comments are DOM nodes that render nothing.
     eval(&mut e, "document.getElementById('d').appendChild(c)");
-    assert_eq!(eval_str(&mut e, "document.getElementById('d').childNodes.length"), "2");
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('d').childNodes.length"),
+        "2"
+    );
 
     eval(&mut e, "var f = document.createDocumentFragment()");
     assert_eq!(eval_str(&mut e, "f.nodeType"), "11");
@@ -205,15 +281,24 @@ fn contains_same_node_and_document_accessors() {
     assert_eq!(eval_str(&mut e, "document.head.tagName"), "HEAD");
     assert_eq!(eval_str(&mut e, "document.doctype.nodeName"), "html");
     assert_eq!(
-        eval_str(&mut e, "document.getElementById('d').contains(document.getElementById('s'))"),
+        eval_str(
+            &mut e,
+            "document.getElementById('d').contains(document.getElementById('s'))"
+        ),
         "true"
     );
     assert_eq!(
-        eval_str(&mut e, "document.getElementById('d').contains(document.getElementById('d'))"),
+        eval_str(
+            &mut e,
+            "document.getElementById('d').contains(document.getElementById('d'))"
+        ),
         "true"
     );
     assert_eq!(
-        eval_str(&mut e, "document.getElementById('s').contains(document.getElementById('d'))"),
+        eval_str(
+            &mut e,
+            "document.getElementById('s').contains(document.getElementById('d'))"
+        ),
         "false"
     );
     assert_eq!(
@@ -229,12 +314,21 @@ fn contains_same_node_and_document_accessors() {
 fn text_content_writes_through_the_new_text_model() {
     let mut e = engine(r#"<div id="d">old</div>"#);
     eval(&mut e, "document.getElementById('d').textContent = 'new'");
-    assert_eq!(eval_str(&mut e, "document.getElementById('d').textContent"), "new");
-    assert_eq!(eval_str(&mut e, "document.getElementById('d').childNodes.length"), "1");
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('d').textContent"),
+        "new"
+    );
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('d').childNodes.length"),
+        "1"
+    );
     // The reused text child keeps its node identity; the value lives in `data`.
     eval(&mut e, "var t = document.getElementById('d').childNodes[0]");
     eval(&mut e, "t.data = 'edited'");
-    assert_eq!(eval_str(&mut e, "document.getElementById('d').textContent"), "edited");
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('d').textContent"),
+        "edited"
+    );
 }
 
 #[test]

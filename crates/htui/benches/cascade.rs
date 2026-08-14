@@ -7,7 +7,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 
 /// Full pipeline for the small fixture: HTML parse + CSS parse + cascade.
 /// Useful as a sanity check that the cascade dominates the parse cost.

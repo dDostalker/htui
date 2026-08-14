@@ -15,9 +15,7 @@ use htui::layout::layout::TermMap;
 use htui::layout::{BoxConstraint, Cursor, layout_tree};
 use htui::script::{ScriptEngine, ScriptMsg, apply_message};
 use htui::tdom::node::{NodeArena, NodeId};
-use htui::tui::graph_api::{
-    InputRenderState, RenderCmd, TermLayout, apply_textarea_key,
-};
+use htui::tui::graph_api::{InputRenderState, RenderCmd, TermLayout, apply_textarea_key};
 
 const COLS: u16 = 80;
 const ROWS: u16 = 24;
@@ -44,8 +42,14 @@ fn layout_boxes(html: &str) -> (Vec<htui::layout::LayoutBox>, NodeArena) {
     let (root_id, arena) = setup(html);
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
-    let boxes =
-        layout_tree(&arena, root_id, containing, &mut cursor, COLS as usize, ROWS as usize);
+    let boxes = layout_tree(
+        &arena,
+        root_id,
+        containing,
+        &mut cursor,
+        COLS as usize,
+        ROWS as usize,
+    );
     (boxes, arena)
 }
 
@@ -156,7 +160,10 @@ fn test_textarea_renders_framed_default_value() {
         "two side columns × two content rows"
     );
     assert!(tl.layout.iter().any(|b| b.word == "┌"), "top-left corner");
-    assert!(tl.layout.iter().any(|b| b.word == "└"), "bottom-left corner");
+    assert!(
+        tl.layout.iter().any(|b| b.word == "└"),
+        "bottom-left corner"
+    );
 }
 
 #[test]
@@ -177,13 +184,23 @@ fn test_textarea_default_size() {
 fn test_textarea_key_enter_inserts_newline() {
     let mut value = "ab".to_string();
     let mut cursor = 2;
-    assert!(apply_textarea_key(&mut value, &mut cursor, 10, KeyCode::Enter));
+    assert!(apply_textarea_key(
+        &mut value,
+        &mut cursor,
+        10,
+        KeyCode::Enter
+    ));
     assert_eq!(value, "ab\n");
     assert_eq!(cursor, 3);
     // A literal newline char inserts the same way.
     let mut value = "a".to_string();
     let mut cursor = 1;
-    assert!(apply_textarea_key(&mut value, &mut cursor, 10, KeyCode::Char('\n')));
+    assert!(apply_textarea_key(
+        &mut value,
+        &mut cursor,
+        10,
+        KeyCode::Char('\n')
+    ));
     assert_eq!(value, "a\n");
 }
 
@@ -203,9 +220,19 @@ fn test_textarea_key_up_down_moves_caret_between_lines() {
     );
     assert_eq!(cursor, 1);
     // Boundaries are no-ops.
-    assert!(!apply_textarea_key(&mut value, &mut cursor, 10, KeyCode::Up));
+    assert!(!apply_textarea_key(
+        &mut value,
+        &mut cursor,
+        10,
+        KeyCode::Up
+    ));
     cursor = 7;
-    assert!(!apply_textarea_key(&mut value, &mut cursor, 10, KeyCode::Down));
+    assert!(!apply_textarea_key(
+        &mut value,
+        &mut cursor,
+        10,
+        KeyCode::Down
+    ));
 }
 
 #[test]
@@ -214,8 +241,16 @@ fn test_textarea_wrap_moves_caret_across_wrapped_lines() {
     // lands on the second visual line's column 1.
     let mut value = "abcdef".to_string();
     let mut cursor = 1;
-    assert!(apply_textarea_key(&mut value, &mut cursor, 3, KeyCode::Down));
-    assert_eq!(cursor, 4, "visual row 1 starts at char 3, column 1 -> char 4");
+    assert!(apply_textarea_key(
+        &mut value,
+        &mut cursor,
+        3,
+        KeyCode::Down
+    ));
+    assert_eq!(
+        cursor, 4,
+        "visual row 1 starts at char 3, column 1 -> char 4"
+    );
 }
 
 #[test]
@@ -238,7 +273,8 @@ fn test_textarea_blur_commits_text_content() {
         "textarea blur must commit into the text content"
     );
     assert!(
-        cmds.iter().any(|c| matches!(c, RenderCmd::RenderArena { .. })),
+        cmds.iter()
+            .any(|c| matches!(c, RenderCmd::RenderArena { .. })),
         "commit must mark the node dirty"
     );
 }
@@ -258,7 +294,9 @@ fn test_textarea_blur_same_value_no_change_event() {
         },
     );
     assert!(
-        !cmds.iter().any(|c| matches!(c, RenderCmd::RenderArena { .. })),
+        !cmds
+            .iter()
+            .any(|c| matches!(c, RenderCmd::RenderArena { .. })),
         "unchanged value must not re-render"
     );
 }
@@ -268,7 +306,8 @@ fn test_textarea_scroll_keeps_caret_visible() {
     // rows=1 with four lines: a focused caret on the last line scrolls the
     // box so only that line is visible.
     let term_map = mock_term_map();
-    let (root_id, arena) = setup(r#"<textarea id="t" cols="6" rows="1">a&#10;b&#10;c&#10;d</textarea>"#);
+    let (root_id, arena) =
+        setup(r#"<textarea id="t" cols="6" rows="1">a&#10;b&#10;c&#10;d</textarea>"#);
     let t = find_node_by_id(&arena, "t");
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.input_states.insert(
@@ -372,7 +411,10 @@ fn test_textarea_value_setter_clears_to_empty() {
         &mut engine,
         "(function(){ document.getElementById('t').value = ''; })()",
     );
-    assert_eq!(eval_str(&mut engine, "document.getElementById('t').value"), "");
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('t').value"),
+        ""
+    );
     assert_eq!(
         eval_str(&mut engine, "document.getElementById('t').textContent"),
         ""
@@ -399,9 +441,7 @@ fn test_textarea_focused_paints_inverted_caret() {
     let caret_idx = tl
         .layout
         .iter()
-        .position(|b| {
-            b.fcolor == Some(Color::Black) && b.bcolor == Some(Color::White)
-        })
+        .position(|b| b.fcolor == Some(Color::Black) && b.bcolor == Some(Color::White))
         .expect("inverted caret cell");
     let cols = term_map.columns as usize;
     assert_eq!(caret_idx % cols, 2, "caret sits at column 1 of the content");
@@ -453,13 +493,26 @@ fn test_textarea_backspace_delete_match_caret_position() {
     // the painted caret (see the caret-position test above).
     let mut value = "ab\ncd".to_string();
     let mut cursor = 2;
-    assert!(apply_textarea_key(&mut value, &mut cursor, 10, KeyCode::Backspace));
-    assert_eq!(value, "a\ncd", "Backspace removes the char before the caret");
+    assert!(apply_textarea_key(
+        &mut value,
+        &mut cursor,
+        10,
+        KeyCode::Backspace
+    ));
+    assert_eq!(
+        value, "a\ncd",
+        "Backspace removes the char before the caret"
+    );
     assert_eq!(cursor, 1);
 
     let mut value = "ab\ncd".to_string();
     let mut cursor = 2;
-    assert!(apply_textarea_key(&mut value, &mut cursor, 10, KeyCode::Delete));
+    assert!(apply_textarea_key(
+        &mut value,
+        &mut cursor,
+        10,
+        KeyCode::Delete
+    ));
     assert_eq!(value, "abcd", "Delete at a line end removes the newline");
     assert_eq!(cursor, 2);
 }
@@ -471,7 +524,12 @@ fn test_textarea_wide_char_caret_matches_editing() {
     // UTF-8 sequence / a single cell).
     let mut value = "中文".to_string();
     let mut cursor = 1;
-    assert!(apply_textarea_key(&mut value, &mut cursor, 10, KeyCode::Backspace));
+    assert!(apply_textarea_key(
+        &mut value,
+        &mut cursor,
+        10,
+        KeyCode::Backspace
+    ));
     assert_eq!(value, "文", "Backspace removes the full wide character");
     assert_eq!(cursor, 0);
 

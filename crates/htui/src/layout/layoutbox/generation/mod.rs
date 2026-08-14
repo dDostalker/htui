@@ -223,7 +223,10 @@ pub fn visible_children(arena: &NodeArena, parent_id: NodeId) -> Vec<NodeId> {
     if parent.node_type != NodeType::Details || parent.attributes.contains_key("open") {
         return ids;
     }
-    match ids.iter().position(|&id| arena[id].node_type == NodeType::Summary) {
+    match ids
+        .iter()
+        .position(|&id| arena[id].node_type == NodeType::Summary)
+    {
         Some(pos) => vec![ids[pos]],
         None => Vec::new(),
     }
@@ -238,18 +241,19 @@ fn generate_children(arena: &NodeArena, parent_id: NodeId) -> Vec<GeneratedBox> 
         // `parent_id`. We can't do that inside `generate_node` because
         // the wrapper is needed to *detect* the case here.
         let child_node = &arena[child_id];
-        if let Some(d) = child_node.css_attr.display() && d.is_transparent() {
-                for &grandchild_id in &child_node.children {
-                    append_child_box(
-                        arena,
-                        parent_id,
-                        grandchild_id,
-                        &mut inline_group,
-                        &mut children,
-                    );
-                }
-                continue;
-            
+        if let Some(d) = child_node.css_attr.display()
+            && d.is_transparent()
+        {
+            for &grandchild_id in &child_node.children {
+                append_child_box(
+                    arena,
+                    parent_id,
+                    grandchild_id,
+                    &mut inline_group,
+                    &mut children,
+                );
+            }
+            continue;
         }
         append_child_box(arena, parent_id, child_id, &mut inline_group, &mut children);
     }

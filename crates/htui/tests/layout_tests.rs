@@ -1,9 +1,9 @@
+use crossterm::style::Color;
 use htui::html::html_parse::Parser;
 use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
 use htui::tdom::node::{NodeArena, NodeId};
 use htui::tui::graph_api::{FontStyle, TermLayout};
-use crossterm::style::Color;
 
 fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
@@ -260,8 +260,8 @@ fn term_layout_caps_a_pathological_viewport_size() {
         rows: u16::MAX,
     };
     let tl = TermLayout::new(&term_map, 1.0);
-    let max_cells = htui::layout::layout::MAX_TERM_COLS as usize
-        * htui::layout::layout::MAX_TERM_ROWS as usize;
+    let max_cells =
+        htui::layout::layout::MAX_TERM_COLS as usize * htui::layout::layout::MAX_TERM_ROWS as usize;
     assert!(
         tl.layout.len() <= max_cells,
         "canvas must be bounded by the size clamps, got {}",
@@ -307,9 +307,15 @@ fn test_layout_h6_prefix_renders() {
     let rstart = row * cols;
     let row_cells = &tl.layout[rstart..rstart + cols];
     let prefix: String = row_cells[0..7].iter().map(|b| b.word.as_str()).collect();
-    assert_eq!(prefix, "###### ", "h6 must render the 6-level markdown prefix");
+    assert_eq!(
+        prefix, "###### ",
+        "h6 must render the 6-level markdown prefix"
+    );
     let text: String = row_cells[7..12].iter().map(|b| b.word.as_str()).collect();
-    assert_eq!(text, "Small", "heading text must follow the prefix on the same row");
+    assert_eq!(
+        text, "Small",
+        "heading text must follow the prefix on the same row"
+    );
 }
 
 #[test]
@@ -643,10 +649,7 @@ fn test_layout_br_forces_line_break() {
         .iter()
         .position(|b| b.word == "b")
         .expect("post-br text must render");
-    assert!(
-        b_idx / cols > a_idx / cols,
-        "<br> must break the line"
-    );
+    assert!(b_idx / cols > a_idx / cols, "<br> must break the line");
     assert_eq!(
         b_idx % cols,
         a_idx % cols,
@@ -675,11 +678,7 @@ fn test_body_background_fills_canvas() {
     let last_row = &tl.layout[(rows - 1) * cols];
     assert_eq!(
         last_row.bcolor,
-        Some(Color::Rgb {
-            r: 0,
-            g: 0,
-            b: 255
-        }),
+        Some(Color::Rgb { r: 0, g: 0, b: 255 }),
         "body background must fill rows below the content"
     );
     assert_eq!(last_row.word, " ", "the fill must not add glyphs");
@@ -701,11 +700,7 @@ fn test_html_background_wins_over_body_for_canvas() {
     let cell = &tl.layout[(rows - 1) * cols];
     assert_eq!(
         cell.bcolor,
-        Some(Color::Rgb {
-            r: 0,
-            g: 128,
-            b: 0
-        }),
+        Some(Color::Rgb { r: 0, g: 128, b: 0 }),
         "<html> background must win over <body> for the canvas"
     );
 }
@@ -727,11 +722,7 @@ fn test_hsl_background_through_cascade_and_paint() {
     let cell = &tl.layout[(rows - 1) * cols];
     assert_eq!(
         cell.bcolor,
-        Some(Color::Rgb {
-            r: 0,
-            g: 0,
-            b: 255
-        }),
+        Some(Color::Rgb { r: 0, g: 0, b: 255 }),
         "hsl() through the `background` shorthand must paint the canvas"
     );
 }

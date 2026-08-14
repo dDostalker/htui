@@ -9,8 +9,9 @@
 
 use crate::{
     layout::{
-        BoxConstraint, Cursor, Border, BorderSides, BorderStyle, EdgeSizes, LayoutBox,
-        LayoutContext, inner_formatting_context::flow::{LayoutBlockOptions, layout_block},
+        Border, BorderSides, BorderStyle, BoxConstraint, Cursor, EdgeSizes, LayoutBox,
+        LayoutContext,
+        inner_formatting_context::flow::{LayoutBlockOptions, layout_block},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
 };

@@ -292,7 +292,14 @@ fn test_ul_with_bg_color_fills_list_rect() {
     let yellow_count = tl
         .layout
         .iter()
-        .filter(|b| b.bcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }))
+        .filter(|b| {
+            b.bcolor
+                == Some(Color::Rgb {
+                    r: 255,
+                    g: 255,
+                    b: 0,
+                })
+        })
         .count();
     assert!(
         yellow_count > 0,

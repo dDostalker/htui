@@ -83,7 +83,11 @@ fn commands_module_makes_hosts_callable_from_js() {
         "1",
         "stateful host functions must survive across JS calls"
     );
-    assert_eq!(eval_str(&mut engine, "globalThis.__n"), "1", "stateful host functions must survive across JS calls");
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__n"),
+        "1",
+        "stateful host functions must survive across JS calls"
+    );
     assert_eq!(eval_str(&mut engine, "globalThis.__n2"), "2");
 }
 

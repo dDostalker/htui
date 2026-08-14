@@ -14,7 +14,7 @@ use htui::layout::layout::TermMap;
 use htui::layout::{BoxConstraint, Cursor, layout_tree};
 use htui::script::{ScriptEngine, ScriptMsg, ScriptResponse, apply_message, run_script_thread};
 use htui::tdom::node::{NodeArena, NodeId};
-use htui::tui::graph_api::{RenderCmd};
+use htui::tui::graph_api::RenderCmd;
 
 const COLS: u16 = 120;
 const ROWS: u16 = 40;
@@ -43,11 +43,21 @@ fn apply_message_move_tracks_hover_and_fires_over_out_in_order() {
     let (bx, by) = center(b.rect);
 
     let mut hover = HoverState::new();
-    let ev = apply_message(&mut engine, &mut hover, &map, ScriptMsg::Move { x: ax, y: ay });
+    let ev = apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::Move { x: ax, y: ay },
+    );
     assert_eq!(ev.hovered, Some(a.node_id), "hover must land on `a`");
     assert!(ev.dirty.is_none(), "a plain pointer move mutates nothing");
 
-    let ev = apply_message(&mut engine, &mut hover, &map, ScriptMsg::Move { x: bx, y: by });
+    let ev = apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::Move { x: bx, y: by },
+    );
     assert_eq!(ev.hovered, Some(b.node_id), "hover must move to `b`");
     assert_eq!(
         eval_str(&mut engine, "String(globalThis.__seen.join(','))"),
@@ -72,8 +82,16 @@ fn apply_message_click_fires_the_matching_listener() {
 
     let mut hover = HoverState::new();
     let ev = apply_message(&mut engine, &mut hover, &map, ScriptMsg::Click { x, y });
-    assert_eq!(*calls.lock().unwrap(), 1, "click must call the host function");
-    assert_eq!(ev.hovered, Some(region.node_id), "click syncs the hover target");
+    assert_eq!(
+        *calls.lock().unwrap(),
+        1,
+        "click must call the host function"
+    );
+    assert_eq!(
+        ev.hovered,
+        Some(region.node_id),
+        "click syncs the hover target"
+    );
 }
 
 #[test]
@@ -262,7 +280,10 @@ fn apply_message_keydown_handler_can_mutate_dom_and_report_dirty() {
     let dirty = ev.dirty.expect("keydown DOM mutation must be reported");
     assert!(
         dirty.dirty.nodes.iter().any(|&id| {
-            dirty.arena.get(id).is_some_and(|n| n.attributes.get("id").map(String::as_str) == Some("a"))
+            dirty
+                .arena
+                .get(id)
+                .is_some_and(|n| n.attributes.get("id").map(String::as_str) == Some("a"))
         }),
         "the mutated node must appear in the dirty set"
     );
@@ -347,7 +368,10 @@ fn apply_message_keydown_without_prevent_default_reports_clear_verdict() {
         Some((7, false)),
         "an unprevented keydown clears the gate for the built-in action"
     );
-    assert_eq!(eval_str(&mut engine, "String(globalThis.__seen.join(','))"), "ran");
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.__seen.join(','))"),
+        "ran"
+    );
 }
 
 #[test]
@@ -368,12 +392,16 @@ fn host_render_html_reloads_in_engine_instead_of_render_thread() {
 
     let cmds = engine.invoke_action("rebuild");
     assert!(
-        cmds.iter().all(|c| !matches!(c, RenderCmd::RenderHtml { .. })),
+        cmds.iter()
+            .all(|c| !matches!(c, RenderCmd::RenderHtml { .. })),
         "RenderHtml must be consumed in-engine, not forwarded to the render thread"
     );
     find_node_by_id(&engine.arena(), "fresh"); // panics if absent — must be live in the engine
     assert!(
-        engine.arena().iter().all(|(_, n)| n.attributes.get("id").map(String::as_str) != Some("old")),
+        engine
+            .arena()
+            .iter()
+            .all(|(_, n)| n.attributes.get("id").map(String::as_str) != Some("old")),
         "the old document must be gone"
     );
     assert!(
@@ -649,13 +677,19 @@ fn apply_message_select_pick_commits_and_reports_dirty() {
         "b",
         "change must fire with the new value"
     );
-    let dirty = ev.dirty.expect("a select value change must request a repaint");
+    let dirty = ev
+        .dirty
+        .expect("a select value change must request a repaint");
     let committed = dirty
         .arena
         .get(node_id)
         .and_then(|n| n.attributes.get("value"))
         .cloned();
-    assert_eq!(committed.as_deref(), Some("b"), "dirty snapshot must carry the new value");
+    assert_eq!(
+        committed.as_deref(),
+        Some("b"),
+        "dirty snapshot must carry the new value"
+    );
 }
 
 #[test]
@@ -744,13 +778,13 @@ fn blocking_host_fn_does_not_block_the_input_side_channel() {
 
     // The script thread is blocked for ~300 ms; a send must not wait on it.
     let t0 = Instant::now();
-    tx.send(ScriptMsg::Quit).expect("send quit while script thread is busy");
+    tx.send(ScriptMsg::Quit)
+        .expect("send quit while script thread is busy");
     assert!(
         t0.elapsed() < Duration::from_millis(100),
         "sending to the script thread must never block on a busy engine"
     );
 }
-
 
 // ============================================================
 // fetch / event loop
@@ -836,8 +870,8 @@ fn fetch_mem_resource_resolves_through_poll() {
         </script>
         <div id="out"></div>"#
     );
-    let mut engine = ScriptEngine::new(&html, EventBindings::default())
-        .expect("engine initializes");
+    let mut engine =
+        ScriptEngine::new(&html, EventBindings::default()).expect("engine initializes");
 
     // A single drain settles the promise; run the microtask queue to land the
     // text in the DOM.
@@ -858,8 +892,7 @@ fn fetch_relative_url_resolves_against_document_base() {
     // (`<base href>`) the same way `<img src>` / `<script src>` do.
     let pid = std::process::id();
     let key = format!("mem://api/data_{pid}.json");
-    htui::resources::register(&key, br#"{"ok":true}"#.to_vec())
-        .expect("register mem file");
+    htui::resources::register(&key, br#"{"ok":true}"#.to_vec()).expect("register mem file");
 
     let html = format!(
         r#"<base href="mem://api/">
@@ -869,8 +902,8 @@ fn fetch_relative_url_resolves_against_document_base() {
         </script>
         <div id="out"></div>"#
     );
-    let mut engine = ScriptEngine::new(&html, EventBindings::default())
-        .expect("engine initializes");
+    let mut engine =
+        ScriptEngine::new(&html, EventBindings::default()).expect("engine initializes");
     engine.poll_fetches();
     engine.poll_fetches();
 
@@ -887,27 +920,23 @@ fn base_uri_reflects_document_base_href() {
     // `Node.baseURI` reports the document base URL established by `<base>`;
     // without one it is an empty string.
     let pid = std::process::id();
-    let html = format!(
-        r#"<base href="mem://site/{pid}/"><div id="x"></div>"#
-    );
-    let mut engine = ScriptEngine::new(&html, EventBindings::default())
-        .expect("engine initializes");
+    let html = format!(r#"<base href="mem://site/{pid}/"><div id="x"></div>"#);
+    let mut engine =
+        ScriptEngine::new(&html, EventBindings::default()).expect("engine initializes");
     let expected_uri = format!("mem://site/{pid}/");
     assert_eq!(
         eval_str(&mut engine, "document.getElementById('x').baseURI"),
         expected_uri
     );
 
-    let mut no_base =
-        ScriptEngine::new(r#"<div id="y"></div>"#, EventBindings::default())
-            .expect("engine initializes");
+    let mut no_base = ScriptEngine::new(r#"<div id="y"></div>"#, EventBindings::default())
+        .expect("engine initializes");
     assert_eq!(
         eval_str(&mut no_base, "document.getElementById('y').baseURI"),
         "",
         "no <base href>: baseURI must be empty"
     );
 }
-
 
 // ============================================================
 // Helpers
@@ -947,9 +976,7 @@ fn spawn_script(
     let html: Arc<str> = Arc::from(html);
     let (tx, rx) = mpsc::channel::<ScriptMsg>();
     let (out_tx, out_rx) = mpsc::channel::<ScriptResponse>();
-    let handle = std::thread::spawn(move || {
-        run_script_thread(html, bindings, rx, out_tx, hit_map)
-    });
+    let handle = std::thread::spawn(move || run_script_thread(html, bindings, rx, out_tx, hit_map));
     (tx, out_rx, handle)
 }
 
@@ -1002,10 +1029,9 @@ fn host_bindings(
     mut f: impl FnMut(&mut htui::script::HostCtx) -> boa_engine::JsValue + Send + 'static,
 ) -> EventBindings {
     let mut bindings = EventBindings::default();
-    bindings.host.insert(
-        name.to_string(),
-        Box::new(move |call| Ok(f(call))),
-    );
+    bindings
+        .host
+        .insert(name.to_string(), Box::new(move |call| Ok(f(call))));
     bindings
 }
 

@@ -2,11 +2,11 @@ mod color;
 mod length;
 
 pub use color::parse_color_str;
+use length::parse_length_token;
 pub use length::{FontContext, Length, LengthContext, PX_PER_CELL, Viewport};
 pub(crate) use length::{
     parse_border_side, parse_border_style, parse_border_width, parse_edge_sizes,
 };
-use length::parse_length_token;
 
 use indexmap::IndexMap;
 
@@ -243,10 +243,7 @@ pub struct CornerRadii {
 impl CornerRadii {
     /// `true` when at least one corner carries a non-zero radius.
     pub const fn is_rounded(&self) -> bool {
-        self.top_left > 0
-            || self.top_right > 0
-            || self.bottom_right > 0
-            || self.bottom_left > 0
+        self.top_left > 0 || self.top_right > 0 || self.bottom_right > 0 || self.bottom_left > 0
     }
 }
 
@@ -557,7 +554,11 @@ pub fn resolve_flex_basis(
 ) -> Option<usize> {
     match basis {
         FlexBasis::Auto => None,
-        FlexBasis::Length(len) => Some(len.resolve(LengthContext { containing: containing_main, font: font_ctx, viewport })),
+        FlexBasis::Length(len) => Some(len.resolve(LengthContext {
+            containing: containing_main,
+            font: font_ctx,
+            viewport,
+        })),
     }
 }
 
@@ -619,8 +620,16 @@ pub fn parse_gap_shorthand(s: &str, font_ctx: FontContext, viewport: Viewport) -
     let Some(second) = parts.next() else {
         let v = first_len?;
         return Some(GapSizes {
-            row: v.resolve(LengthContext { containing: usize::MAX, font: font_ctx, viewport }),
-            column: v.resolve(LengthContext { containing: usize::MAX, font: font_ctx, viewport }),
+            row: v.resolve(LengthContext {
+                containing: usize::MAX,
+                font: font_ctx,
+                viewport,
+            }),
+            column: v.resolve(LengthContext {
+                containing: usize::MAX,
+                font: font_ctx,
+                viewport,
+            }),
         });
     };
     // CSS allows more than two values for row-gap-style properties, but the
@@ -633,8 +642,16 @@ pub fn parse_gap_shorthand(s: &str, font_ctx: FontContext, viewport: Viewport) -
     let row = first_len?;
     let column = second_len?;
     Some(GapSizes {
-        row: row.resolve(LengthContext { containing: usize::MAX, font: font_ctx, viewport }),
-        column: column.resolve(LengthContext { containing: usize::MAX, font: font_ctx, viewport }),
+        row: row.resolve(LengthContext {
+            containing: usize::MAX,
+            font: font_ctx,
+            viewport,
+        }),
+        column: column.resolve(LengthContext {
+            containing: usize::MAX,
+            font: font_ctx,
+            viewport,
+        }),
     })
 }
 

@@ -1,7 +1,10 @@
 //! Immutable layout snapshot shared between the render thread and the
 //! hit-test thread (region collection).
 
-use crate::{layout::layoutbox::LayoutBox, tdom::node::{NodeArena, NodeId}};
+use crate::{
+    layout::layoutbox::LayoutBox,
+    tdom::node::{NodeArena, NodeId},
+};
 
 /// Immutable snapshot of one layout pass.
 ///

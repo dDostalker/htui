@@ -4,7 +4,10 @@ use crate::{
     layout::{
         BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext,
         inner_formatting_context::flow::{LayoutBlockOptions, layout_block},
-        layoutbox::{generation::{GeneratedBoxKind, generate_node}, q_quote_pair},
+        layoutbox::{
+            generation::{GeneratedBoxKind, generate_node},
+            q_quote_pair,
+        },
     },
     tdom::node::{Node, NodeArena, NodeId, NodeType},
     tui::graph_api::block_style,

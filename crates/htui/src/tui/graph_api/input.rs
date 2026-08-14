@@ -6,13 +6,6 @@ use crossterm::event::{
     MouseButton, MouseEventKind,
 };
 
-use crate::{
-    events::KeyEventInfo,
-    html::css_parse::DynamicState,
-    script::ScriptMsg,
-    tdom::node::{NodeArena, NodeId, NodeType},
-    tui::graph_api::char_width,
-};
 use crate::events::HitMap;
 use crate::layout::Rect;
 use crate::layout::layoutbox::geometry::{
@@ -21,6 +14,13 @@ use crate::layout::layoutbox::geometry::{
 use crate::layout::paint::{
     textarea_caret_position, textarea_char_at, textarea_scroll_row, textarea_visual_lines,
     value_window,
+};
+use crate::{
+    events::KeyEventInfo,
+    html::css_parse::DynamicState,
+    script::ScriptMsg,
+    tdom::node::{NodeArena, NodeId, NodeType},
+    tui::graph_api::char_width,
 };
 
 const SCROLL_LINES_PER_TICK: u32 = 3;
@@ -169,8 +169,13 @@ impl DirtyInfo {
 
 #[derive(Debug, Clone)]
 pub enum RenderCmd {
-    Rerender { scroll_y: u32 },
-    Redraw { scroll_y: u32, zoom: f32 },
+    Rerender {
+        scroll_y: u32,
+    },
+    Redraw {
+        scroll_y: u32,
+        zoom: f32,
+    },
     /// Render a supplied DOM arena snapshot (the script engine's live arena
     /// after JS mutations), cascading styles and re-laying-out without
     /// re-parsing HTML. `dynamic` carries the session interaction state (the
@@ -192,16 +197,22 @@ pub enum RenderCmd {
     /// intercepted by `ScriptEngine::reload` so the engine re-parses the
     /// document (single source of truth); the render-thread branch only
     /// handles direct API use / fallback.
-    RenderHtml { html: Arc<str> },
+    RenderHtml {
+        html: Arc<str>,
+    },
     /// Re-style the cached document for the CSS `:hover` pseudo-class with the
     /// given session-local node (`None` clears any hover), then repaint. With
     /// no `:hover` rules in the stylesheet this repaints to the same pixels.
-    Hover { node_id: Option<NodeId> },
+    Hover {
+        node_id: Option<NodeId>,
+    },
     /// Re-style the cached document for the CSS `:focus` pseudo-class with the
     /// given focused text field (`None` clears any focus highlight), then
     /// repaint. Pushed by the input loop whenever the focus moves; with no
     /// `:focus` rules in the stylesheet this repaints to the same pixels.
-    Focus { node_id: Option<NodeId> },
+    Focus {
+        node_id: Option<NodeId>,
+    },
     /// Repaint one `<input>` field with fresh edit state (value / caret /
     /// focus). The layout is unchanged — the field's rectangle is fixed — so
     /// only that rectangle is repainted.
@@ -216,11 +227,15 @@ pub enum RenderCmd {
     /// input loop (never forwarded to the render thread): it seeds the edit
     /// session and routes the `blur` / `focus` events back through the
     /// script-message path, so the focus state stays owned by the input side.
-    FocusRequest { node_id: NodeId },
+    FocusRequest {
+        node_id: NodeId,
+    },
     /// JS `el.blur()` — remove focus from `node_id` if it is the focused
     /// field (no-op otherwise, matching the browser). Intercepted by the
     /// input loop like [`RenderCmd::FocusRequest`](Self::FocusRequest).
-    BlurRequest { node_id: NodeId },
+    BlurRequest {
+        node_id: NodeId,
+    },
     /// Open the dropdown overlay for `node_id`: the render thread resolves the
     /// options (a `<select>`'s children, or an `<input list>`'s `<datalist>`
     /// filtered by `filter`), paints the overlay below the field and
@@ -231,7 +246,9 @@ pub enum RenderCmd {
     },
     /// Close the dropdown overlay for `node_id` (clears the painted overlay
     /// and restores the field's frame).
-    SelectClose { node_id: NodeId },
+    SelectClose {
+        node_id: NodeId,
+    },
     /// Move the dropdown's highlighted row to `highlight` (keyboard
     /// navigation) and repaint only the overlay.
     SelectMove {
@@ -757,7 +774,8 @@ fn is_button_input(arena: &NodeArena, node_id: NodeId) -> bool {
 fn is_number_input(arena: Option<&NodeArena>, node_id: NodeId) -> bool {
     arena.is_some_and(|a| {
         a.get(node_id).is_some_and(|n| {
-            n.get_type().is_some_and(|t| t.eq_ignore_ascii_case("number"))
+            n.get_type()
+                .is_some_and(|t| t.eq_ignore_ascii_case("number"))
         })
     })
 }
@@ -786,7 +804,10 @@ fn focused_form(arena: Option<&NodeArena>, node_id: NodeId) -> Option<NodeId> {
     let arena = arena?;
     let mut current = arena.get(node_id).and_then(|n| n.parent);
     while let Some(pid) = current {
-        if arena.get(pid).is_some_and(|n| n.node_type == NodeType::Form) {
+        if arena
+            .get(pid)
+            .is_some_and(|n| n.node_type == NodeType::Form)
+        {
             return Some(pid);
         }
         current = arena.get(pid).and_then(|n| n.parent);
@@ -808,12 +829,7 @@ fn is_textarea_node(arena: &NodeArena, node_id: NodeId) -> bool {
 fn textarea_index_at(state: &InputState, rect: Rect, x: u32, y: u32) -> usize {
     let content_width = rect.width.saturating_sub(2).max(1);
     let rows = rect.height.saturating_sub(2).max(1);
-    let scroll = textarea_scroll_row(
-        &state.input_value,
-        content_width,
-        rows,
-        state.input_cursor,
-    );
+    let scroll = textarea_scroll_row(&state.input_value, content_width, rows, state.input_cursor);
     let local_row = (y as usize)
         .saturating_sub(rect.y.saturating_add(1))
         .saturating_add(scroll);
@@ -823,9 +839,9 @@ fn textarea_index_at(state: &InputState, rect: Rect, x: u32, y: u32) -> usize {
 
 /// `true` for a focusable text field (`<input>` / `<textarea>`).
 fn is_text_field(arena: &NodeArena, node_id: NodeId) -> bool {
-    arena.get(node_id).is_some_and(|n| {
-        matches!(n.node_type, NodeType::Input | NodeType::Textarea)
-    })
+    arena
+        .get(node_id)
+        .is_some_and(|n| matches!(n.node_type, NodeType::Input | NodeType::Textarea))
 }
 
 /// All `<input>` / `<textarea>` node ids in document order (depth-first), for
@@ -834,7 +850,11 @@ fn is_text_field(arena: &NodeArena, node_id: NodeId) -> bool {
 /// and checkbox/radio toggles (click-only in this engine) are skipped.
 pub fn collect_input_ids(arena: &NodeArena) -> Vec<NodeId> {
     let mut out = Vec::new();
-    let Some(root) = arena.iter().find(|(_, n)| n.parent.is_none()).map(|(id, _)| id) else {
+    let Some(root) = arena
+        .iter()
+        .find(|(_, n)| n.parent.is_none())
+        .map(|(id, _)| id)
+    else {
         return out;
     };
     let mut stack = vec![root];
@@ -849,10 +869,7 @@ pub fn collect_input_ids(arena: &NodeArena) -> Vec<NodeId> {
                     .unwrap_or_default();
                 // Button inputs activate on click only — they take no text
                 // focus, so `Tab` cycling skips them.
-                let is_button = matches!(
-                    t.as_str(),
-                    "button" | "submit" | "reset" | "image"
-                );
+                let is_button = matches!(t.as_str(), "button" | "submit" | "reset" | "image");
                 if t != "hidden" && t != "checkbox" && t != "radio" && !is_button {
                     out.push(id);
                 }
@@ -949,9 +966,7 @@ fn apply_ctrl_shortcut(state: &mut InputState, key: KeyCode) -> bool {
             }
             let byte = char_to_byte(&state.input_value, state.input_cursor);
             state.input_value.insert_str(byte, &text);
-            state.input_cursor = state
-                .input_cursor
-                .saturating_add(text.chars().count());
+            state.input_cursor = state.input_cursor.saturating_add(text.chars().count());
             state.input_sel_anchor = None;
             true
         }
@@ -1048,11 +1063,7 @@ fn focus_input(
 /// back into the DOM (so a later focus or re-render sees it), and clear the
 /// edit session. The commit and the `blur` / `change` events themselves run on
 /// the script thread via [`ScriptMsg::BlurInput`].
-fn blur_input(
-    state: &mut InputState,
-    msgs: &mut Vec<ScriptMsg>,
-    cmds: &mut Vec<RenderCmd>,
-) {
+fn blur_input(state: &mut InputState, msgs: &mut Vec<ScriptMsg>, cmds: &mut Vec<RenderCmd>) {
     let Some(focused) = state.focused_input.take() else {
         return;
     };
@@ -1203,7 +1214,10 @@ fn is_disabled_control(arena: &NodeArena, node_id: NodeId) -> bool {
 /// element); every other hit resolves to itself. `None` = no element.
 fn resolve_click_node(arena: &NodeArena, clicked: Option<NodeId>) -> Option<NodeId> {
     let id = clicked?;
-    if arena.get(id).is_some_and(|n| n.node_type == NodeType::Label) {
+    if arena
+        .get(id)
+        .is_some_and(|n| n.node_type == NodeType::Label)
+    {
         Some(label_control(arena, id).unwrap_or(id))
     } else {
         Some(id)
@@ -1267,11 +1281,7 @@ fn char_index_at_x(value: &str, cursor: usize, inner_width: usize, x: usize) -> 
     }
     // Past the visible window's right edge: the window's end is the nearest
     // reachable caret (the caret itself is always inside the window).
-    if end < v.len() {
-        end
-    } else {
-        v.len()
-    }
+    if end < v.len() { end } else { v.len() }
 }
 
 /// Clear the page text selection, queueing a repaint only when one existed.
@@ -1309,12 +1319,10 @@ fn hit_select_option(open: &SelectOpenState, x: u32, y: u32) -> Option<usize> {
 fn row_option(rows: &[SelectRow], row: usize) -> Option<usize> {
     match rows.get(row)? {
         SelectRow::Item(i) => Some(*i),
-        SelectRow::Group(_) => rows[row..]
-            .iter()
-            .find_map(|r| match r {
-                SelectRow::Item(i) => Some(*i),
-                SelectRow::Group(_) => None,
-            }),
+        SelectRow::Group(_) => rows[row..].iter().find_map(|r| match r {
+            SelectRow::Item(i) => Some(*i),
+            SelectRow::Group(_) => None,
+        }),
     }
 }
 
@@ -1371,7 +1379,15 @@ fn open_select(
     node_id: NodeId,
     cmds: &mut Vec<RenderCmd>,
 ) {
-    open_overlay(state, hit_map, arena, node_id, OverlayKind::Select, None, cmds);
+    open_overlay(
+        state,
+        hit_map,
+        arena,
+        node_id,
+        OverlayKind::Select,
+        None,
+        cmds,
+    );
 }
 
 /// Open / refresh the autocomplete dropdown of a focused `<input list>`.
@@ -1434,20 +1450,21 @@ fn close_select(
     cmds.push(RenderCmd::SelectClose {
         node_id: open.node_id,
     });
-    if let Some(idx) = pick && idx < open.options.len() {
-            let value = open.options[idx].value.clone();
-            let old = arena
-                .get(open.node_id)
-                .and_then(|n| n.attributes.get("value"))
-                .cloned()
-                .unwrap_or_default();
-            if value != old {
-                msgs.push(ScriptMsg::SelectPick {
-                    node_id: open.node_id,
-                    value,
-                });
-            }
-        
+    if let Some(idx) = pick
+        && idx < open.options.len()
+    {
+        let value = open.options[idx].value.clone();
+        let old = arena
+            .get(open.node_id)
+            .and_then(|n| n.attributes.get("value"))
+            .cloned()
+            .unwrap_or_default();
+        if value != old {
+            msgs.push(ScriptMsg::SelectPick {
+                node_id: open.node_id,
+                value,
+            });
+        }
     }
 }
 
@@ -1603,17 +1620,21 @@ pub fn handle_mouse_move(
         .open_select
         .as_ref()
         .and_then(|open| hit_select_option(open, x, y))
-    &&  let Some(idx) = state
+        && let Some(idx) = state
             .open_select
             .as_ref()
             .and_then(|open| row_option(&open.rows, row))
-    &&  state.open_select.as_ref().is_some_and(|o| o.highlight != idx)
-    &&  let Some(open) = &mut state.open_select {
-            open.highlight = idx;
-            cmds.push(RenderCmd::SelectMove {
-                node_id: open.node_id,
-                highlight: idx,
-            });
+        && state
+            .open_select
+            .as_ref()
+            .is_some_and(|o| o.highlight != idx)
+        && let Some(open) = &mut state.open_select
+    {
+        open.highlight = idx;
+        cmds.push(RenderCmd::SelectMove {
+            node_id: open.node_id,
+            highlight: idx,
+        });
     }
 
     if state.pressed.is_some() {
@@ -1756,12 +1777,11 @@ pub fn trigger_refresh(
                         if let Some(open) = &mut state.open_select {
                             let items = select_item_indices(&open.rows);
                             if !items.is_empty() {
-                                let pos = items
-                                    .iter()
-                                    .position(|&i| i == open.highlight)
-                                    .unwrap_or(0);
-                                let next = items
-                                    [(((pos as i32) + dir).rem_euclid(items.len() as i32)) as usize];
+                                let pos =
+                                    items.iter().position(|&i| i == open.highlight).unwrap_or(0);
+                                let next = items[(((pos as i32) + dir)
+                                    .rem_euclid(items.len() as i32))
+                                    as usize];
                                 open.highlight = next;
                                 cmds.push(RenderCmd::SelectMove {
                                     node_id,
@@ -1779,10 +1799,9 @@ pub fn trigger_refresh(
                             // Datalist: fill the field with the highlighted
                             // suggestion and keep focus (the value commits on
                             // blur / Enter as usual).
-                            let pick_value = state
-                                .open_select
-                                .as_ref()
-                                .and_then(|o| o.options.get(o.highlight).map(|opt| opt.value.clone()));
+                            let pick_value = state.open_select.as_ref().and_then(|o| {
+                                o.options.get(o.highlight).map(|opt| opt.value.clone())
+                            });
                             if let Some(open) = state.open_select.take() {
                                 cmds.push(RenderCmd::SelectClose {
                                     node_id: open.node_id,
@@ -1838,8 +1857,7 @@ pub fn trigger_refresh(
                     blur_input(state, msgs, &mut cmds);
                     return cmds;
                 }
-                let content_width =
-                    textarea_content_width(arena, focused);
+                let content_width = textarea_content_width(arena, focused);
 
                 // Word-level editing: Ctrl / Alt + ←/→/Home/End/Backspace/
                 // Delete, with optional Shift extending the selection. Must
@@ -1912,10 +1930,7 @@ pub fn trigger_refresh(
                 // `<textarea>`-owned keys: Enter inserts a newline, ↑ / ↓
                 // move the caret between visual lines (keeping the column).
                 if state.focused_is_textarea
-                    && matches!(
-                        key.code,
-                        KeyCode::Enter | KeyCode::Up | KeyCode::Down
-                    )
+                    && matches!(key.code, KeyCode::Enter | KeyCode::Up | KeyCode::Down)
                 {
                     if apply_textarea_key(
                         &mut state.input_value,
@@ -1951,7 +1966,10 @@ pub fn trigger_refresh(
                     // A readonly field keeps caret navigation but rejects the
                     // editing keys (insert / delete) — its value is fixed.
                     if is_readonly_input(arena, focused)
-                        && matches!(code, KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete)
+                        && matches!(
+                            code,
+                            KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete
+                        )
                     {
                         code = KeyCode::Null;
                     }
@@ -1964,11 +1982,7 @@ pub fn trigger_refresh(
                             code,
                         )
                     } else {
-                        apply_input_key(
-                            &mut state.input_value,
-                            &mut state.input_cursor,
-                            code,
-                        )
+                        apply_input_key(&mut state.input_value, &mut state.input_cursor, code)
                     };
                     if changed {
                         state.input_sel_anchor = None;
@@ -2075,9 +2089,8 @@ pub fn trigger_refresh(
                             && let Some(row) = hit_select_option(&open, x, y)
                             && let Some(option_idx) = row_option(&open.rows, row)
                         {
-                                close_select(state, arena, Some(option_idx), msgs, &mut cmds);
-                                return cmds;
-                            
+                            close_select(state, arena, Some(option_idx), msgs, &mut cmds);
+                            return cmds;
                         }
                         if px == mouse.column && py == mouse.row {
                             handle_click(state, hit_map, arena, x, y, msgs, &mut cmds);
@@ -2088,7 +2101,8 @@ pub fn trigger_refresh(
                         state.pressed = None;
                     }
                 }
-                MouseEventKind::Up(MouseButton::Right) | MouseEventKind::Up(MouseButton::Middle) => {
+                MouseEventKind::Up(MouseButton::Right)
+                | MouseEventKind::Up(MouseButton::Middle) => {
                     // Block selection (right button) ends here; the selection
                     // itself is kept. No click is dispatched for these buttons.
                     state.pressed = None;
@@ -2184,9 +2198,7 @@ pub fn paste_into_field(
     }
     let byte = char_to_byte(&state.input_value, state.input_cursor);
     state.input_value.insert_str(byte, &text);
-    state.input_cursor = state
-        .input_cursor
-        .saturating_add(text.chars().count());
+    state.input_cursor = state.input_cursor.saturating_add(text.chars().count());
     state.input_sel_anchor = None;
     push_input_render(state, focused, cmds);
     true
@@ -2239,10 +2251,11 @@ fn page_level_builtins(
             // shortcuts are handled earlier). `Ctrl+X` on read-only page text
             // degrades to a copy, like a browser.
             KeyCode::Char('c') | KeyCode::Char('x') => {
-                if state.focused_input.is_none() && state.text_sel_anchor.is_some() && 
-                    let Ok(guard) = state.selection_text.lock() {
-                        state.input_clipboard = guard.clone();
-                    
+                if state.focused_input.is_none()
+                    && state.text_sel_anchor.is_some()
+                    && let Ok(guard) = state.selection_text.lock()
+                {
+                    state.input_clipboard = guard.clone();
                 }
             }
             // `Ctrl` + Home / End jump to the top / bottom of the page

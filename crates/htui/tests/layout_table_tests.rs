@@ -288,7 +288,14 @@ fn test_table_cell_bg_color_applies() {
     let yellow_count = tl
         .layout
         .iter()
-        .filter(|b| b.bcolor == Some(Color::Rgb { r: 255, g: 255, b: 0 }))
+        .filter(|b| {
+            b.bcolor
+                == Some(Color::Rgb {
+                    r: 255,
+                    g: 255,
+                    b: 0,
+                })
+        })
         .count();
     assert!(
         yellow_count > 0,
@@ -319,7 +326,14 @@ fn test_table_nth_child_even_stripes_td_bg() {
     let even_cells = tl
         .layout
         .iter()
-        .filter(|b| b.bcolor == Some(Color::Rgb { r: 169, g: 169, b: 169 }))
+        .filter(|b| {
+            b.bcolor
+                == Some(Color::Rgb {
+                    r: 169,
+                    g: 169,
+                    b: 169,
+                })
+        })
         .count();
     let odd_cells = tl
         .layout

@@ -180,13 +180,7 @@ pub(crate) fn paint_textarea(
         if y < visible.y || y >= visible.y.saturating_add(visible.height) {
             continue;
         }
-        put(
-            canvas,
-            cell_index(canvas, r.x, y),
-            Some('│'),
-            frame,
-            bg,
-        );
+        put(canvas, cell_index(canvas, r.x, y), Some('│'), frame, bg);
         let Some(line) = lines.get(scroll.saturating_add(vis_row)) else {
             put(
                 canvas,
@@ -216,11 +210,10 @@ pub(crate) fn paint_textarea(
                 (fg, bg)
             };
             for sub in 0..w {
-                let abs_col = r
-                    .x
-                    .saturating_add(1)
-                    .saturating_add(col)
-                    .saturating_add(sub);
+                let abs_col =
+                    r.x.saturating_add(1)
+                        .saturating_add(col)
+                        .saturating_add(sub);
                 if abs_col >= r.x.saturating_add(r.width).saturating_sub(1) {
                     break;
                 }

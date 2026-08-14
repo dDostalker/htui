@@ -1,6 +1,8 @@
 use crate::tdom::node::{NodeArena, NodeId, NodeType};
 
-use super::selector::{Combinator, CompoundSelector, CssSelector, DynamicState, NthExpr, PseudoClass, Selector};
+use super::selector::{
+    Combinator, CompoundSelector, CssSelector, DynamicState, NthExpr, PseudoClass, Selector,
+};
 
 impl PseudoClass {
     /// The matching semantics of a dynamic pseudo-class: read the slot of
@@ -141,7 +143,14 @@ pub fn selector_chain_matches_with_state(
     if n == 1 {
         return true;
     }
-    match_combinators(arena, node_id, &selector.compounds, &selector.combinators, n - 1, state)
+    match_combinators(
+        arena,
+        node_id,
+        &selector.compounds,
+        &selector.combinators,
+        n - 1,
+        state,
+    )
 }
 
 /// Like [`selector_chain_matches`], but evaluates `:hover` against the node

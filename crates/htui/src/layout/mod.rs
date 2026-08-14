@@ -33,10 +33,7 @@ pub mod paint;
 pub use crate::html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeSizes};
 pub use crate::html::css_parse::{FontContext, Viewport};
 pub use layoutbox::inner_formatting_context;
-pub use layoutbox::inner_formatting_context::{
-    flex::layout_flex_dispatch,
-    flow::layout_tree,
-};
+pub use layoutbox::inner_formatting_context::{flex::layout_flex_dispatch, flow::layout_tree};
 pub use layoutbox::{
     BoxKind, Cursor, FormattingContext, GeneratedBox, GeneratedBoxKind, InlineRun, LayoutBox,
     OuterDisplay, PaintStyle, Rect, ReplacedContent, generate_box_tree, generate_node,
@@ -74,7 +71,11 @@ impl LayoutContext {
 /// carrying the parent block's node id during generation and never produce a
 /// `LayoutBox` of their own, so the `node_id` of every box carrying inline
 /// runs is exactly its owning DOM block.
-pub fn extract_flow_text(arena: &NodeArena, boxes: &[LayoutBox], lines: &[(u32, u32, u32)]) -> String {
+pub fn extract_flow_text(
+    arena: &NodeArena,
+    boxes: &[LayoutBox],
+    lines: &[(u32, u32, u32)],
+) -> String {
     let mut text_lines: Vec<FlowTextLine> = Vec::new();
     collect_flow_lines(arena, boxes, &mut text_lines);
 
@@ -126,7 +127,11 @@ pub fn extract_flow_text(arena: &NodeArena, boxes: &[LayoutBox], lines: &[(u32, 
 ///
 /// Block selections (right-drag rectangles) are *not* passed through this:
 /// their highlight intentionally follows the dragged rectangle.
-pub fn selection_text_lines(arena: &NodeArena, boxes: &[LayoutBox], lines: &[(u32, u32, u32)]) -> Vec<(u32, u32, u32)> {
+pub fn selection_text_lines(
+    arena: &NodeArena,
+    boxes: &[LayoutBox],
+    lines: &[(u32, u32, u32)],
+) -> Vec<(u32, u32, u32)> {
     let mut text_lines: Vec<FlowTextLine> = Vec::new();
     collect_flow_lines(arena, boxes, &mut text_lines);
     let mut out: Vec<(u32, u32, u32)> = Vec::new();
@@ -159,7 +164,11 @@ struct FlowTextLine<'a> {
 
 /// Collect every visual text line of the layout with the paint phase's exact
 /// geometry, so extraction sees the same cells the user sees.
-fn collect_flow_lines<'a>(arena: &'a NodeArena, boxes: &'a [LayoutBox], out: &mut Vec<FlowTextLine<'a>>) {
+fn collect_flow_lines<'a>(
+    arena: &'a NodeArena,
+    boxes: &'a [LayoutBox],
+    out: &mut Vec<FlowTextLine<'a>>,
+) {
     for lb in boxes {
         collect_box_lines(arena, lb, out);
         collect_flow_lines(arena, &lb.children, out);

@@ -3,7 +3,9 @@ use indexmap::IndexMap;
 use crate::tdom::node::{NodeArena, NodeId};
 
 use super::{
-    matcher::selector_chain_matches_with_state, properties::CssAttr, selector::CssSelector,
+    matcher::selector_chain_matches_with_state,
+    properties::CssAttr,
+    selector::CssSelector,
     selector::{DynamicState, PseudoClassSet},
     stylesheet::{CssRule, CssRuleEntry, parse_declaration_splits},
 };
@@ -121,11 +123,9 @@ pub fn css_into_node(arena: &mut NodeArena, root_id: NodeId, css: &CssRule) {
 /// rule-build time so state-change commands can test membership in O(1)
 /// instead of rescanning the stylesheet.
 pub fn css_pseudo_rule_set(css: &CssRule) -> PseudoClassSet {
-    css.0
-        .iter()
-        .fold(PseudoClassSet::EMPTY, |set, entry| {
-            set.union(PseudoClassSet::from_selector(&entry.selector))
-        })
+    css.0.iter().fold(PseudoClassSet::EMPTY, |set, entry| {
+        set.union(PseudoClassSet::from_selector(&entry.selector))
+    })
 }
 
 /// Clear the parsed CSS attributes of every node in the subtree rooted at

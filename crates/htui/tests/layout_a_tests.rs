@@ -63,7 +63,10 @@ fn test_a_renders_text_content() {
     // The link text must reach the canvas. Before this was implemented the
     // text inside `<a>` was silently dropped by `walk_runs`.
     init();
-    let (root_id, arena) = setup("<p>click <a href=\"https://example.com\">here</a> now</p>", "");
+    let (root_id, arena) = setup(
+        "<p>click <a href=\"https://example.com\">here</a> now</p>",
+        "",
+    );
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map);
@@ -102,11 +105,7 @@ fn test_a_default_blue_color_applies() {
     let cell = &tl.layout[idx];
     assert_eq!(
         cell.fcolor,
-        Some(Color::Rgb {
-            r: 0,
-            g: 0,
-            b: 255
-        }),
+        Some(Color::Rgb { r: 0, g: 0, b: 255 }),
         "default <a> rendering must use blue foreground (got {:?})",
         cell.fcolor
     );
@@ -135,10 +134,7 @@ fn test_a_text_decoration_none_disables_underline() {
 #[test]
 fn test_a_color_override_disables_default_blue() {
     init();
-    let (root_id, arena) = setup(
-        "<p><a href=\"x\">link</a></p>",
-        "a { color: magenta; }",
-    );
+    let (root_id, arena) = setup("<p><a href=\"x\">link</a></p>", "a { color: magenta; }");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map);
@@ -167,10 +163,7 @@ fn test_a_inherits_parent_color_when_no_override() {
     // does propagate through `walk_runs`' `fg` parameter, so the link must
     // render red (inherited) rather than blue (UA default).
     init();
-    let (root_id, arena) = setup(
-        "<p><a href=\"x\">link</a></p>",
-        "p { color: red; }",
-    );
+    let (root_id, arena) = setup("<p><a href=\"x\">link</a></p>", "p { color: red; }");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map);
@@ -178,11 +171,7 @@ fn test_a_inherits_parent_color_when_no_override() {
     let cell = &tl.layout[idx];
     assert_eq!(
         cell.fcolor,
-        Some(Color::Rgb {
-            r: 255,
-            g: 0,
-            b: 0
-        }),
+        Some(Color::Rgb { r: 255, g: 0, b: 0 }),
         "link must inherit the parent block's color (got {:?})",
         cell.fcolor
     );
@@ -245,7 +234,9 @@ fn test_a_empty_link_does_not_paint() {
     assert!(canvas.contains("after"));
     // No cell should have an underline since the `<a>` contributed nothing.
     assert!(
-        tl.layout.iter().all(|b| !b.style.contains(FontStyle::UNDERLINED)),
+        tl.layout
+            .iter()
+            .all(|b| !b.style.contains(FontStyle::UNDERLINED)),
         "empty <a> must not add any underlined cells"
     );
 }
@@ -314,10 +305,22 @@ fn test_block_a_renders_text_as_its_own_row() {
         </aside>
     "##;
     let (rows, _) = render_rows(html, "a { display: block; }");
-    assert!(rows.iter().any(|r| r.contains("Dashboard")), "Dashboard must render");
-    assert!(rows.iter().any(|r| r.contains("Projects")), "Projects must render");
-    assert!(rows.iter().any(|r| r.contains("Tasks")), "Tasks must render");
-    assert!(rows.iter().any(|r| r.contains("Settings")), "Settings must render");
+    assert!(
+        rows.iter().any(|r| r.contains("Dashboard")),
+        "Dashboard must render"
+    );
+    assert!(
+        rows.iter().any(|r| r.contains("Projects")),
+        "Projects must render"
+    );
+    assert!(
+        rows.iter().any(|r| r.contains("Tasks")),
+        "Tasks must render"
+    );
+    assert!(
+        rows.iter().any(|r| r.contains("Settings")),
+        "Settings must render"
+    );
 }
 
 #[test]
@@ -349,11 +352,7 @@ fn test_block_a_default_blue_color_applies() {
     let idx = first_cell_with(&tl, "l").expect("link text must render");
     assert_eq!(
         tl.layout[idx].fcolor,
-        Some(Color::Rgb {
-            r: 0,
-            g: 0,
-            b: 255
-        }),
+        Some(Color::Rgb { r: 0, g: 0, b: 255 }),
         "block <a> UA default must use blue foreground (got {:?})",
         tl.layout[idx].fcolor
     );
@@ -364,10 +363,7 @@ fn test_block_a_text_decoration_none_disables_underline() {
     // Author CSS overriding the UA default must take effect on the block path.
     init();
     let html = r#"<aside><a href="x">link</a></aside>"#;
-    let (root_id, arena) = setup(
-        html,
-        "a { display: block; text-decoration: none; }",
-    );
+    let (root_id, arena) = setup(html, "a { display: block; text-decoration: none; }");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map);
@@ -416,11 +412,7 @@ fn test_block_a_inherits_parent_color_when_no_override() {
     let idx = first_cell_with(&tl, "l").expect("link text must render");
     assert_eq!(
         tl.layout[idx].fcolor,
-        Some(Color::Rgb {
-            r: 255,
-            g: 0,
-            b: 0
-        }),
+        Some(Color::Rgb { r: 255, g: 0, b: 0 }),
         "block <a> must inherit the parent block's color (got {:?})",
         tl.layout[idx].fcolor
     );
@@ -459,7 +451,10 @@ fn test_block_a_visual_test_sidebar_renders_all_menu_items() {
     }
     // Author `text-decoration: none` overrides the UA underline default:
     // no link cell should carry UNDERLINED.
-    let any_underlined = tl.layout.iter().any(|b| b.style.contains(FontStyle::UNDERLINED));
+    let any_underlined = tl
+        .layout
+        .iter()
+        .any(|b| b.style.contains(FontStyle::UNDERLINED));
     assert!(
         !any_underlined,
         "author `text-decoration: none` must suppress the UA underline default on every sidebar link"

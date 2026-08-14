@@ -20,7 +20,9 @@ use htui::layout::layoutbox::geometry::{SelectOption, SelectRow};
 use htui::layout::{BoxConstraint, Cursor, layout_tree};
 use htui::script::{ScriptEngine, ScriptMsg, apply_message};
 use htui::tdom::node::{NodeArena, NodeId, NodeType};
-use htui::tui::graph_api::{InputState, OverlayKind, RenderCmd, TermLayout, handle_click, handle_mouse_down};
+use htui::tui::graph_api::{
+    InputState, OverlayKind, RenderCmd, TermLayout, handle_click, handle_mouse_down,
+};
 
 const COLS: u16 = 80;
 const ROWS: u16 = 24;
@@ -56,8 +58,14 @@ fn layout_boxes(html: &str, css: &str) -> (Vec<htui::layout::LayoutBox>, NodeAre
     let (root_id, arena) = setup(html, css);
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
-    let boxes =
-        layout_tree(&arena, root_id, containing, &mut cursor, COLS as usize, ROWS as usize);
+    let boxes = layout_tree(
+        &arena,
+        root_id,
+        containing,
+        &mut cursor,
+        COLS as usize,
+        ROWS as usize,
+    );
     (boxes, arena)
 }
 
@@ -181,9 +189,8 @@ fn test_output_renders_inline_text() {
 #[test]
 fn test_output_value_property_reads_and_writes_text() {
     init();
-    let mut engine =
-        ScriptEngine::new(r#"<output id="o">42</output>"#, EventBindings::default())
-            .expect("engine");
+    let mut engine = ScriptEngine::new(r#"<output id="o">42</output>"#, EventBindings::default())
+        .expect("engine");
     assert_eq!(
         eval_str(&mut engine, "document.getElementById('o').value"),
         "42",
@@ -214,9 +221,15 @@ fn test_fieldset_renders_border_and_margins() {
     assert!(fs.rect.height >= 4, "border + legend + content + border");
     let legend = find_box_by_type(&boxes, &NodeType::Legend, &arena).expect("legend box");
     assert_eq!(legend.rect.height, 1);
-    let tl = draw("<fieldset><legend>Group</legend><p>content</p></fieldset>", "");
+    let tl = draw(
+        "<fieldset><legend>Group</legend><p>content</p></fieldset>",
+        "",
+    );
     assert!(count_word(&tl, "┌") > 0, "UA border frame draws");
-    assert!(count_word(&tl, "G") > 0, "legend text renders inside the frame");
+    assert!(
+        count_word(&tl, "G") > 0,
+        "legend text renders inside the frame"
+    );
     assert!(count_word(&tl, "c") > 0, "fieldset content renders");
 }
 
@@ -259,10 +272,16 @@ fn test_progress_full_and_empty() {
 #[test]
 fn test_progress_author_width_controls_bar() {
     init();
-    let (boxes, arena) = layout_boxes("<progress value=\"0.5\"></progress>", "progress { width: 20px; }");
+    let (boxes, arena) = layout_boxes(
+        "<progress value=\"0.5\"></progress>",
+        "progress { width: 20px; }",
+    );
     let p = find_box_by_type(&boxes, &NodeType::Progress, &arena).expect("progress box");
     assert_eq!(p.rect.width, 20, "CSS width constrains the bar");
-    let tl = draw("<progress value=\"0.5\"></progress>", "progress { width: 20px; }");
+    let tl = draw(
+        "<progress value=\"0.5\"></progress>",
+        "progress { width: 20px; }",
+    );
     assert_eq!(count_word(&tl, "█"), 10);
     assert_eq!(count_word(&tl, "░"), 10);
 }
@@ -277,7 +296,10 @@ fn test_meter_ratio_from_min_max() {
     let filled = count_word(&tl, "█");
     let empty = count_word(&tl, "░");
     let ratio = filled as f64 / (filled + empty) as f64;
-    assert!((ratio - 0.25).abs() < 0.05, "meter fills by (value-min)/(max-min)");
+    assert!(
+        (ratio - 0.25).abs() < 0.05,
+        "meter fills by (value-min)/(max-min)"
+    );
 }
 
 #[test]
@@ -329,11 +351,18 @@ fn test_optgroup_builds_group_header_rows() {
     let _ = mouse_down(&mut state, &engine, &map, x, y, MouseButton::Left);
     let open = state.open_select.as_ref().expect("select dropdown opens");
 
-    assert_eq!(open.options.len(), 4, "optgroup options flatten into the list");
+    assert_eq!(
+        open.options.len(),
+        4,
+        "optgroup options flatten into the list"
+    );
     assert_eq!(open.options[0].group.as_deref(), Some("Fruits"));
     assert_eq!(open.options[1].group.as_deref(), Some("Fruits"));
     assert_eq!(open.options[2].group.as_deref(), Some("Veg"));
-    assert_eq!(open.options[3].group, None, "ungrouped option keeps no group");
+    assert_eq!(
+        open.options[3].group, None,
+        "ungrouped option keeps no group"
+    );
     // rows: Group(Fruits), Item0, Item1, Group(Veg), Item2, Item3
     assert_eq!(
         open.rows.len(),
@@ -374,7 +403,8 @@ fn test_optgroup_header_click_selects_first_option() {
         "a header click commits and closes the dropdown"
     );
     assert!(
-        msgs.iter().any(|m| matches!(m, ScriptMsg::SelectPick { value, .. } if value == "a")),
+        msgs.iter()
+            .any(|m| matches!(m, ScriptMsg::SelectPick { value, .. } if value == "a")),
         "the group header picks its first option"
     );
 }
@@ -402,9 +432,13 @@ fn test_optgroup_option_click_picks_value() {
         open.rect.y.saturating_add(1) as u32,
         MouseButton::Left,
     );
-    assert!(state.open_select.is_none(), "an option click closes the dropdown");
     assert!(
-        msgs.iter().any(|m| matches!(m, ScriptMsg::SelectPick { value, .. } if value == "a")),
+        state.open_select.is_none(),
+        "an option click closes the dropdown"
+    );
+    assert!(
+        msgs.iter()
+            .any(|m| matches!(m, ScriptMsg::SelectPick { value, .. } if value == "a")),
         "the first option under a group header must commit its own value"
     );
 
@@ -421,7 +455,8 @@ fn test_optgroup_option_click_picks_value() {
         MouseButton::Left,
     );
     assert!(
-        msgs.iter().any(|m| matches!(m, ScriptMsg::SelectPick { value, .. } if value == "c")),
+        msgs.iter()
+            .any(|m| matches!(m, ScriptMsg::SelectPick { value, .. } if value == "c")),
         "an option after a header maps to its own option index"
     );
 }
@@ -443,10 +478,7 @@ fn test_datalist_never_renders_but_keeps_options() {
     );
     let d = find_node_by_type(&arena, &NodeType::Datalist).expect("datalist stays in DOM");
     assert_eq!(arena[d].children.len(), 1, "options stay in the DOM");
-    assert_eq!(
-        arena[arena[d].children[0]].node_type,
-        NodeType::HtmlOption
-    );
+    assert_eq!(arena[arena[d].children[0]].node_type, NodeType::HtmlOption);
     let tl = draw(
         "<div>shown</div><datalist id=\"d\"><option value=\"a\">Apple</option></datalist>",
         "",
@@ -470,7 +502,10 @@ fn test_datalist_autocomplete_opens_on_focus() {
 
     let mut state = InputState::new();
     let _ = mouse_down(&mut state, &engine, &map, x, y, MouseButton::Left);
-    let open = state.open_select.as_ref().expect("datalist dropdown opens on focus");
+    let open = state
+        .open_select
+        .as_ref()
+        .expect("datalist dropdown opens on focus");
     assert_eq!(open.kind, OverlayKind::Datalist);
     assert_eq!(open.options.len(), 2, "empty field shows every suggestion");
     assert_eq!(open.options[0].value, "Apple");
@@ -536,7 +571,9 @@ fn visual_test_form_elements_document_initializes() {
     );
 
     // Compute: 3 + 4 → output.value replaces the text content.
-    let region = map.resolve_by_id("compute-btn").expect("compute button region");
+    let region = map
+        .resolve_by_id("compute-btn")
+        .expect("compute button region");
     let (x, y) = center(region.rect);
     let mut hover = HoverState::new();
     let arena = engine.arena();
@@ -587,7 +624,10 @@ fn visual_test_form_elements_document_initializes() {
         &mut msgs,
         &mut cmds,
     );
-    assert!(state.open_select.is_none(), "a blank click closes the dropdown");
+    assert!(
+        state.open_select.is_none(),
+        "a blank click closes the dropdown"
+    );
     let region = map.resolve_by_id("lang").expect("lang input region");
     let (x, y) = center(region.rect);
     let mut msgs = Vec::new();

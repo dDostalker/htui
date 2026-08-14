@@ -46,18 +46,45 @@ fn class_list_reads_the_class_attribute() {
         EventBindings::default(),
     )
     .expect("engine initializes");
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList.length"), "3");
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList.item(1)"), "b");
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList[2]"), "c");
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList.contains('a')"), "true");
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList.contains('x')"), "false");
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('d').classList.length"),
+        "3"
+    );
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "document.getElementById('d').classList.item(1)"
+        ),
+        "b"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('d').classList[2]"),
+        "c"
+    );
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "document.getElementById('d').classList.contains('a')"
+        ),
+        "true"
+    );
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "document.getElementById('d').classList.contains('x')"
+        ),
+        "false"
+    );
     assert_eq!(
         eval_str(&mut engine, "document.getElementById('d').classList.value"),
         "a b c",
         "classList.value mirrors className"
     );
     assert_eq!(
-        eval_str(&mut engine, "String(document.getElementById('d').classList)"),
+        eval_str(
+            &mut engine,
+            "String(document.getElementById('d').classList)"
+        ),
         "a b c",
         "String(classList) is the attribute value"
     );
@@ -67,8 +94,17 @@ fn class_list_reads_the_class_attribute() {
 fn class_list_empty_when_no_class() {
     let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
         .expect("engine initializes");
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList.length"), "0");
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList.contains('x')"), "false");
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('d').classList.length"),
+        "0"
+    );
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "document.getElementById('d').classList.contains('x')"
+        ),
+        "false"
+    );
 }
 
 // ============================================================
@@ -89,8 +125,14 @@ fn class_list_add_appends_and_preserves_order() {
     // New tokens append at the end; an existing token is not duplicated.
     assert_eq!(class_name(&engine, "d"), "a b x y");
     // The change is visible in the live token list.
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList.length"), "4");
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList[3]"), "y");
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('d').classList.length"),
+        "4"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('d').classList[3]"),
+        "y"
+    );
 }
 
 #[test]
@@ -104,23 +146,27 @@ fn class_list_remove_preserves_relative_order() {
         &mut engine,
         "(function(){ var l = document.getElementById('d').classList; l.remove('b', 'a', 'zz'); })()",
     );
-    assert_eq!(class_name(&engine, "d"), "c d", "remaining tokens keep their order");
+    assert_eq!(
+        class_name(&engine, "d"),
+        "c d",
+        "remaining tokens keep their order"
+    );
     // Removing everything empties the class attribute.
     eval_str(
         &mut engine,
         "(function(){ var l = document.getElementById('d').classList; l.remove('c', 'd'); })()",
     );
     assert_eq!(class_name(&engine, "d"), "");
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList.length"), "0");
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('d').classList.length"),
+        "0"
+    );
 }
 
 #[test]
 fn class_list_add_unchanged_token_does_not_mark_dirty() {
-    let mut engine = ScriptEngine::new(
-        r#"<div id="d" class="a"></div>"#,
-        EventBindings::default(),
-    )
-    .expect("engine initializes");
+    let mut engine = ScriptEngine::new(r#"<div id="d" class="a"></div>"#, EventBindings::default())
+        .expect("engine initializes");
     // Adding an already-present token changes nothing: no re-render.
     eval_str(
         &mut engine,
@@ -144,14 +190,38 @@ fn class_list_toggle_returns_the_new_state() {
         EventBindings::default(),
     )
     .expect("engine initializes");
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList.toggle('a')"), "false");
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "document.getElementById('d').classList.toggle('a')"
+        ),
+        "false"
+    );
     assert_eq!(class_name(&engine, "d"), "b");
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList.toggle('a')"), "true");
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "document.getElementById('d').classList.toggle('a')"
+        ),
+        "true"
+    );
     assert_eq!(class_name(&engine, "d"), "b a", "toggled-on token appends");
     // Forced states never flip the opposite way and report the forced value.
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList.toggle('b', true)"), "true");
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "document.getElementById('d').classList.toggle('b', true)"
+        ),
+        "true"
+    );
     assert_eq!(class_name(&engine, "d"), "b a");
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList.toggle('a', false)"), "false");
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "document.getElementById('d').classList.toggle('a', false)"
+        ),
+        "false"
+    );
     assert_eq!(class_name(&engine, "d"), "b");
 }
 
@@ -162,10 +232,22 @@ fn class_list_replace_swaps_a_present_token() {
         EventBindings::default(),
     )
     .expect("engine initializes");
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList.replace('a', 'z')"), "true");
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "document.getElementById('d').classList.replace('a', 'z')"
+        ),
+        "true"
+    );
     assert_eq!(class_name(&engine, "d"), "b z");
     // Replacing an absent token is a no-op returning false.
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList.replace('nope', 'q')"), "false");
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "document.getElementById('d').classList.replace('nope', 'q')"
+        ),
+        "false"
+    );
     assert_eq!(class_name(&engine, "d"), "b z");
 }
 
@@ -185,7 +267,10 @@ fn class_list_value_setter_replaces_all_tokens() {
         "(function(){ document.getElementById('d').classList.value = 'x y'; })()",
     );
     assert_eq!(class_name(&engine, "d"), "x y");
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList.length"), "2");
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('d').classList.length"),
+        "2"
+    );
 }
 
 #[test]
@@ -195,14 +280,32 @@ fn class_list_is_iterable() {
         EventBindings::default(),
     )
     .expect("engine initializes");
-    assert_eq!(eval_str(&mut engine, "[...document.getElementById('d').classList].join(',')"), "a,b,c");
-    assert_eq!(eval_str(&mut engine, "Array.from(document.getElementById('d').classList).join('|')"), "a|b|c");
     assert_eq!(
-        eval_str(&mut engine, "Array.from(document.getElementById('d').classList.keys()).join(',')"),
+        eval_str(
+            &mut engine,
+            "[...document.getElementById('d').classList].join(',')"
+        ),
+        "a,b,c"
+    );
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "Array.from(document.getElementById('d').classList).join('|')"
+        ),
+        "a|b|c"
+    );
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "Array.from(document.getElementById('d').classList.keys()).join(',')"
+        ),
         "0,1,2"
     );
     assert_eq!(
-        eval_str(&mut engine, "Array.from(document.getElementById('d').classList.values()).join(',')"),
+        eval_str(
+            &mut engine,
+            "Array.from(document.getElementById('d').classList.values()).join(',')"
+        ),
         "a,b,c"
     );
     assert_eq!(
@@ -228,11 +331,8 @@ fn class_list_is_iterable() {
 
 #[test]
 fn class_list_is_live_across_attribute_changes() {
-    let mut engine = ScriptEngine::new(
-        r#"<div id="d" class="a"></div>"#,
-        EventBindings::default(),
-    )
-    .expect("engine initializes");
+    let mut engine = ScriptEngine::new(r#"<div id="d" class="a"></div>"#, EventBindings::default())
+        .expect("engine initializes");
     let held = eval_str(
         &mut engine,
         "(function () {
@@ -245,8 +345,14 @@ fn class_list_is_live_across_attribute_changes() {
           return afterClassName + ':' + afterAttr;
         })()",
     );
-    assert_eq!(held, "2:true", "held classList must reflect later attribute writes");
-    assert_eq!(eval_str(&mut engine, "document.getElementById('d').classList.value"), "p q");
+    assert_eq!(
+        held, "2:true",
+        "held classList must reflect later attribute writes"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('d').classList.value"),
+        "p q"
+    );
 }
 
 #[test]
@@ -273,11 +379,8 @@ fn class_list_mutations_are_visible_to_inner_html() {
 
 #[test]
 fn class_list_rejects_empty_and_whitespace_tokens() {
-    let mut engine = ScriptEngine::new(
-        r#"<div id="d" class="a"></div>"#,
-        EventBindings::default(),
-    )
-    .expect("engine initializes");
+    let mut engine = ScriptEngine::new(r#"<div id="d" class="a"></div>"#, EventBindings::default())
+        .expect("engine initializes");
     // Empty tokens throw SyntaxError across the API surface.
     for expr in [
         "document.getElementById('d').classList.add('')",
@@ -313,11 +416,8 @@ fn class_list_rejects_empty_and_whitespace_tokens() {
 
 #[test]
 fn class_list_changes_mark_the_element_dirty() {
-    let mut engine = ScriptEngine::new(
-        r#"<div id="d" class="a"></div>"#,
-        EventBindings::default(),
-    )
-    .expect("engine initializes");
+    let mut engine = ScriptEngine::new(r#"<div id="d" class="a"></div>"#, EventBindings::default())
+        .expect("engine initializes");
     eval_str(
         &mut engine,
         "(function(){ document.getElementById('d').classList.add('b'); })()",

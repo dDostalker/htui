@@ -50,7 +50,13 @@ impl Parser {
         let mut css_sources: Vec<String> = Vec::new();
         let mut scripts: Vec<String> = Vec::new();
 
-        convert_children(&dom.document, root_id, &mut arena, &mut css_sources, &mut scripts);
+        convert_children(
+            &dom.document,
+            root_id,
+            &mut arena,
+            &mut css_sources,
+            &mut scripts,
+        );
 
         debug!(
             "解析完成: root={}, {} 节点, CSS: {} 字节, JS: {} 字节",

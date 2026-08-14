@@ -118,10 +118,7 @@ pub(super) fn compute_column_widths(
     }
     let total: usize = widths.iter().sum();
     if total > available_width && total > 0 {
-        let mut scaled: Vec<usize> = widths
-            .iter()
-            .map(|w| w * available_width / total)
-            .collect();
+        let mut scaled: Vec<usize> = widths.iter().map(|w| w * available_width / total).collect();
         let scaled_total: usize = scaled.iter().sum();
         let mut remainder = available_width.saturating_sub(scaled_total);
         let mut indices: Vec<usize> = (0..column_count).collect();

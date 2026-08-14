@@ -5,10 +5,7 @@
 //! after converting screen coordinates to canvas coordinates; the tests drive
 //! these functions directly with canvas coordinates, so no terminal is needed.
 
-use crate::{
-    script::ScriptEngine,
-    tui::graph_api::RenderCmd,
-};
+use crate::{script::ScriptEngine, tui::graph_api::RenderCmd};
 
 use super::{EventType, HitMap, HitRegion};
 

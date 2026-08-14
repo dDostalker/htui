@@ -368,9 +368,11 @@ impl ImageCache {
             img._create_img()?;
             self.entries.insert(key.clone(), img);
         }
-        self.entries.get(&key).ok_or_else(|| ImageError::CacheEntryVanished {
-            path: path.to_string(),
-        })
+        self.entries
+            .get(&key)
+            .ok_or_else(|| ImageError::CacheEntryVanished {
+                path: path.to_string(),
+            })
     }
 }
 
@@ -426,9 +428,12 @@ pub fn render_image_at_slice(
 ) -> Result<(), ImageError> {
     let (x, y) = origin;
     let img_data = cache.get_or_decode(path, max_size)?;
-    let picture = img_data.picture.as_ref().ok_or_else(|| ImageError::DataEmpty {
-        path: path.to_string(),
-    })?;
+    let picture = img_data
+        .picture
+        .as_ref()
+        .ok_or_else(|| ImageError::DataEmpty {
+            path: path.to_string(),
+        })?;
     let img_cols = img_data.cloumns as usize;
     let img_rows = img_data.rows as usize;
     let canvas_cols = canvas_cols as usize;

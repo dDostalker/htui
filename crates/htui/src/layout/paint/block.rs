@@ -92,9 +92,12 @@ pub(crate) fn paint_block(
             + box_edges.padding.bottom
             + box_edges.padding.left
             > 0;
-        let text_clamped =
-            my_bg.is_some() && !has_padding && lb.paint_style.font_size_cells > 1;
-        let text_row_offset: usize = if text_clamped { glyph_row_within_line } else { 0 };
+        let text_clamped = my_bg.is_some() && !has_padding && lb.paint_style.font_size_cells > 1;
+        let text_row_offset: usize = if text_clamped {
+            glyph_row_within_line
+        } else {
+            0
+        };
         let (bg_start_x, bg_width) = if text_clamped {
             if let Some(runs) = &lb.paint_style.runs {
                 let inner_h = box_edges.inner_horizontal();

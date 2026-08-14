@@ -92,7 +92,12 @@ fn parse_shorthand_lengths(
     }
 }
 
-fn resolve_length(length: Length, containing: usize, font: FontContext, viewport: Viewport) -> usize {
+fn resolve_length(
+    length: Length,
+    containing: usize,
+    font: FontContext,
+    viewport: Viewport,
+) -> usize {
     length.resolve(LengthContext {
         containing,
         font,
@@ -151,15 +156,18 @@ pub(crate) fn parse_border_side(
     font_ctx: FontContext,
     viewport: Viewport,
 ) -> Border {
-    if let Some(value) = side_raw && let Some(parsed) = parse_border_shorthand(value, containing_width, font_ctx, viewport) {
-            return parsed;
-        
+    if let Some(value) = side_raw
+        && let Some(parsed) = parse_border_shorthand(value, containing_width, font_ctx, viewport)
+    {
+        return parsed;
+
         // `border-top` was present but unparseable — fall through to next
         // priority rather than dropping the side entirely.
     }
-    if let Some(value) = shorthand_raw && let Some(parsed) = parse_border_shorthand(value, containing_width, font_ctx, viewport) {
-            return parsed;
-        
+    if let Some(value) = shorthand_raw
+        && let Some(parsed) = parse_border_shorthand(value, containing_width, font_ctx, viewport)
+    {
+        return parsed;
     }
     fallback
 }
@@ -183,12 +191,9 @@ fn parse_border_shorthand(
     let mut color: Option<Color> = None;
 
     for token in split_border_tokens(value) {
-        if let Some(w) = parse_length_token(
-            Some(token.as_str()),
-            containing_width,
-            font_ctx,
-            viewport,
-        ) {
+        if let Some(w) =
+            parse_length_token(Some(token.as_str()), containing_width, font_ctx, viewport)
+        {
             width = Some(w);
             continue;
         }
@@ -500,7 +505,9 @@ impl Length {
                 (raw as usize).max(1)
             }
             &Length::Em(n) => (n * context.font.font_size_cells as f32).round().max(0.0) as usize,
-            &Length::Rem(n) => (n * context.font.root_font_size_cells as f32).round().max(0.0) as usize,
+            &Length::Rem(n) => (n * context.font.root_font_size_cells as f32)
+                .round()
+                .max(0.0) as usize,
             &Length::Vw(n) => {
                 let raw = (n * context.viewport.cols as f32 / 100.0).round();
                 (raw as usize).max(1)
@@ -512,4 +519,3 @@ impl Length {
         }
     }
 }
-

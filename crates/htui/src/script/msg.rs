@@ -17,7 +17,9 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::events::{ElementRef, EventBindings, EventType, HitMap, HitRegion, HoverState, KeyEventInfo, interaction};
+use crate::events::{
+    ElementRef, EventBindings, EventType, HitMap, HitRegion, HoverState, KeyEventInfo, interaction,
+};
 use crate::layout::Rect;
 use crate::script::ScriptEngine;
 use crate::tdom::node::{NodeArena, NodeId, NodeType};
@@ -62,7 +64,10 @@ pub enum ScriptMsg {
         key: KeyEventInfo,
     },
     /// A key was released (`KeyUp`); same target semantics as `KeyDown`.
-    KeyUp { target: Option<NodeId>, key: KeyEventInfo },
+    KeyUp {
+        target: Option<NodeId>,
+        key: KeyEventInfo,
+    },
     /// Shut the script thread down.
     Quit,
 }
@@ -97,7 +102,10 @@ pub struct ScriptEvent {
 #[derive(Debug)]
 pub enum ScriptResponse {
     /// Engine constructed; initial arena for the first frame.
-    Ready { arena: Arc<NodeArena>, root_id: NodeId },
+    Ready {
+        arena: Arc<NodeArena>,
+        root_id: NodeId,
+    },
     /// Engine construction failed (event handling is disabled afterwards).
     Failed(String),
     /// Result of processing one message / tick.
@@ -138,11 +146,17 @@ fn dialog_form_action(arena: &NodeArena, node_id: NodeId) -> Option<NodeId> {
     }
     let is_submit = match node.node_type {
         NodeType::Button => !matches!(
-            node.attributes.get("type").map(|t| t.to_ascii_lowercase()).as_deref(),
+            node.attributes
+                .get("type")
+                .map(|t| t.to_ascii_lowercase())
+                .as_deref(),
             Some("button")
         ),
         NodeType::Input => matches!(
-            node.attributes.get("type").map(|t| t.to_ascii_lowercase()).as_deref(),
+            node.attributes
+                .get("type")
+                .map(|t| t.to_ascii_lowercase())
+                .as_deref(),
             Some("submit") | Some("image")
         ),
         _ => false,
@@ -325,7 +339,8 @@ pub fn apply_message(
             // `Click` dispatch ran first).
             let node_id = *node_id;
             let is_radio = engine.arena().get(node_id).is_some_and(|n| {
-                n.get_type().is_some_and(|t| t.eq_ignore_ascii_case("radio"))
+                n.get_type()
+                    .is_some_and(|t| t.eq_ignore_ascii_case("radio"))
             });
             let should_check = if is_radio {
                 true
@@ -352,7 +367,11 @@ pub fn apply_message(
             let region = region_for(&engine.arena(), *form_id);
             (engine.fire(&region, EventType::Submit, 0, 0), None)
         }
-        ScriptMsg::KeyDown { key_id, target, key } => {
+        ScriptMsg::KeyDown {
+            key_id,
+            target,
+            key,
+        } => {
             let region = key_region(engine, *target);
             let (cmds, prevented) = engine.fire_key_gated(&region, EventType::KeyDown, key);
             (cmds, Some((*key_id, prevented)))

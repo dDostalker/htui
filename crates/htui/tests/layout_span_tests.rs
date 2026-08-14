@@ -235,22 +235,13 @@ fn test_span_color_overrides_parent() {
     let r_idx = find_cell(&tl, "r").expect("'r' of 'red' should render");
     assert_eq!(
         tl.layout[r_idx].fcolor,
-        Some(Color::Rgb {
-            r: 255,
-            g: 0,
-            b: 0
-        }),
+        Some(Color::Rgb { r: 255, g: 0, b: 0 }),
         "span cell should carry the red fg"
     );
     let p_idx = find_cell(&tl, "p").expect("plain 'p' should render");
     assert!(
         tl.layout[p_idx].fcolor.is_none()
-            || tl.layout[p_idx].fcolor
-                == Some(Color::Rgb {
-                    r: 255,
-                    g: 0,
-                    b: 0
-                }),
+            || tl.layout[p_idx].fcolor == Some(Color::Rgb { r: 255, g: 0, b: 0 }),
         "plain cell should not pick up the span's red"
     );
 }
@@ -268,11 +259,7 @@ fn test_span_color_with_inherited_parent_color() {
     let g_idx = find_cell(&tl, "g").expect("'g' of 'go' should render");
     assert_eq!(
         tl.layout[g_idx].fcolor,
-        Some(Color::Rgb {
-            r: 0,
-            g: 128,
-            b: 0
-        }),
+        Some(Color::Rgb { r: 0, g: 128, b: 0 }),
         "span's own color (green) must win over div's inherited color"
     );
 }
@@ -376,20 +363,12 @@ fn test_unstyled_runs_inherit_aside_bg() {
 
     assert_eq!(
         tl.layout[p_idx].bcolor,
-        Some(Color::Rgb {
-            r: 0,
-            g: 0,
-            b: 139
-        }),
+        Some(Color::Rgb { r: 0, g: 0, b: 139 }),
         "plain text inside <aside> should inherit darkblue bg"
     );
     assert_eq!(
         tl.layout[b_idx].bcolor,
-        Some(Color::Rgb {
-            r: 0,
-            g: 0,
-            b: 139
-        }),
+        Some(Color::Rgb { r: 0, g: 0, b: 139 }),
         "bold span inside <aside> should also paint on darkblue bg"
     );
 }
@@ -434,7 +413,7 @@ fn test_text_align_center_counts_all_runs() {
 
 #[test]
 fn test_layout_box_exposes_runs_for_block_with_spans() {
-    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor, };
+    use htui::layout::{BoxConstraint, Cursor, inner_formatting_context::flow::layout_tree};
 
     let (root_id, arena) = setup(
         "<p>plain <span class=\"b\">bold</span></p>",
@@ -485,7 +464,7 @@ fn test_layout_box_runs_are_materialised_for_plain_block() {
     // The single-run case is still materialised as one inline run rather
     // than skipped. The paint phase treats one run identically to the
     // general case, so this is a contract test on the layout.
-    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor};
+    use htui::layout::{BoxConstraint, Cursor, inner_formatting_context::flow::layout_tree};
 
     let (root_id, arena) = setup("<p>just text</p>", "");
     let containing = BoxConstraint::root(&mock_term_map());
@@ -518,14 +497,18 @@ fn test_layout_box_runs_are_materialised_for_plain_block() {
 
 #[test]
 fn test_h1_prefix_is_a_separate_run() {
-    use htui::layout::{inner_formatting_context::flow::layout_tree, BoxConstraint, Cursor, };
+    use htui::layout::{BoxConstraint, Cursor, inner_formatting_context::flow::layout_tree};
 
     let (root_id, arena) = setup("<h1>Title</h1>", "h1 { color: cyan; }");
     let containing = BoxConstraint::root(&mock_term_map());
     let mut cursor = Cursor::new();
     let boxes = layout_tree(&arena, root_id, containing, &mut cursor, 80, 24);
     let h_box = find_box_by_type(&boxes, &NodeType::H1, &arena).expect("should have the <h1> box");
-    let runs = h_box.paint_style.runs.as_ref().expect("<h1> should expose runs");
+    let runs = h_box
+        .paint_style
+        .runs
+        .as_ref()
+        .expect("<h1> should expose runs");
     // `runs` is `Vec<Vec<InlineRun>>` — at width 80 the prefix and the
     // body fit on a single visual line, so the outer vec has one entry
     // that contains both runs in order: prefix first, then the heading
@@ -546,7 +529,10 @@ fn test_h1_prefix_is_a_separate_run() {
     );
     assert_eq!(line_runs[0].text, "#", "first prefix chunk is '#'");
     assert_eq!(line_runs[1].text, " ", "second prefix chunk is the space");
-    assert_eq!(line_runs[2].text, "Title", "body run must be the heading text");
+    assert_eq!(
+        line_runs[2].text, "Title",
+        "body run must be the heading text"
+    );
     // All three runs share the heading's resolved color.
     for r in line_runs {
         assert_eq!(
@@ -643,11 +629,7 @@ fn test_font_styles_visual_test_mixed_inline() {
     let g_idx = find_cell(&tl, "g").expect("green span should render");
     assert_eq!(
         tl.layout[g_idx].fcolor,
-        Some(Color::Rgb {
-            r: 0,
-            g: 128,
-            b: 0
-        }),
+        Some(Color::Rgb { r: 0, g: 128, b: 0 }),
         "green span must carry green fg"
     );
     assert!(

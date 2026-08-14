@@ -129,11 +129,11 @@ fn tokenize_run(
     let mut pending_width: usize = 0;
 
     let flush = |kind: Option<u8>,
-                     text: &mut String,
-                     count: &mut usize,
-                     width: &mut usize,
-                     run: &InlineRun,
-                     out: &mut Vec<Token>| {
+                 text: &mut String,
+                 count: &mut usize,
+                 width: &mut usize,
+                 run: &InlineRun,
+                 out: &mut Vec<Token>| {
         if let Some(k) = kind {
             if *count == 0 || text.is_empty() {
                 return;
@@ -169,7 +169,14 @@ fn tokenize_run(
             // Close whatever is pending, then push the forced break.
             // A `<br>` marker run (force_break) is unconditional — it
             // splits the line even under `white-space: normal`.
-            flush(pending_kind, &mut pending_text, &mut pending_count, &mut pending_width, run, out);
+            flush(
+                pending_kind,
+                &mut pending_text,
+                &mut pending_count,
+                &mut pending_width,
+                run,
+                out,
+            );
             pending_kind = None;
             out.push(if run.force_break {
                 Token::Break
@@ -181,7 +188,14 @@ fn tokenize_run(
         let w = grapheme_width(g).max(font);
         if is_horizontal_ws(g) {
             if pending_kind != Some(0) {
-                flush(pending_kind, &mut pending_text, &mut pending_count, &mut pending_width, run, out);
+                flush(
+                    pending_kind,
+                    &mut pending_text,
+                    &mut pending_count,
+                    &mut pending_width,
+                    run,
+                    out,
+                );
                 pending_kind = Some(0);
             }
             pending_text.push_str(g);
@@ -194,7 +208,14 @@ fn tokenize_run(
             // flush whatever is pending so the boundary before this
             // character is recognised as a wrap opportunity, then emit
             // it as its own one-grapheme word.
-            flush(pending_kind, &mut pending_text, &mut pending_count, &mut pending_width, run, out);
+            flush(
+                pending_kind,
+                &mut pending_text,
+                &mut pending_count,
+                &mut pending_width,
+                run,
+                out,
+            );
             pending_kind = None;
             out.push(Token::Word {
                 text: g.to_string(),
@@ -208,7 +229,14 @@ fn tokenize_run(
             // Non-CJK, or CJK under `keep-all`: accumulate as one word
             // so the wrap phase treats the run as unbreakable.
             if pending_kind != Some(1) {
-                flush(pending_kind, &mut pending_text, &mut pending_count, &mut pending_width, run, out);
+                flush(
+                    pending_kind,
+                    &mut pending_text,
+                    &mut pending_count,
+                    &mut pending_width,
+                    run,
+                    out,
+                );
                 pending_kind = Some(1);
             }
             pending_text.push_str(g);
@@ -216,7 +244,14 @@ fn tokenize_run(
             pending_width += w;
         }
     }
-    flush(pending_kind, &mut pending_text, &mut pending_count, &mut pending_width, run, out);
+    flush(
+        pending_kind,
+        &mut pending_text,
+        &mut pending_count,
+        &mut pending_width,
+        run,
+        out,
+    );
 }
 
 /// Apply the `white-space` collapsing rules to a token stream and
@@ -258,7 +293,10 @@ fn apply_white_space(tokens: Vec<Token>, ws: WhiteSpace) -> Vec<Vec<Token>> {
                 if let Some(line) = lines.last_mut() {
                     let last_is_space = matches!(line.last(), Some(Token::Space { .. }));
                     if !last_is_space {
-                        line.push(Token::Space { width: 1, _count: 1 });
+                        line.push(Token::Space {
+                            width: 1,
+                            _count: 1,
+                        });
                     }
                 }
             }
@@ -325,7 +363,14 @@ fn wrap_logical_line(
                     current_width = 0;
                 }
             }
-            Token::Word { text, width, style, fg, bg, node_id } => {
+            Token::Word {
+                text,
+                width,
+                style,
+                fg,
+                bg,
+                node_id,
+            } => {
                 last_run_style = (fg, bg, style);
                 last_run_node_id = node_id;
                 if width + current_width <= max_width {
@@ -448,7 +493,10 @@ fn emit_preserving_newlines(runs: &[InlineRun]) -> Vec<Vec<InlineRun>> {
             // accumulated buffer so fg / bg / style never silently
             // bleed across span boundaries.
             if buffering
-                && (cur_fg != run.fg || cur_bg != run.bg || cur_style != run.style || cur_node_id != run.node_id)
+                && (cur_fg != run.fg
+                    || cur_bg != run.bg
+                    || cur_style != run.style
+                    || cur_node_id != run.node_id)
             {
                 line.push(InlineRun::owned(
                     std::mem::take(&mut buf),
@@ -470,7 +518,13 @@ fn emit_preserving_newlines(runs: &[InlineRun]) -> Vec<Vec<InlineRun>> {
         }
     }
     if buffering {
-        line.push(InlineRun::owned(buf, cur_style, cur_fg, cur_bg, cur_node_id));
+        line.push(InlineRun::owned(
+            buf,
+            cur_style,
+            cur_fg,
+            cur_bg,
+            cur_node_id,
+        ));
     }
     // Always emit a trailing visual line — even an empty one when
     // the input ended on a newline. This keeps callers (which split
@@ -481,8 +535,6 @@ fn emit_preserving_newlines(runs: &[InlineRun]) -> Vec<Vec<InlineRun>> {
     }
     lines
 }
-
-
 
 pub fn wrap_runs(
     runs: &[InlineRun],
@@ -575,7 +627,14 @@ pub fn wrapped_size(
     word_break: WordBreak,
     overflow_wrap: OverflowWrap,
 ) -> (usize, usize) {
-    let lines = wrap_runs(runs, max_width, font_size_cells, white_space, word_break, overflow_wrap);
+    let lines = wrap_runs(
+        runs,
+        max_width,
+        font_size_cells,
+        white_space,
+        word_break,
+        overflow_wrap,
+    );
     let font = font_size_cells.max(1);
     let max_line_w = lines
         .iter()

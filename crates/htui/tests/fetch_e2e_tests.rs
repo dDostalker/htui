@@ -3,7 +3,7 @@
 //! the microtask event loop to write the DOM.
 
 use htui::events::{EventBindings, HitMap, HoverState};
-use htui::script::{ScriptEngine, apply_message, ScriptMsg};
+use htui::script::{ScriptEngine, ScriptMsg, apply_message};
 
 fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
@@ -39,8 +39,7 @@ fn mem_script_and_fetch_drive_dom_together() {
       <script src="mem://e2e/app.js"></script>
       <div id="out">pending</div>
     "#;
-    let mut engine = ScriptEngine::new(html, EventBindings::default())
-        .expect("engine initializes");
+    let mut engine = ScriptEngine::new(html, EventBindings::default()).expect("engine initializes");
 
     // Drain the event loop the way the script thread does: `mem://e2e/app.js`
     // ran during construction and called loadApp(), which started the fetch.
@@ -64,7 +63,12 @@ fn mem_script_and_fetch_drive_dom_together() {
     // consistent — no panics on the interaction path).
     let mut hover = HoverState::new();
     let hit_map = HitMap::default();
-    let _ = apply_message(&mut engine, &mut hover, &hit_map, ScriptMsg::Move { x: 0, y: 0 });
+    let _ = apply_message(
+        &mut engine,
+        &mut hover,
+        &hit_map,
+        ScriptMsg::Move { x: 0, y: 0 },
+    );
 
     htui::resources::unregister("mem://e2e/app.js");
     htui::resources::unregister("mem://e2e/data.txt");

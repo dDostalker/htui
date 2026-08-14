@@ -8,7 +8,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use htui::tui::graph_api::TermLayout;
 
 fn bench_render_to_bytes_small(c: &mut Criterion) {
