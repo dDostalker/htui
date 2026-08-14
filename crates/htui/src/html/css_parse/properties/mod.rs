@@ -33,11 +33,12 @@ use indexmap::IndexMap;
 use crate::html::box_edges::{Border, BorderSides, BoxEdges, EdgeSizes};
 
 use super::values::{
-    AlignItems, BoxSizing, CornerRadii, CssDisplay, FlexBasis, FlexDirection, FlexWrap,
-    FontStyleKind, FontWeight, GapSizes, JustifyContent, Length, LineHeight, OverflowWrap,
-    TextAlign, TextDecoration, TextTransform, Visibility, WhiteSpace, WordBreak, parse_align_items,
-    parse_border_radius, parse_border_side, parse_border_style, parse_border_width,
-    parse_box_sizing, parse_color_str, parse_edge_sizes, parse_flex_basis, parse_flex_direction,
+    AlignContent, AlignItems, BoxSizing, CornerRadii, CssDisplay, FlexBasis, FlexDirection,
+    FlexShorthand, FlexWrap, FontStyleKind, FontWeight, GapSizes, JustifyContent, Length,
+    LineHeight, OverflowWrap, TextAlign, TextDecoration, TextTransform, Visibility, WhiteSpace,
+    WordBreak, parse_align_content, parse_align_items, parse_border_radius, parse_border_side,
+    parse_border_style, parse_border_width, parse_box_sizing, parse_color_str, parse_edge_sizes,
+    parse_flex_basis, parse_flex_direction, parse_flex_flow, parse_flex_shorthand,
     parse_flex_wrap, parse_gap_shorthand, parse_justify_content, parse_line_height,
     parse_non_negative_number, parse_order, parse_overflow_wrap, parse_text_transform,
     parse_visibility, parse_white_space, parse_word_break, resolve_flex_basis,
@@ -402,14 +403,32 @@ impl CssAttr {
         }
     }
 
-    /// `flex-direction` (defaults to `Row`).
+    /// `flex-direction` (defaults to `Row`). Falls back to the `flex-flow`
+    /// shorthand's direction component when `flex-direction` is unset.
     pub fn get_flex_direction(&self) -> FlexDirection {
-        self.parse_or("flex-direction", parse_flex_direction, FlexDirection::Row)
+        match self.0.get("flex-direction") {
+            Some(v) => parse_flex_direction(v).unwrap_or(FlexDirection::Row),
+            None => self
+                .0
+                .get("flex-flow")
+                .and_then(|v| parse_flex_flow(v))
+                .map(|(dir, _)| dir)
+                .unwrap_or(FlexDirection::Row),
+        }
     }
 
-    /// `flex-wrap` (defaults to `NoWrap`).
+    /// `flex-wrap` (defaults to `NoWrap`). Falls back to the `flex-flow`
+    /// shorthand's wrap component when `flex-wrap` is unset.
     pub fn get_flex_wrap(&self) -> FlexWrap {
-        self.parse_or("flex-wrap", parse_flex_wrap, FlexWrap::NoWrap)
+        match self.0.get("flex-wrap") {
+            Some(v) => parse_flex_wrap(v).unwrap_or(FlexWrap::NoWrap),
+            None => self
+                .0
+                .get("flex-flow")
+                .and_then(|v| parse_flex_flow(v))
+                .and_then(|(_, wrap)| wrap)
+                .unwrap_or(FlexWrap::NoWrap),
+        }
     }
 
     /// `justify-content` (defaults to `FlexStart`).
@@ -448,29 +467,51 @@ impl CssAttr {
         }
     }
 
-    /// `align-content` for multi-line flex containers (defaults to
-    /// `FlexStart`).
-    pub fn get_align_content(&self) -> JustifyContent {
+    /// `align-content` for multi-line flex containers. Defaults to
+    /// `Stretch` (the CSS initial value: lines fill the free cross space).
+    pub fn get_align_content(&self) -> AlignContent {
         self.parse_or(
             "align-content",
-            parse_justify_content,
-            JustifyContent::FlexStart,
+            parse_align_content,
+            AlignContent::Stretch,
         )
     }
 
-    /// `flex-grow` (defaults to `0`).
+    /// Parse the `flex` shorthand once (when present) into its components.
+    fn flex_shorthand(&self) -> Option<FlexShorthand> {
+        self.0
+            .get("flex")
+            .and_then(|v| parse_flex_shorthand(v))
+    }
+
+    /// `flex-grow` (defaults to `0`). Falls back to the `flex` shorthand's
+    /// grow component when `flex-grow` is unset.
     pub fn get_flex_grow(&self) -> f32 {
-        self.parse_or("flex-grow", parse_non_negative_number, 0.0)
+        match self.0.get("flex-grow") {
+            Some(v) => parse_non_negative_number(v).unwrap_or(0.0),
+            None => self.flex_shorthand().map(|f| f.grow).unwrap_or(0.0),
+        }
     }
 
-    /// `flex-shrink` (defaults to `1`).
+    /// `flex-shrink` (defaults to `1`). Falls back to the `flex` shorthand's
+    /// shrink component when `flex-shrink` is unset.
     pub fn get_flex_shrink(&self) -> f32 {
-        self.parse_or("flex-shrink", parse_non_negative_number, 1.0)
+        match self.0.get("flex-shrink") {
+            Some(v) => parse_non_negative_number(v).unwrap_or(1.0),
+            None => self.flex_shorthand().map(|f| f.shrink).unwrap_or(1.0),
+        }
     }
 
-    /// `flex-basis` (defaults to `Auto`).
+    /// `flex-basis` (defaults to `Auto`). Falls back to the `flex` shorthand's
+    /// basis component when `flex-basis` is unset.
     pub fn get_flex_basis(&self) -> FlexBasis {
-        self.parse_or("flex-basis", parse_flex_basis, FlexBasis::Auto)
+        match self.0.get("flex-basis") {
+            Some(v) => parse_flex_basis(v).unwrap_or(FlexBasis::Auto),
+            None => self
+                .flex_shorthand()
+                .map(|f| f.basis)
+                .unwrap_or(FlexBasis::Auto),
+        }
     }
 
     /// Resolve `flex-basis` against the containing main-axis size.

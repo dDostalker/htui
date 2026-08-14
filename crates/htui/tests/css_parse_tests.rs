@@ -1248,6 +1248,19 @@ fn length_parse_vw_vh() {
 }
 
 #[test]
+fn length_parse_ch() {
+    init();
+    // `ch` is the CSS character-width unit: 1ch == the advance width of the
+    // `0` glyph, which is exactly one cell on a terminal's monospace grid.
+    // Unlike `em`, `ch` measures characters, so widths stay aligned with
+    // character counts regardless of font-size.
+    assert_eq!(Length::parse("12ch"), Some(Length::Ch(12.0)));
+    assert_eq!(Length::parse("1.5ch"), Some(Length::Ch(1.5)));
+    assert_eq!(Length::parse("8CH"), Some(Length::Ch(8.0)));
+    assert_eq!(Length::parse(" 4ch  "), Some(Length::Ch(4.0)));
+}
+
+#[test]
 fn length_parse_rejects_unsupported_units() {
     init();
     // vmin / vmax not yet wired through (see doc/layout.md 10.6).
@@ -1382,6 +1395,17 @@ fn length_resolve_rem_scales_with_root_font_size() {
     assert_eq!(Length::Rem(2.0).resolve(length_ctx(80, font_ctx(1, 3))), 6);
     assert_eq!(Length::Rem(1.5).resolve(length_ctx(80, font_ctx(2, 4))), 6);
     assert_eq!(Length::Rem(0.0).resolve(length_ctx(80, font_ctx(5, 5))), 0);
+}
+
+#[test]
+fn length_resolve_ch_is_font_size_independent() {
+    init();
+    // 1ch == 1 cell no matter the effective font-size — unlike `em`, `ch`
+    // counts characters, and a terminal cell *is* a character. Rounding
+    // follows the same away-from-zero rule as the other multipliers.
+    assert_eq!(Length::Ch(12.0).resolve(length_ctx(80, default_font_ctx())), 12);
+    assert_eq!(Length::Ch(1.5).resolve(length_ctx(80, font_ctx(2, 1))), 2); // 1.5 rounds away
+    assert_eq!(Length::Ch(0.4).resolve(length_ctx(80, font_ctx(3, 2))), 0);
 }
 
 #[test]

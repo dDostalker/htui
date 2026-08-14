@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<!--
+  htui 视觉测试 — flex 高级能力补全
+  覆盖场景：flex 简写 / flex-flow / direction & wrap reverse /
+           align-items baseline / align-content stretch / flex-basis content
+  运行: cargo run -p visual_test -- flex_advanced
+  浏览器直接打开本文件即可看到与终端渲染对应的样式
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>htui Flex — 简写 / reverse / baseline / content</title>
+    <style>
+        body { color: white; font-family: monospace; line-height: 1; }
+        h2 { color: cyan; }
+        h3 { color: yellow; }
+        .row  { display: flex; flex-direction: row; }
+        .col  { display: flex; flex-direction: column; }
+        .wrap { display: flex; flex-wrap: wrap; }
+        .row-reverse { display: flex; flex-direction: row-reverse; }
+        .col-reverse { display: flex; flex-direction: column-reverse; }
+        .wrap-reverse { display: flex; flex-wrap: wrap-reverse; }
+        .ff-row-wrap   { display: flex; flex-flow: row wrap; }
+        .ff-row-wrap > * { flex: 0 0 33.33%; }
+        .ff-column-wrap{ display: flex; flex-flow: column wrap; }
+        /* Pin the item height to exactly one row. `line-height: 1` can
+           still round up to a taller line box on some fonts, and flex
+           items default to `min-height: auto` (the content's minimum
+           height, driven by font metrics), either of which pushes the
+           column wrap to one item per column in the browser. An explicit
+           1em height with `min-height: 0` keeps both renderers at two
+           items per column. */
+        .ff-column-wrap > *,
+        .cr-wrap > *   { height: 1em; min-height: 0; }
+        .rr-wrap  { display: flex; flex-direction: row-reverse; flex-wrap: wrap; }
+        .cr-wrap  { display: flex; flex-direction: column-reverse; flex-wrap: wrap; }
+        .width-8  { width: 8ch; }
+        .width-12 { width: 12ch; }
+        .height-2 { height: 2em; }
+        .height-4 { height: 4em; }
+        .height-5 { height: 5em; }
+        .height-7 { height: 7em; }
+        .no-shrink { flex-shrink: 0; }
+        .baseline { align-items: baseline; }
+        .pad-top-2 { padding-top: 2em; }
+        .align-content-start { align-content: flex-start; }
+        .align-content-stretch { align-content: stretch; }
+        .flex-1    { flex: 1; }
+        .flex-fixed{ flex: 0 0 10ch; }
+        .flex-none { flex: none; }
+        .basis-content { flex-basis: content; }
+        .red    { background-color: red;     color: white; }
+        .green  { background-color: green;   color: white; }
+        .blue   { background-color: blue;    color: white; }
+        .yellow { background-color: yellow;  color: black; }
+        .magenta{ background-color: magenta; color: white; }
+        .cyan   { background-color: cyan;    color: black; }
+    </style>
+</head>
+<body>
+    <h2>Flex — 简写 / reverse / baseline / content</h2>
+
+    <h3>1. flex: 1 — 两项均分整行</h3>
+    <div class="row">
+        <div class="red flex-1">A</div>
+        <div class="green flex-1">B</div>
+    </div>
+
+    <h3>2. flex: 0 0 10ch — 固定 basis，不增长不收缩</h3>
+    <div class="row">
+        <div class="red flex-fixed">fixed</div>
+        <div class="green flex-1">rest</div>
+    </div>
+
+    <h3>3. flex: none — 保持自然尺寸</h3>
+    <div class="row">
+        <div class="red flex-none">none</div>
+        <div class="green flex-none">items</div>
+    </div>
+
+    <h3>4. flex-flow: row wrap — 简写同时设置方向与换行</h3>
+    <div class="ff-row-wrap width-12">
+        <div class="red">AAAA</div>
+        <div class="green">BBBB</div>
+        <div class="blue">CCCC</div>
+        <div class="yellow">DDDD</div>
+    </div>
+
+    <h3>5. flex-flow: column wrap — 2 列纵向网格</h3>
+    <div class="ff-column-wrap width-8 height-2">
+        <div class="red">A</div>
+        <div class="green">B</div>
+        <div class="blue">C</div>
+        <div class="yellow">D</div>
+    </div>
+
+    <h3>6. flex-direction: row-reverse — 主轴向右侧对齐</h3>
+    <div class="row-reverse">
+        <div class="red">A</div>
+        <div class="green">B</div>
+        <div class="blue">C</div>
+    </div>
+
+    <h3>7. flex-direction: column-reverse — 主轴从底部堆叠</h3>
+    <div class="col-reverse">
+        <div class="red">A</div>
+        <div class="green">B</div>
+        <div class="blue">C</div>
+    </div>
+
+    <h3>8. flex-wrap: wrap-reverse — 行从底部堆叠</h3>
+    <div class="wrap-reverse width-8 height-4 align-content-start">
+        <div class="red no-shrink">AAAA</div>
+        <div class="green no-shrink">BBBB</div>
+        <div class="blue no-shrink">CCCC</div>
+    </div>
+
+    <h3>9. align-items: baseline — 首文本行对齐</h3>
+    <div class="row baseline height-5">
+        <div class="red pad-top-2">A</div>
+        <div class="green">B</div>
+    </div>
+
+    <h3>10. align-content: stretch（默认）— 行撑满交叉轴</h3>
+    <div class="wrap width-12 height-7 align-content-stretch">
+        <div class="red no-shrink">AAAAAAA</div>
+        <div class="green no-shrink">BBBBBBB</div>
+        <div class="blue no-shrink">CCCCCCC</div>
+    </div>
+
+    <h3>11. flex-basis: content — 按内在内容尺寸</h3>
+    <div class="row">
+        <div class="red basis-content">content</div>
+        <div class="green">!</div>
+    </div>
+
+    <h3>12. flex-direction: row-reverse + wrap — 换行后仍顶右</h3>
+    <div class="rr-wrap width-12">
+        <div class="red no-shrink">AAAAAA</div>
+        <div class="green no-shrink">BBBBBB</div>
+        <div class="blue no-shrink">CCCCCC</div>
+    </div>
+
+    <h3>13. flex-direction: column-reverse + wrap — 列内倒序 + 右列</h3>
+    <div class="cr-wrap width-8 height-2">
+        <div class="red">A</div>
+        <div class="green">B</div>
+        <div class="blue">C</div>
+        <div class="yellow">D</div>
+    </div>
+</body>
+</html>

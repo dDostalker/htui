@@ -64,6 +64,10 @@ pub(super) struct FlexItemPrep {
     pub(super) grow: f32,
     pub(super) shrink: f32,
     pub(super) align_self: crate::html::css_parse::AlignItems,
+    /// Offset (rows) from the box top to its first text row — the terminal
+    /// cell-grid analogue of the CSS text baseline. Used by
+    /// `align-items: baseline` to align the items' first text rows.
+    pub(super) baseline: usize,
     pub(super) order: i32,
 }
 

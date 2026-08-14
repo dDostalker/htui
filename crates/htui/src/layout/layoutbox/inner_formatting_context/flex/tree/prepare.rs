@@ -54,17 +54,13 @@ pub(super) fn prepare_flex_item(
             // nesting) reports its real content size — not 0 — which
             // keeps the parent from collapsing the nested container to
             // 1 cell.
-            let explicit = match direction {
-                FlexDirection::Row => {
-                    css.get_width(containing_main, context.font, context.viewport)
-                }
-                FlexDirection::Column => {
-                    css.get_height(containing_main, context.font, context.viewport)
-                }
+            let explicit = match direction.is_row() {
+                true => css.get_width(containing_main, context.font, context.viewport),
+                false => css.get_height(containing_main, context.font, context.viewport),
             };
-            match direction {
-                FlexDirection::Row => explicit.or(Some(natural.width)),
-                FlexDirection::Column => explicit.or(Some(natural.height)),
+            match direction.is_row() {
+                true => explicit.or(Some(natural.width)),
+                false => explicit.or(Some(natural.height)),
             }
         })
         .unwrap_or(FLEX_ITEM_MIN_CROSS);
@@ -77,26 +73,43 @@ pub(super) fn prepare_flex_item(
     // smaller widths). Without these floors, a definite-sized flex column
     // whose items' basis sums exceed its height would crush every item below
     // its content (e.g. stat cards collapsing to a 2-row strip).
-    let min_main = match direction {
-        FlexDirection::Row => longest_breakable_width(arena, item_id),
-        FlexDirection::Column => natural.height,
+    let min_main = match direction.is_row() {
+        true => longest_breakable_width(arena, item_id),
+        false => natural.height,
     };
 
     // `align-self: auto` defers to the container's `align-items` (CSS
     // default for `align-items` is `stretch`, so without an explicit
     // `align-items` this still ends up as `Stretch`).
-    let css_min_main = match direction {
-        FlexDirection::Row => css.get_min_width(containing_main, context.font, context.viewport),
-        FlexDirection::Column => {
-            css.get_min_height(containing_main, context.font, context.viewport)
-        }
+    let css_min_main = match direction.is_row() {
+        true => css.get_min_width(containing_main, context.font, context.viewport),
+        false => css.get_min_height(containing_main, context.font, context.viewport),
     };
-    let css_max_main = match direction {
-        FlexDirection::Row => css.get_max_width(containing_main, context.font, context.viewport),
-        FlexDirection::Column => {
-            css.get_max_height(containing_main, context.font, context.viewport)
-        }
+    let css_max_main = match direction.is_row() {
+        true => css.get_max_width(containing_main, context.font, context.viewport),
+        false => css.get_max_height(containing_main, context.font, context.viewport),
     };
+    // Baseline (rows from the box top to the first text row), for
+    // `align-items: baseline`: border-top + padding-top place the content
+    // box, and the glyph row sits at the line-box's vertical centring offset.
+    let own_font_size_cells =
+        effective_font_size_cells(arena, item_id, context.font, context.viewport);
+    let line_height_cells = crate::html::css_parse::resolve_line_height_cells(
+        css.get_line_height(),
+        own_font_size_cells,
+        context.font,
+        context.viewport,
+    );
+    let font = own_font_size_cells.max(1);
+    let line_h = line_height_cells.max(1);
+    let glyph_row = if line_h > font { (line_h - font) / 2 } else { (font - 1) / 2 };
+    let edges = css.get_box_edges(usize::MAX, context.font, context.viewport);
+    let baseline = edges
+        .border
+        .top
+        .thickness()
+        .saturating_add(edges.padding.top)
+        .saturating_add(glyph_row);
     FlexItemPrep {
         source: FlexItemSource::Node(item_id),
         basis: basis_resolved,
@@ -109,6 +122,7 @@ pub(super) fn prepare_flex_item(
             AlignSelf::Auto => align_items,
             AlignSelf::Value(v) => v,
         },
+        baseline,
         order: css.get_order(),
     }
 }
@@ -122,12 +136,12 @@ pub(super) fn prepare_anonymous_text_item(
     align_items: AlignItems,
 ) -> FlexItemPrep {
     let text_w = runs_total_width(&item.runs);
-    let (basis, min_main) = match direction {
-        FlexDirection::Row => (
+    let (basis, min_main) = match direction.is_row() {
+        true => (
             text_w.max(FLEX_ITEM_MIN_CROSS),
             runs_longest_word(&item.runs),
         ),
-        FlexDirection::Column => (FLEX_ITEM_MIN_CROSS, FLEX_ITEM_MIN_CROSS),
+        false => (FLEX_ITEM_MIN_CROSS, FLEX_ITEM_MIN_CROSS),
     };
     FlexItemPrep {
         source: FlexItemSource::AnonymousText(item),
@@ -138,6 +152,7 @@ pub(super) fn prepare_anonymous_text_item(
         grow: 0.0,
         shrink: 1.0,
         align_self: align_items,
+        baseline: 0,
         order: 0,
     }
 }
@@ -375,8 +390,8 @@ fn natural_intrinsic_size(
             }
         }
 
-        let (inner_w, inner_h) = match inner_direction {
-            FlexDirection::Row => {
+        let (inner_w, inner_h) = match inner_direction.is_row() {
+            true => {
                 // Row: main axis = horizontal, items flow left→right.
                 // Main size is sum of widths + column gaps; cross size
                 // is the max of heights.
@@ -399,7 +414,7 @@ fn natural_intrinsic_size(
                     max_h.max(FLEX_ITEM_MIN_CROSS),
                 )
             }
-            FlexDirection::Column => {
+            false => {
                 // Column: main axis = vertical, items stack top→bottom.
                 // Main size is sum of heights + row gaps; cross size
                 // is the max of widths.
@@ -555,9 +570,9 @@ pub(super) fn natural_cross_axis_size(
     context: LayoutContext,
 ) -> usize {
     let intrinsic = natural_intrinsic_size(arena, node_id, context);
-    match direction {
-        FlexDirection::Row => intrinsic.height,
-        FlexDirection::Column => intrinsic.width,
+    match direction.is_row() {
+        true => intrinsic.height,
+        false => intrinsic.width,
     }
     .max(FLEX_ITEM_MIN_CROSS)
 }
@@ -574,9 +589,9 @@ pub(super) fn natural_cross_axis_size_for_prep(
         FlexItemSource::Node(node_id) => {
             natural_cross_axis_size(arena, *node_id, direction, context)
         }
-        FlexItemSource::AnonymousText(text) => match direction {
-            FlexDirection::Row => text.line_height_cells.max(FLEX_ITEM_MIN_CROSS),
-            FlexDirection::Column => runs_total_width(&text.runs).max(FLEX_ITEM_MIN_CROSS),
+        FlexItemSource::AnonymousText(text) => match direction.is_row() {
+            true => text.line_height_cells.max(FLEX_ITEM_MIN_CROSS),
+            false => runs_total_width(&text.runs).max(FLEX_ITEM_MIN_CROSS),
         },
     }
 }
@@ -611,18 +626,12 @@ pub(super) fn resolve_item_cross_size(
     line_cross: usize,
     natural_cross: usize,
     _has_explicit_height: bool,
-    direction: FlexDirection,
 ) -> usize {
     if matches!(align_self, AlignItems::Stretch) {
-        let can_stretch = match direction {
-            FlexDirection::Row => true,
-            FlexDirection::Column => true,
-        };
-        if can_stretch {
-            line_cross
-        } else {
-            natural_cross.max(FLEX_ITEM_MIN_CROSS)
-        }
+        // Stretching fills the line's cross-axis size regardless of whether
+        // the container has an explicit size on that axis: the line cross is
+        // always known by this point (see the function docs).
+        line_cross
     } else {
         natural_cross.max(FLEX_ITEM_MIN_CROSS)
     }

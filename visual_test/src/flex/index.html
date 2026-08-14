@@ -4,18 +4,18 @@
     <meta charset="UTF-8" />
     <title>htui Flexbox Visual Test</title>
     <style>
-        body { color: white; }
+        body { color: white; font-family: monospace; line-height: 1; }
         h2 { color: cyan; }
         h3 { color: yellow; }
         .row      { display: flex; flex-direction: row; }
         .col      { display: flex; flex-direction: column; }
         .wrap     { display: flex; flex-wrap: wrap; }
-        .height-4 { height: 4; }
-        .height-3 { height: 3; }
-        .width-30 { width: 30; }
+        .height-4 { height: 4em; }
+        .height-3 { height: 3em; }
+        .width-30 { width: 30ch; }
         .no-shrink { flex-shrink: 0; }
-        .gap-2    { gap: 2; }
-        .gap-1    { gap: 1; }
+        .gap-2    { gap: 2em; }
+        .gap-1    { gap: 1em; }
         .j-start  { justify-content: flex-start; }
         .j-end    { justify-content: flex-end; }
         .j-center { justify-content: center; }
@@ -27,7 +27,7 @@
         .a-stretch{ align-items: stretch; }
         .grow-1   { flex-grow: 1; }
         .grow-2   { flex-grow: 2; }
-        .basis-10 { flex-basis: 10; }
+        .basis-10 { flex-basis: 10ch; }
         .order-2  { order: 2; }
         .order-1  { order: 1; }
         .order--1 { order: -1; }
@@ -126,7 +126,7 @@
         <div class="yellow order-2">third (2)</div>
     </div>
 
-    <h3>9. flex-wrap: 30px container, 15-char items</h3>
+    <h3>9. flex-wrap: 30ch container, 15-char items</h3>
     <div class="wrap width-30">
         <div class="red no-shrink">AAAAAAAAAAAAAAA</div>
         <div class="green no-shrink">BBBBBBBBBBBBBBB</div>

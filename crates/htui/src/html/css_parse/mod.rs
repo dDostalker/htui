@@ -20,9 +20,11 @@ pub use selector::{
 };
 pub use stylesheet::{CssRule, CssRuleEntry, Parser, parse_declaration_text};
 pub use values::{
-    AlignItems, BoxSizing, CornerRadii, CssDisplay, FlexBasis, FlexDirection, FlexWrap,
-    FontContext, FontStyleKind, FontWeight, GapSizes, InsetSides, JustifyContent, Length,
-    LengthContext, LineHeight, OverflowWrap, PX_PER_CELL, Position, Positioning, TextAlign,
-    TextDecoration, TextTransform, Viewport, Visibility, WhiteSpace, WordBreak, parse_color_str,
-    parse_position, parse_visibility, resolve_line_height_cells,
+    AlignContent, AlignItems, BoxSizing, CornerRadii, CssDisplay, FlexBasis, FlexDirection,
+    FlexShorthand, FlexWrap, FontContext, FontStyleKind, FontWeight, GapSizes, InsetSides,
+    JustifyContent, Length, LengthContext, LineHeight, OverflowWrap, PX_PER_CELL, Position,
+    Positioning, TextAlign, TextDecoration, TextTransform, Viewport, Visibility, WhiteSpace,
+    WordBreak, parse_align_content, parse_align_items, parse_color_str, parse_flex_direction,
+    parse_flex_flow, parse_flex_shorthand, parse_flex_wrap, parse_position, parse_visibility,
+    resolve_line_height_cells,
 };

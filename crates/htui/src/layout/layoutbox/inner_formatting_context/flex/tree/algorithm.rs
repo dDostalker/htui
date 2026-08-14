@@ -1,7 +1,7 @@
 //! Flex algorithm primitives: wrap into lines, distribute main-axis space,
 //! apply `justify-content` / `align-content`, place items on the cross axis.
 
-use crate::html::css_parse::{AlignItems, FlexDirection, GapSizes, JustifyContent};
+use crate::html::css_parse::{AlignContent, AlignItems, FlexDirection, GapSizes, JustifyContent};
 
 use super::container::FlexItemPrep;
 
@@ -28,9 +28,9 @@ pub(super) fn wrap_into_lines(
     available_main: usize,
     gap: GapSizes,
 ) -> Vec<Vec<usize>> {
-    let column_gap = match direction {
-        FlexDirection::Row => gap.column,
-        FlexDirection::Column => gap.row,
+    let column_gap = match direction.is_row() {
+        true => gap.column,
+        false => gap.row,
     };
     let mut lines: Vec<Vec<usize>> = Vec::new();
     let mut current: Vec<usize> = Vec::new();
@@ -261,16 +261,45 @@ pub(super) fn justify_spacing(
 }
 
 /// Same as `justify_spacing` but for `align-content` (which uses the
-/// same value set). Lines count == n_items for this calculation.
+/// same value set plus `stretch`). Lines count == n_items for this
+/// calculation.
 pub(super) fn align_content_spacing(
-    justify: JustifyContent,
+    align: AlignContent,
     free_space: usize,
     n_lines: usize,
 ) -> (usize, usize) {
-    justify_spacing(justify, free_space, n_lines)
+    match align {
+        // `stretch` fills the free cross space by growing each line's cross
+        // size by `free / n` (no leading / trailing / inter-line gap) — the
+        // browser semantics. The line growth itself is applied in
+        // `layout_flex_items` via `stretch_extra`; the pair returned here is
+        // only the line-offset distribution, which for stretch is zero (lines
+        // are already stacked edge-to-edge by their grown sizes).
+        AlignContent::Stretch => (0, 0),
+        AlignContent::FlexStart
+        | AlignContent::FlexEnd
+        | AlignContent::Center
+        | AlignContent::SpaceBetween
+        | AlignContent::SpaceAround
+        | AlignContent::SpaceEvenly => justify_spacing(
+            match align {
+                AlignContent::FlexStart => JustifyContent::FlexStart,
+                AlignContent::FlexEnd => JustifyContent::FlexEnd,
+                AlignContent::Center => JustifyContent::Center,
+                AlignContent::SpaceBetween => JustifyContent::SpaceBetween,
+                AlignContent::SpaceAround => JustifyContent::SpaceAround,
+                _ => JustifyContent::SpaceEvenly,
+            },
+            free_space,
+            n_lines,
+        ),
+    }
 }
 
 /// Position an item along the cross axis within its line.
+///
+/// `Baseline` is handled by the caller (it needs the per-item baseline
+/// offset); reaching it here falls back to [`AlignItems::FlexStart`].
 pub(super) fn align_on_cross_axis(
     line_origin: usize,
     line_size: usize,
@@ -278,7 +307,7 @@ pub(super) fn align_on_cross_axis(
     align: AlignItems,
 ) -> usize {
     match align {
-        AlignItems::FlexStart => line_origin,
+        AlignItems::FlexStart | AlignItems::Baseline => line_origin,
         AlignItems::FlexEnd => line_origin.saturating_add(line_size.saturating_sub(item_size)),
         AlignItems::Center => line_origin.saturating_add(line_size.saturating_sub(item_size) / 2),
         AlignItems::Stretch => line_origin,

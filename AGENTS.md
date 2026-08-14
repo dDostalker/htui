@@ -201,6 +201,7 @@ htui/
 │       ├── flex_align_content/
 │       ├── flex_align_self/
 │       ├── flex_nested/
+│       ├── flex_advanced/  # flex 高级能力演示（flex 简写 / flex-flow / direction·wrap reverse / baseline / align-content stretch / flex-basis content）
 │       ├── pre/
 │       ├── showcase/
 │       ├── table/

@@ -331,6 +331,7 @@ impl FontContext {
 /// - `50%`                          → [`Length::Pct(p)`] (raw 0–100, divided at resolve)
 /// - `2em`, `1.5em`                 → [`Length::Em(n)`]
 /// - `2rem`, `1.5rem`               → [`Length::Rem(n)`]
+/// - `12ch`                         → [`Length::Ch(n)`] (1ch == one cell)
 /// - `50vw`                         → [`Length::Vw(n)`]  (1vw = viewport_cols / 100)
 /// - `50vh`                         → [`Length::Vh(n)`]  (1vh = viewport_rows / 100)
 ///
@@ -355,6 +356,13 @@ pub enum Length {
     /// Root-em multiplier (CSS `2rem`). Same semantics as `em` here — the
     /// terminal has no root font-size distinction.
     Rem(f32),
+    /// Character-width multiplier (CSS `12ch`). In a browser `1ch` is the
+    /// advance width of the `0` glyph — exactly one cell on the terminal's
+    /// monospace grid, so `1ch == 1 cell`. Unlike `em`, this stays aligned
+    /// with character counts regardless of font-size, which makes it the
+    /// unit of choice for widths measured in characters (the default for
+    /// terminal layout).
+    Ch(f32),
     /// Viewport-width multiplier (CSS `50vw`).
     ///
     /// Resolves to `round(n * viewport_cols / 100)` cells, min 1.
@@ -380,6 +388,7 @@ enum PreLength {
     Pct(f32),
     Em(f32),
     Rem(f32),
+    Ch(f32),
     Vw(f32),
     Vh(f32),
 }
@@ -429,6 +438,10 @@ impl Length {
                     "px" => PreLength::Px(n),
                     "em" => PreLength::Em(n),
                     "rem" => PreLength::Rem(n),
+                    // `ch` is the CSS character-width unit: 1ch is the `0`
+                    // glyph's advance, exactly one cell on the monospace
+                    // grid. It resolves to the raw value (no font context).
+                    "ch" => PreLength::Ch(n),
                     // 1vw = viewport_cols / 100, 1vh = viewport_rows / 100.
                     // The actual viewport size is supplied at `Length::resolve`
                     // time — the parser only carries the raw multiplier.
@@ -466,6 +479,7 @@ impl Length {
             PreLength::Pct(p) => Length::Pct(p),
             PreLength::Em(n) => Length::Em(n),
             PreLength::Rem(n) => Length::Rem(n),
+            PreLength::Ch(n) => Length::Ch(n),
             PreLength::Vw(n) => Length::Vw(n),
             PreLength::Vh(n) => Length::Vh(n),
         })
@@ -508,6 +522,9 @@ impl Length {
             &Length::Rem(n) => (n * context.font.root_font_size_cells as f32)
                 .round()
                 .max(0.0) as usize,
+            // `ch` is font-size-independent by definition: one cell per `0`
+            // glyph, so the raw multiplier is the cell count.
+            &Length::Ch(n) => n.round().max(0.0) as usize,
             &Length::Vw(n) => {
                 let raw = (n * context.viewport.cols as f32 / 100.0).round();
                 (raw as usize).max(1)

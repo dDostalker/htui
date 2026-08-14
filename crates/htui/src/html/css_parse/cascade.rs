@@ -190,6 +190,8 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "border-color",
     // Flexbox
     "display",
+    "flex",
+    "flex-flow",
     "flex-direction",
     "flex-wrap",
     "justify-content",

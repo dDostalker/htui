@@ -26,6 +26,182 @@ fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
 }
 
+// ============================================================
+// Extended flex features: *-reverse directions / wrap, baseline,
+// align-content: stretch, flex / flex-flow shorthands, flex-basis:
+// content.
+// ============================================================
+
+#[test]
+fn test_flex_direction_row_reverse_flows_right_to_left() {
+    init();
+    // `row-reverse`: main-start is the right edge, so with the default
+    // `justify-content: flex-start` the items pack at the right of the
+    // (full-width) container, first item innermost.
+    let html = r#"
+        <div class="container"><div class="a">A</div><div class="b">B</div></div>
+    "#;
+    let css = ".container { display: flex; flex-direction: row-reverse; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(
+        rows[0].ends_with("BA"),
+        "row-reverse packs items at the right edge, first item rightmost: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn test_flex_direction_column_reverse_stacks_bottom_to_top() {
+    init();
+    // `column-reverse`: main-start is the bottom edge, so the first item
+    // sits on the last row and later items stack upward.
+    let html = r#"
+        <div class="container"><div class="a">A</div><div class="b">B</div></div>
+    "#;
+    let css = ".container { display: flex; flex-direction: column-reverse; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(rows[0].starts_with("B"), "first item must sit at the bottom: {:?}", rows[0]);
+    assert!(rows[1].starts_with("A"), "second item above it: {:?}", rows[1]);
+}
+
+#[test]
+fn test_flex_wrap_reverse_stacks_lines_from_the_cross_end() {
+    init();
+    // `wrap-reverse`: the cross axis is reversed, so with the default
+    // `align-content: stretch` removed (`flex-start`) the lines pack from
+    // the *bottom* of the container: the first line (A) lands on the last
+    // row, later lines stack upward. The 5-row container anchors the three
+    // 1-row lines at rows 2-4 (the bottom), mirroring a browser.
+    let html = r#"
+        <div class="container">
+            <div class="a">AAAA</div>
+            <div class="b">BBBB</div>
+            <div class="c">CCCC</div>
+        </div>
+    "#;
+    let css = r#"
+        .container { display: flex; flex-wrap: wrap-reverse; width: 6px; height: 5; align-content: flex-start; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    assert!(
+        rows[0].trim().is_empty(),
+        "rows 0-1 are free above the stacked lines: {:?}",
+        rows[0]
+    );
+    assert!(
+        rows[1].trim().is_empty(),
+        "rows 0-1 are free above the stacked lines: {:?}",
+        rows[1]
+    );
+    assert!(rows[2].contains("CCCC"), "last line at the top of the anchored stack: {:?}", rows[2]);
+    assert!(rows[3].contains("BBBB"), "middle line in the middle: {:?}", rows[3]);
+    assert!(rows[4].contains("AAAA"), "first line at the bottom: {:?}", rows[4]);
+}
+
+#[test]
+fn test_flex_align_items_baseline_aligns_first_text_rows() {
+    init();
+    // `align-items: baseline` aligns the items' first text rows (the
+    // terminal cell-grid analogue of the CSS text baseline): an item with
+    // `padding-top: 2` shifts up so its text row coincides with the plain
+    // item's text row.
+    let html = r#"
+        <div class="container">
+            <div class="a">A</div>
+            <div class="b">B</div>
+        </div>
+    "#;
+    let css = ".container { display: flex; align-items: baseline; } .b { padding-top: 2; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(
+        rows[2].starts_with("AB"),
+        "both texts must sit on the same row (the shared baseline): {:?}",
+        rows[2]
+    );
+}
+
+#[test]
+fn test_flex_align_content_stretch_fills_the_container() {
+    init();
+    // `align-content: stretch` (the CSS initial value) grows the wrapped
+    // lines to fill the container's free cross space: 3 one-row lines in a
+    // 7-row container leave 4 free rows → an even gap of 1 between lines.
+    let html = r#"
+        <div class="container">
+            <div class="a">AAAA</div>
+            <div class="b">BBBB</div>
+            <div class="c">CCCC</div>
+        </div>
+    "#;
+    let css = r#"
+        .container { display: flex; flex-wrap: wrap; width: 6px; height: 7; align-content: stretch; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    assert!(rows[0].contains("AAAA"), "first line at the top: {:?}", rows[0]);
+    assert!(rows[2].contains("BBBB"), "stretched gap moves line 2 down 2: {:?}", rows[2]);
+    assert!(rows[4].contains("CCCC"), "stretched gap moves line 3 down 4: {:?}", rows[4]);
+}
+
+#[test]
+fn test_flex_shorthand_grow_and_full_form() {
+    init();
+    // `flex: 1` → `flex-grow: 1`, basis 0: two items split the container
+    // evenly.
+    let html = r#"
+        <div class="container"><div class="a">A</div><div class="b">B</div></div>
+    "#;
+    let css = ".container { display: flex; width: 10px; } .a { flex: 1; } .b { flex: 1; }";
+    let (rows, _) = render_rows(html, css);
+    // `flex: 1` gives each item 5 of the 10 cells; the plain items render
+    // their single glyph at their slot start.
+    assert_eq!(rows[0].chars().nth(0), Some('A'));
+    assert_eq!(rows[0].chars().nth(5), Some('B'));
+
+    // `flex: <grow> <shrink> <basis>`: bases 20 / 10 sum to the container,
+    // so no growth — A occupies [0, 20), B occupies [20, 30).
+    let html = r#"
+        <div class="container"><div class="a">A</div><div class="b">B</div></div>
+    "#;
+    let css = ".container { display: flex; width: 30px; } .a { flex: 2 1 20px; } .b { flex: 1 1 10px; }";
+    let (rows, _) = render_rows(html, css);
+    assert_eq!(rows[0].chars().nth(0), Some('A'));
+    assert_eq!(rows[0].chars().nth(20), Some('B'));
+}
+
+#[test]
+fn test_flex_flow_shorthand_sets_direction_and_wrap() {
+    init();
+    // `flex-flow: column wrap` = `flex-direction: column` + `flex-wrap:
+    // wrap`: a 2×2 column grid (A,B on line 1 / column 0; C,D on column 1).
+    let html = r#"
+        <div class="container">
+            <div class="a">A</div><div class="b">B</div>
+            <div class="c">C</div><div class="d">D</div>
+        </div>
+    "#;
+    let css = ".container { display: flex; flex-flow: column wrap; width: 2px; height: 2px; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(rows[0].starts_with("AC"), "column 0 = A, column 1 = C: {:?}", rows[0]);
+    assert!(rows[1].starts_with("BD"), "column 0 = B, column 1 = D: {:?}", rows[1]);
+}
+
+#[test]
+fn test_flex_basis_content_sizes_to_the_content() {
+    init();
+    // `flex-basis: content` sizes the item from its intrinsic content: A's
+    // 5-cell text drives its width, and B sits right after it.
+    let html = r#"
+        <div class="container"><div class="a">hello</div><div class="b">!</div></div>
+    "#;
+    let css = ".container { display: flex; } .a { flex-basis: content; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(
+        rows[0].starts_with("hello!"),
+        "content basis must size A to its text: {:?}",
+        rows[0]
+    );
+}
+
 fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     let mut html_parser = html_parse::Parser::new(html);
     let (root_id, mut arena, embedded) = html_parser.parse();
