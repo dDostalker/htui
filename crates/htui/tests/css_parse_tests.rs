@@ -1,9 +1,9 @@
 use crossterm::style::Color;
 use htui::html::css_parse::{
-    BorderStyle, BoxSizing, Combinator, CornerRadii, CssAttr, CssRule, CssSelector, EdgeSizes,
-    FontContext, FontWeight, INHERITED_PROPS, Length, LengthContext, LineHeight, NthExpr,
-    PX_PER_CELL, Parser, SUPPORTED_PROPERTIES, Selector, TextDecoration, TextTransform, Viewport,
-    css_into_node, parse_color_str, parse_declaration_text, resolve_line_height_cells,
+    BorderStyle, BoxSizing, Combinator, CornerRadii, CssAttr, CssRule, CssSelector, EdgeAuto,
+    EdgeSizes, FontContext, FontWeight, INHERITED_PROPS, Length, LengthContext, LineHeight,
+    NthExpr, PX_PER_CELL, Parser, SUPPORTED_PROPERTIES, Selector, TextDecoration, TextTransform,
+    Viewport, css_into_node, parse_color_str, parse_declaration_text, resolve_line_height_cells,
     selector_chain_matches,
 };
 use htui::html::html_parse;
@@ -2108,6 +2108,161 @@ fn border_radius_parses_one_to_four_values() {
 fn border_radius_is_supported() {
     init();
     assert!(SUPPORTED_PROPERTIES.contains(&"border-radius"));
+}
+
+#[test]
+fn border_radius_corner_longhands_override_shorthand() {
+    init();
+    // `border-radius: 2px` then `border-top-left-radius: 5px` — the longhand
+    // wins on that corner, the others keep the shorthand value.
+    let mut decls = IndexMap::new();
+    decls.insert("border-radius".into(), "2px".into());
+    decls.insert("border-top-left-radius".into(), "5px".into());
+    let mut attr = CssAttr::new();
+    attr.add(CssAttr(decls));
+    assert_eq!(
+        attr.get_border_radius(80, default_font_ctx(), viewport()),
+        CornerRadii {
+            top_left: 5,
+            top_right: 2,
+            bottom_right: 2,
+            bottom_left: 2,
+        }
+    );
+}
+
+#[test]
+fn border_radius_corner_longhand_alone() {
+    init();
+    // Only the longhand declared — the other corners stay square.
+    let attr = attr_from_decl("border-top-right-radius", "3px");
+    assert_eq!(
+        attr.get_border_radius(80, default_font_ctx(), viewport()),
+        CornerRadii {
+            top_left: 0,
+            top_right: 3,
+            bottom_right: 0,
+            bottom_left: 0,
+        }
+    );
+}
+
+#[test]
+fn border_radius_corner_longhands_are_supported() {
+    init();
+    for p in [
+        "border-top-left-radius",
+        "border-top-right-radius",
+        "border-bottom-right-radius",
+        "border-bottom-left-radius",
+    ] {
+        assert!(
+            SUPPORTED_PROPERTIES.contains(&p),
+            "{p} must be in SUPPORTED_PROPERTIES"
+        );
+    }
+}
+
+#[test]
+fn border_side_component_longhand_overrides_side_shorthand() {
+    init();
+    // `border: 1px solid red; border-top: 3px solid blue; border-top-width:
+    // 5px;` — the component longhand overrides just the width of the side
+    // shorthand; style / color stay from `border-top`.
+    let mut decls = IndexMap::new();
+    decls.insert("border".into(), "1px solid red".into());
+    decls.insert("border-top".into(), "3px solid blue".into());
+    decls.insert("border-top-width".into(), "5px".into());
+    let mut attr = CssAttr::new();
+    attr.add(CssAttr(decls));
+    let sides = attr.get_border(
+        80,
+        font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+        viewport(),
+    );
+    assert_eq!(sides.top.width, 5, "component longhand wins the width");
+    assert_eq!(sides.top.style, BorderStyle::Solid);
+    assert_eq!(
+        sides.top.color,
+        Some(Color::Rgb {
+            r: 0,
+            g: 0,
+            b: 255
+        }),
+        "style/color come from the side shorthand"
+    );
+    // The other sides are untouched by the top longhand.
+    assert_eq!(sides.right.width, 1);
+}
+
+#[test]
+fn border_side_component_longhand_alone() {
+    init();
+    // Only `border-left-color` declared — width 0 / style none, color set.
+    let attr = attr_from_decl("border-left-color", "green");
+    let sides = attr.get_border(
+        80,
+        font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+        viewport(),
+    );
+    assert_eq!(sides.left.width, 0);
+    assert_eq!(sides.left.style, BorderStyle::None);
+    assert_eq!(
+        sides.left.color,
+        Some(Color::Rgb {
+            r: 0,
+            g: 128,
+            b: 0
+        })
+    );
+    assert_eq!(sides.top.color, None, "other sides unaffected");
+}
+
+#[test]
+fn border_side_component_longhands_are_supported() {
+    init();
+    for side in ["top", "right", "bottom", "left"] {
+        for prop in ["width", "style", "color"] {
+            let name = format!("border-{side}-{prop}");
+            assert!(
+                SUPPORTED_PROPERTIES.contains(&name.as_str()),
+                "{name} must be in SUPPORTED_PROPERTIES"
+            );
+        }
+    }
+}
+
+#[test]
+fn margin_auto_flags_parse_from_shorthand_and_longhand() {
+    init();
+    // `margin: 0 auto` -> left+right auto.
+    let attr = attr_from_decl("margin", "0 auto");
+    let auto = attr.get_margin_auto();
+    assert!(!auto.top && !auto.bottom, "vertical auto stays false");
+    assert!(auto.left && auto.right, "horizontal edges are auto");
+
+    // Four-value shorthand: `margin: 1px auto 2px 3px` -> right auto.
+    let attr = attr_from_decl("margin", "1px auto 2px 3px");
+    let auto = attr.get_margin_auto();
+    assert!(!auto.top && auto.right && !auto.bottom && !auto.left);
+
+    // Single-value shorthand applies to all four edges.
+    let attr = attr_from_decl("margin", "auto");
+    let auto = attr.get_margin_auto();
+    assert!(auto.top && auto.right && auto.bottom && auto.left);
+
+    // Per-side longhand wins over the shorthand position.
+    let mut decls = IndexMap::new();
+    decls.insert("margin".into(), "auto".into());
+    decls.insert("margin-right".into(), "5px".into());
+    let mut attr = CssAttr::new();
+    attr.add(CssAttr(decls));
+    let auto = attr.get_margin_auto();
+    assert!(auto.left, "shorthand left stays auto");
+    assert!(!auto.right, "longhand clears the right auto");
+
+    // No margin declarations -> all false.
+    assert_eq!(CssAttr::new().get_margin_auto(), EdgeAuto::default());
 }
 
 // ============================================================

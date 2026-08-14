@@ -112,6 +112,21 @@ pub fn layout_block(
                 child_context.font,
                 child_context.viewport,
             );
+            let mut edges = edges;
+            // Horizontal `margin: auto` distributes the containing block's
+            // free space: two auto margins center the box, a single one
+            // absorbs the whole remainder. `available` already excluded the
+            // fixed (non-auto) margins, so the free space is simply the
+            // leftover width. Vertical auto margins stay 0 in block flow.
+            let margin_auto = node.css_attr.get_margin_auto();
+            if margin_auto.left || margin_auto.right {
+                let free = available.saturating_sub(block_width);
+                match (margin_auto.left, margin_auto.right) {
+                    (true, true) => edges.margin.left = free / 2,
+                    (true, false) => edges.margin.left = free,
+                    _ => {}
+                }
+            }
             let x = block_left(containing) + opts.indent;
             let geom = compute_outer_geometry(
                 BoxConstraint {

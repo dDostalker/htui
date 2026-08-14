@@ -212,6 +212,127 @@ fn margin_shorthand_two_values_applies_to_top_bottom_and_left_right() {
     );
 }
 
+#[test]
+fn margin_auto_centers_block_horizontally() {
+    init();
+    // `margin: 0 auto` + explicit width centers the box: both auto margins
+    // share the free space. 80-col canvas, width 20 → left = (80-20)/2 = 30.
+    let (term_map, tl) = draw(
+        "<div>X</div>",
+        "div { width: 20px; margin: 0 auto; background-color: yellow; }",
+    );
+    let cols = term_map.columns as usize;
+    let text_idx = tl.layout.iter().position(|b| b.word == "X").unwrap();
+    assert_eq!(
+        text_idx % cols,
+        30,
+        "both auto margins split the free space: (80-20)/2 = 30"
+    );
+}
+
+#[test]
+fn margin_right_auto_pushes_box_to_the_left() {
+    init();
+    // `margin-right: auto` absorbs the whole remainder: the box stays flush
+    // left with the free space on its right.
+    let (term_map, tl) = draw("<div>X</div>", "div { width: 20px; margin-right: auto; }");
+    let cols = term_map.columns as usize;
+    let text_idx = tl.layout.iter().position(|b| b.word == "X").unwrap();
+    assert_eq!(text_idx % cols, 0, "left margin stays 0, auto right absorbs");
+}
+
+#[test]
+fn margin_left_auto_pushes_box_to_the_right() {
+    init();
+    // `margin-left: auto` absorbs the whole remainder: the box sits flush
+    // against the right edge of the containing block.
+    let (term_map, tl) = draw(
+        "<div>X</div>",
+        "div { width: 20px; margin-left: auto; background-color: yellow; }",
+    );
+    let cols = term_map.columns as usize;
+    let text_idx = tl.layout.iter().position(|b| b.word == "X").unwrap();
+    assert_eq!(
+        text_idx % cols,
+        60,
+        "auto left margin = 80 - 20 = 60"
+    );
+}
+
+#[test]
+fn border_side_component_longhand_renders() {
+    init();
+    // `border-left-width: 3px; border-left-style: solid; border-left-color:
+    // green;` — the longhands alone must paint a left border edge. The
+    // padding-top gives the box a second row so the edge isn't overwritten
+    // by the corner glyph on row 0.
+    let (_, tl) = draw(
+        "<div></div>",
+        "div { width: 5px; padding-top: 1px; border-left-width: 3px; border-left-style: solid; border-left-color: green; }",
+    );
+    let cols = 80;
+    // The left edge glyph renders as a vertical bar somewhere in the box.
+    let edge = tl
+        .layout
+        .iter()
+        .find(|b| b.word == BOX_V)
+        .expect("left edge vertical bar")
+        .clone();
+    assert_eq!(edge.word, BOX_V, "left edge renders a vertical bar");
+    assert_eq!(
+        edge.fcolor,
+        Some(Color::Rgb {
+            r: 0,
+            g: 128,
+            b: 0
+        }),
+        "longhand color applies"
+    );
+}
+
+#[test]
+fn border_component_longhand_overrides_side_shorthand_in_layout() {
+    init();
+    // `border: 1px solid red; border-left-color: blue;` — the component
+    // longhand overrides just the left color, others stay red.
+    let (_, tl) = draw(
+        "<div></div>",
+        "div { width: 5px; border: 1px solid red; border-left-color: blue; }",
+    );
+    let cols = 80;
+    let left_edge = tl
+        .layout
+        .iter()
+        .find(|b| b.word == BOX_V)
+        .expect("left edge")
+        .clone();
+    let top_edge = tl
+        .layout
+        .iter()
+        .find(|b| b.word == BOX_H)
+        .expect("top edge")
+        .clone();
+    assert_eq!(left_edge.word, BOX_V);
+    assert_eq!(
+        left_edge.fcolor,
+        Some(Color::Rgb {
+            r: 0,
+            g: 0,
+            b: 255
+        }),
+        "component longhand wins"
+    );
+    assert_eq!(
+        top_edge.fcolor,
+        Some(Color::Rgb {
+            r: 255,
+            g: 0,
+            b: 0
+        }),
+        "other sides keep shorthand"
+    );
+}
+
 // ============================================================
 // border
 // ============================================================

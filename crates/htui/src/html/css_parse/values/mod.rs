@@ -5,8 +5,9 @@ pub use color::parse_color_str;
 use length::parse_length_token;
 pub use length::{FontContext, Length, LengthContext, PX_PER_CELL, Viewport};
 pub(crate) use length::{
-    parse_border_side, parse_border_style, parse_border_width, parse_edge_sizes,
+    parse_border_side, parse_border_style, parse_border_width, parse_edge_auto, parse_edge_sizes,
 };
+pub(crate) use length::{merge_border_longhand};
 
 use indexmap::IndexMap;
 
@@ -271,53 +272,73 @@ impl CornerRadii {
     }
 }
 
-/// Expand the `border-radius` shorthand (1–4 values) into a [`CornerRadii`].
+/// Expand the `border-radius` shorthand (1–4 values) into a [`CornerRadii`],
+/// then overlay the per-corner longhands (`border-top-left-radius`, …).
 ///
 /// Follows the standard CSS 1-/2-/3-/4-value pattern: one value applies to
 /// every corner, two set `(top-left & bottom-right) / (top-right &
 /// bottom-left)`, three set top-left / (top-right & bottom-left) /
 /// bottom-right, four set each corner in clockwise order. Tokens that cannot
-/// be parsed as a [`Length`] are treated as `0`.
+/// be parsed as a [`Length`] are treated as `0`. The per-corner longhands win
+/// over the shorthand (mirroring CSS priority); an unparseable longhand
+/// leaves that corner untouched.
 pub(super) fn parse_border_radius(
     decls: &IndexMap<String, String>,
     containing_width: usize,
     font_ctx: FontContext,
     viewport: Viewport,
 ) -> CornerRadii {
-    let Some(value) = decls.get("border-radius") else {
-        return CornerRadii::default();
-    };
-    let radii: Vec<usize> = value
-        .split_whitespace()
-        .filter_map(|t| parse_length_token(Some(t), containing_width, font_ctx, viewport))
-        .collect();
-    match radii.len() {
-        0 => CornerRadii::default(),
-        1 => CornerRadii {
-            top_left: radii[0],
-            top_right: radii[0],
-            bottom_right: radii[0],
-            bottom_left: radii[0],
-        },
-        2 => CornerRadii {
-            top_left: radii[0],
-            top_right: radii[1],
-            bottom_right: radii[0],
-            bottom_left: radii[1],
-        },
-        3 => CornerRadii {
-            top_left: radii[0],
-            top_right: radii[1],
-            bottom_right: radii[2],
-            bottom_left: radii[1],
-        },
-        _ => CornerRadii {
-            top_left: radii[0],
-            top_right: radii[1],
-            bottom_right: radii[2],
-            bottom_left: radii[3],
-        },
+    let mut radii: CornerRadii = decls
+        .get("border-radius")
+        .map(|value| {
+            let parsed: Vec<usize> = value
+                .split_whitespace()
+                .filter_map(|t| parse_length_token(Some(t), containing_width, font_ctx, viewport))
+                .collect();
+            match parsed.len() {
+                0 => CornerRadii::default(),
+                1 => CornerRadii {
+                    top_left: parsed[0],
+                    top_right: parsed[0],
+                    bottom_right: parsed[0],
+                    bottom_left: parsed[0],
+                },
+                2 => CornerRadii {
+                    top_left: parsed[0],
+                    top_right: parsed[1],
+                    bottom_right: parsed[0],
+                    bottom_left: parsed[1],
+                },
+                3 => CornerRadii {
+                    top_left: parsed[0],
+                    top_right: parsed[1],
+                    bottom_right: parsed[2],
+                    bottom_left: parsed[1],
+                },
+                _ => CornerRadii {
+                    top_left: parsed[0],
+                    top_right: parsed[1],
+                    bottom_right: parsed[2],
+                    bottom_left: parsed[3],
+                },
+            }
+        })
+        .unwrap_or_default();
+    // Per-corner longhands override the shorthand.
+    for (name, slot) in [
+        ("border-top-left-radius", &mut radii.top_left),
+        ("border-top-right-radius", &mut radii.top_right),
+        ("border-bottom-right-radius", &mut radii.bottom_right),
+        ("border-bottom-left-radius", &mut radii.bottom_left),
+    ] {
+        if let Some(raw) = decls.get(name)
+            && let Some(len) =
+                parse_length_token(Some(raw.as_str()), containing_width, font_ctx, viewport)
+        {
+            *slot = len;
+        }
     }
+    radii
 }
 
 // ============================================================

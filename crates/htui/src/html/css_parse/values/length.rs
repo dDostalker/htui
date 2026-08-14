@@ -2,7 +2,7 @@ use crossterm::style::Color;
 use cssparser::{Parser as CssParser, ParserInput, Token};
 use indexmap::IndexMap;
 
-use crate::html::box_edges::{Border, BorderStyle, EdgeSizes};
+use crate::html::box_edges::{Border, BorderStyle, EdgeAuto, EdgeSizes};
 
 use super::color::parse_color_str;
 
@@ -92,6 +92,70 @@ fn parse_shorthand_lengths(
     }
 }
 
+/// Expand a `margin` shorthand / `margin-{side}` set into per-side `auto`
+/// flags (CSS `margin: 0 auto`). Mirrors the [`parse_shorthand_lengths`]
+/// expansion pattern for the token positions, then lets the per-side
+/// longhands override each edge. `auto` on the vertical axes is recorded but
+/// ignored by block-flow layout (CSS keeps vertical auto margins at 0); flex
+/// containers may consult it later.
+pub(crate) fn parse_edge_auto(decls: &IndexMap<String, String>, shorthand: &str) -> EdgeAuto {
+    let mut out = EdgeAuto::default();
+    if let Some(value) = decls.get(shorthand) {
+        let autos: Vec<bool> = value
+            .split_whitespace()
+            .map(|t| t.eq_ignore_ascii_case("auto"))
+            .collect();
+        match autos.as_slice() {
+            [a] => {
+                if *a {
+                    out = EdgeAuto::new(true, true, true, true);
+                }
+            }
+            [a, b] => {
+                if *a {
+                    out.top = true;
+                    out.bottom = true;
+                }
+                if *b {
+                    out.right = true;
+                    out.left = true;
+                }
+            }
+            [a, b, c] => {
+                if *a {
+                    out.top = true;
+                }
+                if *b {
+                    out.right = true;
+                    out.left = true;
+                }
+                if *c {
+                    out.bottom = true;
+                }
+            }
+            [a, b, c, d, ..] => {
+                out.top = *a;
+                out.right = *b;
+                out.bottom = *c;
+                out.left = *d;
+            }
+            [] => {}
+        }
+    }
+    // Per-side longhands win over the shorthand positions.
+    for (side_name, flag) in [
+        ("top", &mut out.top),
+        ("right", &mut out.right),
+        ("bottom", &mut out.bottom),
+        ("left", &mut out.left),
+    ] {
+        if let Some(raw) = decls.get(&format!("{shorthand}-{side_name}")) {
+            *flag = raw.eq_ignore_ascii_case("auto");
+        }
+    }
+    out
+}
+
 fn resolve_length(
     length: Length,
     containing: usize,
@@ -170,6 +234,38 @@ pub(crate) fn parse_border_side(
         return parsed;
     }
     fallback
+}
+
+/// Overlay the per-side `border-{side}-{prop}` longhands on top of an
+/// already-resolved side, mirroring CSS priority: `border-top-width` beats
+/// `border-top`, which beats `border-width` / `border`.
+///
+/// An unparseable longhand (or one absent from the declaration map) leaves
+/// that property untouched, so a bad value never wipes a valid shorthand.
+pub(crate) fn merge_border_longhand(
+    side: Border,
+    decls: &IndexMap<String, String>,
+    side_name: &str,
+    containing_width: usize,
+    font_ctx: FontContext,
+    viewport: Viewport,
+) -> Border {
+    let mut side = side;
+    if let Some(raw) = decls.get(&format!("border-{side_name}-width"))
+        && let Some(w) =
+            parse_length_token(Some(raw.as_str()), containing_width, font_ctx, viewport)
+    {
+        side.width = w;
+    }
+    if let Some(raw) = decls.get(&format!("border-{side_name}-style")) {
+        side.style = parse_border_style(Some(raw.as_str()));
+    }
+    if let Some(raw) = decls.get(&format!("border-{side_name}-color"))
+        && let Some(c) = parse_color_str(raw)
+    {
+        side.color = Some(c);
+    }
+    side
 }
 
 /// Parse a `border` shorthand declaration.

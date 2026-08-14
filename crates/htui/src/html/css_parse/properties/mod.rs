@@ -30,18 +30,18 @@ use crate::tdom::node::NodeType;
 use crossterm::style::Color;
 use indexmap::IndexMap;
 
-use crate::html::box_edges::{Border, BorderSides, BoxEdges, EdgeSizes};
+use crate::html::box_edges::{Border, BorderSides, BoxEdges, EdgeAuto, EdgeSizes};
 
 use super::values::{
     AlignContent, AlignItems, BoxSizing, CornerRadii, CssDisplay, FlexBasis, FlexDirection,
     FlexShorthand, FlexWrap, FontStyleKind, FontWeight, GapSizes, JustifyContent, Length,
     LineHeight, OverflowWrap, TextAlign, TextDecoration, TextTransform, Visibility, WhiteSpace,
-    WordBreak, parse_align_content, parse_align_items, parse_border_radius, parse_border_side,
-    parse_border_style, parse_border_width, parse_box_sizing, parse_color_str, parse_edge_sizes,
-    parse_flex_basis, parse_flex_direction, parse_flex_flow, parse_flex_shorthand,
-    parse_flex_wrap, parse_gap_shorthand, parse_justify_content, parse_line_height,
-    parse_non_negative_number, parse_order, parse_overflow_wrap, parse_text_transform,
-    parse_visibility, parse_white_space, parse_word_break, resolve_flex_basis,
+    WordBreak, merge_border_longhand, parse_align_content, parse_align_items, parse_border_radius,
+    parse_border_side, parse_border_style, parse_border_width, parse_box_sizing, parse_color_str,
+    parse_edge_auto, parse_edge_sizes, parse_flex_basis, parse_flex_direction, parse_flex_flow,
+    parse_flex_shorthand, parse_flex_wrap, parse_gap_shorthand, parse_justify_content,
+    parse_line_height, parse_non_negative_number, parse_order, parse_overflow_wrap,
+    parse_text_transform, parse_visibility, parse_white_space, parse_word_break, resolve_flex_basis,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -271,9 +271,11 @@ impl CssAttr {
 
     /// Resolve all four margin edges from `margin` / `margin-{side}`.
     ///
-    /// `margin: auto` is currently treated as `0` (the terminal has no
-    /// centering primitive for margins). Per-side longhands win over the
-    /// shorthand.
+    /// `margin: auto` resolves to `0` here; the per-side `auto` flags (see
+    /// [`get_margin_auto`]) are handed to the layout phase, which distributes
+    /// the containing block's free space — both horizontal auto margins
+    /// center the block, a single one absorbs the remainder. Per-side
+    /// longhands win over the shorthand.
     pub fn get_margin(
         &self,
         containing_width: usize,
@@ -281,6 +283,16 @@ impl CssAttr {
         viewport: Viewport,
     ) -> EdgeSizes {
         parse_edge_sizes(&self.0, "margin", containing_width, font_ctx, viewport)
+    }
+
+    /// Per-side `auto` flags for the margin edges (CSS `margin: 0 auto`).
+    ///
+    /// Block-flow layout uses only the horizontal flags: both auto margins
+    /// center the box within its containing block, a single auto margin
+    /// absorbs all the free space on its side. Vertical auto margins stay
+    /// `0` in block flow (CSS).
+    pub fn get_margin_auto(&self) -> EdgeAuto {
+        parse_edge_auto(&self.0, "margin")
     }
 
     /// Resolve all four border sides from `border` / `border-{side}` /
@@ -309,34 +321,62 @@ impl CssAttr {
         let universal = Border::new(universal_width, universal_style, universal_color);
 
         // Step 2: parse per-side longhands.
-        let top = parse_border_side(
-            self.0.get("border-top"),
-            self.0.get("border"),
-            universal,
+        let top = merge_border_longhand(
+            parse_border_side(
+                self.0.get("border-top"),
+                self.0.get("border"),
+                universal,
+                containing_width,
+                font_ctx,
+                viewport,
+            ),
+            &self.0,
+            "top",
             containing_width,
             font_ctx,
             viewport,
         );
-        let right = parse_border_side(
-            self.0.get("border-right"),
-            self.0.get("border"),
-            universal,
+        let right = merge_border_longhand(
+            parse_border_side(
+                self.0.get("border-right"),
+                self.0.get("border"),
+                universal,
+                containing_width,
+                font_ctx,
+                viewport,
+            ),
+            &self.0,
+            "right",
             containing_width,
             font_ctx,
             viewport,
         );
-        let bottom = parse_border_side(
-            self.0.get("border-bottom"),
-            self.0.get("border"),
-            universal,
+        let bottom = merge_border_longhand(
+            parse_border_side(
+                self.0.get("border-bottom"),
+                self.0.get("border"),
+                universal,
+                containing_width,
+                font_ctx,
+                viewport,
+            ),
+            &self.0,
+            "bottom",
             containing_width,
             font_ctx,
             viewport,
         );
-        let left = parse_border_side(
-            self.0.get("border-left"),
-            self.0.get("border"),
-            universal,
+        let left = merge_border_longhand(
+            parse_border_side(
+                self.0.get("border-left"),
+                self.0.get("border"),
+                universal,
+                containing_width,
+                font_ctx,
+                viewport,
+            ),
+            &self.0,
+            "left",
             containing_width,
             font_ctx,
             viewport,

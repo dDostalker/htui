@@ -62,6 +62,33 @@ impl EdgeSizes {
     }
 }
 
+/// Per-edge flags recording which margin sides are `auto`.
+///
+/// `margin: 0 auto` (or a single auto side) does not resolve to a concrete
+/// length — it participates in the containing block's free-space
+/// distribution during layout: both horizontal auto margins center the
+/// block, a single one absorbs the whole remainder. Vertical auto margins
+/// stay `0` in block flow (CSS), so the layout phase only consults the
+/// left / right flags.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EdgeAuto {
+    pub top: bool,
+    pub right: bool,
+    pub bottom: bool,
+    pub left: bool,
+}
+
+impl EdgeAuto {
+    pub const fn new(top: bool, right: bool, bottom: bool, left: bool) -> Self {
+        Self {
+            top,
+            right,
+            bottom,
+            left,
+        }
+    }
+}
+
 /// Visual style of a border edge.
 ///
 /// Terminals render at most one character per cell, so anything that isn't a

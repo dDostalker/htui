@@ -5,7 +5,7 @@
     <meta charset="UTF-8" />
     <title>htui Box Model Demo</title>
     <style>
-        body { color: white; }
+        body { color: white; font-family: monospace; line-height: 1; }
 
         /* 1. Padding — background extends into the padding area */
         .pad {
@@ -38,6 +38,36 @@
 
         .card-title { color: yellow; }
         .card-body  { color: white; }
+
+        /* 5. margin auto — horizontal centering */
+        .centered {
+            width: 30ch;
+            margin: 0 auto;
+            background-color: darkblue;
+            color: yellow;
+            border: 1px solid cyan;
+        }
+        .right-pushed {
+            width: 20ch;
+            margin-left: auto;
+            background-color: darkgreen;
+            color: white;
+        }
+
+        /* 6. border-{side}-{prop} component longhands */
+        .partial-border {
+            border: 1px solid cyan;
+            border-top-width: 3px;
+            border-top-color: yellow;
+            border-left-color: magenta;
+        }
+
+        /* 7. border-radius per-corner longhands */
+        .round-top {
+            border: 1px solid green;
+            border-top-left-radius: 3px;
+            border-top-right-radius: 3px;
+        }
     </style>
 </head>
 <body>
@@ -67,6 +97,21 @@
             <p class="card-title">Another Card</p>
             <p class="card-body">Margin keeps the cards apart.</p>
         </div>
+
+        <h2>5. Margin auto — horizontal centering</h2>
+        <p>A fixed-width block centered with <code>margin: 0 auto</code>:</p>
+        <div class="centered">Centered block</div>
+        <p>Single <code>margin-left: auto</code> pushes the box to the right:</p>
+        <div class="right-pushed">Right</div>
+
+        <h2>6. Border component longhands</h2>
+        <p><code>border-top-width</code> / <code>border-top-color</code> /
+           <code>border-left-color</code> override the universal border:</p>
+        <div class="partial-border">Longhands</div>
+
+        <h2>7. Border-radius corners</h2>
+        <p>Only the top corners rounded via corner longhands:</p>
+        <div class="round-top">Rounded top</div>
     </div>
 </body>
 </html>

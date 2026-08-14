@@ -246,6 +246,29 @@ fn render_rows(html: &str, css: &str) -> (Vec<String>, TermLayout) {
 }
 
 #[test]
+fn test_flex_container_margin_auto_centers() {
+    init();
+    // A flex container is a block-level box in its own flow, so
+    // `margin: 0 auto` centers it within the containing block the same way
+    // a plain block is centered: left auto margin = (80-20)/2 = 30.
+    let html = r#"
+        <div class="container"><div class="a">A</div></div>
+    "#;
+    let css = ".container { display: flex; width: 20px; margin: 0 auto; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(
+        rows[0].starts_with(&" ".repeat(30)),
+        "flex container centered by auto margins: {:?}",
+        rows[0]
+    );
+    assert_eq!(
+        rows[0].chars().nth(30),
+        Some('A'),
+        "the item sits at the centered container's left edge"
+    );
+}
+
+#[test]
 fn test_flex_promotes_inline_children_to_items() {
     init();
     // Inline children (`<span>` / `<a>` / `<em>`) are blockified into flex

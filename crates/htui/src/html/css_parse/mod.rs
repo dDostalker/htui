@@ -5,7 +5,7 @@ mod selector;
 mod stylesheet;
 mod values;
 
-pub use crate::html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeSizes};
+pub use crate::html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeAuto, EdgeSizes};
 pub use cascade::{
     INHERITED_PROPS, SUPPORTED_PROPERTIES, css_into_node, css_into_node_with_hover,
     css_into_node_with_state, css_pseudo_rule_set, reset_css_attr,
