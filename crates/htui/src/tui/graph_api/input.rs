@@ -2311,7 +2311,13 @@ pub fn paste_into_field(
 
 /// The page-level built-in action for a key that no `<select>` dropdown or
 /// focused `<input>` consumed: `Ctrl` zoom / document jumps, page text-
-/// selection clearing, `Shift`+Space page-up, plain Space / PageUp / PageDown /
+/// selection clearing, PageUp / PageDown / arrows / `g` / `G` scrolling,
+/// `Home` / `End`, `Esc` quit and `Tab` / `Shift`+`Tab` focus cycling.
+///
+/// The browser-style keys are deliberately **not** bound: `j` / `k` / `q` /
+/// `Space` type into focused fields and match a browser, which has no vim
+/// shortcuts, terminal quit key or page-scroll shortcut. `Esc` remains the
+/// engine's quit key.
 ///
 /// Returns the render commands the key produces (empty = no built-in action,
 /// e.g. a scroll key already at the page boundary). With the script layer
@@ -2389,19 +2395,6 @@ fn page_level_builtins(
         clear_text_selection(state, &mut cmds);
     }
 
-    // `Shift` + Space scrolls up a page (the browser flip of the plain
-    // `Space` page-down handled below).
-    if key.code == KeyCode::Char(' ') && key.modifiers.contains(event::KeyModifiers::SHIFT) {
-        if state.scroll_y == 0 {
-            return cmds;
-        }
-        let step = (rows as u32).saturating_sub(1).max(1);
-        state.scroll_y = state.scroll_y.saturating_sub(step);
-        return vec![RenderCmd::Rerender {
-            scroll_y: state.scroll_y,
-        }];
-    }
-
     match key.code {
         // `Esc` quits the engine; plain `q` is deliberately not bound (it
         // types into focused fields and matches the browser, which has no
@@ -2425,17 +2418,6 @@ fn page_level_builtins(
                 return cmds;
             }
             state.scroll_y = max_scroll;
-            cmds.push(RenderCmd::Rerender {
-                scroll_y: state.scroll_y,
-            });
-        }
-        // Plain `Space` scrolls down a page, like a browser.
-        KeyCode::Char(' ') => {
-            if state.scroll_y >= max_scroll {
-                return cmds;
-            }
-            let step = (rows as u32).saturating_sub(1).max(1);
-            state.scroll_y = state.scroll_y.saturating_add(step);
             cmds.push(RenderCmd::Rerender {
                 scroll_y: state.scroll_y,
             });
