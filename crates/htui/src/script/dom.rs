@@ -172,6 +172,9 @@ fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsValue
     let set_value = js_fn(context, NativeFunction::from_fn_ptr(native_set_value));
     let get_inner_html = js_fn(context, NativeFunction::from_fn_ptr(native_get_inner_html));
     let set_inner_html = js_fn(context, NativeFunction::from_fn_ptr(native_set_inner_html));
+    let get_hidden = js_fn(context, NativeFunction::from_fn_ptr(native_get_hidden));
+    let set_hidden = js_fn(context, NativeFunction::from_fn_ptr(native_set_hidden));
+    let get_dataset = js_fn(context, NativeFunction::from_fn_ptr(native_get_dataset));
 
     let mut init = ObjectInitializer::new(context);
     init.property(js_string!("_nodeId"), node_key, hidden);
@@ -343,6 +346,18 @@ fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsValue
             js_string!("innerHTML"),
             Some(get_inner_html),
             Some(set_inner_html),
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("hidden"),
+            Some(get_hidden),
+            Some(set_hidden),
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("dataset"),
+            Some(get_dataset),
+            None,
             Attribute::all(),
         );
         init.function(
@@ -927,6 +942,206 @@ fn class_list_set(
     }
     mark_dirty(&mut st, node_id);
     Ok(JsValue::undefined())
+}
+
+/// `el.hidden` read — whether the `hidden` global attribute is present (the
+/// UA `[hidden] { display: none }` rule hides the element).
+fn native_get_hidden(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let present = with_state()
+        .map(|rc| {
+            rc.borrow()
+                .arena
+                .get(node_id)
+                .is_some_and(|n| n.attributes.contains_key("hidden"))
+        })
+        .unwrap_or(false);
+    Ok(JsValue::from(present))
+}
+
+/// `el.hidden` write — set / remove the `hidden` attribute, scheduling a
+/// re-render only when the state actually changed (browser `hidden` is a
+/// boolean attribute: any non-false value is "present").
+fn native_set_hidden(this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let on = args.first().is_some_and(|v| v.to_boolean());
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let mut st = rc.borrow_mut();
+    let Some(node) = st.arena.get_mut(node_id) else {
+        return Ok(JsValue::undefined());
+    };
+    let present = node.attributes.contains_key("hidden");
+    if on && !present {
+        node.attributes.insert("hidden".to_string(), String::new());
+        mark_dirty(&mut st, node_id);
+    } else if !on && present {
+        node.attributes.shift_remove("hidden");
+        mark_dirty(&mut st, node_id);
+    }
+    Ok(JsValue::undefined())
+}
+
+/// `el.dataset` — a live `DOMStringMap` over the element's `data-*`
+/// attributes (the `dataset` property). The factory's native closures read /
+/// write individual `data-<name>` attributes through the engine arena, so the
+/// returned object reflects later DOM mutations (browser `dataset` is live).
+fn native_get_dataset(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let node_key = node_id_to_f64(node_id);
+    let get = js_fn(
+        context,
+        NativeFunction::from_copy_closure_with_captures(dataset_get, node_key),
+    );
+    let set = js_fn(
+        context,
+        NativeFunction::from_copy_closure_with_captures(dataset_set, node_key),
+    );
+    let remove = js_fn(
+        context,
+        NativeFunction::from_copy_closure_with_captures(dataset_remove, node_key),
+    );
+    let keys = js_fn(
+        context,
+        NativeFunction::from_copy_closure_with_captures(dataset_keys, node_key),
+    );
+    let global = context.global_object();
+    let helper = global
+        .get(js_string!("__htuiDataset"), context)?
+        .to_object(context)?;
+    helper.call(
+        &JsValue::undefined(),
+        &[get.into(), set.into(), remove.into(), keys.into()],
+        context,
+    )
+}
+
+/// Live `dataset` read: the `data-<name>` attribute value (the `name` is the
+/// kebab-cased key passed by the proxy), or `undefined` when absent.
+fn dataset_get(
+    _this: &JsValue,
+    args: &[JsValue],
+    node_key: &f64,
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = f64_to_node_id(*node_key);
+    let name = args
+        .first()
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?
+        .unwrap_or_default();
+    let value = with_state().map(|rc| {
+        rc.borrow()
+            .arena
+            .get(node_id)
+            .and_then(|n| n.attributes.get(&format!("data-{name}")).cloned())
+    });
+    Ok(match value {
+        Some(Some(v)) => js_string!(v).into(),
+        _ => JsValue::undefined(),
+    })
+}
+
+/// Live `dataset` write: set `data-<name>` to the value. An empty string
+/// removes the attribute (browser `dataset` semantics); the node is marked
+/// dirty only when the attribute actually changed.
+fn dataset_set(
+    _this: &JsValue,
+    args: &[JsValue],
+    node_key: &f64,
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = f64_to_node_id(*node_key);
+    let name = args
+        .first()
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?
+        .unwrap_or_default();
+    let value = args
+        .get(1)
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?
+        .unwrap_or_default();
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let mut st = rc.borrow_mut();
+    let Some(node) = st.arena.get_mut(node_id) else {
+        return Ok(JsValue::undefined());
+    };
+    let key = format!("data-{name}");
+    let existing = node.attributes.get(&key).cloned();
+    if value.is_empty() {
+        if existing.is_some() {
+            node.attributes.shift_remove(&key);
+            mark_dirty(&mut st, node_id);
+        }
+    } else if existing.as_deref() != Some(value.as_str()) {
+        node.attributes.insert(key, value);
+        mark_dirty(&mut st, node_id);
+    }
+    Ok(JsValue::undefined())
+}
+
+/// Live `dataset` delete: remove the `data-<name>` attribute.
+fn dataset_remove(
+    _this: &JsValue,
+    args: &[JsValue],
+    node_key: &f64,
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = f64_to_node_id(*node_key);
+    let name = args
+        .first()
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?
+        .unwrap_or_default();
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let mut st = rc.borrow_mut();
+    if let Some(node) = st.arena.get_mut(node_id) {
+        let key = format!("data-{name}");
+        if node.attributes.shift_remove(&key).is_some() {
+            mark_dirty(&mut st, node_id);
+        }
+    }
+    Ok(JsValue::undefined())
+}
+
+/// Live `dataset` enumeration: the kebab-cased names of every `data-*`
+/// attribute on the element, in attribute order.
+fn dataset_keys(
+    _this: &JsValue,
+    _args: &[JsValue],
+    node_key: &f64,
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = f64_to_node_id(*node_key);
+    let names: Vec<String> = with_state()
+        .map(|rc| {
+            rc.borrow()
+                .arena
+                .get(node_id)
+                .map(|n| {
+                    n.attributes
+                        .keys()
+                        .filter_map(|k| k.strip_prefix("data-").map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+    let arr = boa_engine::object::builtins::JsArray::new(context);
+    for name in names {
+        arr.push(js_string!(name), context)?;
+    }
+    Ok(arr.into())
 }
 
 fn native_get_id(this: &JsValue, _args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {

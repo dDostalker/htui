@@ -136,6 +136,14 @@ pub fn generate_node(arena: &NodeArena, node_id: NodeId) -> Option<GeneratedBox>
         return None;
     }
 
+    // UA `[hidden] { display: none }`: an element carrying the `hidden` global
+    // attribute produces no box (its subtree drops with it). Like the dialog
+    // rule, an author-declared `display` beats the UA default, so
+    // `display: block` on a `hidden` element still renders (browser behaviour).
+    if node.attributes.contains_key("hidden") && !node.css_attr.is_set("display") {
+        return None;
+    }
+
     // `display: contents` flattens the element's children into the parent
     // instead of producing a box. We can't do that here (we only own one
     // node), so we emit a `Transparent` marker; `generate_children` will

@@ -110,6 +110,65 @@ fn display_none_subtree_also_excluded() {
 }
 
 #[test]
+fn hidden_attribute_excludes_box_from_tree() {
+    // The UA rule `[hidden] { display: none }`: an element carrying the
+    // `hidden` global attribute produces no box (matching the browser, where
+    // `hidden` behaves like `display: none` unless an author `display` wins).
+    let (root_id, arena) = setup(
+        "<div><p>visible</p><p hidden>gone</p></div>",
+        "",
+    );
+    let boxes = generate_box_tree(&arena, root_id);
+    let div =
+        find(&boxes, &arena, |nt| matches!(nt, NodeType::Div)).expect("div should generate a box");
+    let ps: Vec<&GeneratedBox> = div
+        .children
+        .iter()
+        .filter(|c| matches!(arena[c.node_id].node_type, NodeType::P))
+        .collect();
+    assert_eq!(ps.len(), 1, "the hidden <p> must be absent");
+    assert!(
+        flatten_text_contains(&div.children, &arena, "visible"),
+        "the visible <p> should remain in the tree"
+    );
+    assert!(
+        !flatten_text_contains(&div.children, &arena, "gone"),
+        "the hidden <p>'s content must not render"
+    );
+}
+
+#[test]
+fn hidden_attribute_drops_the_subtree() {
+    let (root_id, arena) = setup(
+        "<div hidden><p>never</p><span>shown</span></div>",
+        "",
+    );
+    let boxes = generate_box_tree(&arena, root_id);
+    assert!(
+        !boxes
+            .iter()
+            .any(|g| matches!(arena[g.node_id].node_type, NodeType::Div)),
+        "a hidden div and all its descendants must be absent"
+    );
+}
+
+#[test]
+fn hidden_attribute_yields_to_author_display() {
+    // `hidden` is a plain UA rule, so an author `display` overrides it
+    // (browser behaviour): `style="display: block"` on a `hidden` element
+    // still renders.
+    let (root_id, arena) = setup(
+        "<div><p hidden style=\"display: block\">shown</p></div>",
+        "",
+    );
+    let boxes = generate_box_tree(&arena, root_id);
+    assert!(
+        flatten_text_contains(&boxes, &arena, "shown"),
+        "an author display on a hidden element must keep it rendered"
+    );
+}
+
+#[test]
 fn display_contents_flattens_children_into_parent() {
     let (root_id, arena) = setup(
         "<div><span style=\"display: contents\">X</span><p>after</p></div>",

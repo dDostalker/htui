@@ -67,6 +67,58 @@ globalThis.__htuiLiveList = function (getLen, getItem) {
     deleteProperty: function () { return false; }
   });
 };
+// Live DOMStringMap factory for `el.dataset`. `get` / `set` / `remove` /
+// `keys` are native closures over the engine arena (the element's `data-*`
+// attributes), so every access reflects the current DOM — a held `dataset`
+// reference stays live. Property names use the browser camelCase↔kebab-case
+// mapping (`dataset.fooBar` <-> `data-foo-bar`); assigning `''` removes the
+// attribute, and `Object.keys(dataset)` enumerates the kebab-cased names.
+globalThis.__htuiDataset = function (get, set, remove, keys) {
+  function kebab(p) {
+    return String(p).replace(/[A-Z]/g, function (c) { return '-' + c.toLowerCase(); });
+  }
+  function hasData(k) {
+    return keys().indexOf(k) !== -1;
+  }
+  var target = {
+    toString: function () { return '[object DOMStringMap]'; }
+  };
+  return new Proxy(target, {
+    get: function (t, p) {
+      if (typeof p === 'symbol') return Reflect.get(t, p);
+      // `toString` / `valueOf` fall back to the target so coercions such as
+      // `String(dataset)` succeed; everything else is a data-* lookup.
+      if (p === 'toString' || p === 'valueOf') return Reflect.get(t, p);
+      if (p === 'then' || p === 'toJSON') return undefined;
+      return get(kebab(p));
+    },
+    set: function (t, p, v) {
+      if (typeof p !== 'string' || p === 'then') return false;
+      var k = kebab(p);
+      if (v === null || v === undefined || v === '') { remove(k); }
+      else { set(k, String(v)); }
+      return true;
+    },
+    has: function (t, p) {
+      if (typeof p !== 'string') return Reflect.has(t, p);
+      return hasData(kebab(p));
+    },
+    deleteProperty: function (t, p) {
+      if (typeof p !== 'string') return false;
+      remove(kebab(p));
+      return true;
+    },
+    ownKeys: function () {
+      return keys();
+    },
+    getOwnPropertyDescriptor: function (t, p) {
+      if (typeof p !== 'string') return undefined;
+      var v = get(kebab(p));
+      if (v === undefined) return undefined;
+      return { value: v, writable: true, enumerable: true, configurable: true };
+    }
+  });
+};
 // Live DOMTokenList factory for `el.classList`. `getAttr()` / `setAttr()`
 // are native closures over the engine arena (the element's `class`
 // attribute), so every access reflects the current DOM — a held `classList`

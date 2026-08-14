@@ -147,6 +147,7 @@ htui/
 │   │   │   ├── layout_focus_tests.rs # el.focus()/el.blur() 测试（请求经输入循环生效 + focus/blur 事件派发，纯内存）
 │   │   │   ├── layout_inner_html_tests.rs # innerHTML 测试（读取序列化 / 写入片段解析 / style 提取 / script 跳过，纯内存）
 │   │   │   ├── layout_class_list_tests.rs # classList 测试（live DOMTokenList 读/写/迭代/校验，纯内存）
+│   │   │   ├── layout_dataset_tests.rs # 全局属性测试（el.hidden 隐藏切换 + el.dataset live DOMStringMap 读/写/删/枚举，纯内存）
 │   │   │   ├── layout_position_tests.rs # CSS 定位测试（relative / absolute / fixed + z-index）
 │   │   ├── layout_input_tests.rs # <input> 输入框测试（渲染 / 编辑逻辑 / 光标状态）
 │   │   ├── layout_textarea_tests.rs # <textarea> 多行编辑框测试（几何/绘制/编辑/滚动/value IDL，纯内存）
