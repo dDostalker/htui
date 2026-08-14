@@ -215,6 +215,26 @@ pub(super) fn layout_flex_items(
                     }
                 };
                 let item_rect = Rect::new(item_x, item_y, item_w.max(1), item_h.max(1));
+                if std::env::var("HTUI_TRACE_FLEX").is_ok() {
+                    let tag = match &prep.source {
+                        FlexItemSource::Node(id) => arena[*id]
+                            .node_type
+                            .tag_name()
+                            .unwrap_or("?"),
+                        FlexItemSource::AnonymousText(_) => "#text",
+                    };
+                    eprintln!(
+                        "FLEX item tag={} item_rect=({},{},w{},h{}) item_cross={} natural_cross={} align={:?}",
+                        tag,
+                        item_rect.x,
+                        item_rect.y,
+                        item_rect.width,
+                        item_rect.height,
+                        item_cross_size,
+                        item_natural_cross,
+                        prep.align_self
+                    );
+                }
                 let child_box = match &prep.source {
                     FlexItemSource::Node(item_id) => {
                         crate::layout::inner_formatting_context::flow::dispatch(

@@ -559,3 +559,88 @@ fn test_textarea_wide_char_caret_matches_editing() {
         "caret paints after the two-cell '中' (x=0 border, x=1..2 '中', x=3 caret)"
     );
 }
+
+/// A `<textarea>` whose rect exceeds the terminal must paint a clamped,
+/// intact frame instead of wrapping its frame writes into the next row.
+///
+/// As a flex item with `flex-shrink: 0` the field keeps its full CSS width
+/// even when the viewport is narrower; the painter clamps the rect to the
+/// canvas (like `paint_block` does) so the `┌─┐` frame shows and the content
+/// below is not corrupted.
+#[test]
+fn wide_textarea_clamps_frame_to_canvas() {
+    let html = r#"
+      <style>
+        .row { display: flex; }
+        textarea { width: 40; height: 3; flex-shrink: 0; }
+      </style>
+      <div class="row"><textarea>content</textarea></div>
+      <p>below line</p>
+    "#;
+    let (root_id, arena) = setup(html);
+    let narrow = TermMap {
+        columns: 20,
+        rows: 10,
+    };
+    let mut tl = TermLayout::new(&narrow, 1.0);
+    tl.draw(&arena, root_id, &narrow);
+
+    let cols = narrow.columns as usize;
+    // Row 0 is the textarea's top border: a full clamped frame.
+    let top: Vec<char> = tl.layout[0..cols]
+        .iter()
+        .map(|c| c.word.chars().next().unwrap_or(' '))
+        .collect();
+    assert_eq!(top[0], '┌', "left top corner");
+    assert_eq!(
+        top[cols - 1],
+        '┐',
+        "right top corner sits at the canvas edge"
+    );
+    assert!(
+        top[1..cols - 1].iter().all(|&c| c == '─'),
+        "top edge spans the clamped width"
+    );
+    // Content rows keep both side borders.
+    let mid: Vec<char> = tl.layout[cols..2 * cols]
+        .iter()
+        .map(|c| c.word.chars().next().unwrap_or(' '))
+        .collect();
+    assert_eq!(mid[0], '│', "left side");
+    assert_eq!(mid[cols - 1], '│', "right side at the canvas edge");
+    // The following paragraph starts on its own clean row (no wrapped frame
+    // writes landing on it).
+    let rows_txt: Vec<String> = tl
+        .layout
+        .chunks(cols)
+        .enumerate()
+        .map(|(r, row)| {
+            format!(
+                "{r:02}|{}",
+                row.iter()
+                    .map(|c| c.word.as_str())
+                    .collect::<String>()
+                    .trim_end()
+            )
+        })
+        .collect();
+    for s in &rows_txt {
+        if !s.ends_with('|') {
+            eprintln!("{s}");
+        }
+    }
+    let below: Vec<(usize, String)> = tl
+        .layout
+        .chunks(cols)
+        .enumerate()
+        .map(|(r, row)| (r, row.iter().map(|c| c.word.as_str()).collect::<String>()))
+        .filter(|(_, s)| !s.trim().is_empty())
+        .collect();
+    assert!(
+        below
+            .iter()
+            .any(|(_, s)| s.trim_end().starts_with("below line")),
+        "content below the wide field must stay uncorrupted, got {:?}",
+        below
+    );
+}

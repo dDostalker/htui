@@ -628,3 +628,51 @@ fn border_radius_renders_rounded_corner_glyphs() {
     let (_, tl) = draw("<div>X</div>", "div { border: 1px solid red; width: 6px; }");
     assert_eq!(word_at(&tl, 0, 0), "┌", "square corner without radius");
 }
+
+// ============================================================
+// CSS `height` — fixed-height boxes clip their text
+// ============================================================
+
+#[test]
+fn css_height_fixes_the_frame_and_clips_text() {
+    init();
+    // `height` fixes the border-box height (htui's default box-sizing is
+    // `border-box`): a 3-row card with six lines of content keeps its frame
+    // and clips the overflow instead of growing — the box frame wins over
+    // the text when the two conflict on a small terminal.
+    let (term_map, tl) = draw(
+        r#"<div class="card">line one<br>line two<br>line three<br>line four<br>line five<br>line six</div>"#,
+        "body { margin: 0; } .card { height: 3; border: 1px solid red; }",
+    );
+    let cols = term_map.columns as usize;
+    let row_text = |y: usize| {
+        tl.layout[y * cols..(y + 1) * cols]
+            .iter()
+            .map(|b| b.word.as_str())
+            .collect::<String>()
+    };
+    let top = row_text(0);
+    assert_eq!(top.chars().next(), Some('┌'), "top-left corner");
+    assert_eq!(top.chars().last(), Some('┐'), "top-right corner");
+    let content = row_text(1);
+    assert!(
+        content.contains("line one"),
+        "the first line fits inside the fixed height"
+    );
+    for clipped in ["line two", "line three", "line six"] {
+        assert!(
+            !content.contains(clipped),
+            "{clipped} must be clipped by the fixed height"
+        );
+    }
+    let bottom = row_text(2);
+    assert_eq!(bottom.chars().next(), Some('└'), "bottom-left corner");
+    assert_eq!(bottom.chars().last(), Some('┘'), "bottom-right corner");
+    // Rows beyond the fixed-height frame stay blank (no spilled text).
+    assert!(
+        tl.layout[3 * cols..]
+            .iter()
+            .all(|b| b.word.trim().is_empty()),
+        "nothing may paint below the fixed-height frame"
+    );
+}

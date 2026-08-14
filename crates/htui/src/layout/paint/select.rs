@@ -11,7 +11,7 @@ use crate::{
     tui::graph_api::{FontStyle, char_width},
 };
 
-use super::{PaintCanvas, intersect_rects};
+use super::{PaintCanvas, clamp_rect_to_canvas, intersect_rects};
 
 /// Frame colour for an open (focused) dropdown (Tokyo Night accent cyan).
 const OPEN_FRAME: &str = "#2ac3de";
@@ -27,6 +27,9 @@ pub(crate) fn paint_select(
     if r.x >= canvas_cols || r.width == 0 || r.height == 0 {
         return;
     }
+    let Some(r) = clamp_rect_to_canvas(r, canvas_cols) else {
+        return;
+    };
     let Some(visible) = intersect_rects(Rect::new(r.x, r.y, r.width, r.height), clip) else {
         return;
     };

@@ -84,6 +84,20 @@ pub fn layout_block(
 
     let (geom, preallocated_height) = match pre_allocated_rect {
         Some(rect) => {
+            if std::env::var("HTUI_TRACE_FLEX").is_ok() {
+                let tag = node.node_type.tag_name().unwrap_or("?");
+                eprintln!(
+                    "BLOCK tag={} pre_alloc=({},{},w{},h{}) containing.w={} edges.h={} padding={:?}",
+                    tag,
+                    rect.x,
+                    rect.y,
+                    rect.width,
+                    rect.height,
+                    containing.width,
+                    edges.inner_horizontal(),
+                    edges.padding
+                );
+            }
             let inner_h = edges.inner_horizontal();
             let content_constraint = BoxConstraint {
                 x: rect
@@ -282,6 +296,19 @@ pub fn layout_block(
                 BoxSizing::BorderBox => h,
                 BoxSizing::ContentBox => h.saturating_add(inner_v),
             };
+            // `height` fixes the border-box height (converted per
+            // `box-sizing`), replacing the content-derived height: the box
+            // keeps its intended frame even when the wrapped text / block
+            // children are taller, and the paint phase clips the overflow.
+            // On a narrow terminal the frame therefore wins over the text
+            // instead of the box silently growing past its declared size.
+            if let Some(h) = node
+                .css_attr
+                .get_height(available, child_context.font, child_context.viewport)
+                .map(to_border)
+            {
+                height = h.max(1);
+            }
             if let Some(m) = node
                 .css_attr
                 .get_min_height(available, child_context.font, child_context.viewport)

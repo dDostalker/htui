@@ -292,6 +292,27 @@ pub(super) fn intersect_rects(a: Rect, b: Rect) -> Option<Rect> {
     }
 }
 
+/// Clamp a box rect to the canvas width so its frame / text writes never
+/// land past the terminal's right edge, where `cell_index` would wrap into
+/// the next row of the flat canvas buffer.
+///
+/// [`paint_block`] already clamps the rect it paints with; the replaced
+/// element painters (`<input>` / `<textarea>` / `<button>` / `<select>`) get
+/// the same treatment here, since a flex-placed item can hand them a rect
+/// wider than the viewport — without the clamp the frame breaks (missing
+/// right side) and the wrapped writes corrupt the rows below.
+pub(super) fn clamp_rect_to_canvas(r: Rect, canvas_cols: usize) -> Option<Rect> {
+    if r.x >= canvas_cols || r.width == 0 || r.height == 0 {
+        return None;
+    }
+    Some(Rect::new(
+        r.x,
+        r.y,
+        r.width.min(canvas_cols - r.x),
+        r.height,
+    ))
+}
+
 /// Paint one box (and its subtree) into the canvas.
 ///
 /// `clip` is the box's inherited clip region (absolute canvas coordinates):
@@ -307,14 +328,32 @@ fn paint_box(
     parent_bg: Option<Color>,
     clip: Option<Rect>,
 ) {
+    let canvas_cols = canvas.columns as usize;
+    // A box laid out wider than the terminal (e.g. a flex row whose items
+    // overflow the viewport) must not paint past the right edge, where the
+    // flat canvas wraps writes into the next row. Clamp the rect once here so
+    // the content area / children clip derived below also end at the canvas
+    // edge — otherwise a child's background would cover the parent's
+    // (clamped) border cell and leave the frame with a hole on the right
+    // side when the terminal shrinks.
+    let rect = if lb.rect.x >= canvas_cols || lb.rect.width == 0 {
+        lb.rect
+    } else {
+        Rect::new(
+            lb.rect.x,
+            lb.rect.y,
+            lb.rect.width.min(canvas_cols.saturating_sub(lb.rect.x)),
+            lb.rect.height,
+        )
+    };
     // This box's own clip = inherited clip ∩ own border-box. A box never
     // paints outside its ancestors' borders.
     let own_clip = match clip {
-        Some(c) => match intersect_rects(c, lb.rect) {
+        Some(c) => match intersect_rects(c, rect) {
             Some(r) => r,
             None => return,
         },
-        None => lb.rect,
+        None => rect,
     };
     if own_clip.width == 0 || own_clip.height == 0 {
         // Zero-area box: no chrome of its own, but positioned children are
@@ -371,16 +410,14 @@ fn paint_box(
     // dropped entirely, so no descendant can ever overwrite a frame cell.
     let edges = &lb.paint_style.box_edges;
     let content_area = Rect::new(
-        lb.rect
-            .x
+        rect.x
             .saturating_add(edges.border.left.thickness())
             .saturating_add(edges.padding.left),
-        lb.rect
-            .y
+        rect.y
             .saturating_add(edges.border.top.thickness())
             .saturating_add(edges.padding.top),
-        lb.rect.width.saturating_sub(edges.inner_horizontal()),
-        lb.rect.height.saturating_sub(edges.inner_vertical()),
+        rect.width.saturating_sub(edges.inner_horizontal()),
+        rect.height.saturating_sub(edges.inner_vertical()),
     );
     let children_clip = intersect_rects(own_clip, content_area);
     paint_children(lb, arena, canvas, effective_bg, children_clip);
