@@ -58,7 +58,7 @@ enum Token {
 /// graphemes the HTML spec treats as collapsible when `white-space`
 /// is `normal` / `nowrap` / `pre-line`.
 fn is_horizontal_ws(g: &str) -> bool {
-    matches!(g, " " | "\t" | "\u{00A0}")
+    matches!(g, " " | "\t")
 }
 
 /// Returns `true` when `c` is in any of the major CJK ranges for
@@ -555,8 +555,10 @@ pub fn wrap_runs(
             &mut visual_lines,
         );
     }
-    if visual_lines.is_empty() {
-        visual_lines.push(Vec::new());
+    if visual_lines.is_empty() || visual_lines.iter().all(|l| l.is_empty()) {
+        // Whitespace-only input collapses away to no visible content: report
+        // zero lines so callers don't reserve a phantom inline row for it.
+        return Vec::new();
     }
     visual_lines
 }

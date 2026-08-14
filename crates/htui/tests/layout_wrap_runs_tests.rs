@@ -148,3 +148,24 @@ fn newlines_create_separate_lines() {
     let lines = run_ws("a\nb\nc", 80, WhiteSpace::PreWrap);
     assert_eq!(lines.len(), 3, "got {} lines", lines.len());
 }
+
+#[test]
+fn consecutive_spaces_collapse_to_single_space() {
+    // `white-space: normal` collapses a run of collapsible spaces to a
+    // single space (the browser-default HTML behaviour).
+    let lines = run("a    b", 80);
+    assert_eq!(lines.len(), 1);
+    let joined: String = lines[0].iter().map(|r| r.text.as_str()).collect();
+    assert_eq!(joined, "a b");
+}
+
+#[test]
+fn nbsp_is_not_collapsible() {
+    // U+00A0 is a non-breaking space: unlike `' '` / `\t`, it is NOT
+    // collapsible under `white-space: normal` and must survive as three
+    // cells.
+    let lines = run("a\u{00A0}\u{00A0}\u{00A0}b", 80);
+    assert_eq!(lines.len(), 1);
+    let joined: String = lines[0].iter().map(|r| r.text.as_str()).collect();
+    assert_eq!(joined, "a\u{00A0}\u{00A0}\u{00A0}b");
+}

@@ -680,6 +680,14 @@ pub struct Node {
     pub css_attr: CssAttr,
 }
 
+/// Whether `c` is one of the HTML/CSS collapsible white-space characters
+/// (space, tab, and the segment-break set). Non-breaking space (`U+00A0`) is
+/// deliberately excluded: browsers treat it as a non-collapsible, non-breaking
+/// space that must survive `white-space: normal` collapsing.
+pub(crate) fn is_collapsible_whitespace(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{000C}')
+}
+
 impl Node {
     pub fn from(node_type: NodeType) -> Node {
         Node {
@@ -782,7 +790,7 @@ impl Node {
         if matches!(white_space, WhiteSpace::PreLine) && s.contains('\n') {
             return true;
         }
-        !s.chars().all(char::is_whitespace)
+        !s.chars().all(is_collapsible_whitespace)
     }
 
     /// The effective `white-space` governing this node's inline content: the

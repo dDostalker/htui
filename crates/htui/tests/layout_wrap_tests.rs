@@ -343,3 +343,35 @@ fn h2_prefix_stays_on_first_line() {
         "heading prefix and first body word must share a row"
     );
 }
+
+// ============================================================
+// 8. Collapsible vs non-collapsible whitespace
+// ============================================================
+
+#[test]
+fn whitespace_only_span_collapses_to_single_space() {
+    // A whitespace-only inline element between two words must collapse to
+    // a single space, not disappear entirely.
+    init();
+    let html = "<p>hello<span>   </span>world</p>";
+    let (rows, _) = render_rows(html, "");
+    assert!(
+        rows.iter().any(|r| r.contains("hello world")),
+        "whitespace-only span should collapse to a single space, rows = {:?}",
+        rows
+    );
+}
+
+#[test]
+fn nbsp_entity_is_preserved() {
+    // `&nbsp;` decodes to U+00A0, a non-collapsible space: three of them
+    // must survive verbatim instead of collapsing to a single space.
+    init();
+    let html = "<p>a&nbsp;&nbsp;&nbsp;b</p>";
+    let (rows, _) = render_rows(html, "");
+    assert!(
+        rows.iter().any(|r| r.contains("a\u{00A0}\u{00A0}\u{00A0}b")),
+        "&nbsp; must survive as non-collapsible spaces, rows = {:?}",
+        rows
+    );
+}

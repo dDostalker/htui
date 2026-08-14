@@ -11,7 +11,7 @@ use crate::{
         layoutbox::generation::{GeneratedBoxKind, generate_node},
         layoutbox::geometry::select_options,
     },
-    tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
+    tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells, is_collapsible_whitespace},
     tui::graph_api::{FontStyle, char_width, grapheme_width},
 };
 
@@ -459,10 +459,12 @@ fn natural_intrinsic_size(
         }
         let text_w = measure_text_content_width(arena, node_id).unwrap_or(0);
         content_w = content_w.max(text_w);
-        // Mirror the block layout's inline-run walker: whitespace-only text
-        // that the walker drops (collapsing `white-space`) must not add a
-        // phantom inline row to the intrinsic height.
-        let has_inline = !collect_runs(arena, node_id, node, None, None, FontStyle::empty()).is_empty()
+        // Inline content adds one intrinsic row, but a run made purely of
+        // collapsible whitespace must not (it collapses away at a line edge).
+        // NBSP is intentionally *not* collapsible, so it still counts.
+        let has_inline = collect_runs(arena, node_id, node, None, None, FontStyle::empty())
+            .iter()
+            .any(|r| r.force_break || r.text.chars().any(|c| !is_collapsible_whitespace(c)))
             || text_w > 0;
         if has_inline {
             // Intrinsic (max-content) measurement does not wrap, so a

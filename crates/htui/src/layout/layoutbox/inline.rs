@@ -108,11 +108,12 @@ fn walk_runs(
         }
         match &child.node_type {
             NodeType::Text => {
-                // Whitespace-only text nodes are kept in the DOM but only
-                // become runs when the context preserves whitespace (see
-                // `Node::text_is_painted`).
-                if child.text_is_painted(white_space)
-                    && let Some(s) = child.data.as_deref()
+                // Keep every non-empty text node (including whitespace-only
+                // runs): the wrap phase collapses / preserves whitespace
+                // according to `white-space`, so a whitespace-only node between
+                // two words correctly collapses to a single space instead of
+                // vanishing.
+                if let Some(s) = child.data.as_deref()
                     && !s.is_empty()
                 {
                     let text = apply_text_transform(s, transform);
