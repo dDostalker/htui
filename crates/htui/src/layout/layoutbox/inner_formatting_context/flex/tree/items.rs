@@ -215,26 +215,6 @@ pub(super) fn layout_flex_items(
                     }
                 };
                 let item_rect = Rect::new(item_x, item_y, item_w.max(1), item_h.max(1));
-                if std::env::var("HTUI_TRACE_FLEX").is_ok() {
-                    let tag = match &prep.source {
-                        FlexItemSource::Node(id) => arena[*id]
-                            .node_type
-                            .tag_name()
-                            .unwrap_or("?"),
-                        FlexItemSource::AnonymousText(_) => "#text",
-                    };
-                    eprintln!(
-                        "FLEX item tag={} item_rect=({},{},w{},h{}) item_cross={} natural_cross={} align={:?}",
-                        tag,
-                        item_rect.x,
-                        item_rect.y,
-                        item_rect.width,
-                        item_rect.height,
-                        item_cross_size,
-                        item_natural_cross,
-                        prep.align_self
-                    );
-                }
                 let child_box = match &prep.source {
                     FlexItemSource::Node(item_id) => {
                         crate::layout::inner_formatting_context::flow::dispatch(
@@ -311,7 +291,19 @@ pub(super) fn layout_flex_items(
         // placement pass at the final size when items wrapped taller. The
         // re-layout only happens when the final line cross differs.
         let (first_boxes, first_extent, first_placed_main) = place_line(line_cross);
-        let final_line_cross = first_extent.max(line_cross);
+        // For `row` direction the cross axis is vertical, so wrapped content
+        // can grow the line and the re-place stretches `align-items: stretch`
+        // items to the real height. For `column` direction the cross axis is
+        // the container's fixed content width: `first_extent` here is the
+        // line's *main-axis* (height) extent, so using it as the cross size
+        // would re-place every item WIDER than the container whenever the
+        // content is taller than the viewport is wide (a dashboard on a
+        // narrow terminal) — the overflow. A column's line cross is always
+        // the container width, so no re-place.
+        let final_line_cross = match direction {
+            FlexDirection::Row => first_extent.max(line_cross),
+            FlexDirection::Column => line_cross,
+        };
         let (line_boxes, actual_extent, placed_main) = if final_line_cross > line_cross {
             place_line(final_line_cross)
         } else {

@@ -359,20 +359,6 @@ pub(super) fn layout_flex_container(
     };
     let fill_bg = block_bg.is_some();
     let rect = Rect::new(outer_x, outer_y_top, block_width, total_box_height);
-    if std::env::var("HTUI_TRACE_FLEX").is_ok() {
-        let tag = arena[node_id].node_type.tag_name().unwrap_or("?");
-        eprintln!(
-            "FLEX-CONTAINER tag={} pre_alloc={:?} block_width={} content_width={} rect=({},{},w{},h{})",
-            tag,
-            pre_allocated_rect.map(|r| r.width),
-            block_width,
-            content_width,
-            rect.x,
-            rect.y,
-            rect.width,
-            rect.height
-        );
-    }
 
     let paint_style = PaintStyle {
         box_edges: edges,

@@ -84,20 +84,6 @@ pub fn layout_block(
 
     let (geom, preallocated_height) = match pre_allocated_rect {
         Some(rect) => {
-            if std::env::var("HTUI_TRACE_FLEX").is_ok() {
-                let tag = node.node_type.tag_name().unwrap_or("?");
-                eprintln!(
-                    "BLOCK tag={} pre_alloc=({},{},w{},h{}) containing.w={} edges.h={} padding={:?}",
-                    tag,
-                    rect.x,
-                    rect.y,
-                    rect.width,
-                    rect.height,
-                    containing.width,
-                    edges.inner_horizontal(),
-                    edges.padding
-                );
-            }
             let inner_h = edges.inner_horizontal();
             let content_constraint = BoxConstraint {
                 x: rect

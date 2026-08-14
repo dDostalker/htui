@@ -1604,3 +1604,43 @@ fn test_flex_row_line_grows_when_item_content_wraps() {
         "right card bottom border must be continuous: {border_row:?}"
     );
 }
+
+/// A tall `flex-direction: column` container on a narrow terminal must keep
+/// every item inside the container's width.
+///
+/// The two-pass line placement used the line's *height* extent as the final
+/// cross size in `column` direction, so content taller than the viewport was
+/// wide re-placed every item wider than the container (a dashboard on a small
+/// window overflowed the terminal). A column's cross axis is the fixed
+/// container width, so the re-place must never widen the items.
+#[test]
+fn tall_column_flex_keeps_items_within_container_width() {
+    init();
+    let mut html = String::from(r#"<div class="app">"#);
+    for i in 0..40 {
+        html.push_str(&format!(r#"<div class="row">row {i} content</div>"#));
+    }
+    html.push_str(r#"</div>"#);
+    let css = "body { margin: 0; } .app { display: flex; flex-direction: column; } .row { display: flex; }";
+    let (root_id, arena) = setup(&html, css);
+    let map = TermMap {
+        columns: 30,
+        rows: 10,
+    };
+    let mut tl = TermLayout::new(&map, 1.0);
+    tl.draw(&arena, root_id, &map);
+    let boxes = tl.layout_only(&arena, root_id, &map);
+
+    // Every box rect in the tree must fit within the canvas width.
+    let mut stack = boxes;
+    let mut widest = 0usize;
+    while let Some(b) = stack.pop() {
+        widest = widest.max(b.rect.width);
+        stack.extend(b.children);
+    }
+    assert!(
+        widest <= map.columns as usize,
+        "no box may be wider than the canvas, got {widest} at {} cols",
+        map.columns
+    );
+}
