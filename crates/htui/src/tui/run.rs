@@ -37,8 +37,8 @@ use crate::{
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{
         Block, DirtyInfo, FontStyle, InputRenderState, InputState, KEY_GATE_TIMEOUT, RenderCmd,
-        SelectionMode, TermLayout, apply_focus_requests, char_width, reapply_console_modes,
-        trigger_refresh,
+        SelectionMode, TermLayout, apply_focus_requests, char_width, coalesce_batch,
+        reapply_console_modes, trigger_refresh,
     },
 };
 
@@ -1838,31 +1838,11 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
             }
         }
 
-        // Coalesce: when a full `RenderArena` is pending, drop any queued
-        // `Hover` commands — the render thread's `try_recv` would otherwise
-        // drop them anyway (it keeps only the last command), losing the
-        // highlight, or the duplicate repaint would be wasted work. The hover
-        // target is already carried by `RenderArena.hovered`.
-        let cmds = {
-            let mut merged: Vec<RenderCmd> = Vec::with_capacity(cmds.len());
-            let mut arena_pending = false;
-            for cmd in cmds {
-                match cmd {
-                    RenderCmd::RenderArena { .. } => {
-                        arena_pending = true;
-                        merged.push(cmd);
-                    }
-                    RenderCmd::Hover { .. } if arena_pending => {
-                        // Dropped: the arena render re-cascades with `hovered`.
-                    }
-                    RenderCmd::Focus { .. } if arena_pending => {
-                        // Dropped: the arena render re-cascades with `focused`.
-                    }
-                    other => merged.push(other),
-                }
-            }
-            merged
-        };
+        // Coalesce the batch: a `Focus` queued behind a pending `RenderArena`
+        // is dropped (superseding would lose the DOM mutation — see
+        // [`coalesce_batch`]); newer `Hover` commands survive, so the render
+        // thread can apply the freshest highlight on top of the arena render.
+        let cmds = coalesce_batch(cmds);
 
         // JS `el.focus()` / `el.blur()` requests target input-loop state (the
         // edit session lives here) and route their `focus` / `blur` (+ `change`)

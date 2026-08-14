@@ -28,6 +28,12 @@ const ZOOM_STEP: f32 = 0.1;
 const ZOOM_MIN: f32 = 0.2;
 const ZOOM_MAX: f32 = 5.0;
 
+/// Minimum pointer travel (Chebyshev distance in cells) before a press turns
+/// into a page text selection drag. A press alone never selects, and a
+/// jittery click — press, one-cell wiggle, release — must not leave a single
+/// highlighted character behind (browsers use a similar threshold).
+const TEXT_SEL_DRAG_THRESHOLD: u32 = 2;
+
 /// Convert a crossterm `KeyEvent` into the terminal-agnostic payload the
 /// script layer dispatches as `keydown` / `keyup`, mirroring the browser
 /// `KeyboardEvent` fields (`key` / `code` / `keyCode` + modifier flags). Every
@@ -1197,6 +1203,54 @@ pub fn handle_click(
     }
 }
 
+/// End a button press at the release position (screen coordinates in
+/// `release_screen`).
+///
+/// Clears the pressed / drag state, then re-validates the hover at the
+/// release position: hover freezes while a button is held (button-free moves
+/// are the only thing that update it), so a press-and-drag-away release must
+/// not leave the pressed element `:hover`-highlighted — the highlight residue
+/// after a button press. A left release on the same cell it started on also
+/// dispatches the click (and the dropdown pick, when the release lands on an
+/// open `<select>` overlay row).
+pub fn handle_mouse_up(
+    state: &mut InputState,
+    hit_map: &HitMap,
+    arena: &NodeArena,
+    release_screen: (u16, u16),
+    button: MouseButton,
+    msgs: &mut Vec<ScriptMsg>,
+    cmds: &mut Vec<RenderCmd>,
+) {
+    let pressed = state.pressed.take();
+    state.drag_selecting = false;
+    let (x, y) = canvas_pos(state, release_screen.0, release_screen.1);
+    // Re-validate the hover at the release position (see the doc comment).
+    msgs.push(ScriptMsg::Move { x, y });
+    if button != MouseButton::Left {
+        return;
+    }
+    let Some((px, py)) = pressed else {
+        return;
+    };
+    // Press-drag-release over a dropdown row picks it (the browser's native
+    // `<select>` interaction), even when the release lands off the press
+    // cell. Rows map to option indices like the mousedown pick above:
+    // `<optgroup>` headers pick their first option.
+    if let Some(open) = state.open_select.clone()
+        && let Some(row) = hit_select_option(&open, x, y)
+        && let Some(option_idx) = row_option(&open.rows, row)
+    {
+        close_select(state, arena, Some(option_idx), msgs, cmds);
+        return;
+    }
+    if px == release_screen.0 && py == release_screen.1 {
+        handle_click(state, hit_map, arena, x, y, msgs, cmds);
+    }
+    // A drag ended on a different cell: the selection (field-internal or
+    // page text) is kept as-is.
+}
+
 /// `true` for a form control carrying a `disabled` attribute — such
 /// controls swallow clicks (no Click dispatch, no focus change).
 fn is_disabled_control(arena: &NodeArena, node_id: NodeId) -> bool {
@@ -1295,6 +1349,37 @@ fn clear_text_selection(state: &mut InputState, cmds: &mut Vec<RenderCmd>) {
             mode: state.text_sel_mode,
         });
     }
+}
+
+/// Coalesce a command batch before forwarding it to the render thread.
+///
+/// A `RenderArena` carries the interaction state (`hovered` / `focused`)
+/// captured when its DOM snapshot was folded, so it supersedes any earlier
+/// `Hover` / `Focus` in the batch. A `Focus` queued *behind* it is still
+/// dropped: the render thread's batch merge keeps only the last command, and
+/// `Focus` is not deferred like `Hover`, so letting it supersede the arena
+/// would lose the DOM mutation. `Hover` commands behind a pending arena are
+/// kept — the render thread defers them and applies the newer highlight on
+/// top of the arena render, so dropping them here would freeze the stale
+/// highlight (a clicked button staying `:hover`-highlighted after the pointer
+/// leaves).
+pub fn coalesce_batch(cmds: Vec<RenderCmd>) -> Vec<RenderCmd> {
+    let mut merged: Vec<RenderCmd> = Vec::with_capacity(cmds.len());
+    let mut arena_pending = false;
+    for cmd in cmds {
+        match cmd {
+            RenderCmd::RenderArena { .. } => {
+                arena_pending = true;
+                merged.push(cmd);
+            }
+            RenderCmd::Focus { .. } if arena_pending => {
+                // Dropped: the arena render re-cascades with `focused`, and
+                // superseding would drop the arena's DOM mutations.
+            }
+            other => merged.push(other),
+        }
+    }
+    merged
 }
 
 /// The overlay option row containing the canvas point `(x, y)`, if any.
@@ -1473,11 +1558,12 @@ fn close_select(
 /// Browser-aligned mousedown behaviour: a press on an `<input>` focuses it
 /// (blurring any previously focused field) and positions the caret at the
 /// press point, entering drag-selection mode; a press anywhere else blurs the
-/// focused field and starts a page text selection (the anchor for the drag).
-/// Any prior page selection is cleared. `arena` is the input loop's latest DOM
-/// snapshot; everything that needs the engine is collected into `msgs` for the
-/// script thread. Local render commands are appended to `cmds` in dispatch
-/// order.
+/// focused field and defers the page text selection start until the pointer
+/// actually drags (see [`handle_mouse_move`]) — a press alone never creates
+/// a selection. Any prior page selection is cleared. `arena` is the input
+/// loop's latest DOM snapshot; everything that needs the engine is collected
+/// into `msgs` for the script thread. Local render commands are appended to
+/// `cmds` in dispatch order.
 pub fn handle_mouse_down(
     state: &mut InputState,
     hit_map: &HitMap,
@@ -1557,23 +1643,23 @@ pub fn handle_mouse_down(
                     }
                 }
             } else {
-                // Mousedown outside a field blurs it (browser timing), then
-                // starts a flow text selection anchored at the press point.
+                // Mousedown outside a field blurs it (browser timing). The
+                // flow text selection is deferred: browsers select only on a
+                // real drag, so a jittery click leaves no residue.
                 if state.focused_input.is_some() {
                     blur_input(state, msgs, cmds);
                 }
                 clear_text_selection(state, cmds);
-                state.text_sel_anchor = Some((x, y));
-                state.text_sel_end = Some((x, y));
                 state.text_sel_mode = SelectionMode::Flow;
             }
         }
         // Right-drag starts a rectangular (block) selection; the focused field
-        // and its caret stay untouched.
+        // and its caret stay untouched. Like the left flow selection it only
+        // starts once the drag passes the threshold (see
+        // [`handle_mouse_move`]); the press clears prior selections and
+        // records the shape.
         MouseButton::Right => {
             clear_text_selection(state, cmds);
-            state.text_sel_anchor = Some((x, y));
-            state.text_sel_end = Some((x, y));
             state.text_sel_mode = SelectionMode::Block;
         }
         _ => {}
@@ -1599,8 +1685,10 @@ pub fn handle_mouse_down(
 /// While the left button is held this drives the active drag: inside a
 /// focused `<input>` the caret (and with it the character selection) follows
 /// the pointer; over page content the text selection rectangle tracks the
-/// pointer. Without a press it queues a [`ScriptMsg::Move`] for the script
-/// thread's hover machinery (pointer enter / leave + `MouseOver` /
+/// pointer. A page text selection starts only once the drag has moved past
+/// [`TEXT_SEL_DRAG_THRESHOLD`] cells from the press point — a press alone
+/// never creates one. Without a press it queues a [`ScriptMsg::Move`] for the
+/// script thread's hover machinery (pointer enter / leave + `MouseOver` /
 /// `MouseOut`). Local render commands are appended to `cmds` in dispatch
 /// order.
 pub fn handle_mouse_move(
@@ -1659,7 +1747,27 @@ pub fn handle_mouse_move(
                 state.input_cursor = idx;
                 push_input_render(state, focused, cmds);
             }
-        } else if let Some(anchor) = state.text_sel_anchor {
+        } else {
+            // Page-content drag. The selection (flow for left, block for
+            // right) starts only once the pointer has moved a real distance
+            // from the press point — a jittery click (press, one-cell wiggle,
+            // release) must not leave a highlighted character behind. The
+            // anchor is the press point, so the selection starts where the
+            // button went down (browser behaviour).
+            let anchor = match state.text_sel_anchor {
+                Some(a) => a,
+                None => {
+                    let Some((px, py)) = state.pressed else {
+                        return;
+                    };
+                    let (ax, ay) = canvas_pos(state, px, py);
+                    if x.abs_diff(ax).max(y.abs_diff(ay)) < TEXT_SEL_DRAG_THRESHOLD {
+                        return;
+                    }
+                    state.text_sel_anchor = Some((ax, ay));
+                    (ax, ay)
+                }
+            };
             state.text_sel_end = Some((x, y));
             cmds.push(RenderCmd::TextSelection {
                 anchor: Some(anchor),
@@ -2074,39 +2182,44 @@ pub fn trigger_refresh(
                     }
                 }
                 MouseEventKind::Up(MouseButton::Left) => {
-                    if let (Some((px, py)), Some(hit_map), Some(arena)) =
-                        (state.pressed, hit_map, arena)
-                    {
-                        state.pressed = None;
-                        state.drag_selecting = false;
-                        let (x, y) = canvas_pos(state, mouse.column, mouse.row);
-                        // Press-drag-release over a dropdown row picks it
-                        // (the browser's native `<select>` interaction), even
-                        // when the release lands off the press cell. Rows map
-                        // to option indices like the mousedown pick above:
-                        // `<optgroup>` headers pick their first option.
-                        if let Some(open) = state.open_select.clone()
-                            && let Some(row) = hit_select_option(&open, x, y)
-                            && let Some(option_idx) = row_option(&open.rows, row)
-                        {
-                            close_select(state, arena, Some(option_idx), msgs, &mut cmds);
-                            return cmds;
-                        }
-                        if px == mouse.column && py == mouse.row {
-                            handle_click(state, hit_map, arena, x, y, msgs, &mut cmds);
-                        }
-                        // A drag ended on a different cell: the selection
-                        // (field-internal or page text) is kept as-is.
+                    if let (Some(hit_map), Some(arena)) = (hit_map, arena) {
+                        // Clears the press, re-validates the hover at the
+                        // release position (so a press-and-drag-away button
+                        // does not stay `:hover`-highlighted), and dispatches
+                        // the click / dropdown pick for a left release.
+                        handle_mouse_up(
+                            state,
+                            hit_map,
+                            arena,
+                            (mouse.column, mouse.row),
+                            MouseButton::Left,
+                            msgs,
+                            &mut cmds,
+                        );
                     } else {
                         state.pressed = None;
+                        state.drag_selecting = false;
                     }
                 }
-                MouseEventKind::Up(MouseButton::Right)
-                | MouseEventKind::Up(MouseButton::Middle) => {
+                MouseEventKind::Up(btn @ (MouseButton::Right | MouseButton::Middle)) => {
                     // Block selection (right button) ends here; the selection
-                    // itself is kept. No click is dispatched for these buttons.
-                    state.pressed = None;
-                    state.drag_selecting = false;
+                    // itself is kept. No click is dispatched for these
+                    // buttons, but the hover still re-validates (it froze
+                    // during the drag).
+                    if let (Some(hit_map), Some(arena)) = (hit_map, arena) {
+                        handle_mouse_up(
+                            state,
+                            hit_map,
+                            arena,
+                            (mouse.column, mouse.row),
+                            btn,
+                            msgs,
+                            &mut cmds,
+                        );
+                    } else {
+                        state.pressed = None;
+                        state.drag_selecting = false;
+                    }
                 }
                 // crossterm reports button-held motion as `Drag` (SGR code
                 // 32..34) and button-free motion as `Moved` (SGR 64) — both

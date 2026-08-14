@@ -20,8 +20,8 @@ use htui::layout::{BoxConstraint, Cursor, Rect, layout_tree};
 use htui::script::{ScriptEngine, ScriptMsg, apply_message};
 use htui::tdom::node::{NodeArena, NodeId};
 use htui::tui::graph_api::{
-    InputState, RenderCmd, SelectionMode, TermLayout, apply_input_key, handle_click,
-    handle_mouse_down, handle_mouse_move,
+    InputState, RenderCmd, SelectionMode, TermLayout, apply_input_key, coalesce_batch,
+    handle_click, handle_mouse_down, handle_mouse_move, handle_mouse_up,
 };
 
 use crossterm::event::{KeyCode, MouseButton};
@@ -311,8 +311,10 @@ fn drag_on_input_selects_a_character_range() {
 
 #[test]
 fn drag_on_page_text_emits_text_selection() {
-    // Pressing over normal content starts a page text selection; dragging
-    // updates its endpoint and queues a `TextSelection` repaint.
+    // A press alone never creates a page text selection (browsers select only
+    // on a real drag, so a jittery click leaves no residue); once the drag
+    // passes the threshold, dragging updates its endpoint and queues a
+    // `TextSelection` repaint.
     let (mut engine, geo) = build_geometry(
         r#"<div id="a">some text</div><div id="b">more text</div>"#,
         EventBindings::default(),
@@ -321,12 +323,19 @@ fn drag_on_page_text_emits_text_selection() {
 
     let mut state = InputState::new();
     mouse_down(&mut state, &mut engine, &map, 0, 0, MouseButton::Left);
-    assert_eq!(state.text_sel_anchor, Some((0, 0)));
-    assert_eq!(state.text_sel_end, Some((0, 0)));
+    assert_eq!(
+        state.text_sel_anchor, None,
+        "a press alone defers the selection start"
+    );
+    assert_eq!(state.text_sel_end, None);
     assert_eq!(state.text_sel_mode, SelectionMode::Flow);
 
     state.pressed = Some((0, 0));
     let cmds = mouse_move(&mut state, &mut engine, &map, 4, 0);
+    assert_eq!(
+        state.text_sel_anchor, Some((0, 0)),
+        "the anchor is the press point"
+    );
     assert_eq!(state.text_sel_end, Some((4, 0)));
     assert!(
         cmds.iter().any(|c| matches!(
@@ -343,8 +352,9 @@ fn drag_on_page_text_emits_text_selection() {
 
 #[test]
 fn pressing_elsewhere_replaces_the_page_selection() {
-    // A second press clears the previous selection (rendering it away) before
-    // anchoring the new one — the render thread needs the explicit clear.
+    // A second press clears the previous selection (rendering it away); the
+    // new selection is anchored only once its drag begins — the render thread
+    // needs the explicit clear.
     let (mut engine, geo) =
         build_geometry(r#"<div id="a">some text</div>"#, EventBindings::default());
     let map = HitMap::build(&geo);
@@ -367,13 +377,17 @@ fn pressing_elsewhere_replaces_the_page_selection() {
         )),
         "the previous selection must be cleared on a new press"
     );
-    assert_eq!(state.text_sel_anchor, Some((2, 2)));
+    assert_eq!(
+        state.text_sel_anchor, None,
+        "the new selection is deferred until its drag begins"
+    );
 }
 
 #[test]
 fn right_drag_emits_a_block_selection() {
     // Right-drag is the rectangle (block) selection: the command must carry
     // `SelectionMode::Block` so the render thread highlights a rectangle.
+    // Like the left flow selection it only starts once the drag begins.
     let (mut engine, geo) = build_geometry(
         r#"<div id="a">some text</div><div id="b">more text</div>"#,
         EventBindings::default(),
@@ -383,10 +397,17 @@ fn right_drag_emits_a_block_selection() {
     let mut state = InputState::new();
     mouse_down(&mut state, &mut engine, &map, 2, 0, MouseButton::Right);
     assert_eq!(state.text_sel_mode, SelectionMode::Block);
-    assert_eq!(state.text_sel_anchor, Some((2, 0)));
+    assert_eq!(
+        state.text_sel_anchor, None,
+        "a press alone defers the selection start"
+    );
 
-    state.pressed = Some((0, 0));
+    state.pressed = Some((2, 0));
     let cmds = mouse_move(&mut state, &mut engine, &map, 5, 2);
+    assert_eq!(
+        state.text_sel_anchor, Some((2, 0)),
+        "the anchor is the press point"
+    );
     assert!(
         cmds.iter().any(|c| matches!(
             c,
@@ -402,6 +423,104 @@ fn right_drag_emits_a_block_selection() {
         !state.drag_selecting,
         "right-drag never enters the field-internal drag mode"
     );
+}
+
+#[test]
+fn jittery_click_on_a_button_leaves_no_selection() {
+    // A button press with a one-cell wiggle (a sloppy but common click) must
+    // not leave a highlighted character behind: the selection is deferred
+    // until the drag clears the threshold, so no `TextSelection` is ever
+    // queued and the anchor stays clear through the release.
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="btn">▶ button text</div><div id="next">other</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let btn = map.resolve_by_id("btn").expect("btn region");
+    let (bx, by) = center(btn.rect);
+
+    let mut state = InputState::new();
+    mouse_down(&mut state, &mut engine, &map, bx, by, MouseButton::Left);
+    assert_eq!(
+        state.text_sel_anchor, None,
+        "press alone: no selection yet"
+    );
+
+    // The input loop tracks the press position; the pointer wiggles one cell
+    // right while the button is held (still a click, not a drag).
+    state.pressed = Some((bx as u16, by as u16));
+    let cmds = mouse_move(&mut state, &mut engine, &map, bx + 1, by);
+    assert!(
+        !cmds.iter().any(|c| matches!(c, RenderCmd::TextSelection { .. })),
+        "a sub-threshold wiggle must not queue a TextSelection"
+    );
+    assert_eq!(state.text_sel_anchor, None);
+
+    // Release on the jittered cell: still no selection residue.
+    mouse_up(&mut state, &mut engine, &map, (bx + 1) as u16, by as u16);
+    assert_eq!(state.text_sel_anchor, None, "no residue after release");
+    assert_eq!(state.text_sel_end, None);
+}
+
+#[test]
+fn coalesce_keeps_a_newer_hover_after_a_pending_arena() {
+    // The run loop used to drop `Hover` commands queued behind a
+    // `RenderArena`; the render thread defers them and applies the freshest
+    // highlight on top of the arena render, so dropping them froze the stale
+    // highlight — a clicked button staying `:hover`-highlighted after the
+    // pointer left it.
+    let arena = Arc::new(NodeArena::default());
+    let root_id = NodeId::default();
+    let batch = vec![
+        RenderCmd::RenderArena {
+            arena: Arc::clone(&arena),
+            root_id,
+            scroll_y: 0,
+            zoom: 1.0,
+            dynamic: DynamicState {
+                hovered: Some(root_id),
+                focused: None,
+            },
+            dirty: htui::tui::graph_api::DirtyInfo::default(),
+        },
+        RenderCmd::Hover { node_id: None },
+    ];
+    let merged = coalesce_batch(batch);
+    assert!(
+        merged.iter().any(|c| matches!(c, RenderCmd::Hover { node_id: None })),
+        "a newer Hover behind a RenderArena must survive coalescing"
+    );
+    assert_eq!(
+        merged.len(),
+        2,
+        "both the arena render and the hover must be forwarded"
+    );
+}
+
+#[test]
+fn coalesce_drops_a_focus_queued_behind_a_pending_arena() {
+    // Unlike `Hover`, the render thread has no deferred `Focus` pass: letting
+    // it supersede the arena render would drop the DOM mutation, so the
+    // coalescer must keep dropping it.
+    let batch = vec![
+        RenderCmd::RenderArena {
+            arena: Arc::new(NodeArena::default()),
+            root_id: NodeId::default(),
+            scroll_y: 0,
+            zoom: 1.0,
+            dynamic: DynamicState::default(),
+            dirty: htui::tui::graph_api::DirtyInfo::default(),
+        },
+        RenderCmd::Focus {
+            node_id: Some(NodeId::default()),
+        },
+    ];
+    let merged = coalesce_batch(batch);
+    assert!(
+        !merged.iter().any(|c| matches!(c, RenderCmd::Focus { .. })),
+        "a Focus behind a RenderArena must still be dropped"
+    );
+    assert_eq!(merged.len(), 1, "only the arena render survives");
 }
 
 #[test]
@@ -968,6 +1087,31 @@ fn mouse_move(
     let mut msgs = Vec::new();
     let mut cmds = Vec::new();
     handle_mouse_move(state, map, x, y, &mut msgs, &mut cmds);
+    cmds.extend(drive_msgs(state, engine, map, msgs));
+    cmds
+}
+
+/// Left mouse-up at screen coordinates, executing the queued messages like
+/// the script thread would.
+fn mouse_up(
+    state: &mut InputState,
+    engine: &mut ScriptEngine,
+    map: &HitMap,
+    sx: u16,
+    sy: u16,
+) -> Vec<RenderCmd> {
+    let arena = engine.arena();
+    let mut msgs = Vec::new();
+    let mut cmds = Vec::new();
+    handle_mouse_up(
+        state,
+        map,
+        &arena,
+        (sx, sy),
+        MouseButton::Left,
+        &mut msgs,
+        &mut cmds,
+    );
     cmds.extend(drive_msgs(state, engine, map, msgs));
     cmds
 }
@@ -1693,5 +1837,167 @@ fn hover_background_fills_padding_cells_not_just_the_text_run() {
         tl.layout[content_row * cols + left_padding + 1].bcolor,
         hover_bg,
         "text run cell must keep the hover background"
+    );
+}
+
+#[test]
+fn hover_clear_reuses_cached_boxes_without_stale_run_background() {
+    // The inverse of the hover-on fill: when the geometry was laid out from
+    // the *hovered* cascade (a DOM mutation that re-laid-out under the
+    // pointer — e.g. a button click that toggled its label), the `Hover`
+    // clear repaint reuses those cached boxes with a fresh un-hovered
+    // cascade. The block's own background must come from the fresh cascade
+    // (`effective_bg`), not from the runs baked at layout time — otherwise
+    // the glyph cell keeps the stale `:hover` background, the single
+    // highlighted character left behind after a button click.
+    let html = r#"<div id="save" class="btn">Save</div>"#;
+    let css = ".btn { padding-left: 1; padding-right: 1; border: 1px solid #7aa2f7; }\n\
+               .btn:hover { background-color: #28304d; }";
+    let (root_id, mut arena) = setup(html);
+    let mut css_parser = CssParser::new(css);
+    let rules = css_parser.parse();
+    let save = find_node_by_id(&arena, "save");
+
+    // Layout from the *hovered* cascade — the geometry the render thread
+    // caches after a DOM mutation that happened while the pointer sat over
+    // the element.
+    reset_css_attr(&mut arena, root_id);
+    css_into_node_with_hover(&mut arena, root_id, &rules, Some(save));
+    let term_map = TermMap {
+        columns: COLS,
+        rows: ROWS,
+    };
+    let containing = BoxConstraint::root(&term_map);
+    let mut cursor = Cursor::new();
+    let boxes = layout_tree(
+        &arena,
+        root_id,
+        containing,
+        &mut cursor,
+        COLS as usize,
+        ROWS as usize,
+    );
+    let r = find_box(&boxes, save).expect("btn box").rect;
+
+    // Hover clear: re-cascade without hover and repaint the element's
+    // region from the cached boxes, like the render thread's `Hover { None }`.
+    reset_css_attr(&mut arena, root_id);
+    css_into_node(&mut arena, root_id, &rules);
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.repaint_region(&arena, &boxes, r);
+
+    let hover_bg = Some(Color::Rgb {
+        r: 0x28,
+        g: 0x30,
+        b: 0x4d,
+    });
+    let cols = COLS as usize;
+    let content_row = (r.y + 1) as usize; // directly below the top border
+    for x in (r.x as usize)..(r.x + r.width) as usize {
+        assert_ne!(
+            tl.layout[content_row * cols + x].bcolor,
+            hover_bg,
+            "no cell of the un-hovered button may keep the :hover background"
+        );
+    }
+}
+
+/// A press-and-drag-away release must clear the pressed element's `:hover`
+/// highlight.
+///
+/// The hover state freezes while a button is held (button-free moves are the
+/// only thing that re-validate it), so releasing away from the press cell
+/// without re-validating leaves the pressed button highlighted until the next
+/// pointer move — the highlight residue after a button press. `handle_mouse_up`
+/// re-validates the hover at the release position.
+#[test]
+fn press_and_drag_away_clears_the_button_hover_on_release() {
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="btn">click me</div><div id="other">other</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let btn = map.resolve_by_id("btn").expect("btn region");
+    let other = map.resolve_by_id("other").expect("other region");
+    let (bx, by) = center(btn.rect);
+    let (ox, oy) = center(other.rect);
+
+    let mut state = InputState::new();
+    // One persistent hover state, like the script thread's.
+    let mut hover = HoverState::new();
+    let arena = engine.arena();
+
+    // Move over the button → hover = button (the `:hover` highlight appears).
+    let ev = apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::Move { x: bx, y: by },
+    );
+    assert_eq!(ev.hovered, Some(btn.node_id), "hover enters the button");
+
+    // Press on the button.
+    let mut down_msgs = Vec::new();
+    let mut cmds = Vec::new();
+    handle_mouse_down(
+        &mut state,
+        &map,
+        &arena,
+        bx,
+        by,
+        MouseButton::Left,
+        &mut down_msgs,
+        &mut cmds,
+    );
+    state.pressed = Some((bx as u16, by as u16));
+
+    // Drag away while the button is held: hover must stay frozen on it.
+    let mut drag_msgs = Vec::new();
+    handle_mouse_move(&mut state, &map, ox, oy, &mut drag_msgs, &mut cmds);
+    assert!(
+        drag_msgs.is_empty(),
+        "no hover updates may be queued while a button is held"
+    );
+    assert_eq!(
+        hover.current().map(|r| r.node_id),
+        Some(btn.node_id),
+        "hover stays on the pressed button during the drag"
+    );
+
+    // Release on the other element: the release re-validates the hover.
+    let mut up_msgs = Vec::new();
+    let mut up_cmds = Vec::new();
+    handle_mouse_up(
+        &mut state,
+        &map,
+        &arena,
+        (ox as u16, oy as u16),
+        MouseButton::Left,
+        &mut up_msgs,
+        &mut up_cmds,
+    );
+    assert!(state.pressed.is_none(), "the press is cleared on release");
+    assert!(
+        up_msgs.iter().any(|m| matches!(
+            m,
+            ScriptMsg::Move { x, y } if *x == ox && *y == oy
+        )),
+        "the release must re-validate the hover at the release position"
+    );
+    for msg in up_msgs {
+        let ev = apply_message(&mut engine, &mut hover, &map, msg);
+        cmds.extend(ev.cmds);
+    }
+    assert_eq!(
+        hover.current().map(|r| r.node_id),
+        Some(other.node_id),
+        "hover moves to the element under the release point"
+    );
+    assert!(
+        !cmds.iter().any(|c| matches!(
+            c,
+            RenderCmd::Hover { node_id: Some(n) } if *n == btn.node_id
+        )),
+        "no Hover command may keep the button highlighted after the release"
     );
 }

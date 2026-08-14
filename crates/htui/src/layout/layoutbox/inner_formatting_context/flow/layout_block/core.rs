@@ -139,7 +139,7 @@ pub fn layout_block(
     let body_runs = if opts.hr_rule {
         Vec::new()
     } else {
-        collect_runs(arena, node_id, node, block_fg, block_bg, block_font_style)
+        collect_runs(arena, node_id, node, block_fg, None, block_font_style)
     };
     let fill_bg = block_bg.is_some();
 
