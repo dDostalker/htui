@@ -96,7 +96,7 @@ pub(crate) use inline::{q_quote_pair, text_node_run};
 pub use inline_run::InlineRun;
 pub use inner_formatting_context::FormattingContext;
 pub use outer_display::OuterDisplay;
-pub use paint_style::PaintStyle;
+pub use paint_style::{ColumnLayout, PaintStyle};
 pub use position::{apply_relative_offset, pin_fixed_boxes, pin_sticky_boxes, resolve_positioned_rects};
 pub use rect::Rect;
 pub use wrap::{is_cjk_break_opportunity, wrap_runs, wrapped_size};

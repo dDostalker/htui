@@ -276,7 +276,7 @@ pub(crate) fn merge_border_longhand(
 /// doesn't drop the whole border. Functional colors (`rgb(255, 0, 0)`,
 /// `hsl(120 50% 50%)`, …) are kept intact as one token — splitting them on
 /// internal spaces / commas would break the color.
-fn parse_border_shorthand(
+pub(crate) fn parse_border_shorthand(
     value: &str,
     containing_width: usize,
     font_ctx: FontContext,

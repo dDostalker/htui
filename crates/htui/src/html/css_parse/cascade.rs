@@ -222,6 +222,9 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "gap",
     "row-gap",
     "column-gap",
+    "place-content",
+    "place-items",
+    "place-self",
     // Text wrapping (CSS Text Level 3)
     "white-space",
     "word-break",
@@ -234,6 +237,16 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "right",
     "bottom",
     "left",
+    // Multi-column layout (CSS Multi-column Layout Level 1)
+    "columns",
+    "column-width",
+    "column-count",
+    "column-gap",
+    "column-fill",
+    "column-rule",
+    "column-rule-width",
+    "column-rule-style",
+    "column-rule-color",
     // Visibility / overflow
     "visibility",
     "overflow",

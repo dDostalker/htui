@@ -134,6 +134,7 @@ htui/
 │   │   │   ├── layout_box_model_tests.rs
 │   │   │   ├── layout_font_size_tests.rs
 │   │   │   ├── layout_tree_tests.rs
+│   │   │   ├── layout_columns_tests.rs # CSS 多列布局测试（column-count/width/gap/rule/fill）
 │   │   │   ├── layout_html_body_tests.rs
 │   │   │   ├── layout_flex_tests.rs   # CSS flexbox (display: flex) 布局测试
 │   │   │   ├── layout_pipeline_tests.rs # box generation + geometry + mixed end-to-end regression
@@ -209,6 +210,8 @@ htui/
 │       ├── input/        # <input> 输入框演示（点击聚焦 + 键盘编辑 + focus/blur/input/change 事件）
 │       ├── form/         # 表单控件演示（checkbox/radio 切换互斥、password 掩码、hidden 不渲染 + change 计数）
 │       ├── configurator/ # 配置器设置表单演示（input + 原生 select 下拉 + JS 开关 + 实时预览 + 保存/重置）
+│       ├── columns/      # 多列布局演示（column-count/width 自动列数/columns 简写/column-rule/column-fill:auto/文本+块混合分列）
+│       ├── place/        # place-content/place-items/place-self 简写演示（单值双轴/双值/长写优先）
 │       ├── fetch_demo/   # fetch 演示：<script src="mem://…"> 加载 + fetch 经 Promise 微任务事件循环写 DOM
 │       └── viewport_units/
 └── example/              # 完整交互示例（cargo run -p example -- music|music-light|codex|sticky）

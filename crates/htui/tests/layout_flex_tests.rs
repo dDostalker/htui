@@ -398,6 +398,124 @@ fn flex_row_with_input_renders_the_field() {
     );
 }
 
+// ============================================================
+// place-content / place-items / place-self shorthands
+// ============================================================
+
+#[test]
+fn test_place_content_single_value_applies_to_both_axes() {
+    init();
+    // `place-content: center` sets both `align-content: center` (rows
+    // vertically centred in the 7-row container) and `justify-content:
+    // center` (items centred within each 6-cell line).
+    let html = r#"
+        <div class="container">
+            <div class="a">AAAA</div>
+            <div class="b">BBBB</div>
+            <div class="c">CCCC</div>
+        </div>
+    "#;
+    let css = ".container { display: flex; flex-wrap: wrap; width: 6px; height: 7; place-content: center; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(
+        rows[2].starts_with(" AAAA"),
+        "line 1 vertically centred and its items centred: {:?}",
+        rows[2]
+    );
+    assert!(rows[3].starts_with(" BBBB"), "line 2: {:?}", rows[3]);
+    assert!(rows[4].starts_with(" CCCC"), "line 3: {:?}", rows[4]);
+    assert!(rows[0].trim().is_empty(), "2 free rows above: {:?}", rows[0]);
+}
+
+#[test]
+fn test_place_content_two_values_set_both_axes() {
+    init();
+    // `place-content: center space-between` maps `align-content: center` and
+    // `justify-content: space-between` independently: two items split a
+    // 10-cell single line to the two ends (justify). The line sits on row 0 —
+    // `align-content` is ignored for single-line flex containers, matching
+    // browsers.
+    let html = r#"
+        <div class="container"><div class="a">A</div><div class="b">B</div></div>
+    "#;
+    let css = ".container { display: flex; width: 10px; height: 5px; place-content: center space-between; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(
+        rows[0].starts_with("A        B"),
+        "items at both ends on the single line: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn test_place_content_stretch_does_not_touch_justify() {
+    init();
+    // `stretch` is valid for `align-content` but not for `justify-content`;
+    // the single value therefore only sets `align-content: stretch` (rows
+    // spread over the free height) while `justify-content` keeps its default
+    // `flex-start` (items left-aligned), matching browsers.
+    let html = r#"
+        <div class="container">
+            <div class="a">AAAA</div>
+            <div class="b">BBBB</div>
+            <div class="c">CCCC</div>
+        </div>
+    "#;
+    let css = ".container { display: flex; flex-wrap: wrap; width: 6px; height: 7; place-content: stretch; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(rows[0].starts_with("AAAA"), "stretched line 1, items left: {:?}", rows[0]);
+    assert!(rows[2].starts_with("BBBB"), "stretched gap: {:?}", rows[2]);
+    assert!(rows[4].starts_with("CCCC"), "stretched gap: {:?}", rows[4]);
+}
+
+#[test]
+fn test_place_items_centers_on_the_cross_axis() {
+    init();
+    // `place-items: center` → `align-items: center`: the 1-row item floats to
+    // the middle of the 5-row container.
+    let html = r#"<div class="container"><div class="a">A</div></div>"#;
+    let css = ".container { display: flex; height: 5px; place-items: center; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(rows[2].starts_with("A"), "item centred on row 2: {:?}", rows[2]);
+    assert!(rows[0].trim().is_empty() && rows[1].trim().is_empty());
+}
+
+#[test]
+fn test_place_items_two_values_syntax_checked() {
+    init();
+    // `place-items: center center` — the second value (`justify-items`) is
+    // not rendered by this engine but must still be syntactically valid.
+    let html = r#"<div class="container"><div class="a">A</div></div>"#;
+    let css = ".container { display: flex; height: 5px; place-items: center center; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(rows[2].starts_with("A"), "item centred on row 2: {:?}", rows[2]);
+}
+
+#[test]
+fn test_place_self_aligns_one_item() {
+    init();
+    // `place-self: flex-end` on one item overrides the container's default
+    // `align-items: stretch` for that item: B sits on the bottom row while A
+    // keeps stretching to the full height.
+    let html = r#"
+        <div class="container"><div class="a">A</div><div class="b">B</div></div>
+    "#;
+    let css = ".container { display: flex; height: 5px; } .b { place-self: flex-end; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(rows[0].starts_with("A"), "stretched item A on the top row: {:?}", rows[0]);
+    assert!(rows[4].contains("B"), "item B pinned to the bottom: {:?}", rows[4]);
+}
+
+#[test]
+fn test_place_shorthand_yields_to_explicit_longhands() {
+    init();
+    // An explicit `align-items` longhand wins over `place-items`.
+    let html = r#"<div class="container"><div class="a">A</div></div>"#;
+    let css = ".container { display: flex; height: 5px; align-items: flex-start; place-items: center; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(rows[0].starts_with("A"), "longhand flex-start wins: {:?}", rows[0]);
+}
+
 #[test]
 fn test_flex_row_lays_out_children_side_by_side() {
     init();

@@ -379,6 +379,7 @@ pub(super) fn layout_flex_container(
     let paint_style = PaintStyle {
         box_edges: edges,
         runs: None,
+        column_layout: None,
         font_size_cells: own_font_size_cells,
         line_height_cells,
         border_radius: node.css_attr.get_border_radius(

@@ -30,18 +30,20 @@ use crate::tdom::node::NodeType;
 use crossterm::style::Color;
 use indexmap::IndexMap;
 
-use crate::html::box_edges::{Border, BorderSides, BoxEdges, EdgeAuto, EdgeSizes};
+use crate::html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeAuto, EdgeSizes};
 
 use super::values::{
-    AlignContent, AlignItems, BoxSizing, CornerRadii, CssDisplay, FlexBasis, FlexDirection,
-    FlexShorthand, FlexWrap, FontStyleKind, FontWeight, GapSizes, JustifyContent, Length,
-    LineHeight, OverflowWrap, TextAlign, TextDecoration, TextTransform, Visibility, WhiteSpace,
-    WordBreak, merge_border_longhand, parse_align_content, parse_align_items, parse_border_radius,
-    parse_border_side, parse_border_style, parse_border_width, parse_box_sizing, parse_color_str,
-    parse_edge_auto, parse_edge_sizes, parse_flex_basis, parse_flex_direction, parse_flex_flow,
-    parse_flex_shorthand, parse_flex_wrap, parse_gap_shorthand, parse_justify_content,
-    parse_line_height, parse_non_negative_number, parse_order, parse_overflow_wrap,
-    parse_text_transform, parse_visibility, parse_white_space, parse_word_break, resolve_flex_basis,
+    AlignContent, AlignItems, BoxSizing, ColumnFill, ColumnsResolved, CornerRadii, CssDisplay,
+    FlexBasis, FlexDirection, FlexShorthand, FlexWrap, FontStyleKind, FontWeight, GapSizes,
+    JustifyContent, Length, LineHeight, OverflowWrap, TextAlign, TextDecoration, TextTransform,
+    Visibility, WhiteSpace, WordBreak, merge_border_longhand, parse_align_content,
+    parse_align_items, parse_border_radius, parse_border_side, parse_border_style,
+    parse_border_width, parse_box_sizing, parse_color_str, parse_column_count, parse_column_fill,
+    parse_column_rule, parse_columns_shorthand, parse_edge_auto, parse_edge_sizes,
+    parse_flex_basis, parse_flex_direction, parse_flex_flow, parse_flex_shorthand,
+    parse_flex_wrap, parse_gap_shorthand, parse_justify_content, parse_line_height,
+    parse_non_negative_number, parse_order, parse_overflow_wrap, parse_text_transform,
+    parse_visibility, parse_white_space, parse_word_break, resolve_flex_basis,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -471,25 +473,37 @@ impl CssAttr {
         }
     }
 
-    /// `justify-content` (defaults to `FlexStart`).
+    /// `justify-content` (defaults to `FlexStart`). Falls back to the
+    /// `place-content` shorthand's `justify-content` component when the
+    /// longhand is unset or unparseable (an invalid longhand declaration is
+    /// dropped by the cascade, so the shorthand still applies — matching
+    /// browsers).
     pub fn get_justify_content(&self) -> JustifyContent {
-        self.parse_or(
-            "justify-content",
-            parse_justify_content,
-            JustifyContent::FlexStart,
-        )
+        self.0
+            .get("justify-content")
+            .and_then(|v| parse_justify_content(v))
+            .or_else(|| self.place_content_justify())
+            .unwrap_or(JustifyContent::FlexStart)
     }
 
-    /// `align-items` for the container (defaults to `Stretch`).
+    /// `align-items` for the container (defaults to `Stretch`). Falls back to
+    /// the `place-items` shorthand's `align-items` component when the longhand
+    /// is unset or unparseable.
     pub fn get_align_items(&self) -> AlignItems {
-        self.parse_or("align-items", parse_align_items, AlignItems::Stretch)
+        self.0
+            .get("align-items")
+            .and_then(|v| parse_align_items(v))
+            .or_else(|| self.place_items_shorthand())
+            .unwrap_or(AlignItems::Stretch)
     }
 
     /// `align-self` for a single flex item (defaults to `Auto`).
     ///
     /// `Auto` means "inherit the parent's `align-items`"; the layout
     /// applies the fallback at item-resolution time so a parent change
-    /// is honoured without re-parsing the child.
+    /// is honoured without re-parsing the child. Falls back to the
+    /// `place-self` shorthand's `align-self` component when the longhand
+    /// is unset or unparseable.
     pub fn get_align_self(&self) -> AlignSelf {
         match self
             .0
@@ -497,24 +511,96 @@ impl CssAttr {
             .map(|s| s.trim().to_ascii_lowercase())
         {
             Some(v) if v == "auto" => AlignSelf::Auto,
-            Some(_) => AlignSelf::Value(
-                self.0
-                    .get("align-self")
-                    .and_then(|v| parse_align_items(v))
+            Some(v) => AlignSelf::Value(
+                parse_align_items(&v)
+                    .or_else(|| self.place_self_shorthand())
                     .unwrap_or(AlignItems::Stretch),
             ),
-            None => AlignSelf::Auto,
+            None => match self.place_self_shorthand() {
+                Some(a) => AlignSelf::Value(a),
+                None => AlignSelf::Auto,
+            },
         }
     }
 
     /// `align-content` for multi-line flex containers. Defaults to
     /// `Stretch` (the CSS initial value: lines fill the free cross space).
+    /// Falls back to the `place-content` shorthand's `align-content`
+    /// component when the longhand is unset or unparseable.
     pub fn get_align_content(&self) -> AlignContent {
-        self.parse_or(
-            "align-content",
-            parse_align_content,
-            AlignContent::Stretch,
-        )
+        self.0
+            .get("align-content")
+            .and_then(|v| parse_align_content(v))
+            .or_else(|| self.place_content_shorthand().map(|(a, _)| a))
+            .unwrap_or(AlignContent::Stretch)
+    }
+
+    /// The `justify-content` component of the `place-content` shorthand
+    /// (`None` when the shorthand is absent or its first value does not
+    /// double as a valid `justify-content` — e.g. `stretch`).
+    fn place_content_justify(&self) -> Option<JustifyContent> {
+        self.place_content_shorthand().and_then(|(_, j)| j)
+    }
+
+    /// Parse the `place-content` shorthand (`<'align-content'>
+    /// <'justify-content'>?`) into its components. The first token drives
+    /// `align-content`; the optional second drives `justify-content`. When the
+    /// second is omitted the first is reused for `justify-content` when it is
+    /// also a valid value there (`stretch` is not valid for `justify-content`
+    /// in flex layout, so `place-content: stretch` only sets `align-content` —
+    /// matching browsers). Unparseable or extra tokens reject the shorthand.
+    fn place_content_shorthand(&self) -> Option<(AlignContent, Option<JustifyContent>)> {
+        let raw = self.0.get("place-content")?;
+        let mut tokens = raw.split_whitespace();
+        let first = tokens.next()?;
+        let align = parse_align_content(first)?;
+        let justify = match tokens.next() {
+            Some(s) => Some(parse_justify_content(s)?),
+            None => parse_justify_content(first),
+        };
+        if tokens.next().is_some() {
+            return None;
+        }
+        Some((align, justify))
+    }
+
+    /// Parse the `place-items` shorthand (`<'align-items'> <'justify-items'>?`)
+    /// into its `align-items` component. The second value (`justify-items`) is
+    /// not implemented and is only syntax-checked; a lone first value also
+    /// fills `justify-items` in browsers, which this engine does not render.
+    fn place_items_shorthand(&self) -> Option<AlignItems> {
+        let raw = self.0.get("place-items")?;
+        let mut tokens = raw.split_whitespace();
+        let first = tokens.next()?;
+        let align = parse_align_items(first)?;
+        if let Some(second) = tokens.next()
+            && parse_align_items(second).is_none()
+        {
+            return None;
+        }
+        if tokens.next().is_some() {
+            return None;
+        }
+        Some(align)
+    }
+
+    /// Parse the `place-self` shorthand (`<'align-self'> <'justify-self'>?`)
+    /// into its `align-self` component. Like [`Self::place_items_shorthand`],
+    /// the second value (`justify-self`) is only syntax-checked.
+    fn place_self_shorthand(&self) -> Option<AlignItems> {
+        let raw = self.0.get("place-self")?;
+        let mut tokens = raw.split_whitespace();
+        let first = tokens.next()?;
+        let align = parse_align_items(first)?;
+        if let Some(second) = tokens.next()
+            && parse_align_items(second).is_none()
+        {
+            return None;
+        }
+        if tokens.next().is_some() {
+            return None;
+        }
+        Some(align)
     }
 
     /// Parse the `flex` shorthand once (when present) into its components.
@@ -614,6 +700,140 @@ impl CssAttr {
             .or_else(|| shorthand.map(|g| g.column))
             .unwrap_or(0);
         GapSizes { row, column }
+    }
+
+    /// Resolve the multi-column properties (`columns` / `column-count` /
+    /// `column-width` / `column-gap` / `column-fill` / `column-rule`) into a
+    /// concrete [`ColumnsResolved`] spec.
+    ///
+    /// `available` is the content-box width the columns share. Follows the CSS
+    /// Multi-column pseudo-algorithm: an explicit `column-count` caps the
+    /// number of columns; an explicit `column-width` limits it to how many
+    /// such columns (plus `gap`) fit; when both are given the smaller wins;
+    /// when only `column-width` is given the count is derived from the
+    /// available width. The used column width always widens to fill the
+    /// container evenly. Returns `None` when no column property is declared or
+    /// the resolved count is 1 (no fragmentation).
+    pub fn get_columns_resolved(
+        &self,
+        available: usize,
+        font_ctx: FontContext,
+        viewport: Viewport,
+    ) -> Option<ColumnsResolved> {
+        // `column-gap` defaults to `normal` == 1em in browsers; in cells that
+        // is one font-size unit. Percentages resolve against the available
+        // width (the multicol container is in scope here, unlike the flex
+        // `gap` where the axis size is not yet known).
+        let gap = self
+            .0
+            .get("column-gap")
+            .and_then(|v| Length::parse(v))
+            .map(|l| {
+                l.resolve(LengthContext {
+                    containing: available,
+                    font: font_ctx,
+                    viewport,
+                })
+            })
+            .unwrap_or(font_ctx.font_size_cells);
+
+        let shorthand = self.0.get("columns").and_then(|v| parse_columns_shorthand(v));
+        let count_decl = self
+            .0
+            .get("column-count")
+            .and_then(|v| parse_column_count(v))
+            .or_else(|| shorthand.and_then(|s| s.count));
+        let width_len = self
+            .0
+            .get("column-width")
+            .and_then(|v| Length::parse(v))
+            .or_else(|| shorthand.and_then(|s| s.width))
+            .filter(|l| !matches!(l, Length::Auto));
+
+        if count_decl.is_none() && width_len.is_none() {
+            return None;
+        }
+
+        let width_cells = width_len.map(|l| {
+            l.resolve(LengthContext {
+                containing: available,
+                font: font_ctx,
+                viewport,
+            })
+        });
+        let max_by_width = width_cells.map(|w| {
+            let unit = w.saturating_add(gap).max(1);
+            (available.saturating_add(gap) / unit).max(1)
+        });
+
+        let count = match (count_decl, max_by_width) {
+            (Some(c), Some(m)) => c.min(m),
+            (Some(c), None) => c,
+            (None, Some(m)) => m,
+            (None, None) => return None,
+        };
+        if count <= 1 {
+            return None;
+        }
+
+        // Shrink the count until every column keeps at least one cell; on a
+        // very narrow container an eager `column-count` would otherwise leave
+        // zero-width columns.
+        let mut count = count;
+        while count > 1 && available < count.saturating_sub(1).saturating_mul(gap).saturating_add(count) {
+            count -= 1;
+        }
+        if count <= 1 {
+            return None;
+        }
+        let col_width = available.saturating_sub(count.saturating_sub(1).saturating_mul(gap)) / count;
+
+        Some(ColumnsResolved {
+            count,
+            col_width: col_width.max(1),
+            gap,
+            fill: self.parse_or("column-fill", parse_column_fill, ColumnFill::default()),
+            rule: self.get_column_rule(available, font_ctx, viewport),
+        })
+    }
+
+    /// Resolve `column-rule` — shorthand plus `column-rule-width` /
+    /// `column-rule-style` / `column-rule-color` longhands (longhands win,
+    /// mirroring the border precedence). Returns `None` when the style is
+    /// `none`, so no rule is painted.
+    fn get_column_rule(
+        &self,
+        containing_width: usize,
+        font_ctx: FontContext,
+        viewport: Viewport,
+    ) -> Option<Border> {
+        let shorthand = self.0.get("column-rule").and_then(|v| {
+            parse_column_rule(v, containing_width, font_ctx, viewport)
+        });
+        let width_declared = self.0.contains_key("column-rule-width");
+        let mut width = self
+            .0
+            .get("column-rule-width")
+            .map(|v| parse_border_width(Some(v.as_str()), containing_width, font_ctx, viewport))
+            .or_else(|| shorthand.map(|b| b.width))
+            .unwrap_or(0);
+        let style = self
+            .0
+            .get("column-rule-style")
+            .map(|v| parse_border_style(Some(v.as_str())))
+            .or_else(|| shorthand.map(|b| b.style))
+            .unwrap_or(BorderStyle::None);
+        let color = self
+            .0
+            .get("column-rule-color")
+            .and_then(|v| parse_color_str(v))
+            .or_else(|| shorthand.and_then(|b| b.color));
+        if !width_declared && width == 0 && style == BorderStyle::Solid {
+            // `column-rule: solid red` names no width — default to one cell so
+            // the rule is visible (browsers default to `medium`).
+            width = 1;
+        }
+        (style != BorderStyle::None).then_some(Border::new(width, style, color))
     }
 
     /// Element height (CSS `height`).

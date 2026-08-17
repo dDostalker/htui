@@ -136,6 +136,7 @@ pub fn layout_table(
     let paint_style = PaintStyle {
         box_edges: edges,
         runs: None,
+        column_layout: None,
         font_size_cells: own_font_size_cells,
         line_height_cells: own_font_size_cells.max(1),
         border_radius: crate::html::css_parse::CornerRadii::default(),

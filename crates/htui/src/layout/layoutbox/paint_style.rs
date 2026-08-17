@@ -1,9 +1,34 @@
 //! Paint-only visual chrome carried by every [`crate::layout::LayoutBox`].
+use crossterm::style::Color;
 
 use crate::html::box_edges::BoxEdges;
 
 use super::inline_run::InlineRun;
 use crate::html::css_parse::CornerRadii;
+
+/// Multi-column fragmentation of a box's own inline content.
+///
+/// Present when the box fragments its content into side-by-side columns; the
+/// normal [`PaintStyle::runs`] stays `None` in that case and the wrapped lines
+/// live here, grouped per column. Block children are re-positioned into the
+/// columns by the layout phase, so only text needs this table.
+#[derive(Debug, Clone)]
+pub struct ColumnLayout {
+    /// Wrapped inline lines for each column: `[column][line][run]`. A column
+    /// with no inline content has an empty inner `Vec`.
+    pub lines: Vec<Vec<Vec<InlineRun>>>,
+    /// Absolute canvas x of each column's content-left edge.
+    pub col_x: Vec<usize>,
+    /// Content width of one column in cells.
+    pub col_width: usize,
+    /// Absolute canvas x of every painted column-rule (one between each
+    /// adjacent pair of columns).
+    pub rule_x: Vec<usize>,
+    /// Colour of the column rules (the element's foreground when unspecified).
+    pub rule_color: Option<Color>,
+    /// Total column height (rows the columns span, content-box rows).
+    pub height: usize,
+}
 
 /// Paint-only data carried by every [`crate::layout::LayoutBox`].
 ///
@@ -24,6 +49,10 @@ pub struct PaintStyle {
     /// (e.g. a structural `<aside>` whose text lives in nested block
     /// children, or a replaced element like `<img>`).
     pub runs: Option<Vec<Vec<InlineRun>>>,
+    /// Multi-column fragmentation (see [`ColumnLayout`]). `None` for regular
+    /// single-column boxes. When set, [`Self::runs`] is `None` and the box's
+    /// inline text is painted per column instead.
+    pub column_layout: Option<ColumnLayout>,
     /// Effective font-size of this box in terminal cells (≥ 1). Drives the
     /// `font_size_cells` expansion the paint phase applies so an `<h1>` with
     /// the default 2em font-size renders each character across 2 cells.
@@ -49,6 +78,7 @@ impl Default for PaintStyle {
         Self {
             box_edges: BoxEdges::default(),
             runs: None,
+            column_layout: None,
             font_size_cells: 1,
             line_height_cells: 1,
             border_radius: CornerRadii::default(),

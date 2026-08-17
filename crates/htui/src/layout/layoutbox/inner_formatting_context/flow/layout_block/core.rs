@@ -8,16 +8,20 @@
 //! right [`LayoutBlockOptions`].
 
 use crate::{
-    html::box_edges::{Border, BorderSides, BoxEdges, EdgeSizes},
-    html::css_parse::BoxSizing,
+    html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeSizes},
+    html::css_parse::{
+        BoxSizing, ColumnFill, ColumnsResolved, OverflowWrap, Position, WhiteSpace, WordBreak,
+    },
     layout::{
-        BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext, PaintStyle, Rect,
+        BoxConstraint, ColumnLayout, Cursor, InlineRun, LayoutBox, LayoutContext, PaintStyle, Rect,
         inner_formatting_context::flow::layout_children,
         layoutbox::{collect_runs, visible_children, wrap_runs},
     },
     tdom::node::{Node, NodeArena, NodeId, effective_font_size_cells},
     tui::graph_api::{FontStyle, block_style},
 };
+
+use crossterm::style::Color;
 
 use crate::html::css_parse::resolve_line_height_cells;
 
@@ -216,49 +220,96 @@ pub fn layout_block(
     // Wrap the inline content to the content-box width. The wrapped
     // line count drives the rect height; the per-line run list is
     // what the paint phase draws.
-    let wrap_width = geom.content_constraint.width.max(1);
-    let wrapped_lines = if all_runs.is_empty() {
-        Vec::new()
-    } else {
-        wrap_runs(
-            &all_runs,
-            wrap_width,
-            own_font_size_cells,
-            node.css_attr.get_white_space(&node.node_type),
-            node.css_attr.get_word_break(),
-            node.css_attr.get_overflow_wrap(),
-        )
-    };
-    let inline_line_count = wrapped_lines.len();
-    let inline_rows = inline_line_count.saturating_mul(line_height_cells.max(1));
-
-    // Block children begin BELOW the box's own inline text: in CSS the
-    // inline content forms its own line(s) first and block-level children
-    // start on a fresh line underneath. Starting the child cursor at the
-    // content top would paint the first child's row over the parent's own
-    // text (e.g. `<li>Nested list<ul>…</ul></li>` and
-    // `<div>text<p>child</p></div>`).
     let content_top = geom.outer_y + edges.border.top.thickness() + edges.padding.top;
-    let mut child_cursor = Cursor {
-        y: content_top.saturating_add(inline_rows),
-    };
-    let block_children = visible_children(arena, node_id);
-    let children = layout_children(
-        arena,
-        &block_children,
-        child_containing,
-        &mut child_cursor,
-        child_context,
+    let white_space = node.css_attr.get_white_space(&node.node_type);
+    let word_break = node.css_attr.get_word_break();
+    let overflow_wrap = node.css_attr.get_overflow_wrap();
+
+    // Multi-column layout (CSS Multi-column Level 1): when `column-count` /
+    // `column-width` resolve to more than one column, the inline lines and
+    // the block children fragment into side-by-side columns instead of a
+    // single column. The multicol branch produces the same outputs the
+    // single-column path below does (wrapped lines, children, content
+    // height) plus the per-column text table handed to the paint phase.
+    let columns = node.css_attr.get_columns_resolved(
+        geom.content_constraint.width,
+        child_context.font,
+        child_context.viewport,
     );
+    // `column-fill: auto` fills each column up to the container's *explicit*
+    // height before moving on; when no height is declared the spec treats
+    // `auto` as `balance`, so this is only consulted for the auto case.
+    let fixed_content_height = columns.as_ref().and_then(|_| {
+        node.css_attr
+            .get_height(available, child_context.font, child_context.viewport)
+            .map(|h| {
+                let inner_v = edges.padding.vertical() + edges.border.vertical_thickness();
+                match sizing {
+                    BoxSizing::BorderBox => h.saturating_sub(inner_v),
+                    BoxSizing::ContentBox => h,
+                }
+            })
+    });
+    let mut column_layout: Option<ColumnLayout> = None;
+    let (wrapped_lines, children, content_height) = if let Some(spec) = &columns {
+        let (layout, children, height) = layout_multicol(
+            arena,
+            node_id,
+            all_runs,
+            geom,
+            spec,
+            content_top,
+            own_font_size_cells,
+            line_height_cells,
+            white_space,
+            word_break,
+            overflow_wrap,
+            block_fg,
+            fixed_content_height,
+            child_context,
+        );
+        column_layout = layout;
+        (Vec::new(), children, height)
+    } else {
+        let wrap_width = geom.content_constraint.width.max(1);
+        let wrapped_lines = if all_runs.is_empty() {
+            Vec::new()
+        } else {
+            wrap_runs(
+                &all_runs,
+                wrap_width,
+                own_font_size_cells,
+                white_space,
+                word_break,
+                overflow_wrap,
+            )
+        };
+        let inline_rows = wrapped_lines.len().saturating_mul(line_height_cells.max(1));
 
-    let children_rows = child_cursor
-        .y
-        .saturating_sub(content_top.saturating_add(inline_rows));
+        // Block children begin BELOW the box's own inline text: in CSS the
+        // inline content forms its own line(s) first and block-level children
+        // start on a fresh line underneath. Starting the child cursor at the
+        // content top would paint the first child's row over the parent's own
+        // text (e.g. `<li>Nested list<ul>…</ul></li>` and
+        // `<div>text<p>child</p></div>`).
+        let mut child_cursor = Cursor {
+            y: content_top.saturating_add(inline_rows),
+        };
+        let block_children = visible_children(arena, node_id);
+        let children = layout_children(
+            arena,
+            &block_children,
+            child_containing,
+            &mut child_cursor,
+            child_context,
+        );
 
-    // The content area stacks the wrapped inline lines and the block
-    // children (they no longer share rows), so the border-box height
-    // accommodates both.
-    let content_height = children_rows.saturating_add(inline_rows);
+        let children_rows = child_cursor
+            .y
+            .saturating_sub(content_top.saturating_add(inline_rows));
+        let content_height = children_rows.saturating_add(inline_rows);
+        (wrapped_lines, children, content_height)
+    };
 
     let outer_height = match preallocated_height {
         Some(height) => {
@@ -362,6 +413,7 @@ pub fn layout_block(
         } else {
             Some(wrapped_lines)
         },
+        column_layout,
         font_size_cells: own_font_size_cells,
         line_height_cells,
         border_radius: node.css_attr.get_border_radius(
@@ -452,4 +504,204 @@ fn merge_ua_margins(node: &Node, mut edges: BoxEdges, ua_margins: Option<EdgeSiz
         edges.margin.left = ua.left;
     }
     edges
+}
+
+/// One unit of content in the multicol stream: a wrapped inline line or a
+/// block child. `height` spans from the unit's start down to the next unit's
+/// start in the pass-1 stream, so inter-sibling margins survive
+/// fragmentation.
+struct ColumnFragment {
+    height: usize,
+    /// Index of the wrapped inline line, when this unit is a line fragment.
+    line: Option<usize>,
+    /// Index into the children vec, when this unit is a child fragment.
+    child: Option<usize>,
+}
+
+/// Lay out a box's content into side-by-side columns (CSS Multi-column).
+///
+/// Pass 1 wraps the inline runs at the column width and lays the block
+/// children out as one continuous `col_width`-wide stream. The stream is then
+/// fragmented into `count` columns: `balance` (the default) targets
+/// `ceil(total / count)` per column, `auto` targets the box's explicit
+/// content height, and each unit flows into the next column when the current
+/// one would overflow. Children are re-positioned to their column's
+/// coordinates; detached (`absolute` / `fixed`) children keep their pass-1
+/// rectangles and are left to the post-layout positioning pass. Returns the
+/// per-column text table for the paint phase, the re-positioned children, and
+/// the content height (the tallest column).
+#[allow(clippy::too_many_arguments)]
+fn layout_multicol(
+    arena: &NodeArena,
+    node_id: NodeId,
+    all_runs: Vec<InlineRun>,
+    geom: OuterGeometry,
+    spec: &ColumnsResolved,
+    content_top: usize,
+    own_font_size_cells: usize,
+    line_height_cells: usize,
+    white_space: WhiteSpace,
+    word_break: WordBreak,
+    overflow_wrap: OverflowWrap,
+    block_fg: Option<Color>,
+    fixed_content_height: Option<usize>,
+    child_context: LayoutContext,
+) -> (Option<ColumnLayout>, Vec<LayoutBox>, usize) {
+    let count = spec.count.max(2);
+    let col_w = spec.col_width.max(1);
+    let gap = spec.gap;
+    let content_left = geom.content_constraint.x;
+
+    // Pass 1: wrap the inline content to the column width, then lay the block
+    // children out in a single `col_w`-wide stream starting below the inline
+    // lines (same document order the single-column path uses).
+    let wrapped_lines = if all_runs.is_empty() {
+        Vec::new()
+    } else {
+        wrap_runs(
+            &all_runs,
+            col_w,
+            own_font_size_cells,
+            white_space,
+            word_break,
+            overflow_wrap,
+        )
+    };
+    let line_rows = wrapped_lines.len().saturating_mul(line_height_cells.max(1));
+    let block_children = visible_children(arena, node_id);
+    let mut col_cursor = Cursor {
+        y: content_top.saturating_add(line_rows),
+    };
+    let mut children = layout_children(
+        arena,
+        &block_children,
+        BoxConstraint {
+            x: content_left,
+            width: col_w,
+        },
+        &mut col_cursor,
+        child_context,
+    );
+
+    // Build the fragment stream. Inline lines first (contiguous), then each
+    // in-flow child (static / relative) using its pass-1 rect, so the height
+    // spans margins and relative offsets down to the next unit.
+    let mut fragments: Vec<ColumnFragment> = Vec::new();
+    let mut stream = 0usize;
+    for idx in 0..wrapped_lines.len() {
+        fragments.push(ColumnFragment {
+            height: line_height_cells.max(1),
+            line: Some(idx),
+            child: None,
+        });
+        stream = stream.saturating_add(line_height_cells.max(1));
+    }
+    for (idx, child) in children.iter().enumerate() {
+        if !matches!(
+            child.positioning.position,
+            Position::Static | Position::Relative
+        ) {
+            continue;
+        }
+        let end = child
+            .rect
+            .y
+            .saturating_add(child.rect.height)
+            .saturating_sub(content_top);
+        fragments.push(ColumnFragment {
+            height: end.saturating_sub(stream),
+            line: None,
+            child: Some(idx),
+        });
+        stream = end;
+    }
+    let total = stream;
+
+    // Distribute the fragments into columns. `target` is the height each
+    // column is allowed before the next fragment moves on.
+    let target = match (spec.fill, fixed_content_height) {
+        (ColumnFill::Auto, Some(h)) => h.max(1),
+        _ => total.div_ceil(count),
+    };
+    let mut col_of = vec![0usize; fragments.len()];
+    let mut col_off = vec![0usize; fragments.len()];
+    let mut col = 0usize;
+    let mut col_h = 0usize;
+    for (i, frag) in fragments.iter().enumerate() {
+        if col_h > 0 && col_h.saturating_add(frag.height) > target && col < count.saturating_sub(1)
+        {
+            col += 1;
+            col_h = 0;
+        }
+        col_of[i] = col;
+        col_off[i] = col_h;
+        col_h = col_h.saturating_add(frag.height);
+    }
+
+    // The container's content height is the tallest column.
+    let mut col_heights = vec![0usize; count];
+    for (i, frag) in fragments.iter().enumerate() {
+        col_heights[col_of[i]] =
+            col_heights[col_of[i]].max(col_off[i].saturating_add(frag.height));
+    }
+    let content_height = col_heights.iter().copied().max().unwrap_or(0);
+
+    // Re-position the in-flow children into their columns. The column x is
+    // `content_left + col * (col_w + gap)`; the column y keeps the fragment's
+    // offset within its column (margins and relative offsets are already
+    // folded into the fragment spans).
+    for (i, frag) in fragments.iter().enumerate() {
+        let Some(child_idx) = frag.child else {
+            continue;
+        };
+        let child = &mut children[child_idx];
+        let col_x = content_left.saturating_add(
+            col_of[i].saturating_mul(col_w.saturating_add(gap)),
+        );
+        child.rect.x = col_x.saturating_add(child.rect.x.saturating_sub(content_left));
+        child.rect.y = content_top.saturating_add(col_off[i]);
+    }
+
+    // Group the wrapped lines per column for the paint phase.
+    let mut column_lines: Vec<Vec<Vec<InlineRun>>> = vec![Vec::new(); count];
+    for (i, frag) in fragments.iter().enumerate() {
+        if let Some(line_idx) = frag.line {
+            column_lines[col_of[i]].push(wrapped_lines[line_idx].clone());
+        }
+    }
+
+    let mut col_xs: Vec<usize> = Vec::with_capacity(count);
+    for c in 0..count {
+        col_xs.push(
+            content_left.saturating_add(c.saturating_mul(col_w.saturating_add(gap))),
+        );
+    }
+
+    // Column rules sit centred in each gap; a zero-width gap leaves no room.
+    let mut rule_xs: Vec<usize> = Vec::new();
+    let rule_visible = spec.rule.is_some_and(|r| r.style != BorderStyle::None) && gap > 0;
+    if rule_visible {
+        for c in 0..count.saturating_sub(1) {
+            let boundary =
+                content_left.saturating_add((c + 1).saturating_mul(col_w)).saturating_add(
+                    c.saturating_mul(gap),
+                );
+            rule_xs.push(boundary.saturating_add(gap / 2));
+        }
+    }
+    let rule_color = spec
+        .rule
+        .filter(|r| r.style != BorderStyle::None)
+        .and_then(|r| r.color)
+        .or(block_fg);
+
+    let layout = ColumnLayout {
+        lines: column_lines,
+        col_x: col_xs,
+        col_width: col_w,
+        rule_x: rule_xs,
+        rule_color,
+        height: content_height,
+    };
+    (Some(layout), children, content_height)
 }

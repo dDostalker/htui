@@ -160,6 +160,8 @@ fn main() {
         "configurator" => test_case!(configurator, no_css),
         "fetch_demo" => test_case!(fetch_demo, no_css),
         "showcase" => test_case!(showcase, no_css),
+        "columns" => test_case!(columns, no_css),
+        "place" => test_case!(place, no_css),
         _ => {
             let available = [
                 "all_in_one",
@@ -198,6 +200,8 @@ fn main() {
                 "configurator",
                 "fetch_demo",
                 "showcase",
+                "columns",
+                "place",
             ];
             eprintln!(
                 "Unknown test: '{test_name}'\nAvailable tests: {}",

@@ -4,7 +4,7 @@ use crate::{
     html::css_parse::TextAlign,
     layout::{LayoutBox, Rect},
     tdom::node::NodeArena,
-    tui::graph_api::block_style,
+    tui::graph_api::{FontStyle, block_style},
 };
 
 use super::{PaintCanvas, border::paint_borders, intersect_rects, text::paint_runs};
@@ -164,7 +164,20 @@ pub(crate) fn paint_block(
     // Inline content sits in the content-box (rect shrunk by border +
     // padding), not the border-box, so text-align and run positioning
     // work against the inner width.
-    if let Some(runs) = &lb.paint_style.runs {
+    if lb.paint_style.column_layout.is_some() {
+        paint_column_layout(
+            lb,
+            canvas,
+            clip,
+            box_edges,
+            align,
+            effective_bg,
+            r,
+            cell_start,
+            style,
+            glyph_row_within_line,
+        );
+    } else if let Some(runs) = &lb.paint_style.runs {
         let inner_h = box_edges.inner_horizontal();
         let border_top = box_edges.border.top.thickness();
         let padding_top = box_edges.padding.top;
@@ -221,4 +234,104 @@ pub(crate) fn paint_block(
     // width. Painting last guarantees a frame cell keeps its glyph even if
     // wrapped content reached it.
     paint_borders(lb, r, canvas, fg, effective_bg);
+}
+
+/// Paint a multi-column box's fragmented inline content and column rules.
+///
+/// Each column's wrapped lines are painted at its own column x with the
+/// column width (the text may be `text-align`-ed inside the column); column
+/// rules (`column-rule`) are vertical `│` glyphs centred in each gap, painted
+/// with the rule colour over the box's effective background. All writes stay
+/// inside the box's content area and are clipped by the inherited `clip`.
+#[allow(clippy::too_many_arguments)]
+fn paint_column_layout(
+    lb: &LayoutBox,
+    canvas: &mut PaintCanvas<'_>,
+    clip: Rect,
+    box_edges: &crate::html::box_edges::BoxEdges,
+    align: TextAlign,
+    effective_bg: Option<Color>,
+    r: Rect,
+    cell_start: usize,
+    style: FontStyle,
+    glyph_row_within_line: usize,
+) {
+    let Some(columns_layout) = &lb.paint_style.column_layout else {
+        return;
+    };
+    let cols = canvas.columns as usize;
+    let font = lb.paint_style.font_size_cells.max(1);
+    let line_h = lb.paint_style.line_height_cells.max(1);
+    let border_top = box_edges.border.top.thickness();
+    let padding_top = box_edges.padding.top;
+    let content_top_abs = r.y.saturating_add(border_top).saturating_add(padding_top);
+    let content_right = r.x.saturating_add(r.width);
+    let vertical_offset = glyph_row_within_line * cols;
+    let content_height = columns_layout.height;
+
+    // Each column paints its wrapped lines inside the box's content area.
+    for (col, lines) in columns_layout.lines.iter().enumerate() {
+        let col_x = columns_layout.col_x[col];
+        if col_x >= content_right {
+            continue;
+        }
+        let col_width = (content_right - col_x).min(columns_layout.col_width);
+        let col_clip = Rect::new(col_x, content_top_abs, col_width, content_height);
+        if let Some(col_clip) = intersect_rects(col_clip, clip) {
+            let col_cell_start = cell_start
+                .saturating_add(col_x.saturating_sub(r.x))
+                .saturating_add(border_top.saturating_add(padding_top).saturating_mul(cols))
+                .saturating_add(vertical_offset);
+            paint_runs(
+                canvas,
+                lines,
+                col_cell_start,
+                col_width,
+                align,
+                effective_bg,
+                font,
+                line_h,
+                col_clip,
+            );
+        }
+    }
+
+    // Column rules: vertical `│` glyphs centred in each gap, spanning the
+    // content height (clipped by the box's content area and the inherited
+    // clip). The colour may be `None` (no declared rule / element colour) —
+    // like borders, the cell then keeps the terminal default foreground.
+    if !columns_layout.rule_x.is_empty() {
+        let rule_color = columns_layout.rule_color;
+        let row_top = content_top_abs;
+        // Bottom (exclusive) of the content area: the rect minus the bottom
+        // border and padding. The top border is already reflected in
+        // `content_top_abs`, so it is not subtracted here.
+        let content_area_bottom = r.y.saturating_add(
+            r.height
+                .saturating_sub(box_edges.border.bottom.thickness())
+                .saturating_sub(box_edges.padding.bottom),
+        );
+        let row_bottom = content_top_abs
+            .saturating_add(content_height)
+            .min(content_area_bottom);
+        for &rule_x in &columns_layout.rule_x {
+            if rule_x >= content_right {
+                continue;
+            }
+            for y in row_top..row_bottom {
+                if y < clip.y || y >= clip.y.saturating_add(clip.height) {
+                    continue;
+                }
+                let idx = canvas.cell_index(rule_x, y);
+                if idx < canvas.layout.len() && canvas.in_region(idx) {
+                    let cell = &mut canvas.layout[idx];
+                    cell.word.clear();
+                    cell.word.push('│');
+                    cell.fcolor = rule_color;
+                    cell.bcolor = effective_bg;
+                    cell.style = style;
+                }
+            }
+        }
+    }
 }
