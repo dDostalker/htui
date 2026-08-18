@@ -162,6 +162,13 @@ pub(crate) fn paint_input(
     } else {
         fg
     };
+    // `caret-color` paints the caret block with the declared colour; the
+    // default is the inverted cell (field background <-> text colour swap).
+    let caret_color = node.css_attr.get_caret_color();
+    let caret_cell = |fg: Option<Color>, bg: Option<Color>| match caret_color {
+        Some(cc) => (Some(bg.unwrap_or(Color::Black)), Some(cc)),
+        None => (Some(bg.unwrap_or(Color::Black)), Some(fg.unwrap_or(Color::White))),
+    };
 
     let inner_width = r.width.saturating_sub(2);
     let inner_x = r.x.saturating_add(1);
@@ -204,10 +211,7 @@ pub(crate) fn paint_input(
             let (cell_fg, cell_bg) = if inverted {
                 // Inverted caret cell so the caret position is visible even at
                 // the end of the value (a blank inverted cell).
-                (
-                    Some(bg.unwrap_or(Color::Black)),
-                    Some(fg.unwrap_or(Color::White)),
-                )
+                caret_cell(fg, bg)
             } else if selection.is_some_and(|(s, e)| i >= s && i < e) {
                 // Selected characters are highlighted (Tokyo Night selection
                 // blue) over the field's own colours.
@@ -240,12 +244,13 @@ pub(crate) fn paint_input(
     if focused && cursor == value.chars().count() && col < inner_width {
         let abs_col = inner_x.saturating_add(col);
         if abs_col < r.x.saturating_add(r.width).saturating_sub(1) {
+            let (cf, cb) = caret_cell(fg, bg);
             put(
                 canvas,
                 cell_index(canvas, abs_col, r.y),
                 Some(' '),
-                Some(bg.unwrap_or(Color::Black)),
-                Some(fg.unwrap_or(Color::White)),
+                cf,
+                cb,
             );
         }
     }

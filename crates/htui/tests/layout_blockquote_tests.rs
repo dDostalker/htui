@@ -121,9 +121,9 @@ fn test_blockquote_text_position_on_canvas() {
 #[test]
 fn test_blockquote_margin_creates_gap_between_siblings() {
     init();
-    // Two blockquotes: bottom margin of the first (1) + top margin of the
-    // second (1) keep them two rows apart (the engine does not collapse
-    // adjacent margins, same as every other element here).
+    // Two blockquotes: the first's bottom margin (1) and the second's top
+    // margin (1) collapse to a single 1-row gap between them (CSS vertical
+    // margin collapsing).
     let (term_map, tl) = draw(
         "<blockquote>One</blockquote><blockquote>Two</blockquote>",
         "",
@@ -140,7 +140,7 @@ fn test_blockquote_margin_creates_gap_between_siblings() {
         .position(|b| b.word == "T")
         .expect("second quote text");
     assert_eq!(one / cols, 1);
-    assert_eq!(two / cols, 4);
+    assert_eq!(two / cols, 3, "adjacent 1-row margins collapse to one gap");
     assert_eq!(one % cols, 4);
     assert_eq!(two % cols, 4);
 }
@@ -186,7 +186,11 @@ fn test_blockquote_nested_p_child_shares_row() {
     assert_eq!(bq.rect.y, 1);
     assert_eq!(bq.rect.width, 72);
     assert_eq!(p.rect.x, 4, "p inherits the blockquote content box");
-    assert_eq!(p.rect.y, 1, "p shares the blockquote row");
+    assert_eq!(
+        p.rect.y,
+        2,
+        "p sits one row below the blockquote top (its 1-row UA margin-top)"
+    );
 }
 
 #[test]

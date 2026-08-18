@@ -337,11 +337,12 @@ fn test_aside_bg_covers_nested_p_row() {
     // Browser-like geometry: `<aside>` does NOT reserve its own empty row.
     // The aside's rect wraps the children directly, so for
     // `<aside><p>Nested content</p></aside>`:
-    //   - aside.rect = (x, y, w, 1)
-    //   - nested <p> sits on the same row as the aside
-    //   - the next row is bg-free
-    // Row 0 carries the aside's bg on every non-text cell; the row after
-    // the aside is bg-free.
+    //   - aside.rect = (x, y, w, 3) — the <p>'s UA margins (1 above, 1
+    //     below) plus its 1 text row
+    //   - nested <p> sits one row below the aside's top (margin-top)
+    //   - the row after the aside is bg-free
+    // Rows 0..3 all carry the aside's bg: rows 0 and 2 are the <p>'s UA
+    // margin rows (the aside bg shows through), row 1 holds the text.
     init();
     let html = "<aside><p>Nested content</p></aside>";
     let css = "aside { background-color: darkblue; }";
@@ -352,37 +353,47 @@ fn test_aside_bg_covers_nested_p_row() {
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map);
 
+    // Row 0 = the <p>'s margin-top row — the aside bg fills every cell.
     let row0 = &tl.layout[0..cols];
-    let row1 = &tl.layout[cols..2 * cols];
-
-    // Row 0 = the aside's row, which is also the nested <p>'s row. The
-    // bg covers every non-text cell.
     let row0_bg = row0
         .iter()
         .filter(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 0, b: 139 }))
         .count();
+    assert_eq!(row0_bg, cols, "row 0 = <p> margin-top, fully aside bg");
+
+    // Row 1 = the paragraph's text row; bg covers every non-text cell.
+    let row1 = &tl.layout[cols..2 * cols];
+    let row1_bg = row1
+        .iter()
+        .filter(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 0, b: 139 }))
+        .count();
     assert!(
-        row0_bg > 0,
-        "row 0 must carry the aside's bg (got {row0_bg}/{cols} bg cells)"
-    );
-    assert!(
-        row0_bg >= cols - "Nested content".len(),
-        "row 0 bg should fill all non-text cells (got {row0_bg} bg cells, expected >= {})",
+        row1_bg >= cols - "Nested content".len(),
+        "row 1 bg should fill all non-text cells (got {row1_bg} bg cells, expected >= {})",
         cols - "Nested content".len()
     );
-    // Row 1 is outside the aside — must be bg-free.
+
+    // Row 2 = the <p>'s margin-bottom row — fully aside bg.
+    let row2 = &tl.layout[2 * cols..3 * cols];
     assert!(
-        row1.iter().all(|b| b.bcolor.is_none()),
-        "row 1 must not carry the aside's bg (aside is exactly 1 row tall)"
+        row2.iter().all(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 0, b: 139 })),
+        "row 2 = <p> margin-bottom, fully aside bg"
+    );
+
+    // Row 3 is outside the aside — must be bg-free.
+    let row3 = &tl.layout[3 * cols..4 * cols];
+    assert!(
+        row3.iter().all(|b| b.bcolor.is_none()),
+        "row 3 must not carry the aside's bg (aside is exactly 3 rows tall)"
     );
 }
 
 #[test]
 fn test_aside_rect_height_includes_nested_children() {
-    // Direct check on the layout tree: the aside wraps its children on the
-    // same row, so rect.height equals the rows occupied by children (1 for
-    // a single <p>). The nested <p> starts at the aside's own y, not one
-    // row below.
+    // Direct check on the layout tree: the aside wraps its children, so
+    // rect.height equals the rows the children occupy — for a single <p>
+    // that is 3 (its UA margin-top 1 + text 1 + margin-bottom 1). The
+    // nested <p> starts one row below the aside's own y (margin-top).
     init();
     let html = "<aside><p>only child</p></aside>";
     let css = "aside { background-color: darkblue; }";
@@ -397,21 +408,23 @@ fn test_aside_rect_height_includes_nested_children() {
     let aside_box = find_box_by_type(&boxes, &NodeType::Aside, &arena)
         .expect("aside box should be present in the layout tree");
     assert_eq!(
-        aside_box.rect.height, 1,
-        "aside rect.height should NOT reserve an empty own row; it wraps the children (1 row for 1 <p>)"
+        aside_box.rect.height, 3,
+        "aside wraps the <p> plus its 1-row UA margins (margin 1 + text 1 + margin 1)"
     );
     assert_eq!(aside_box.children.len(), 1, "aside should have 1 child box");
     assert_eq!(
-        aside_box.children[0].rect.y, aside_box.rect.y,
-        "child should share the aside's row (no offset)"
+        aside_box.children[0].rect.y,
+        aside_box.rect.y.saturating_add(1),
+        "the <p>'s UA margin-top puts it one row below the aside's top"
     );
 }
 
 #[test]
 fn test_aside_bg_covers_two_nested_p_rows() {
-    // Two nested <p> siblings share the aside's bg across rows 0 and 1.
-    // The aside's rect is exactly 2 rows tall (rows 0..2), so row 2 must
-    // be bg-free.
+    // Two nested <p> siblings share the aside's bg. Each <p> is 3 rows
+    // (margin-top 1 + text 1 + margin-bottom 1), but the adjacent margins
+    // collapse to 1, so the aside's rect is 5 rows: margin / text /
+    // collapsed margin / text / margin. Row 5 must be bg-free.
     init();
     let html = "<aside><p>first</p><p>second</p></aside>";
     let css = "aside { background-color: darkblue; }";
@@ -422,9 +435,9 @@ fn test_aside_bg_covers_two_nested_p_rows() {
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map);
 
-    // Rows 0..2 are the aside's rect. Each row carries bg on non-text
-    // cells; rows 0 and 1 lose cells to "first"/"second" text.
-    for row in 0..2 {
+    // Rows 0..5 are the aside's rect; every row carries the aside bg on
+    // its non-text cells.
+    for row in 0..5 {
         let start = row * cols;
         let row_slice = &tl.layout[start..start + cols];
         let bg_count = row_slice
@@ -436,13 +449,13 @@ fn test_aside_bg_covers_two_nested_p_rows() {
             "row {row} must carry the aside's bg (got {bg_count}/{cols})"
         );
     }
-    // Row 2 must be bg-free (rect is exactly 2 rows).
-    let row2_start = 2 * cols;
-    if row2_start + cols <= tl.layout.len() {
-        let row2 = &tl.layout[row2_start..row2_start + cols];
+    // Row 5 must be bg-free (rect is exactly 5 rows).
+    let row5_start = 5 * cols;
+    if row5_start + cols <= tl.layout.len() {
+        let row5 = &tl.layout[row5_start..row5_start + cols];
         assert!(
-            row2.iter().all(|b| b.bcolor.is_none()),
-            "row 2 must not carry the aside's bg (rect should be exactly 2 rows)"
+            row5.iter().all(|b| b.bcolor.is_none()),
+            "row 5 must not carry the aside's bg (rect should be exactly 5 rows)"
         );
     }
 }

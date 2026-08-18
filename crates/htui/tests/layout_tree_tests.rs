@@ -110,16 +110,17 @@ fn nested_paragraph_shares_aside_row_with_bg() {
         .map(|i| i / cols)
         .expect("nested paragraph should still render yellow text");
     assert_eq!(
-        paragraph_row, aside_row,
-        "nested <p> must share the aside's row (no empty stripe above), got rows {aside_row}/{paragraph_row}"
+        paragraph_row, aside_row + 1,
+        "nested <p> sits one row below the aside's top (its 1-row UA margin-top), got rows {aside_row}/{paragraph_row}"
     );
-    // The row after the aside must be bg-free (rect height == 1).
-    let row_after_start = (aside_row + 1) * cols;
+    // The aside rect is 3 rows tall (UA margins + text); the row after must
+    // be bg-free.
+    let row_after_start = (aside_row + 3) * cols;
     if row_after_start + cols <= tl.layout.len() {
         let row_after = &tl.layout[row_after_start..row_after_start + cols];
         assert!(
             row_after.iter().all(|b| b.bcolor.is_none()),
-            "row after the aside must be bg-free (aside is exactly 1 row tall)"
+            "row after the aside must be bg-free (aside is exactly 3 rows tall)"
         );
     }
 }
@@ -215,11 +216,12 @@ fn rendered_rows_walks_full_layout_tree() {
     use htui::layout::inner_formatting_context::flow::layout_tree;
 
     // Layout sketch (each block's rect encompasses its children — no empty
-    // placeholder row between container and children):
-    //   row 0: <div>            rect spans rows 0..1
-    //     row 0: <p>A</p>
-    //     row 1: <div>          rect spans row 1
-    //       row 1: <p>B</p>     <- deepest leaf
+    // placeholder row between container and children; `<p>` blocks carry
+    // 1-row UA margins, and adjacent margins collapse):
+    //   row 0: <div>            rect spans rows 0..6
+    //     row 1: <p>A</p>        (margin-top 1)
+    //     row 3: <div>           rect spans rows 3..6 (collapsed margins)
+    //       row 4: <p>B</p>      <- deepest leaf (margin-top 1)
     let (root_id, arena) = setup("<div><p>A</p><div><p>B</p></div></div>", "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
@@ -243,7 +245,7 @@ fn rendered_rows_walks_full_layout_tree() {
         .map(|b| b.rect.y + b.rect.height.max(1))
         .max()
         .unwrap();
-    assert_eq!(max_leaf, 2, "deepest leaf should land on row 2");
+    assert_eq!(max_leaf, 6, "deepest leaf should land on row 6");
 
     assert_eq!(
         tl.rendered_rows as usize, max_leaf,

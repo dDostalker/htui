@@ -152,6 +152,7 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "color",
     "background-color",
     "background",
+    "caret-color",
     "text-align",
     "font-weight",
     "font-style",

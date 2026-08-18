@@ -5,7 +5,13 @@ use cssparser::{
 use indexmap::IndexMap;
 use log::{debug, warn};
 
-use super::{properties::CssAttr, selector::CssSelector};
+use super::{
+    properties::CssAttr, selector::CssSelector,
+    values::{
+        alignment_longhand_valid, expand_place_shorthand, is_alignment_longhand,
+        is_place_shorthand_name,
+    },
+};
 use std::str::FromStr;
 
 /// One qualified rule, with declarations already split by the `!important`
@@ -140,7 +146,7 @@ impl<'i> QualifiedRuleParser<'i> for CssParseState {
     ) -> std::result::Result<(), ParseError<'i, Self::Error>> {
         let mut normal = CssAttr::new();
         let mut important = CssAttr::new();
-        parse_declarations_into(input, &mut normal, &mut important);
+        parse_declarations_into(input, &mut normal, &mut important, true);
         self.rules.push((prelude, normal, important));
         Ok(())
     }
@@ -232,7 +238,14 @@ fn split_top_level_commas(s: &str) -> Vec<&str> {
 /// - quoted string values with semicolons / colons inside
 #[doc(hidden)]
 pub fn parse_declaration_text(block: &str) -> IndexMap<String, String> {
-    let (mut normal, important) = parse_declaration_splits(block);
+    // No `place-*` expansion: this map backs the JS `el.style` object, whose
+    // shorthand properties read back the author-specified text (the cascade
+    // expands separately via [`parse_declaration_splits`]).
+    let mut input_buf = ParserInput::new(block);
+    let mut input = CssParser::new(&mut input_buf);
+    let mut normal = CssAttr::new();
+    let mut important = CssAttr::new();
+    parse_declarations_into(&mut input, &mut normal, &mut important, false);
     normal.0.extend(important.0);
     normal.0
 }
@@ -245,17 +258,24 @@ pub(crate) fn parse_declaration_splits(block: &str) -> (CssAttr, CssAttr) {
     let mut input = CssParser::new(&mut input_buf);
     let mut normal = CssAttr::new();
     let mut important = CssAttr::new();
-    parse_declarations_into(&mut input, &mut normal, &mut important);
+    parse_declarations_into(&mut input, &mut normal, &mut important, true);
     (normal, important)
 }
 
 /// Walk every `name: value [!important]` declaration in `input` and store it
 /// in `normal` or `important` accordingly. Tolerates malformed input by
 /// skipping to the next `;` rather than aborting the whole block.
+///
+/// When `expand_place` is set, the `place-*` box-alignment shorthands are
+/// expanded into their longhands at parse time (browsers cascade shorthands
+/// as expanded longhands, so the later declaration wins regardless of
+/// shorthand / longhand form), and an invalid alignment value drops the
+/// declaration instead of overriding an earlier expansion.
 fn parse_declarations_into<'i, 't>(
     input: &mut CssParser<'i, 't>,
     normal: &mut CssAttr,
     important: &mut CssAttr,
+    expand_place: bool,
 ) {
     loop {
         input.skip_whitespace();
@@ -292,7 +312,24 @@ fn parse_declarations_into<'i, 't>(
             } else {
                 &mut normal.0
             };
-            target.insert(name.to_string(), cleaned);
+            if expand_place && is_place_shorthand_name(&name) {
+                // An invalid `place-*` value drops the whole declaration
+                // (a browser parse error emits no longhands).
+                if let Some(pairs) = expand_place_shorthand(&name, &cleaned) {
+                    for (prop, value) in pairs {
+                        target.insert(prop.to_string(), value);
+                    }
+                }
+            } else if expand_place
+                && is_alignment_longhand(&name)
+                && !alignment_longhand_valid(&name, &cleaned)
+            {
+                // An invalid alignment longhand is dropped rather than
+                // stored, so it cannot override an earlier `place-*`
+                // expansion through the per-property cascade.
+            } else {
+                target.insert(name.to_string(), cleaned);
+            }
         }
         // Consume the trailing `;` if present. A missing `;` is not an
         // error here — the parser simply stops at the next boundary.

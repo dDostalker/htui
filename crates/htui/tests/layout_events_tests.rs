@@ -769,7 +769,15 @@ fn flow_extraction_breaks_between_nested_blocks() {
         r#"<div><p>one</p><p>two</p></div>"#,
         EventBindings::default(),
     );
-    let lines = vec![(0u32, 0u32, 200u32), (1u32, 0u32, 200u32)];
+    // `<p>`'s 1-row UA margins: "one" sits on row 1, "two" on row 3 (the
+    // adjacent margins collapse to one blank row between them). Select the
+    // whole band; empty margin rows must not leak into the copied text.
+    let lines = vec![
+        (0u32, 0u32, 200u32),
+        (1u32, 0u32, 200u32),
+        (2u32, 0u32, 200u32),
+        (3u32, 0u32, 200u32),
+    ];
     let copied = htui::layout::extract_flow_text(&geo.arena, &geo.boxes, &lines);
     assert_eq!(copied, "one\ntwo");
 }

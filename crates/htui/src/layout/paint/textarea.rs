@@ -167,6 +167,13 @@ pub(crate) fn paint_textarea(
     } else {
         fg
     };
+    // `caret-color` paints the caret block with the declared colour; the
+    // default is the inverted cell (field background <-> text colour swap).
+    let caret_color = node.css_attr.get_caret_color();
+    let caret_cell = |fg: Option<Color>, bg: Option<Color>| match caret_color {
+        Some(cc) => (Some(bg.unwrap_or(Color::Black)), Some(cc)),
+        None => (Some(bg.unwrap_or(Color::Black)), Some(fg.unwrap_or(Color::White))),
+    };
 
     let content_width = r.width.saturating_sub(2).max(1);
     let content_rows = r.height.saturating_sub(2).max(1);
@@ -203,10 +210,7 @@ pub(crate) fn paint_textarea(
             let (cell_fg, cell_bg) = if is_caret {
                 // Inverted caret cell so the position is visible even at the
                 // end of the value (a blank inverted cell).
-                (
-                    Some(bg.unwrap_or(Color::Black)),
-                    Some(fg.unwrap_or(Color::White)),
-                )
+                caret_cell(fg, bg)
             } else if selection.is_some_and(|(s, e)| global_char >= s && global_char < e) {
                 (Some(Color::White), parse_color_str(SELECTION_BG))
             } else {
@@ -238,12 +242,13 @@ pub(crate) fn paint_textarea(
         if focused && line_row == caret_row && caret_col >= col && caret_col < content_width {
             let abs_col = r.x.saturating_add(1).saturating_add(caret_col);
             if abs_col < r.x.saturating_add(r.width).saturating_sub(1) {
+                let (cf, cb) = caret_cell(fg, bg);
                 put(
                     canvas,
                     cell_index(canvas, abs_col, y),
                     Some(' '),
-                    Some(bg.unwrap_or(Color::Black)),
-                    Some(fg.unwrap_or(Color::White)),
+                    cf,
+                    cb,
                 );
             }
         }

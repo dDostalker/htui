@@ -837,9 +837,8 @@ impl RenderState {
     ///
     /// Backs `RenderCmd::RenderHtml`. Script-side replacements are intercepted
     /// by `ScriptEngine::reload` (the engine stays the document's single
-    /// source of truth, see `docs/browser-compat.md` §6.4.12); this
-    /// render-thread path remains only for direct API use and as a fallback
-    /// when an in-engine reload fails.
+    /// source of truth); this render-thread path remains only for direct API
+    /// use and as a fallback when an in-engine reload fails.
     fn render_html<W: Write>(
         &mut self,
         out: &mut BufWriter<W>,

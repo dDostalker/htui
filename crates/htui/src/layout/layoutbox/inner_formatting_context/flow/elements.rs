@@ -27,6 +27,15 @@ fn default_opts() -> LayoutBlockOptions {
     LayoutBlockOptions::default()
 }
 
+/// Browser UA default `margin-block: 1em` for `<p>` — one blank row above
+/// and below the paragraph, adapted to terminal cells.
+fn p_opts() -> LayoutBlockOptions {
+    LayoutBlockOptions {
+        ua_margins: Some(EdgeSizes::new(1, 0, 1, 0)),
+        ..Default::default()
+    }
+}
+
 /// `<aside>` is a plain block — no browser UA default background or chrome.
 fn aside_opts() -> LayoutBlockOptions {
     LayoutBlockOptions::default()
@@ -128,7 +137,7 @@ static STANDARD_BLOCK_ELEMENTS: &[BlockElementConfig] = &[
     },
     BlockElementConfig {
         node_type: NodeType::P,
-        opts: default_opts,
+        opts: p_opts,
     },
     BlockElementConfig {
         node_type: NodeType::Aside,

@@ -379,8 +379,7 @@ fn host_render_html_reloads_in_engine_instead_of_render_thread() {
     // A host function that pushes `RenderHtml` must rebuild the document in
     // the engine (the single source of truth): the fresh arena + a dirty root
     // reach the render thread as a `RenderArena`, never as an independent
-    // re-parse on the render side (the former dual-source bug, browser-compat
-    // §6.4.12).
+    // re-parse on the render side (the former dual-source bug).
     let bindings = host_bindings("rebuild", move |call| {
         call.render().push(RenderCmd::RenderHtml {
             html: Arc::from(r#"<div id="fresh">hello</div>"#),

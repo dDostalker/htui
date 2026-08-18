@@ -371,17 +371,19 @@ fn relative_box_inside_relative_frame_renders_offset_text() {
         .rel { position: relative; top: 2; left: 4; }
     "#;
     let (rows, _) = render_rows(html, css);
-    // .row margin:1 → one(y=1, x=1), shifted flow y=4 offset → (5, 6), three(y=7).
+    // .row margin:1 → one(y=1, x=1); the adjacent 1-row margins collapse, so
+    // shifted's flow slot is y=3 and its `top: 2` offset lands at (5, 5);
+    // three follows at y=5.
     assert_eq!(cell(&rows, 1, 1), Some('o'), "first row at its flow slot");
     assert_eq!(
-        cell(&rows, 5, 6),
+        cell(&rows, 5, 5),
         Some('s'),
-        "shifted text must render at (5, 6)"
+        "shifted text must render at (5, 5)"
     );
     assert_eq!(
-        cell(&rows, 1, 7),
+        cell(&rows, 1, 5),
         Some('t'),
-        "third row at its flow slot y=7"
+        "third row at its flow slot y=5"
     );
 }
 

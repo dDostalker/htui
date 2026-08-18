@@ -61,7 +61,10 @@ pub fn layout_generated_box(
         context.viewport,
     );
     let detached = matches!(positioning.position, Position::Absolute | Position::Fixed);
-    let mut local_cursor = Cursor { y: 0 };
+    let mut local_cursor = Cursor {
+        y: 0,
+        prev_bottom_margin: 0,
+    };
     let working_cursor: &mut Cursor = if detached { &mut local_cursor } else { cursor };
 
     let mut lb = match (

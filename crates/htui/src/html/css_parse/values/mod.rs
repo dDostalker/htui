@@ -655,8 +655,10 @@ pub enum JustifyContent {
 #[doc(hidden)]
 pub fn parse_justify_content(s: &str) -> Option<JustifyContent> {
     match s.trim().to_ascii_lowercase().as_str() {
-        "flex-start" | "start" => Some(JustifyContent::FlexStart),
-        "flex-end" | "end" => Some(JustifyContent::FlexEnd),
+        // `left` / `right` are valid justify-content keywords; the engine is
+        // LTR-only, so `left` = `flex-start`, `right` = `flex-end`.
+        "flex-start" | "start" | "left" => Some(JustifyContent::FlexStart),
+        "flex-end" | "end" | "right" => Some(JustifyContent::FlexEnd),
         "center" => Some(JustifyContent::Center),
         "space-between" => Some(JustifyContent::SpaceBetween),
         "space-around" => Some(JustifyContent::SpaceAround),
@@ -686,8 +688,10 @@ pub enum AlignItems {
 pub fn parse_align_items(s: &str) -> Option<AlignItems> {
     match s.trim().to_ascii_lowercase().as_str() {
         "stretch" => Some(AlignItems::Stretch),
-        "flex-start" | "start" => Some(AlignItems::FlexStart),
-        "flex-end" | "end" => Some(AlignItems::FlexEnd),
+        // `self-start` / `self-end` resolve against the writing mode; the
+        // engine is LTR-only, so they match the flex-start / flex-end side.
+        "flex-start" | "start" | "self-start" => Some(AlignItems::FlexStart),
+        "flex-end" | "end" | "self-end" => Some(AlignItems::FlexEnd),
         "center" => Some(AlignItems::Center),
         "baseline" | "first baseline" => Some(AlignItems::Baseline),
         _ => None,
@@ -716,13 +720,112 @@ pub enum AlignContent {
 pub fn parse_align_content(s: &str) -> Option<AlignContent> {
     match s.trim().to_ascii_lowercase().as_str() {
         "stretch" => Some(AlignContent::Stretch),
-        "flex-start" | "start" => Some(AlignContent::FlexStart),
-        "flex-end" | "end" => Some(AlignContent::FlexEnd),
+        // `left` / `right` map to the flex-start / flex-end side in LTR.
+        "flex-start" | "start" | "left" => Some(AlignContent::FlexStart),
+        "flex-end" | "end" | "right" => Some(AlignContent::FlexEnd),
         "center" => Some(AlignContent::Center),
         "space-between" => Some(AlignContent::SpaceBetween),
         "space-around" => Some(AlignContent::SpaceAround),
         "space-evenly" => Some(AlignContent::SpaceEvenly),
         _ => None,
+    }
+}
+
+/// Whether `name` is one of the `place-*` box-alignment shorthands.
+pub(crate) fn is_place_shorthand_name(name: &str) -> bool {
+    matches!(name, "place-content" | "place-items" | "place-self")
+}
+
+/// Expand a `place-*` box-alignment shorthand declaration into its longhand
+/// components at declaration-parse time.
+///
+/// Browsers cascade shorthands as their expanded longhands, so the *later*
+/// declaration wins regardless of shorthand / longhand form — expanding here
+/// (instead of falling back in the `CssAttr` getters) gives the cascade that
+/// ordering for free. Returns `None` when the value fails to parse (the whole
+/// declaration is then dropped, like a browser parse error).
+///
+/// Component rules:
+/// - `place-content`: the first token sets `align-content`; a second token
+///   (or the first, when it is also valid there — `stretch` is not) sets
+///   `justify-content`.
+/// - `place-items` / `place-self`: the first token sets `align-items` /
+///   `align-self`. The second (`justify-items` / `justify-self`) is
+///   syntax-checked only — those properties have no layout effect in this
+///   engine and are not emitted.
+pub(crate) fn expand_place_shorthand(
+    name: &str,
+    value: &str,
+) -> Option<Vec<(&'static str, String)>> {
+    let mut tokens = value.split_whitespace();
+    let first = tokens.next()?;
+    let second = tokens.next();
+    if tokens.next().is_some() {
+        return None;
+    }
+    match name {
+        "place-content" => {
+            parse_align_content(first)?;
+            let justify_token = match second {
+                Some(s) => {
+                    parse_justify_content(s)?;
+                    Some(s)
+                }
+                // A single value doubles as `justify-content` when it is also
+                // valid there; `stretch` is not, so `place-content: stretch`
+                // only sets `align-content`.
+                None => parse_justify_content(first).map(|_| first),
+            };
+            let mut out = vec![("align-content", first.to_string())];
+            if let Some(token) = justify_token {
+                out.push(("justify-content", token.to_string()));
+            }
+            Some(out)
+        }
+        "place-items" => {
+            parse_align_items(first)?;
+            if let Some(s) = second {
+                parse_align_items(s)?;
+            }
+            Some(vec![("align-items", first.to_string())])
+        }
+        "place-self" => {
+            // `align-self` additionally accepts `auto` (defer to the
+            // container's `align-items`).
+            if parse_align_items(first).is_none() && !first.eq_ignore_ascii_case("auto") {
+                return None;
+            }
+            if let Some(s) = second {
+                parse_align_items(s)?;
+            }
+            Some(vec![("align-self", first.to_string())])
+        }
+        _ => None,
+    }
+}
+
+/// Whether `name` is one of the alignment longhands the `place-*` shorthands
+/// expand into.
+pub(crate) fn is_alignment_longhand(name: &str) -> bool {
+    matches!(
+        name,
+        "align-items" | "align-self" | "align-content" | "justify-content"
+    )
+}
+
+/// Whether `value` parses for the alignment longhand `name`.
+///
+/// Used at declaration-parse time so an invalid longhand value is dropped
+/// (the browser's parse-error behaviour) instead of silently overriding an
+/// earlier `place-*` expansion via the per-property cascade.
+pub(crate) fn alignment_longhand_valid(name: &str, value: &str) -> bool {
+    let value = value.trim();
+    match name {
+        "align-items" => parse_align_items(value).is_some(),
+        "align-self" => value.eq_ignore_ascii_case("auto") || parse_align_items(value).is_some(),
+        "align-content" => parse_align_content(value).is_some(),
+        "justify-content" => parse_justify_content(value).is_some(),
+        _ => true,
     }
 }
 

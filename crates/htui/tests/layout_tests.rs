@@ -282,8 +282,8 @@ fn visibility_hidden_keeps_layout_space_but_paints_nothing() {
     let row_a = rows.iter().position(|r| r.contains('a')).expect("a row");
     let row_c = rows.iter().position(|r| r.contains('c')).expect("c row");
     assert_eq!(
-        row_c, row_a + 2,
-        "the hidden <p> keeps its layout space, so c sits two rows below a"
+        row_c, row_a + 4,
+        "the hidden <p> keeps its layout space; a and c are 4 rows apart (text + margin + hidden text + margin)"
     );
 }
 
@@ -470,6 +470,81 @@ fn test_layout_address_inherits_italic_from_ancestor() {
         "<address> must inherit font-style from its ancestor (got {:?})",
         cell.style
     );
+}
+
+// ============================================================
+// display: inline-block
+// ============================================================
+
+#[test]
+fn inline_block_boxes_flow_side_by_side() {
+    init();
+    // Consecutive `display: inline-block` boxes flow left-to-right on one
+    // line (browser inline-level layout), keeping their own margins. Each
+    // card is 20 cells wide with a 2-cell right margin.
+    let html = r#"
+        <div class="card">AA</div>
+        <div class="card">BB</div>
+        <div class="card">CC</div>
+    "#;
+    let css = ".card { display: inline-block; width: 20px; margin-right: 2px; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let idx_a = tl.layout.iter().position(|b| b.word == "A").unwrap();
+    let idx_b = tl.layout.iter().position(|b| b.word == "B").unwrap();
+    let idx_c = tl.layout.iter().position(|b| b.word == "C").unwrap();
+    assert_eq!(idx_a / 80, 0, "all cards share the first row");
+    assert_eq!(idx_b / 80, 0);
+    assert_eq!(idx_c / 80, 0);
+    assert_eq!(idx_b, idx_a + 22, "second card starts after 20 + 2 margin");
+    assert_eq!(idx_c, idx_b + 22, "third card starts after 20 + 2 margin");
+}
+
+#[test]
+fn inline_block_keeps_its_own_box_and_width() {
+    init();
+    // An `inline-block` produces its own box (border / background / width)
+    // instead of flattening its children into the parent flow.
+    let html = r#"<div class="card">hi</div>"#;
+    let css = ".card { display: inline-block; width: 10px; border: 1px solid red; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    // Border frame spans exactly 10 cells (the declared width) on row 0;
+    // the content sits on row 1 inside the frame.
+    assert_eq!(tl.layout[0].word, "┌");
+    assert_eq!(tl.layout[9].word, "┐");
+    assert_eq!(tl.layout[80 + 1].word, "h");
+    assert_eq!(tl.layout[80 + 2].word, "i");
+}
+
+#[test]
+fn inline_block_wraps_at_line_width() {
+    init();
+    // Three 40-cell inline-blocks in an 80-cell line: the first two share a
+    // row, the third wraps to the next row.
+    let html = r#"
+        <div class="card">AA</div>
+        <div class="card">BB</div>
+        <div class="card">CC</div>
+    "#;
+    let css = ".card { display: inline-block; width: 40px; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let idx_a = tl.layout.iter().position(|b| b.word == "A").unwrap();
+    let idx_b = tl.layout.iter().position(|b| b.word == "B").unwrap();
+    let idx_c = tl.layout.iter().position(|b| b.word == "C").unwrap();
+    assert_eq!(idx_a / 80, 0);
+    assert_eq!(idx_b / 80, 0, "second card stays on row 1");
+    assert_eq!(idx_c / 80, 1, "third card wraps to row 2");
+    assert_eq!(idx_b, idx_a + 40, "second card right after the first");
 }
 
 // ============================================================

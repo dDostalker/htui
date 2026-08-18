@@ -183,7 +183,10 @@ fn test_output_renders_inline_text() {
         .position(|b| b.word == "4")
         .expect("output text renders");
     assert_eq!(idx % cols, 8, "output flows inline right after the label");
-    assert_eq!(idx / cols, 0, "output shares the paragraph row");
+    assert_eq!(
+        idx / cols, 1,
+        "output shares the paragraph's text row (UA margin-top=1)"
+    );
 }
 
 #[test]

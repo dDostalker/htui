@@ -79,7 +79,7 @@ fn test_q_wraps_content_in_quotes() {
     let open = first_cell_with(&tl, "\u{201C}").expect("open quote should render");
     let close = first_cell_with(&tl, "\u{201D}").expect("close quote should render");
     let hi = first_cell_with(&tl, "h").expect("q content should render");
-    assert_eq!(open / cols, 0);
+    assert_eq!(open / cols, 1, "quote sits on the paragraph's text row (UA margin-top=1)");
     assert_eq!(open % cols, 8, "quote opens after `He said `");
     assert_eq!(hi, open + 1, "content follows the open quote");
     assert_eq!(close, hi + 2, "close quote follows the content");

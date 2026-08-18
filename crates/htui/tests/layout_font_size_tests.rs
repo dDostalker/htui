@@ -219,10 +219,10 @@ fn em_padding_scales_with_h1_font_size() {
 #[test]
 fn em_padding_top_scales_with_font_size() {
     init();
-    // `<p>` with `font-size: 2em` and `padding-top: 1em`: the body's
+    // A block with `font-size: 2em` and `padding-top: 1em`: the body's
     // first row should land at row 2 (= 1em × 2-cell font-size), not
     // row 1. Padding-left is 0 so the body text starts at col 0.
-    let (term_map, tl) = draw("<p>X</p>", "p { font-size: 2em; padding-top: 1em; }");
+    let (term_map, tl) = draw("<div>X</div>", "div { font-size: 2em; padding-top: 1em; }");
     let cols = term_map.columns as usize;
     let idx = tl.layout.iter().position(|b| b.word == "X").unwrap();
     let row = idx / cols;
@@ -242,9 +242,9 @@ fn em_padding_top_scales_with_font_size() {
 fn h1_default_font_size_grows_block_height_to_two_rows() {
     init();
     // `<h1>` defaults to 2em. The block's rect should be 2 rows tall and the
-    // following `<p>` body must start on the row right after the heading
+    // following block body must start on the row right after the heading
     // (row 2), not row 1.
-    let (term_map, tl) = draw("<h1>Heading</h1><p>after</p>", "");
+    let (term_map, tl) = draw("<h1>Heading</h1><div>after</div>", "");
     let cols = term_map.columns as usize;
     let heading_idx = tl
         .layout
@@ -263,18 +263,18 @@ fn h1_default_font_size_grows_block_height_to_two_rows() {
     assert_eq!(heading_row, 0);
     assert_eq!(
         body_row, 2,
-        "<p> after a 2em <h1> must start at row 2 (h1 occupies 2 rows)"
+        "block after a 2em <h1> must start at row 2 (h1 occupies 2 rows)"
     );
 }
 
 #[test]
 fn explicit_font_size_3em_grows_block_height_to_three_rows() {
     init();
-    // Explicit `font-size: 3em` on a `<p>`: the block's rect should be 3
-    // rows tall and the following `<p>` body must start on row 3.
+    // Explicit `font-size: 3em` on a block: the block's rect should be 3
+    // rows tall and the following block must start on row 3.
     let (term_map, tl) = draw(
-        r#"<p class="big">X</p><p>after</p>"#,
-        "p.big { font-size: 3em; }",
+        r#"<div class="big">X</div><div>after</div>"#,
+        "div.big { font-size: 3em; }",
     );
     let cols = term_map.columns as usize;
     eprintln!("first 5 rows:");
@@ -290,12 +290,12 @@ fn explicit_font_size_3em_grows_block_height_to_three_rows() {
         .layout
         .iter()
         .position(|b| b.word == "X")
-        .expect("first <p> 'X' should render");
+        .expect("first block 'X' should render");
     let after_idx = tl
         .layout
         .iter()
         .position(|b| b.word == "f")
-        .expect("second <p> 'f' should render");
+        .expect("second block 'f' should render");
     let first_row = first_idx / cols;
     let after_row = after_idx / cols;
     assert_eq!(
@@ -304,7 +304,7 @@ fn explicit_font_size_3em_grows_block_height_to_three_rows() {
     );
     assert_eq!(
         after_row, 3,
-        "second <p> must start at row 3 (first <p> occupies 3 rows for 3em)"
+        "second block must start at row 3 (first block occupies 3 rows for 3em)"
     );
 }
 
@@ -335,15 +335,15 @@ fn h1_2em_vertical_baseline_renders_text_on_middle_row() {
 #[test]
 fn explicit_bg_with_large_font_size_clamps_to_text_row_and_width() {
     init();
-    // `<p>` with `font-size: 3em`, `background-color: cyan`, and a short
+    // A block with `font-size: 3em`, `background-color: cyan`, and a short
     // label: the visible bg should clamp to (a) the expanded run width
     // (each char occupies 3 cells) and (b) the row that actually holds
     // the text (the middle row of a 3-row rect). The leading and
     // trailing rows of the rect must remain bg-free — otherwise the
     // colour block would drift into empty rows that have no glyphs.
     let (term_map, tl) = draw(
-        r#"<p class="big">CD</p>"#,
-        "p.big { font-size: 3em; background-color: cyan; }",
+        r#"<div class="big">CD</div>"#,
+        "div.big { font-size: 3em; background-color: cyan; }",
     );
     let cols = term_map.columns as usize;
     let x_idx = tl
@@ -561,7 +561,7 @@ fn render_to_bytes_includes_bg_sgr_on_pad_cells_for_padded_em_block() {
 #[test]
 fn text_transform_uppercase_renders() {
     init();
-    let (term_map, tl) = draw("<p>hello world</p>", "p { text-transform: uppercase; }");
+    let (term_map, tl) = draw("<div>hello world</div>", "div { text-transform: uppercase; }");
     let cols = term_map.columns as usize;
     let row0: String = tl.layout[0..cols]
         .iter()
@@ -575,7 +575,7 @@ fn text_transform_uppercase_renders() {
 #[test]
 fn text_transform_lowercase_and_capitalize_render() {
     init();
-    let (term_map, tl) = draw("<p>Hello WORLD</p>", "p { text-transform: lowercase; }");
+    let (term_map, tl) = draw("<div>Hello WORLD</div>", "div { text-transform: lowercase; }");
     let cols = term_map.columns as usize;
     let row0: String = tl.layout[0..cols]
         .iter()
@@ -585,7 +585,7 @@ fn text_transform_lowercase_and_capitalize_render() {
         .to_string();
     assert_eq!(row0, "hello world");
 
-    let (_, tl) = draw("<p>hello world</p>", "p { text-transform: capitalize; }");
+    let (_, tl) = draw("<div>hello world</div>", "div { text-transform: capitalize; }");
     let row0: String = tl.layout[0..cols]
         .iter()
         .map(|b| b.word.as_str())
@@ -623,7 +623,7 @@ fn line_height_2_expands_single_line_box() {
     init();
     // `line-height: 2` doubles the line box: the glyph stays on row 0 and
     // the rect grows to 2 rows tall.
-    let (term_map, tl) = draw("<p>X</p>", "p { line-height: 2; }");
+    let (term_map, tl) = draw("<div>X</div>", "div { line-height: 2; }");
     let cols = term_map.columns as usize;
     let idx = tl.layout.iter().position(|b| b.word == "X").unwrap();
     assert_eq!(idx / cols, 0, "glyph sits on the first row");
@@ -635,7 +635,7 @@ fn line_height_2_separates_wrapped_lines() {
     init();
     // "ab cd" wraps into two lines inside a 2-col box; with `line-height:
     // 2` the second line lands 2 rows below the first (instead of 1).
-    let (term_map, tl) = draw("<p>ab cd</p>", "p { width: 2px; line-height: 2; }");
+    let (term_map, tl) = draw("<div>ab cd</div>", "div { width: 2px; line-height: 2; }");
     let cols = term_map.columns as usize;
     let a_idx = tl.layout.iter().position(|b| b.word == "a").unwrap();
     let c_idx = tl.layout.iter().position(|b| b.word == "c").unwrap();
@@ -648,7 +648,7 @@ fn line_height_normal_keeps_one_row_per_line() {
     init();
     // Control: the default `line-height: normal` keeps the historical 1-row
     // spacing, so the wrapped second line lands on row 1.
-    let (term_map, tl) = draw("<p>ab cd</p>", "p { width: 2px; }");
+    let (term_map, tl) = draw("<div>ab cd</div>", "div { width: 2px; }");
     let cols = term_map.columns as usize;
     let c_idx = tl.layout.iter().position(|b| b.word == "c").unwrap();
     assert_eq!(c_idx / cols, 1, "second line on row 1 without line-height");

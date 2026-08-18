@@ -64,6 +64,20 @@ pub(super) struct FlexItemPrep {
     pub(super) grow: f32,
     pub(super) shrink: f32,
     pub(super) align_self: crate::html::css_parse::AlignItems,
+    /// Main-axis leading margin (row: `margin-left`; column: `margin-top`),
+    /// applied as an offset before the item's border-box. Margins occupy the
+    /// line but never grow / shrink with the item.
+    pub(super) margin_main_before: usize,
+    /// Main-axis trailing margin (row: `margin-right`; column:
+    /// `margin-bottom`).
+    pub(super) margin_main_after: usize,
+    /// Cross-axis leading margin (row: `margin-top`; column: `margin-left`),
+    /// applied when aligning the item on the cross axis.
+    pub(super) margin_cross_before: usize,
+    /// Cross-axis trailing margin (row: `margin-bottom`; column:
+    /// `margin-right`). Together with [`Self::margin_cross_before`] it forms
+    /// the item's margin-box extent the line must cover.
+    pub(super) margin_cross_after: usize,
     /// Offset (rows) from the box top to its first text row — the terminal
     /// cell-grid analogue of the CSS text baseline. Used by
     /// `align-items: baseline` to align the items' first text rows.
@@ -111,7 +125,9 @@ pub(super) fn layout_flex_container(
     let (outer_x, outer_y_top, block_width, preallocated_height) = match pre_allocated_rect {
         Some(rect) => (rect.x, rect.y, rect.width.max(1), Some(rect.height.max(1))),
         None => {
-            cursor.skip(edges.margin.top);
+            // Collapse the top margin with the previous in-flow sibling's
+            // bottom margin (CSS vertical margin collapsing: the larger wins).
+            cursor.collapse_and_skip(edges.margin.top);
             let outer_y_top = cursor.y;
             let available = containing.width.saturating_sub(edges.margin.horizontal());
             let block_width = constrained_block_width(
@@ -236,7 +252,10 @@ pub(super) fn layout_flex_container(
         );
         match positioning.position {
             Position::Absolute | Position::Fixed => {
-                let mut local_cursor = Cursor { y: 0 };
+                let mut local_cursor = Cursor {
+                    y: 0,
+                    prev_bottom_margin: 0,
+                };
                 if let Some(b) = dispatch(
                     arena,
                     child_id,
@@ -361,6 +380,9 @@ pub(super) fn layout_flex_container(
         cursor.y = outer_y_top
             .saturating_add(total_box_height)
             .saturating_add(edges.margin.bottom);
+        // Leave the bottom margin for the next in-flow sibling to collapse
+        // its top margin against.
+        cursor.leave_bottom_margin(edges.margin.bottom);
     }
 
     // 10. Assemble the container's LayoutBox.

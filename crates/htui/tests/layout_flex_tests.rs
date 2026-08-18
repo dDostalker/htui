@@ -469,6 +469,22 @@ fn test_place_content_stretch_does_not_touch_justify() {
 }
 
 #[test]
+fn test_justify_space_evenly_single_item_is_centered() {
+    init();
+    // CSS Box Alignment: `space-evenly` degenerates to `center` for a line
+    // holding a single alignment subject (the free space is split at both
+    // ends), not a flush-to-the-end placement.
+    let html = r#"<div class="container"><div class="a">A</div></div>"#;
+    let css = ".container { display: flex; width: 10px; justify-content: space-evenly; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(
+        rows[0].chars().nth(4) == Some('A'),
+        "single space-evenly item centred at col 4 (9 free / 2): {:?}",
+        rows[0]
+    );
+}
+
+#[test]
 fn test_place_items_centers_on_the_cross_axis() {
     init();
     // `place-items: center` → `align-items: center`: the 1-row item floats to
@@ -507,13 +523,152 @@ fn test_place_self_aligns_one_item() {
 }
 
 #[test]
-fn test_place_shorthand_yields_to_explicit_longhands() {
+fn test_align_self_margin_box_pins_to_line_end() {
     init();
-    // An explicit `align-items` longhand wins over `place-items`.
+    // `align-self: flex-end` aligns the item's *margin-box* to the line end
+    // (browser semantics): with `margin: 1px`, B's 3-row margin-box hugs the
+    // container bottom, so the content sits on row 7-1-1 = 5. Regression for
+    // the bug where the leading margin was added on top of the alignment,
+    // pushing B past the container edge.
+    let html = r#"
+        <div class="container"><div class="a">A</div><div class="b">B</div></div>
+    "#;
+    let css = ".container { display: flex; height: 7px; } .b { margin: 1px; align-self: flex-end; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(
+        rows[5].contains("B"),
+        "B's margin-box must align to the container bottom: {:?}",
+        rows[5]
+    );
+    assert!(
+        rows[6].trim().is_empty(),
+        "nothing paints below B's content (margin-bottom sits at the edge)"
+    );
+}
+
+#[test]
+fn test_place_shorthand_order_decides_winner() {
+    init();
+    // Browsers cascade shorthands as their expanded longhands, so the later
+    // declaration wins regardless of shorthand / longhand form. A
+    // `place-items` written *after* `align-items` therefore overrides it.
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
     let css = ".container { display: flex; height: 5px; align-items: flex-start; place-items: center; }";
     let (rows, _) = render_rows(html, css);
-    assert!(rows[0].starts_with("A"), "longhand flex-start wins: {:?}", rows[0]);
+    assert!(
+        rows[2].starts_with("A") && rows[0].trim().is_empty(),
+        "later place-items wins (centred): {:?}",
+        rows
+    );
+
+    // The reverse order keeps the explicit longhand on top.
+    let css = ".container { display: flex; height: 5px; place-items: center; align-items: flex-start; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(rows[0].starts_with("A"), "later align-items wins: {:?}", rows[0]);
+}
+
+#[test]
+fn test_place_shorthand_vs_longhand_across_rules() {
+    init();
+    // The same ordering across separate rules: the later rule's longhand
+    // beats the earlier rule's shorthand (cascade order decides, not the
+    // shorthand / longhand form).
+    let html = r#"<div class="container"><div class="a">A</div></div>"#;
+    let css = ".container { display: flex; height: 5px; place-items: center; }\n.container { align-items: flex-start; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(rows[0].starts_with("A"), "later rule's longhand wins: {:?}", rows);
+}
+
+#[test]
+fn test_place_shorthand_survives_invalid_longhand() {
+    init();
+    // An invalid `align-items` value is dropped at parse time (browser parse
+    // error), so an earlier `place-items` still applies instead of being
+    // overridden by the garbage value.
+    let html = r#"<div class="container"><div class="a">A</div></div>"#;
+    let css = ".container { display: flex; height: 5px; place-items: center; align-items: garbage; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(rows[2].starts_with("A"), "invalid longhand dropped: {:?}", rows);
+}
+
+#[test]
+fn test_justify_content_left_right_keywords() {
+    init();
+    // `left` / `right` are valid justify-content keywords; in LTR they map
+    // to flex-start / flex-end.
+    let html = r#"<div class="container"><div class="a">A</div></div>"#;
+    let css = ".container { display: flex; width: 10px; justify-content: right; }";
+    let (rows, _) = render_rows(html, css);
+    assert_eq!(rows[0].chars().nth(9), Some('A'), "right packs to the edge: {:?}", rows[0]);
+
+    let html = r#"<div class="container"><div class="a">A</div></div>"#;
+    let css = ".container { display: flex; width: 10px; justify-content: left; }";
+    let (rows, _) = render_rows(html, css);
+    assert_eq!(rows[0].chars().nth(0), Some('A'), "left packs to the start: {:?}", rows[0]);
+}
+
+#[test]
+fn test_align_self_start_end_keywords() {
+    init();
+    // `self-start` / `self-end` resolve against the writing mode; LTR row
+    // direction maps them to flex-start / flex-end.
+    let html = r#"
+        <div class="container"><div class="a">A</div><div class="b">B</div></div>
+    "#;
+    let css = ".container { display: flex; height: 5px; } .b { align-self: self-end; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(rows[0].starts_with("A"), "stretched item A on the top row: {:?}", rows[0]);
+    assert!(rows[4].contains("B"), "item B pinned to the bottom: {:?}", rows[4]);
+}
+
+// ============================================================
+// flex item margins (wrap threshold / line height / placement)
+// ============================================================
+
+#[test]
+fn test_flex_wrap_counts_item_margins() {
+    init();
+    // Two 4-cell items with 1-cell side margins need 12 cells; a 10-cell
+    // line can only hold one, so they wrap (browsers count margins against
+    // the line). Each item starts at x=1 (its margin-left).
+    let html = r#"
+        <div class="container"><div class="a">AAAA</div><div class="b">BBBB</div></div>
+    "#;
+    let css = ".container { display: flex; flex-wrap: wrap; width: 10px; } .a, .b { margin: 1px; }";
+    let (rows, _) = render_rows(html, css);
+    // Line 1: the first item's margin-box (row 0 margin-top, row 1 content,
+    // row 2 margin-bottom). Line 2 starts at row 3, so the second item's
+    // content sits on row 4.
+    assert_eq!(rows[1].chars().nth(1), Some('A'), "first item at x=1 on line 1: {:?}", rows[1]);
+    assert_eq!(rows[4].chars().nth(1), Some('B'), "second item wraps to line 2: {:?}", rows[4]);
+    assert!(
+        !rows[1].contains("B"),
+        "margin must count against the wrap threshold: {:?}",
+        rows[1]
+    );
+}
+
+#[test]
+fn test_flex_item_margin_box_sizes_the_line() {
+    init();
+    // A single item with 1-cell vertical margins: the line is its margin-box
+    // (3 rows: margin-top + content + margin-bottom). `align-items: stretch`
+    // fills the margin-box, so the item's own box is 1 row tall; the rows
+    // above / below show through as blank (the container has no bg).
+    let html = r#"<div class="container"><div class="a">A</div></div>"#;
+    let css = ".container { display: flex; } .a { margin: 1px; background-color: yellow; }";
+    let (rows, _tl) = render_rows(html, css);
+    assert!(
+        rows[0].trim().is_empty(),
+        "row above the item is the margin-top: {:?}",
+        rows[0]
+    );
+    assert!(rows[1].contains("A"), "content on the middle row: {:?}", rows[1]);
+    assert!(
+        rows[2].trim().is_empty(),
+        "row below the item is the margin-bottom: {:?}",
+        rows[2]
+    );
 }
 
 #[test]

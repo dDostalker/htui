@@ -192,7 +192,7 @@ button/checkbox 的默认动作一致）。`close` 由引擎原生的 `<dialog>`
 - **右键：矩形框选**（vim `Ctrl+V` / tmux 风格）：右键按下并拖动框选一个列/行
   对齐的矩形，高亮与复制均为矩形内文本（行内去尾空格）。右键不改变输入框焦点。
 - 点击别处或按任意非 Ctrl 键清除选择。选择高亮在每次重绘（含 `RenderArena` /
-  hover / 滚动）后自动叠加，动态页面（如 sysmon 自动刷新）下选择保持可见。
+  hover / 滚动）后自动叠加，动态页面（如监控器自动刷新）下选择保持可见。
 
 ---
 
@@ -320,10 +320,10 @@ app::register(&mut bindings);   // 一条语句注册模块内全部命令
 - 参数 `FromJs` 支持：`String`/`f64`/整数/`bool`/`Option<T>`/`Vec<T>`，以及
   `#[derive(FromJs)]` 结构体（同样支持 `#[js_name]` 属性名映射，如
   `{ maxCpu: 80 }` → `max_cpu` 字段）。
-- 两种形态可以混用：`example/src/sysmon.rs` 把纯格式化函数
-  （`bar` / `gb` / `format_datetime`）做成 `#[htui::command]`，`sample()`
-  命令（返回 `HostFn`）内部直接复用这些纯函数（Rust 侧调用，不走 JS 层），
-  页面脚本也可直接 `bar(0.5, 14)` / `formatDateTime(...)` 调用。
+- 两种形态可以混用：把纯格式化函数（如 `bar` / `gb` / `format_datetime`）做成
+  `#[htui::command]`，有状态命令 `sample()`（返回 `HostFn`）内部直接复用这些纯函数
+  （Rust 侧调用，不走 JS 层），页面脚本也可直接 `bar(0.5, 14)` /
+  `formatDateTime(...)` 调用。
 - `#[htui::commands]` 还生成 `js_bindings()`（返回自动生成的**样本 JS 接口**：
   每个宿主命令一条带 `@param`/`@returns` JSDoc 注释的 `function` 声明，代码
   分析器/编辑器（VS Code、tsserver、AI 工具）可直接读懂 JS 侧接口形状）与
@@ -375,8 +375,8 @@ bindings.host.insert(
   脚本线程，输入循环只发 `ScriptMsg`、收 `ScriptResponse`，永不执行 JS。因此宿主函数
   阻塞只会拖住脚本线程——滚动、退出、鼠标拖选照常（Tauri 式 UI 解耦）。但**慢宿主
   函数会延迟后续 JS 派发**（hover/click/定时回调排队等待），所以重活仍建议放
-  后台线程 + `Arc<Mutex<Snapshot>>`，宿主函数只读快照
-  （参考 `example/src/sysmon.rs` 的后台采样线程模式）。
+  后台线程 + `Arc<Mutex<Snapshot>>`，宿主函数只读快照（后台采样线程定期采样
+  发布快照，宿主函数只做快照读取与格式化）。
 
 ### 定时任务（JS `setInterval` / `setTimeout`）
 
@@ -458,13 +458,13 @@ JS 每 200ms 刷一次监控器，大部分帧只改几个 `<p>` 的文本。旧
    `parent_bg` 链传递，文字不会丢背景。`render_diff` 自然只输出变化的格子。
 
 实测（80×24，60 行文档，debug 构建）：全量 draw ~2.1ms → 增量路径 ~1.1ms，其中
-布局 ~0.7ms、区域重绘 ~0.23ms、diff 输出 ~0.2ms。sysmon 页面（~15 个元素）更小。
+布局 ~0.7ms、区域重绘 ~0.23ms、diff 输出 ~0.2ms。监控器类页面（~15 个元素）更小。
 
 ### 渲染合并优化（避免无意义的重排）
 
 1. **值未变不触发渲染**：`el.textContent = v` 在 `v` 与当前文本相同时直接短路，
    不置 `dirty`。监控器每 200ms 刷新但值基本不变时，实际 `RenderArena`
-   次数远少于刷新次数（sysmon 实测 200 次刷新只触发约 14 次渲染）。
+   次数远少于刷新次数（监控器页面实测 200 次刷新只触发约 14 次渲染）。
 2. **命令合并**：输入循环发送前合并命令流。`RenderArena` 携带 `hovered` 字段，
    重排时自动重新应用当前 `:hover` 高亮，因此同轮的 `Hover` 命令会被丢弃；
    渲染线程的 `try_recv` 合并本就只保留最后一个命令，避免重复重绘。
@@ -475,8 +475,7 @@ JS 每 200ms 刷一次监控器，大部分帧只改几个 `<p>` 的文本。旧
    时直接跳过渲染——实测 hover 从全量 ~1.6ms 降到区域 ~0.6ms，鼠标高亮跟随更跟手。
 
 如果仍觉得卡顿，优先检查：**宿主函数是否做了慢操作**——虽然它只在脚本线程上跑、
-不再冻结输入，但会排队延迟后续 JS 派发与定时回调（重活放后台线程 + 快照发布，
-参考 `example/src/sysmon.rs`）。
+不再冻结输入，但会排队延迟后续 JS 派发与定时回调（重活放后台线程 + 快照发布）。
 
 ---
 
@@ -531,10 +530,7 @@ html → tdom → layout → tui    （不可破坏的既有四层）
   函数不阻塞输入侧通道**的解耦保证（纯内存）。
 - `visual_test/src/events/`：事件演示页（`<script>` + on* + addEventListener +
   DOM 变更计数器）。
-- `example/src/sysmon/`：系统监控器——后台采样线程 + 宿主 `sample()`
-  返回快照对象 + JS `refresh()` 每 200ms 更新 DOM（宿主函数全部由
-  `#[htui::commands]` 模块注册）。
 
 运行：`cargo test --test layout_events_tests` / `cargo test --test macro_tests` /
 `cargo test --test script_loop_tests`；
-可视化：`cargo run -p visual_test -- events` / `cargo run -p example -- sysmon`。
+可视化：`cargo run -p visual_test -- events`。

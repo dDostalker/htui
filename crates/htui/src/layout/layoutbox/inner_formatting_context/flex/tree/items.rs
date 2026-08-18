@@ -89,7 +89,11 @@ pub(super) fn layout_flex_items(
         natural_crosses.push(
             line_preps
                 .iter()
-                .map(|p| natural_cross_axis_size_for_prep(arena, p, direction, context))
+                .map(|p| {
+                    natural_cross_axis_size_for_prep(arena, p, direction, context)
+                        .saturating_add(p.margin_cross_before)
+                        .saturating_add(p.margin_cross_after)
+                })
                 .max()
                 .unwrap_or(FLEX_ITEM_MIN_CROSS)
                 .max(FLEX_ITEM_MIN_CROSS),
@@ -250,9 +254,18 @@ pub(super) fn layout_flex_items(
                     prep.align_self,
                     line_cross,
                     item_natural_cross,
-                    has_explicit_height,
+                    (prep.margin_cross_before, prep.margin_cross_after),
                 );
                 let align = effective_align(prep.align_self, align_items);
+                let margin_before = prep.margin_main_before;
+                let margin_after = prep.margin_main_after;
+                // Cross-axis alignment operates on the item's *margin-box*
+                // (browsers align the margin box within the line). The
+                // leading margin then offsets the border-box from the
+                // margin-box top.
+                let margin_box = item_cross_size
+                    .saturating_add(prep.margin_cross_before)
+                    .saturating_add(prep.margin_cross_after);
                 let (item_x, item_y, item_w, item_h) = match direction.is_row() {
                     true => {
                         let y = if matches!(align, AlignItems::Baseline) {
@@ -262,18 +275,25 @@ pub(super) fn layout_flex_items(
                                 .saturating_add(line_baseline)
                                 .saturating_sub(prep.baseline)
                         } else {
-                            align_on_cross_axis(line_origin, line_cross, item_cross_size, align)
+                            align_on_cross_axis(line_origin, line_cross, margin_box, align)
+                                .saturating_add(prep.margin_cross_before)
                         };
-                        (cursor_main, y, main_size, item_cross_size)
+                        (
+                            cursor_main.saturating_add(margin_before),
+                            y,
+                            main_size,
+                            item_cross_size,
+                        )
                     }
                     false => {
-                        let x = align_on_cross_axis(
-                            line_origin,
-                            line_cross,
+                        let x = align_on_cross_axis(line_origin, line_cross, margin_box, align)
+                            .saturating_add(prep.margin_cross_before);
+                        (
+                            x,
+                            cursor_main.saturating_add(margin_before),
                             item_cross_size,
-                            align,
-                        );
-                        (x, cursor_main, item_cross_size, main_size)
+                            main_size,
+                        )
                     }
                 };
                 let item_rect = Rect::new(item_x, item_y, item_w.max(1), item_h.max(1));
@@ -286,7 +306,10 @@ pub(super) fn layout_flex_items(
                                 x: item_x,
                                 width: item_w.max(1),
                             },
-                            &mut Cursor { y: item_y },
+                            &mut Cursor {
+                                y: item_y,
+                                prev_bottom_margin: 0,
+                            },
                             context,
                             Some(item_rect),
                         )
@@ -317,7 +340,11 @@ pub(super) fn layout_flex_items(
                         child_box
                             .rect
                             .y
-                            .saturating_add(child_box.rect.height.max(1)),
+                            .saturating_add(child_box.rect.height.max(1))
+                            // The item's trailing cross-axis margin sits below
+                            // its border-box, so the line must cover it too
+                            // (the line is the largest item's margin-box).
+                            .saturating_add(prep.margin_cross_after),
                     );
                     if direction.is_column() {
                         actual_main_extent = child_box
@@ -337,6 +364,9 @@ pub(super) fn layout_flex_items(
                     true => main_size,
                     false => main_size.max(actual_main_extent),
                 };
+                // The item's margins occupy the line on both sides of its
+                // border-box and advance the next item.
+                let step = step.saturating_add(margin_before).saturating_add(margin_after);
                 cursor_main = cursor_main.saturating_add(step);
                 placed_main = placed_main.saturating_add(step);
                 if prep_idx + 1 < line_preps.len() {

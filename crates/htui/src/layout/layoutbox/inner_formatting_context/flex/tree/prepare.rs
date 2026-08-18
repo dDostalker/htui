@@ -104,6 +104,12 @@ pub(super) fn prepare_flex_item(
     let line_h = line_height_cells.max(1);
     let glyph_row = if line_h > font { (line_h - font) / 2 } else { (font - 1) / 2 };
     let edges = css.get_box_edges(usize::MAX, context.font, context.viewport);
+    let margin = edges.margin;
+    let (margin_main_before, margin_main_after, margin_cross_before, margin_cross_after) =
+        match direction.is_row() {
+            true => (margin.left, margin.right, margin.top, margin.bottom),
+            false => (margin.top, margin.bottom, margin.left, margin.right),
+        };
     let baseline = edges
         .border
         .top
@@ -122,6 +128,10 @@ pub(super) fn prepare_flex_item(
             AlignSelf::Auto => align_items,
             AlignSelf::Value(v) => v,
         },
+        margin_main_before,
+        margin_main_after,
+        margin_cross_before,
+        margin_cross_after,
         baseline,
         order: css.get_order(),
     }
@@ -152,6 +162,10 @@ pub(super) fn prepare_anonymous_text_item(
         grow: 0.0,
         shrink: 1.0,
         align_self: align_items,
+        margin_main_before: 0,
+        margin_main_after: 0,
+        margin_cross_before: 0,
+        margin_cross_after: 0,
         baseline: 0,
         order: 0,
     }
@@ -604,34 +618,27 @@ pub(super) fn natural_cross_axis_size_for_prep(
 /// cross-axis size whenever the line's cross-axis size is already
 /// known.
 ///
-/// The `has_explicit_height` parameter is kept for historical reasons
-/// but is no longer used to gate stretch in `row` direction: the line
-/// cross-axis size is now always known by the time we reach this
-/// function — it comes from either the explicit container height
-/// (CSS) or the recursive [`natural_intrinsic_size`] measurement that
-/// walks through nested flex containers. Stretching an item to that
-/// fixed `line_cross` therefore never grows the container, so the old
-/// "no-stretch without explicit height" guard (which existed to avoid
-/// a circular dependency in the v1 era before nested flex containers
-/// were considered) is no longer needed.
-///
 /// - `row` direction: cross axis is vertical. Stretching fills the
 ///   line height so a short sibling of a tall flex item grows to the
 ///   line instead of leaving blank rows.
 /// - `column` direction: cross axis is horizontal. The container's
 ///   content width is always known (`content.width`), so stretch
 ///   always takes effect.
+///
+/// `margin_cross` is `(before, after)` along the cross axis; a stretched
+/// item's border-box is the line cross minus its own cross-axis margins
+/// (the margins sit outside the stretched box, like a browser).
 pub(super) fn resolve_item_cross_size(
     align_self: AlignItems,
     line_cross: usize,
     natural_cross: usize,
-    _has_explicit_height: bool,
+    margin_cross: (usize, usize),
 ) -> usize {
     if matches!(align_self, AlignItems::Stretch) {
-        // Stretching fills the line's cross-axis size regardless of whether
-        // the container has an explicit size on that axis: the line cross is
-        // always known by this point (see the function docs).
         line_cross
+            .saturating_sub(margin_cross.0)
+            .saturating_sub(margin_cross.1)
+            .max(FLEX_ITEM_MIN_CROSS)
     } else {
         natural_cross.max(FLEX_ITEM_MIN_CROSS)
     }

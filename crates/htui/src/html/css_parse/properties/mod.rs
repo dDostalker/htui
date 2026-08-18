@@ -78,6 +78,18 @@ impl CssAttr {
     pub fn get_color(&self) -> Option<Color> {
         self.0.get("color").and_then(|c| parse_color_str(c))
     }
+
+    /// Cursor colour (CSS `caret-color`). `None` for `auto` / unset — the
+    /// painter then uses the default inverted-cell caret.
+    pub fn get_caret_color(&self) -> Option<Color> {
+        self.0.get("caret-color").and_then(|v| {
+            if v.trim().eq_ignore_ascii_case("auto") {
+                None
+            } else {
+                parse_color_str(v)
+            }
+        })
+    }
     /// Background color (CSS `background-color`, falls back to `background`).
     pub fn get_bg_color(&self) -> Option<Color> {
         self.0
@@ -473,27 +485,22 @@ impl CssAttr {
         }
     }
 
-    /// `justify-content` (defaults to `FlexStart`). Falls back to the
-    /// `place-content` shorthand's `justify-content` component when the
-    /// longhand is unset or unparseable (an invalid longhand declaration is
-    /// dropped by the cascade, so the shorthand still applies — matching
-    /// browsers).
+    /// `justify-content` (defaults to `FlexStart`). The `place-content`
+    /// shorthand is expanded into this longhand at parse time, so the normal
+    /// later-declaration-wins cascade ordering applies.
     pub fn get_justify_content(&self) -> JustifyContent {
         self.0
             .get("justify-content")
             .and_then(|v| parse_justify_content(v))
-            .or_else(|| self.place_content_justify())
             .unwrap_or(JustifyContent::FlexStart)
     }
 
-    /// `align-items` for the container (defaults to `Stretch`). Falls back to
-    /// the `place-items` shorthand's `align-items` component when the longhand
-    /// is unset or unparseable.
+    /// `align-items` for the container (defaults to `Stretch`). The
+    /// `place-items` shorthand is expanded into this longhand at parse time.
     pub fn get_align_items(&self) -> AlignItems {
         self.0
             .get("align-items")
             .and_then(|v| parse_align_items(v))
-            .or_else(|| self.place_items_shorthand())
             .unwrap_or(AlignItems::Stretch)
     }
 
@@ -501,9 +508,8 @@ impl CssAttr {
     ///
     /// `Auto` means "inherit the parent's `align-items`"; the layout
     /// applies the fallback at item-resolution time so a parent change
-    /// is honoured without re-parsing the child. Falls back to the
-    /// `place-self` shorthand's `align-self` component when the longhand
-    /// is unset or unparseable.
+    /// is honoured without re-parsing the child. The `place-self`
+    /// shorthand is expanded into this longhand at parse time.
     pub fn get_align_self(&self) -> AlignSelf {
         match self
             .0
@@ -511,96 +517,20 @@ impl CssAttr {
             .map(|s| s.trim().to_ascii_lowercase())
         {
             Some(v) if v == "auto" => AlignSelf::Auto,
-            Some(v) => AlignSelf::Value(
-                parse_align_items(&v)
-                    .or_else(|| self.place_self_shorthand())
-                    .unwrap_or(AlignItems::Stretch),
-            ),
-            None => match self.place_self_shorthand() {
-                Some(a) => AlignSelf::Value(a),
-                None => AlignSelf::Auto,
-            },
+            Some(v) => AlignSelf::Value(parse_align_items(&v).unwrap_or(AlignItems::Stretch)),
+            None => AlignSelf::Auto,
         }
     }
 
     /// `align-content` for multi-line flex containers. Defaults to
     /// `Stretch` (the CSS initial value: lines fill the free cross space).
-    /// Falls back to the `place-content` shorthand's `align-content`
-    /// component when the longhand is unset or unparseable.
+    /// The `place-content` shorthand is expanded into this longhand at
+    /// parse time.
     pub fn get_align_content(&self) -> AlignContent {
         self.0
             .get("align-content")
             .and_then(|v| parse_align_content(v))
-            .or_else(|| self.place_content_shorthand().map(|(a, _)| a))
             .unwrap_or(AlignContent::Stretch)
-    }
-
-    /// The `justify-content` component of the `place-content` shorthand
-    /// (`None` when the shorthand is absent or its first value does not
-    /// double as a valid `justify-content` — e.g. `stretch`).
-    fn place_content_justify(&self) -> Option<JustifyContent> {
-        self.place_content_shorthand().and_then(|(_, j)| j)
-    }
-
-    /// Parse the `place-content` shorthand (`<'align-content'>
-    /// <'justify-content'>?`) into its components. The first token drives
-    /// `align-content`; the optional second drives `justify-content`. When the
-    /// second is omitted the first is reused for `justify-content` when it is
-    /// also a valid value there (`stretch` is not valid for `justify-content`
-    /// in flex layout, so `place-content: stretch` only sets `align-content` —
-    /// matching browsers). Unparseable or extra tokens reject the shorthand.
-    fn place_content_shorthand(&self) -> Option<(AlignContent, Option<JustifyContent>)> {
-        let raw = self.0.get("place-content")?;
-        let mut tokens = raw.split_whitespace();
-        let first = tokens.next()?;
-        let align = parse_align_content(first)?;
-        let justify = match tokens.next() {
-            Some(s) => Some(parse_justify_content(s)?),
-            None => parse_justify_content(first),
-        };
-        if tokens.next().is_some() {
-            return None;
-        }
-        Some((align, justify))
-    }
-
-    /// Parse the `place-items` shorthand (`<'align-items'> <'justify-items'>?`)
-    /// into its `align-items` component. The second value (`justify-items`) is
-    /// not implemented and is only syntax-checked; a lone first value also
-    /// fills `justify-items` in browsers, which this engine does not render.
-    fn place_items_shorthand(&self) -> Option<AlignItems> {
-        let raw = self.0.get("place-items")?;
-        let mut tokens = raw.split_whitespace();
-        let first = tokens.next()?;
-        let align = parse_align_items(first)?;
-        if let Some(second) = tokens.next()
-            && parse_align_items(second).is_none()
-        {
-            return None;
-        }
-        if tokens.next().is_some() {
-            return None;
-        }
-        Some(align)
-    }
-
-    /// Parse the `place-self` shorthand (`<'align-self'> <'justify-self'>?`)
-    /// into its `align-self` component. Like [`Self::place_items_shorthand`],
-    /// the second value (`justify-self`) is only syntax-checked.
-    fn place_self_shorthand(&self) -> Option<AlignItems> {
-        let raw = self.0.get("place-self")?;
-        let mut tokens = raw.split_whitespace();
-        let first = tokens.next()?;
-        let align = parse_align_items(first)?;
-        if let Some(second) = tokens.next()
-            && parse_align_items(second).is_none()
-        {
-            return None;
-        }
-        if tokens.next().is_some() {
-            return None;
-        }
-        Some(align)
     }
 
     /// Parse the `flex` shorthand once (when present) into its components.

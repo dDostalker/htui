@@ -78,7 +78,7 @@ fn test_data_renders_content_inline() {
     let cols = term_map.columns as usize;
     let idx = first_cell_with(&tl, "f").expect("data content should render");
     let period = first_cell_with(&tl, ".").expect("trailing text should render");
-    assert_eq!(idx / cols, 0, "content stays on the paragraph line");
+    assert_eq!(idx / cols, 1, "content sits on the paragraph's text row (UA margin-top=1)");
     assert_eq!(period, idx + 9, "sentence continues after the data element");
 }
 
@@ -90,7 +90,7 @@ fn test_time_renders_content_inline() {
     let cols = term_map.columns as usize;
     let idx = first_cell_with(&tl, "J").expect("time content should render");
     let period = first_cell_with(&tl, ".").expect("trailing text should render");
-    assert_eq!(idx / cols, 0, "content stays on the paragraph line");
+    assert_eq!(idx / cols, 1, "content sits on the paragraph's text row (UA margin-top=1)");
     assert_eq!(period, idx + 5, "sentence continues after the time element");
 }
 

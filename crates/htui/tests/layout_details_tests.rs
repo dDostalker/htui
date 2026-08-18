@@ -147,7 +147,10 @@ fn test_open_details_renders_all_children() {
         layout_boxes("<details open><summary>More</summary><p>Shown</p></details>");
     assert!(find_box_by_type(&boxes, &NodeType::Summary, &arena).is_some());
     let p = find_box_by_type(&boxes, &NodeType::P, &arena).expect("open details shows content");
-    assert_eq!(p.rect.y, 1, "content starts below the summary row");
+    assert_eq!(
+        p.rect.y, 2,
+        "content starts below the summary row + its 1-row UA margin-top"
+    );
     let (_, tl) = draw("<details open><summary>More</summary><p>Shown</p></details>");
     assert!(
         canvas_has_word(&tl, "▾"),

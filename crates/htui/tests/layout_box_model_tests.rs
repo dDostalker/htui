@@ -133,7 +133,8 @@ fn padding_background_fills_padding_box() {
 fn padding_shrinks_inner_containing_block() {
     init();
     // A nested `<p>` inside `<div>` with padding should sit inside the
-    // content area (after padding). padding-top=2 means <p> lands at row 2.
+    // content area (after padding). padding-top=2 plus the <p>'s 1-row UA
+    // margin-top puts the text at row 3.
     let (term_map, tl) = draw(
         "<div><p>Inner</p></div>",
         "div { padding-top: 2px; padding-left: 5px; }",
@@ -144,7 +145,7 @@ fn padding_shrinks_inner_containing_block() {
         .iter()
         .position(|b| b.word == "I")
         .expect("'Inner' should render");
-    assert_eq!(text_idx / cols, 2, "p must start after padding-top=2");
+    assert_eq!(text_idx / cols, 3, "p starts after padding-top=2 + its UA margin-top=1");
     assert_eq!(text_idx % cols, 5, "p must start after padding-left=5");
 }
 
@@ -198,7 +199,8 @@ fn margin_top_reserves_rows_above() {
 fn margin_shorthand_two_values_applies_to_top_bottom_and_left_right() {
     init();
     // `margin: 2px 8px` → top/bottom=2, left/right=8. Both X and Y carry
-    // margin-top=2, so Y sits 1 own-row + 2 margin-top below X.
+    // margin-top=2, so Y sits 1 own-row + the collapsed 2-row margin below
+    // X (adjacent vertical margins merge to the larger — CSS collapsing).
     let (term_map, tl) = draw("<p>X</p><p>Y</p>", "p { margin: 2px 8px; }");
     let cols = term_map.columns as usize;
     let x_idx = tl.layout.iter().position(|b| b.word == "X").unwrap();
@@ -207,8 +209,8 @@ fn margin_shorthand_two_values_applies_to_top_bottom_and_left_right() {
     assert_eq!(y_idx % cols, 8, "margin-left=8 shifts Y right");
     assert_eq!(
         y_idx / cols,
-        x_idx / cols + 1 + 2 + 2,
-        "Y sits 1 own-row + X's margin-bottom(2) + Y's margin-top(2) below X"
+        x_idx / cols + 1 + 2,
+        "Y sits 1 own-row + the collapsed 2-row margin below X"
     );
 }
 

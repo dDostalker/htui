@@ -7,19 +7,29 @@
   body { font-family: monospace; }
   .demo { width: 26em; margin-bottom: 1.5em; display: inline-block; vertical-align: top; margin-right: 2em; }
   .demo h2 { font-size: 1em; margin: 0.5em 0; }
-  .box { display: flex; border: 1px solid #999; padding: 2px; }
-  .box div, .box span { background: #def; margin: 1px; }
+  .box { display: flex; border: 1px solid #999; padding: 2px;
+         box-sizing: content-box; line-height: 1; }
+  /* No item margin: a browser's 1px margins are visually negligible, while
+     the engine maps 1px to a full terminal cell (px = cell), so a margin
+     would read as a wide gap. Items sit flush, like the browser looks. */
+  .box div, .box span { background: #def; }
   .box .b { background: #fdd; }
+  /* place-content demos: items are 5ch wide so 3 items (15ch) overflow the
+     `14ch` content width and wrap into 2 lines. ch is the unit that maps to
+     terminal cells in both engines (browser: 1ch = one monospace glyph;
+     engine: 1ch = 1 cell), so the two line up cell-for-cell. */
+  .pc-center div, .pc-two div, .pc-stretch div { width: 5ch; }
 
-  /* place-content: one value drives both axes — 3 items wrap into 2 lines,
-     the lines centre vertically and the items centre horizontally. */
-  .pc-center { flex-wrap: wrap; width: 14em; height: 8em; place-content: center; }
+  /* place-content: one value drives both axes — the 2 wrapped lines centre
+     vertically (align-content) and each line's items centre horizontally
+     (justify-content). */
+  .pc-center { flex-wrap: wrap; width: 14ch; height: 8em; place-content: center; }
   /* place-content: two values — lines spread vertically (space-between),
      items spread horizontally (space-evenly). */
-  .pc-two { flex-wrap: wrap; width: 14em; height: 8em;
+  .pc-two { flex-wrap: wrap; width: 14ch; height: 8em;
             place-content: space-between space-evenly; }
   /* place-content: stretch only sets align-content (justify stays flex-start). */
-  .pc-stretch { flex-wrap: wrap; width: 14em; height: 8em; place-content: stretch; }
+  .pc-stretch { flex-wrap: wrap; width: 14ch; height: 8em; place-content: stretch; }
 
   /* place-items: cross-axis align for every item */
   .pi-center { height: 6em; place-items: center; }
@@ -29,8 +39,9 @@
   .ps { height: 6em; }
   .ps .b { place-self: flex-end; }
 
-  /* longhand beats shorthand */
-  .lh { height: 6em; align-items: flex-start; place-items: center; }
+  /* longhand declared after the shorthand wins — browsers cascade
+     shorthands as expanded longhands, so the later declaration decides */
+  .lh { height: 6em; place-items: center; align-items: flex-start; }
 </style>
 </head>
 <body>

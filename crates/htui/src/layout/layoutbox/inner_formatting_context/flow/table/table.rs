@@ -48,7 +48,9 @@ pub fn layout_table(
                 .unwrap_or(available)
                 .min(available)
                 .max(1);
-            cursor.skip(edges.margin.top);
+            // Collapse the top margin with the previous in-flow sibling's
+            // bottom margin (CSS vertical margin collapsing: the larger wins).
+            cursor.collapse_and_skip(edges.margin.top);
             (
                 containing.x + edges.margin.left,
                 block_width,
@@ -124,6 +126,9 @@ pub fn layout_table(
         cursor.y = outer_y_top
             .saturating_add(total_height)
             .saturating_add(edges.margin.bottom);
+        // Leave the bottom margin for the next in-flow sibling to collapse
+        // its top margin against.
+        cursor.leave_bottom_margin(edges.margin.bottom);
     }
 
     let rect_width = preallocated_height

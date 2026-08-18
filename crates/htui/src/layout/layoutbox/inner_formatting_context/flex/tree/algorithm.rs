@@ -18,10 +18,11 @@ pub(super) fn effective_align(align_self: AlignItems, _align_items: AlignItems) 
 
 /// Split items into lines for `flex-wrap: wrap`.
 ///
-/// Greedy algorithm: start a new line whenever adding the next item
-/// (plus the column gap) would exceed the available main-axis size.
-/// Items that are themselves wider than the line get the full line to
-/// themselves (they overflow rather than wrap mid-item).
+/// Greedy algorithm: start a new line whenever adding the next item's
+/// margin-box (border-box + main-axis margins, plus the column gap) would
+/// exceed the available main-axis size. Items that are themselves wider than
+/// the line get the full line to themselves (they overflow rather than wrap
+/// mid-item).
 pub(super) fn wrap_into_lines(
     preps: &[FlexItemPrep],
     direction: FlexDirection,
@@ -36,7 +37,11 @@ pub(super) fn wrap_into_lines(
     let mut current: Vec<usize> = Vec::new();
     let mut used: usize = 0;
     for (idx, prep) in preps.iter().enumerate() {
-        let item_size = prep.basis.max(1);
+        let item_size = prep
+            .basis
+            .max(1)
+            .saturating_add(prep.margin_main_before)
+            .saturating_add(prep.margin_main_after);
         let needed = if current.is_empty() {
             item_size
         } else {
@@ -87,6 +92,10 @@ pub(super) fn distribute_main_axis(
     }
     let gaps = column_gap.saturating_mul(n.saturating_sub(1));
     let total_basis: usize = line.iter().map(|p| p.basis).sum();
+    let total_margin: usize = line
+        .iter()
+        .map(|p| p.margin_main_before.saturating_add(p.margin_main_after))
+        .sum();
     let mut sizes: Vec<usize> = line.iter().map(|p| p.basis).collect();
 
     // An indefinite main axis (a `column` flex container with no explicit
@@ -100,11 +109,14 @@ pub(super) fn distribute_main_axis(
         return (sizes, 0);
     }
 
-    let used_after_basis = total_basis.saturating_add(gaps);
+    let used_after_basis = total_basis
+        .saturating_add(gaps)
+        .saturating_add(total_margin);
     if used_after_basis < available {
         // Free space exists; first try flex-grow, otherwise pass the
-        // free space through to justify-content.
-        let free = available - gaps - total_basis;
+        // free space through to justify-content. Margins are fixed and
+        // never grow with the item, so they are subtracted up front.
+        let free = available - gaps - total_basis - total_margin;
         let total_grow: f32 = line.iter().map(|p| p.grow).sum();
         if total_grow > 0.0 {
             let mut distributed: isize = 0;
@@ -189,10 +201,15 @@ fn enforce_min_main_sizes(
         }
     }
     loop {
+        let total_margin: usize = line
+            .iter()
+            .map(|p| p.margin_main_before.saturating_add(p.margin_main_after))
+            .sum();
         let total: usize = sizes
             .iter()
             .sum::<usize>()
-            .saturating_add(column_gap.saturating_mul(n.saturating_sub(1)));
+            .saturating_add(column_gap.saturating_mul(n.saturating_sub(1)))
+            .saturating_add(total_margin);
         if total <= available {
             break;
         }
@@ -232,8 +249,12 @@ pub(super) fn justify_spacing(
         return match justify {
             JustifyContent::FlexStart | JustifyContent::SpaceBetween => (0, 0),
             JustifyContent::FlexEnd => (free_space, 0),
-            JustifyContent::Center | JustifyContent::SpaceAround => (free_space / 2, 0),
-            JustifyContent::SpaceEvenly => (free_space, 0),
+            // CSS Box Alignment: `space-around` / `space-evenly` are
+            // identical to `center` for a single alignment subject (the
+            // whole free space is split evenly at both ends).
+            JustifyContent::Center | JustifyContent::SpaceAround | JustifyContent::SpaceEvenly => {
+                (free_space / 2, 0)
+            }
         };
     }
     match justify {

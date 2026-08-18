@@ -100,6 +100,32 @@ fn test_multicol_balance_uneven_content() {
     assert_eq!(cell_word(&tl, 40, 2), " ");
 }
 
+#[test]
+fn test_multicol_balance_packs_uneven_heights_browser_style() {
+    init();
+    // Three 3-row children (padding) in 2 columns: the smallest column
+    // height that fits both columns is 6, so the first two children pack
+    // into column 0 (6/3) — not the naive ceil(9/2)=5 split (3/6).
+    let html = r#"
+        <div class="cols">
+            <div class="t">A</div><div class="t">B</div><div class="t">C</div>
+        </div>
+    "#;
+    let css = ".cols { width: 60px; column-count: 2; column-gap: 0; } .t { padding: 1px; }";
+    let tl = setup(html, css);
+    // Each `.t` box is 3 rows tall (padding 1 + content 1 + padding 1), so
+    // the content glyph sits at x 1 (padding-left) on the box's middle row.
+    assert_eq!(cell_word(&tl, 1, 1), "A", "first child in column 0");
+    assert_eq!(
+        cell_word(&tl, 1, 4),
+        "B",
+        "second child packs under A in column 0"
+    );
+    assert_eq!(cell_word(&tl, 31, 1), "C", "third child starts column 1");
+    assert_eq!(cell_word(&tl, 31, 4), " ", "column 1 has no fourth row");
+    assert_eq!(cell_word(&tl, 1, 6), " ", "container is 6 rows tall");
+}
+
 // ============================================================
 // column-width: the count derives from how many fit
 // ============================================================

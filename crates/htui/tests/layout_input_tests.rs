@@ -129,6 +129,18 @@ fn find_input(arena: &NodeArena, root: NodeId) -> NodeId {
     panic!("no <input> in document");
 }
 
+fn find_textarea(arena: &NodeArena, root: NodeId) -> NodeId {
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        let node = &arena[id];
+        if node.node_type == NodeType::Textarea {
+            return id;
+        }
+        stack.extend(node.children.iter().copied());
+    }
+    panic!("no <textarea> in document");
+}
+
 #[test]
 fn selection_range_orders_anchor_and_caret() {
     // Anchor may sit on either side of the caret; the range is always ordered.
@@ -467,6 +479,73 @@ fn engine_input_state_renders_value_and_caret() {
     assert_eq!(cell(1).fcolor, None);
     assert_eq!(cell(1).bcolor, None);
     assert_eq!(cell(2).bcolor, Some(crossterm::style::Color::White));
+}
+
+#[test]
+fn input_caret_color_paints_the_caret_cell() {
+    init();
+    // `caret-color: red` paints the focused field's caret block red instead
+    // of the default inverted cell.
+    let (root_id, arena) = setup(
+        r#"<div><input value="initial"></div><style>input { caret-color: red; }</style>"#,
+    );
+    let input_id = find_input(&arena, root_id);
+
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.input_states.insert(
+        input_id,
+        InputRenderState {
+            value: "abc".to_string(),
+            cursor: 1,
+            focused: true,
+            selection: None,
+        },
+    );
+    tl.draw(&arena, root_id, &term_map);
+
+    let cell = |x: usize| -> &Block { &tl.layout[x] };
+    // Caret on char index 1 → column 2: its background is the declared colour.
+    assert_eq!(
+        cell(2).bcolor,
+        Some(crossterm::style::Color::Rgb { r: 255, g: 0, b: 0 }),
+        "caret cell must take the caret-color"
+    );
+    // Non-caret cells keep the plain field colours.
+    assert_eq!(cell(1).bcolor, None);
+}
+
+#[test]
+fn textarea_caret_color_paints_the_caret_cell() {
+    init();
+    // `caret-color: blue` colours the `<textarea>` caret block.
+    let (root_id, arena) = setup(
+        r#"<div><textarea rows="3">initial</textarea></div>
+            <style>textarea { caret-color: blue; }</style>"#,
+    );
+    let textarea_id = find_textarea(&arena, root_id);
+
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.input_states.insert(
+        textarea_id,
+        InputRenderState {
+            value: "hi".to_string(),
+            cursor: 1,
+            focused: true,
+            selection: None,
+        },
+    );
+    tl.draw(&arena, root_id, &term_map);
+
+    let cols = term_map.columns as usize;
+    // Textarea border occupies row 0; content starts at row 1, column 1.
+    let cell = |x: usize, y: usize| -> &Block { &tl.layout[y * cols + x] };
+    assert_eq!(
+        cell(2, 1).bcolor,
+        Some(crossterm::style::Color::Rgb { r: 0, g: 0, b: 255 }),
+        "caret cell must take the caret-color"
+    );
 }
 
 #[test]

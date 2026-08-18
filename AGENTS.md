@@ -13,7 +13,7 @@
 以下是项目的结构，如果不是特殊要求不得修改项目结构，仅当提示词要求需要时修改，修改前进行询问，并**必须**对项目结构进行同步
 ```
 htui/
-├── Cargo.toml              # workspace 根（members: crates/htui, crates/htui-macros, visual_test, example）
+├── Cargo.toml              # workspace 根（members: crates/htui, crates/htui-macros, visual_test；example 为独立 workspace，不在 members 内）
 ├── crates/
 │   ├── htui/               # 主库 crate：终端 HTML/CSS 渲染引擎（独立发布单元）
 │   │   ├── Cargo.toml
@@ -124,6 +124,9 @@ htui/
 │   │   ├── tests/               # 集成测试（跟随主库）
 │   │   │   ├── html_parse_tests.rs
 │   │   │   ├── css_parse_tests.rs
+│   │   │   ├── dom_node_tests.rs    # DOM 节点 API 测试（insertBefore/replaceChild/cloneNode + Text·Comment·Fragment + document 访问器，纯内存）
+│   │   │   ├── resources_tests.rs   # mem:// 资源层测试（注册 / 读取 / 前缀，纯内存）
+│   │   │   ├── fetch_e2e_tests.rs   # fetch 端到端测试（<script src> 加载 + Promise 微任务事件循环写 DOM，纯内存）
 │   │   │   ├── layout_tests.rs
 │   │   │   ├── layout_div_tests.rs
 │   │   │   ├── layout_span_tests.rs
@@ -131,6 +134,10 @@ htui/
 │   │   │   ├── layout_img_tests.rs
 │   │   │   ├── layout_aside_tests.rs
 │   │   │   ├── layout_header_footer_tests.rs
+│   │   │   ├── layout_blockquote_tests.rs # 块级引用测试（UA 默认 margin 上下 1 行/左右 4 列；作者声明逐边覆盖，纯内存）
+│   │   │   ├── layout_menu_dl_tests.rs    # menu/dl 测试（menu 同 ul：• 前缀；dl 上下 1 行；dd 左缩 4 列，纯内存）
+│   │   │   ├── layout_q_abbr_tests.rs     # q/abbr 测试（q 嵌套引号交替；abbr[title] 下划线，纯内存）
+│   │   │   ├── layout_data_time_tests.rs  # data/time 测试（行内透传；value/datetime 仅属性不渲染，纯内存）
 │   │   │   ├── layout_box_model_tests.rs
 │   │   │   ├── layout_font_size_tests.rs
 │   │   │   ├── layout_tree_tests.rs
@@ -144,36 +151,45 @@ htui/
 │   │   │   ├── layout_emoji_tests.rs
 │   │   │   ├── layout_table_tests.rs
 │   │   │   ├── layout_wrap_tests.rs
+│   │   │   ├── layout_wrap_runs_tests.rs # CSS Text 换行包装器直测（各 break policy 精确 run 断言，不经渲染管线，纯内存）
 │   │   │   ├── layout_events_tests.rs # 事件系统测试（命中 / 冒泡 / hover / click，纯内存）
 │   │   │   ├── layout_focus_tests.rs # el.focus()/el.blur() 测试（请求经输入循环生效 + focus/blur 事件派发，纯内存）
 │   │   │   ├── layout_inner_html_tests.rs # innerHTML 测试（读取序列化 / 写入片段解析 / style 提取 / script 跳过，纯内存）
 │   │   │   ├── layout_class_list_tests.rs # classList 测试（live DOMTokenList 读/写/迭代/校验，纯内存）
 │   │   │   ├── layout_dataset_tests.rs # 全局属性测试（el.hidden 隐藏切换 + el.dataset live DOMStringMap 读/写/删/枚举，纯内存）
 │   │   │   ├── layout_position_tests.rs # CSS 定位测试（relative / absolute / fixed + z-index）
-│   │   ├── layout_input_tests.rs # <input> 输入框测试（渲染 / 编辑逻辑 / 光标状态）
-│   │   ├── layout_textarea_tests.rs # <textarea> 多行编辑框测试（几何/绘制/编辑/滚动/value IDL，纯内存）
-│   │   ├── layout_form_tests.rs # 表单测试（hidden/password/checkbox/radio/textarea + label/button/form submit-reset，纯内存）
-│   │   ├── layout_details_tests.rs # <details>/<summary> 折叠控件测试（关闭只显 summary / 标记 ▸▾ / 点击切换 open + toggle 事件，纯内存）
-│   │   ├── layout_dialog_template_tests.rs # <dialog>/<template> 测试（dialog：open 显隐 + UA 边框 + form[method=dialog] 关闭 + close 事件；template：内容惰性恒不渲染，纯内存）
-│   │   ├── layout_form_elements_tests.rs # 表单元素补全测试（output 行内+value / optgroup 分组头 / datalist 自动补全 / fieldset·legend / progress·meter 条，纯内存）
-│   │   ├── layout_noscript_tests.rs # <noscript> 测试（脚本启用：元素保留 DOM、原始文本解析、恒不渲染，纯内存）
+│   │   │   ├── layout_input_tests.rs # <input> 输入框测试（渲染 / 编辑逻辑 / 光标状态）
+│   │   │   ├── layout_textarea_tests.rs # <textarea> 多行编辑框测试（几何/绘制/编辑/滚动/value IDL，纯内存）
+│   │   │   ├── layout_form_tests.rs # 表单测试（hidden/password/checkbox/radio/textarea + label/button/form submit-reset，纯内存）
+│   │   │   ├── layout_details_tests.rs # <details>/<summary> 折叠控件测试（关闭只显 summary / 标记 ▸▾ / 点击切换 open + toggle 事件，纯内存）
+│   │   │   ├── layout_dialog_template_tests.rs # <dialog>/<template> 测试（dialog：open 显隐 + UA 边框 + form[method=dialog] 关闭 + close 事件；template：内容惰性恒不渲染，纯内存）
+│   │   │   ├── layout_form_elements_tests.rs # 表单元素补全测试（output 行内+value / optgroup 分组头 / datalist 自动补全 / fieldset·legend / progress·meter 条，纯内存）
+│   │   │   ├── layout_noscript_tests.rs # <noscript> 测试（脚本启用：元素保留 DOM、原始文本解析、恒不渲染，纯内存）
 │   │   │   ├── render_diff_tests.rs # 帧差增量渲染（不变零输出 / 滚动 diff / 全帧对比）
-│   │   │   │   ├── macro_tests.rs       # 注册宏测试（commands/host/command(name) 自动注册，纯内存）
-│   │   ├── query_selector_tests.rs # querySelector/querySelectorAll 测试（document/元素作用域、组合器、无效选择器抛错，纯内存）
-│   │   │   │   ├── script_loop_tests.rs # 脚本线程桥测试（apply_message 语义 + 阻塞宿主函数不阻塞输入，纯内存）
-│   │   └── benches/               # criterion 基准（parse / cascade / paint / render_to_bytes / full_redraw）
+│   │   │   ├── macro_tests.rs       # 注册宏测试（commands/host/command(name) 自动注册，纯内存）
+│   │   │   ├── query_selector_tests.rs # querySelector/querySelectorAll 测试（document/元素作用域、组合器、无效选择器抛错，纯内存）
+│   │   │   └── script_loop_tests.rs # 脚本线程桥测试（apply_message 语义 + 阻塞宿主函数不阻塞输入，纯内存）
+│   │   └── benches/               # criterion 基准（parse / cascade / paint / render_to_bytes / full_redraw；common/ 共享辅助）
 │   └── htui-macros/             # 过程宏 crate：#[htui::command]/#[htui::commands] + #[derive(IntoJs/FromJs)]
 │       ├── Cargo.toml
 │       └── src/lib.rs           # proc-macro：命令包装（纯 fn + 返回 HostFn）/ 模块自动注册 / 结构体 ↔ JS 对象 derive + 样本 JS 接口生成（js_bindings，JSDoc）
 ├── docs/
-│   ├── TODO.md            # 待办（querySelector / innerHTML / textarea / details 等，按优先级分组）
+│   ├── TODO.md            # 待办（B：mousedown/mouseup、[attr] 选择器、getComputedStyle；C：img change）
 │   └── zh-cn/
 │       ├── 边界文档.md           # 边界文档（目标 / 核心承诺 / 拒绝清单 / 能力地图）
 │       ├── 能力差异清单.md       # 浏览器能力对比及差异清单（HTML / CSS / JS 全矩阵）
-│       ├── 开发/                # （预留）
 │       └── 教程/
-│           ├── logging.md       # 日志使用说明
-│           └── script-layer.md  # 脚本层完整使用与架构文档（脚本 / on* / 宿主函数 / RenderArena）
+│           ├── 1.HelloWorld.md              # 入门：第一个 htui 程序（占位，待编写）
+│           ├── 2.实现静态终端.md             # 静态渲染（占位，待编写）
+│           ├── 3.0资源.md                   # 资源层概念（占位，待编写）
+│           ├── 3.1资源的注册和读取.md        # mem:// 注册与读取（占位，待编写）
+│           ├── 4.0动态终端.md               # 事件与动态渲染（占位，待编写）
+│           ├── 4.1JS和Rust绑定.md           # 宿主函数绑定（占位，待编写）
+│           ├── 5.日志.md                    # 日志使用说明
+│           ├── 6.0示例-实现性能监控器.md      # 示例：性能监控器（占位，待编写）
+│           ├── 6.1-示例-实现贪吃蛇.md        # 示例：贪吃蛇（占位，待编写）
+│           ├── 6.2调试.md                   # 调试（占位，待编写）
+│           └── script-layer.md              # 脚本层完整使用与架构文档（脚本 / on* / 宿主函数 / RenderArena）
 ├── visual_test/          # 可视化测试工具（cargo run -p visual_test；渲染/布局/事件能力验证）
 │   └── src/
 │       ├── main.rs
@@ -184,6 +200,7 @@ htui/
 │       ├── nested/
 │       ├── text/
 │       ├── css/
+│       ├── css_props/    # 高频 CSS 属性演示（text-transform / line-height / min·max-width·height / box-sizing / border-radius / flex 尺寸约束）
 │       ├── events/       # 事件系统交互演示（onclick / hover / 动态重渲染，render_with_events）
 │       ├── header_footer/
 │       ├── aside/
@@ -211,10 +228,10 @@ htui/
 │       ├── form/         # 表单控件演示（checkbox/radio 切换互斥、password 掩码、hidden 不渲染 + change 计数）
 │       ├── configurator/ # 配置器设置表单演示（input + 原生 select 下拉 + JS 开关 + 实时预览 + 保存/重置）
 │       ├── columns/      # 多列布局演示（column-count/width 自动列数/columns 简写/column-rule/column-fill:auto/文本+块混合分列）
-│       ├── place/        # place-content/place-items/place-self 简写演示（单值双轴/双值/长写优先）
+│       ├── place/        # place-content/place-items/place-self 简写演示（单值双轴/双值/声明顺序优先：后声明胜出，与浏览器一致）
 │       ├── fetch_demo/   # fetch 演示：<script src="mem://…"> 加载 + fetch 经 Promise 微任务事件循环写 DOM
 │       └── viewport_units/
-└── example/              # 完整交互示例（cargo run -p example -- music|music-light|codex|sticky）
+└── example/              # 完整交互示例（独立 workspace；cargo run --manifest-path example/Cargo.toml -- music|music-light|codex|sticky）
     └── src/
         ├── main.rs      # 运行器：dump（headless 预览）/ render_with_events 分派
         ├── music/       # "Neon" 深色 Spotify 风格音乐界面
@@ -325,9 +342,9 @@ InputKeystroke / SelectPick）发给脚本线程，后者经 `apply_message` 统
 
 **已知限制**：输入循环的 DOM 读基于快照，在"JS 改 DOM → `dirty` 响应被消费"
 之间有 read-behind 窗口（`focus_input` 种子、blur 提交、node_type 判断可能读到旧
-文档，窗口约 0–100ms），记录于 `docs/browser-compat.md` §6.4.11。整文档替换
-（宿主函数 push `RenderCmd::RenderHtml`）已由脚本引擎的 `ScriptEngine::reload`
-在引擎内完成（单一真源，见 §6.4.12），不再有渲染线程独立解析。
+文档，窗口约 0–100ms）。整文档替换（宿主函数 push `RenderCmd::RenderHtml`）
+已由脚本引擎的 `ScriptEngine::reload` 在引擎内完成（单一真源），不再有渲染线程
+独立解析。
 
 ### 动态内容：JS 修改 live DOM 后引擎把被改动的 `NodeId` 记入 `dirty`，脚本线程回
 `ScriptResponse::Event`，输入循环据其发送
@@ -339,8 +356,8 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
 定时任务：JS 侧 `setTimeout` / `setInterval`（标准 API）由脚本引擎登记到
 `ScriptState.timers`，脚本线程在消息间隙经 `recv_timeout` 调度
 `ScriptEngine::run_due_timers` 触发回调（监控器/时钟/动画用）。宿主函数在
-脚本线程执行，重活应放后台线程（参考 `example/src/sysmon.rs` 后台采样 +
-快照模式）。
+脚本线程执行，重活应放后台线程（后台采样 + `Arc<Mutex<Snapshot>>` 快照发布，
+宿主函数只读快照）。
 
 资源与异步：`crate::resources` 是内存资源层（`mem://` 注册表，前缀可选，不访问
 文件系统/网络），`<script src>` / `<link href>` / `<img src>` 与 JS `fetch` 都经
@@ -356,7 +373,7 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
 
 1. **值未变不触发渲染**：`el.textContent = v` 在 `v` 与当前文本相同时直接短路，
    不置 `dirty`——监控器每 200ms 刷新但值基本不变时，实际 `RenderArena`
-   次数远少于刷新次数（sysmon 实测 200 次刷新只触发约 14 次渲染）。
+   次数远少于刷新次数（监控器页面实测 200 次刷新只触发约 14 次渲染）。
 2. **命令合并**：输入循环发送前合并命令流。`RenderArena` 携带 `hovered` 字段，
    重排时会重新应用当前 `:hover` 高亮，因此同轮的 `Hover` 命令会被丢弃
    （渲染线程的 `try_recv` 合并本就只保留最后一个命令）。
@@ -370,7 +387,7 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
    **新旧 hover 目标**（含 `:hover` 规则可匹配的祖先）所在区域的并集；样式表
    没有 `:hover` 规则时直接跳过（与浏览器一致，移动指针不产生绘制）。
    `RenderArena` 携带的 hover 变化仍回退全量（内容与高亮同帧变动时最安全）。
-   实测 sysmon：hover 全量重绘 ~1.6ms → 区域重绘 ~0.6ms。
+    实测（监控器页面）：hover 全量重绘 ~1.6ms → 区域重绘 ~0.6ms。
 
 ## 必要事项
 `html → tdom → layout → tui` 四层不可破坏。不要引入新的抽象层，除非有充分理由。在修改之前进行询问。

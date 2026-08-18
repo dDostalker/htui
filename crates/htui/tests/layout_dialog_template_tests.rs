@@ -134,7 +134,10 @@ fn test_dialog_open_renders_content() {
     let dlg =
         find_box_by_type(&boxes, &NodeType::Dialog, &arena).expect("open dialog produces a box");
     assert_eq!(dlg.rect.x, 0, "dialog spans the full width");
-    assert_eq!(dlg.rect.height, 3, "border top/bottom + one content row");
+    assert_eq!(
+        dlg.rect.height, 5,
+        "border 1 + <p> UA margins (1 above + 1 below) + 1 content row + border 1"
+    );
     assert!(
         find_box_by_type(&boxes, &NodeType::P, &arena).is_some(),
         "dialog content renders when open"

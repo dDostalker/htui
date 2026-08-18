@@ -107,7 +107,10 @@ pub fn layout_block(
             )
         }
         None => {
-            cursor.skip(edges.margin.top);
+            // Collapse this block's top margin with the previous in-flow
+            // sibling's bottom margin (CSS vertical margin collapsing: the
+            // larger wins).
+            cursor.collapse_and_skip(edges.margin.top);
             let outer_y_top = cursor.y;
             let block_width = constrained_block_width(
                 &node.css_attr,
@@ -294,6 +297,7 @@ pub fn layout_block(
         // `<div>text<p>child</p></div>`).
         let mut child_cursor = Cursor {
             y: content_top.saturating_add(inline_rows),
+            prev_bottom_margin: 0,
         };
         let block_children = visible_children(arena, node_id);
         let children = layout_children(
@@ -384,6 +388,9 @@ pub fn layout_block(
                 .outer_y
                 .saturating_add(height)
                 .saturating_add(edges.margin.bottom);
+            // Leave the bottom margin for the next in-flow sibling to
+            // collapse its top margin against.
+            cursor.leave_bottom_margin(edges.margin.bottom);
             height
         }
     };
@@ -571,6 +578,7 @@ fn layout_multicol(
     let block_children = visible_children(arena, node_id);
     let mut col_cursor = Cursor {
         y: content_top.saturating_add(line_rows),
+        prev_bottom_margin: 0,
     };
     let mut children = layout_children(
         arena,
@@ -618,10 +626,15 @@ fn layout_multicol(
     let total = stream;
 
     // Distribute the fragments into columns. `target` is the height each
-    // column is allowed before the next fragment moves on.
+    // column is allowed before the next fragment moves on. For `balance`
+    // (the default) it is the *smallest* column height that fits the content
+    // into `count` columns — browsers balance by finding that height (a plain
+    // `ceil(total / count)` target is wrong when fragments are uneven: three
+    // 3-row blocks in 2 columns want 6/3, not 3/6). `auto` with an explicit
+    // container height targets that height instead.
     let target = match (spec.fill, fixed_content_height) {
         (ColumnFill::Auto, Some(h)) => h.max(1),
-        _ => total.div_ceil(count),
+        _ => balance_column_height(&fragments, count, total),
     };
     let mut col_of = vec![0usize; fragments.len()];
     let mut col_off = vec![0usize; fragments.len()];
@@ -704,4 +717,44 @@ fn layout_multicol(
         height: content_height,
     };
     (Some(layout), children, content_height)
+}
+
+/// Smallest column height that packs every fragment into `count` columns,
+/// found by binary search over `[1, total]` — the browser column-balancing
+/// algorithm. The feasibility test uses the same greedy per-fragment rule as
+/// the distribution pass ([`fits_in_columns`]), so the height that "fits" is
+/// exactly the height the distribution uses.
+fn balance_column_height(fragments: &[ColumnFragment], count: usize, total: usize) -> usize {
+    let mut lo = 1usize;
+    let mut hi = total.max(1);
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if fits_in_columns(fragments, count, mid) {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    lo
+}
+
+/// Whether the fragments pack into at most `count` columns when each column
+/// is capped at `height`: a fragment moves to the next column only when the
+/// current one already has content and would overflow; a fragment taller than
+/// `height` overflows its column instead of breaking (matching browsers —
+/// unbreakable content keeps flowing inside its column).
+fn fits_in_columns(fragments: &[ColumnFragment], count: usize, height: usize) -> bool {
+    let mut col = 0usize;
+    let mut col_h = 0usize;
+    for frag in fragments {
+        if col_h > 0 && col_h.saturating_add(frag.height) > height {
+            col += 1;
+            if col >= count {
+                return false;
+            }
+            col_h = 0;
+        }
+        col_h = col_h.saturating_add(frag.height);
+    }
+    true
 }

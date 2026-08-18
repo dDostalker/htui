@@ -108,7 +108,10 @@ pub fn layout_cell(
         .width
         .saturating_sub(cell_edges.inner_horizontal())
         .max(1);
-    let mut child_cursor = Cursor { y: inner_content_y };
+    let mut child_cursor = Cursor {
+        y: inner_content_y,
+        prev_bottom_margin: 0,
+    };
     let child_containing = BoxConstraint {
         x: inner_content_x,
         width: inner_content_width,
