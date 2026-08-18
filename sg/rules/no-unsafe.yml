@@ -1,0 +1,11 @@
+id: no-unsafe
+language: Rust
+rule:
+  any:
+    - pattern: unsafe { $$$ }
+    - pattern: unsafe fn $NAME($$$ARGS) { $$$BODY }
+    - pattern: unsafe impl $$$TRAIT { $$$BODY }
+message: Unsafe code is forbidden. Prefer algorithm-level optimization for performance instead of unsafe blocks.
+severity: error
+note: |
+  If there is a legitimate reason (FFI / inline asm / OS interaction), explain in the PR and get review.

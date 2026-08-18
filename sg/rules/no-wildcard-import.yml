@@ -1,0 +1,8 @@
+id: no-wildcard-import
+language: Rust
+rule:
+  any:
+    - pattern: use $$$PATH::*;
+    - pattern: pub use $$$PATH::*;
+message: Wildcard imports `use ...::*;` pollute the module namespace and make symbol origins hard to trace. Import only the specific items you use.
+severity: warning

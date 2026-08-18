@@ -1,0 +1,12 @@
+id: no-println
+language: Rust
+rule:
+  any:
+    - pattern: println!($$$ARGS)
+    - pattern: eprintln!($$$ARGS)
+    - pattern: dbg!($$$ARGS)
+message: println!/eprintln!/dbg! are forbidden in library code. They bypass the logging layer and cannot be filtered or redirected. Use `log::debug!`/`info!`/`warn!`/`error!` instead.
+severity: warning
+note: |
+  Library code must use `log` macros; `dbg!` is for local debugging only — remove before commit.
+  The rule uses `$$$ARGS` to match macro arguments (`...` does not work for macro token trees).

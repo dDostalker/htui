@@ -1,0 +1,6 @@
+id: no-ignore-result
+language: Rust
+rule:
+  pattern: let _ = $EXPR
+message: "`let _ = ...` silently discards a return value, masking errors from Result-returning calls. If you truly need to drop a Result, use `.ok()` or `if let Ok(_) = ...`; if only suppressing an unused-variable warning, add a comment explaining why."
+severity: warning
