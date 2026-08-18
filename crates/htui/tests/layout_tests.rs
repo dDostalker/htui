@@ -481,7 +481,10 @@ fn inline_block_boxes_flow_side_by_side() {
     init();
     // Consecutive `display: inline-block` boxes flow left-to-right on one
     // line (browser inline-level layout), keeping their own margins. Each
-    // card is 20 cells wide with a 2-cell right margin.
+    // card is 20 cells wide with a 2-cell right margin; the source-code
+    // whitespace between the cards collapses to a single separating space
+    // (browser inter-element whitespace), so consecutive starts are
+    // 20 + 2 margin + 1 space = 23 cells apart.
     let html = r#"
         <div class="card">AA</div>
         <div class="card">BB</div>
@@ -499,8 +502,54 @@ fn inline_block_boxes_flow_side_by_side() {
     assert_eq!(idx_a / 80, 0, "all cards share the first row");
     assert_eq!(idx_b / 80, 0);
     assert_eq!(idx_c / 80, 0);
-    assert_eq!(idx_b, idx_a + 22, "second card starts after 20 + 2 margin");
-    assert_eq!(idx_c, idx_b + 22, "third card starts after 20 + 2 margin");
+    assert_eq!(
+        idx_b,
+        idx_a + 23,
+        "second card starts after 20 + 2 margin + 1 collapsed space"
+    );
+    assert_eq!(idx_c, idx_b + 23, "third card follows the same spacing");
+}
+
+#[test]
+fn inline_block_whitespace_separates_and_collapses() {
+    init();
+    // Inter-element whitespace between two inline-blocks collapses to one
+    // space cell (any run length), while adjacent cards in the source with
+    // no whitespace between them keep only their margins — both match the
+    // browser.
+    let html = "<div class=\"a\">A</div>  <div class=\"b\">B</div><div class=\"c\">C</div>";
+    let css = ".a, .b, .c { display: inline-block; width: 10px; margin-right: 2px; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let idx_a = tl.layout.iter().position(|b| b.word == "A").unwrap();
+    let idx_b = tl.layout.iter().position(|b| b.word == "B").unwrap();
+    let idx_c = tl.layout.iter().position(|b| b.word == "C").unwrap();
+    assert_eq!(idx_b, idx_a + 13, "whitespace run collapses to one cell: 10 + 2 + 1");
+    assert_eq!(idx_c, idx_b + 12, "no whitespace: margin only (10 + 2)");
+}
+
+#[test]
+fn inline_block_line_start_space_is_removed() {
+    init();
+    // A wrapped line drops its leading collapsed space (browser rule), so
+    // the second card starts at column 0 of the wrapped row, not column 1.
+    let html = "<div class=\"a\">A</div> <div class=\"b\">B</div>";
+    let css = ".a, .b { display: inline-block; width: 10px; margin-right: 2px; }";
+    let (root_id, arena) = setup(html, css);
+    // 11 columns: 10 + 2 + 1 + 10 = 23 does not fit; the second card wraps.
+    let term_map = TermMap {
+        columns: 11,
+        rows: 8,
+    };
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let idx_a = tl.layout.iter().position(|b| b.word == "A").unwrap();
+    let idx_b = tl.layout.iter().position(|b| b.word == "B").unwrap();
+    assert_eq!(idx_a % 11, 0, "first card at column 0");
+    assert_eq!(idx_b / 11, idx_a / 11 + 1, "second card wrapped to the next row");
+    assert_eq!(idx_b % 11, 0, "wrapped card starts at column 0 (leading space removed)");
 }
 
 #[test]
@@ -525,14 +574,15 @@ fn inline_block_keeps_its_own_box_and_width() {
 #[test]
 fn inline_block_wraps_at_line_width() {
     init();
-    // Three 40-cell inline-blocks in an 80-cell line: the first two share a
-    // row, the third wraps to the next row.
+    // Three 39-cell inline-blocks in an 80-cell line: two fit on a row
+    // (39 + 1 space + 39 = 79), the third wraps (the separating space plus
+    // a third card would need 39+1+39+1+39 = 119 cells).
     let html = r#"
         <div class="card">AA</div>
         <div class="card">BB</div>
         <div class="card">CC</div>
     "#;
-    let css = ".card { display: inline-block; width: 40px; }";
+    let css = ".card { display: inline-block; width: 39px; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
@@ -544,7 +594,7 @@ fn inline_block_wraps_at_line_width() {
     assert_eq!(idx_a / 80, 0);
     assert_eq!(idx_b / 80, 0, "second card stays on row 1");
     assert_eq!(idx_c / 80, 1, "third card wraps to row 2");
-    assert_eq!(idx_b, idx_a + 40, "second card right after the first");
+    assert_eq!(idx_b, idx_a + 40, "second card follows by 39 + 1 collapsed space");
 }
 
 // ============================================================

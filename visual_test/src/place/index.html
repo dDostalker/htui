@@ -7,7 +7,11 @@
   body { font-family: monospace; }
   .demo { width: 26em; margin-bottom: 1.5em; display: inline-block; vertical-align: top; margin-right: 2em; }
   .demo h2 { font-size: 1em; margin: 0.5em 0; }
-  .box { display: flex; border: 1px solid #999; padding: 2px;
+  /* No padding: a browser's 2px padding is visually negligible (~3% of the
+     box), while the engine maps 1px to a full terminal cell (px = cell), so
+     `padding: 2px` would eat 2 cells per side (~15%) and push the items
+     disproportionately far from the frame. Zero keeps both engines flush. */
+  .box { display: flex; border: 1px solid #999; padding: 0;
          box-sizing: content-box; line-height: 1; }
   /* No item margin: a browser's 1px margins are visually negligible, while
      the engine maps 1px to a full terminal cell (px = cell), so a margin

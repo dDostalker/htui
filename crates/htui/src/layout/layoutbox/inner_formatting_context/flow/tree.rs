@@ -12,7 +12,7 @@
 //! block handlers declared in this module's siblings.
 
 use crate::{
-    html::css_parse::{FontContext, Viewport},
+    html::css_parse::{FontContext, Viewport, WhiteSpace},
     layout::{
         BoxConstraint, Cursor, DEFAULT_LAYOUT, LayoutBox, LayoutContext, OuterDisplay, Rect,
         layoutbox::{
@@ -20,7 +20,7 @@ use crate::{
             layout_generated_tree, resolve_positioned_rects,
         },
     },
-    tdom::node::{NodeArena, NodeId},
+    tdom::node::{Node, NodeArena, NodeId, NodeType, is_collapsible_whitespace},
 };
 
 /// Build a layout forest for `root_id`'s block children.
@@ -58,6 +58,44 @@ pub fn layout_tree(
     boxes
 }
 
+/// One inline-level entry of a shared line: the `inline-block` element plus
+/// the collapsed width of the whitespace that separated it from the previous
+/// inline-level sibling (0 when they were adjacent in the source).
+#[derive(Debug, Clone, Copy)]
+struct InlineRowItem {
+    id: NodeId,
+    /// Collapsed-width cells of the inter-element whitespace (browsers
+    /// collapse a whitespace run between two inline-level boxes to a single
+    /// space that participates in the line layout). Line-start spaces are
+    /// removed at placement time, like a browser.
+    leading_space: usize,
+}
+
+/// The collapsed width (in cells) a whitespace-only text node contributes
+/// between two inline-level boxes.
+///
+/// Collapsing `white-space` modes (`normal` / `nowrap` / `pre-line`) fold any
+/// whitespace run to a single space; preserving modes (`pre` / `pre-wrap`)
+/// keep every whitespace grapheme as its own cell. Text holding real words
+/// contributes 0 here — its inline placement inside an `inline-block` row is
+/// not yet modelled (it is painted by the parent block's own runs).
+fn collapsed_interitem_space(node: &Node, parent_white_space: WhiteSpace) -> usize {
+    if node.node_type != NodeType::Text {
+        return 0;
+    }
+    let Some(s) = node.data.as_deref() else {
+        return 0;
+    };
+    if s.is_empty() || !s.chars().all(is_collapsible_whitespace) {
+        return 0;
+    }
+    if parent_white_space.preserves_whitespace() {
+        s.chars().count()
+    } else {
+        1
+    }
+}
+
 /// Lay out a sequence of sibling node IDs under `containing`.
 pub fn layout_children(
     arena: &NodeArena,
@@ -71,7 +109,19 @@ pub fn layout_children(
     // line: they flow left-to-right and wrap at the containing width, like
     // a browser. They are batched here and placed by [`layout_inline_row`]
     // once a block-level sibling (or the end of the list) breaks the run.
-    let mut inline_row: Vec<NodeId> = Vec::new();
+    let mut inline_row: Vec<InlineRowItem> = Vec::new();
+    // Collapsed whitespace accumulated since the last inline-level item,
+    // waiting to be attached as the next item's `leading_space`.
+    let mut pending_space: usize = 0;
+    // The `white-space` mode governing inter-element whitespace: the parent
+    // element's own declaration when it has one (default `normal`). The
+    // cascade does not inherit `white-space`, matching `white_space_or`.
+    let parent_white_space = children
+        .first()
+        .and_then(|&first| arena.get(first))
+        .and_then(|first| first.parent)
+        .map(|pid| arena[pid].css_attr.get_white_space(&arena[pid].node_type))
+        .unwrap_or(WhiteSpace::Normal);
     for &child_id in children {
         let Some(generated) = generate_node(arena, child_id) else {
             continue;
@@ -97,21 +147,31 @@ pub fn layout_children(
                     ));
                     inline_row.clear();
                 }
+                pending_space = 0;
                 boxes.extend(layout_inline_container_descendants(
                     arena, child_id, containing, cursor, context,
                 ));
             }
             OuterDisplay::Inline { block: true } if generated.kind == GeneratedBoxKind::Normal => {
-                inline_row.push(child_id);
+                inline_row.push(InlineRowItem {
+                    id: child_id,
+                    leading_space: pending_space,
+                });
+                pending_space = 0;
             }
             _ => {
                 // Text / anonymous (`display: contents`) nodes produce no
                 // box and must not break a run of inline-level siblings
                 // (indentation whitespace between two `inline-block`s is a
-                // Text node). Only a real block-level box flushes the row.
+                // Text node). A whitespace-only run instead collapses to a
+                // space that separates the neighbouring inline-level boxes —
+                // the browser's inter-element whitespace. Only a real
+                // block-level box flushes the row.
                 if generated.kind == GeneratedBoxKind::Text
                     || generated.kind == GeneratedBoxKind::Anonymous
                 {
+                    pending_space = pending_space
+                        .max(collapsed_interitem_space(&arena[child_id], parent_white_space));
                     continue;
                 }
                 if !inline_row.is_empty() {
@@ -124,6 +184,7 @@ pub fn layout_children(
                     ));
                     inline_row.clear();
                 }
+                pending_space = 0;
                 if let Some(b) =
                     layout_generated_box(arena, &generated, containing, cursor, context, None)
                 {
@@ -146,7 +207,11 @@ pub fn layout_children(
 
 /// Place a run of consecutive `inline-block` boxes side by side on one or
 /// more lines (browser inline-level flow: left-to-right, wrapping at the
-/// containing width). Each item keeps its own horizontal margins.
+/// containing width). Each item keeps its own horizontal margins; the
+/// collapsed inter-element whitespace separates neighbours (one cell under
+/// `white-space: normal`) and counts toward the wrap threshold, while a
+/// space at the start of a wrapped line is removed — the browser's line
+/// leading-space rule.
 ///
 /// Two passes: the first measures each item's border-box size by laying it
 /// out against a scratch cursor (an `inline-block` with a declared `width`
@@ -155,7 +220,7 @@ pub fn layout_children(
 /// `pre_allocated_rect` so the box tree carries absolute coordinates.
 fn layout_inline_row(
     arena: &NodeArena,
-    items: &[NodeId],
+    items: &[InlineRowItem],
     containing: BoxConstraint,
     cursor: &mut Cursor,
     context: LayoutContext,
@@ -166,10 +231,11 @@ fn layout_inline_row(
         height: usize,
         margin_before: usize,
         margin_after: usize,
+        leading_space: usize,
     }
     let mut measured: Vec<Measured> = Vec::new();
-    for &id in items {
-        let Some(generated) = generate_node(arena, id) else {
+    for item in items {
+        let Some(generated) = generate_node(arena, item.id) else {
             continue;
         };
         let mut scratch = Cursor {
@@ -185,6 +251,7 @@ fn layout_inline_row(
                 height: b.rect.height,
                 margin_before: edges.margin.left,
                 margin_after: edges.margin.right,
+                leading_space: item.leading_space,
             });
         }
     }
@@ -192,28 +259,56 @@ fn layout_inline_row(
     let max_x = containing.x.saturating_add(containing.width);
 
     // Pass 2: place left-to-right, wrapping when the next item (with its
-    // leading margin) would overflow the line.
+    // leading space and margin) would overflow the line.
     let mut x = containing.x;
     let mut y = cursor.y;
     let mut out: Vec<LayoutBox> = Vec::new();
-    for (idx, &id) in items.iter().enumerate() {
+    for (idx, item) in items.iter().enumerate() {
         let Some(m) = measured.get(idx) else {
             continue;
         };
-        let start = x.saturating_add(m.margin_before);
+        // A space at the start of a line is removed (browser collapsing
+        // rule), so it only applies when the line already has content.
+        let space = if x > containing.x { m.leading_space } else { 0 };
+        let start = x.saturating_add(space).saturating_add(m.margin_before);
         // The trailing margin may overflow the line without forcing a wrap
-        // (the box itself fits), so only the box + leading margin count.
+        // (the box itself fits), so only the box + leading space + leading
+        // margin count.
         if start > containing.x && start.saturating_add(m.width) > max_x {
             x = containing.x;
             y = y.saturating_add(max_h);
+            // Re-anchored at the line start: the separating space collapses
+            // away there.
+            let start = x.saturating_add(m.margin_before);
+            let rect = Rect::new(start, y, m.width.max(1), m.height.max(1));
+            let Some(generated) = generate_node(arena, item.id) else {
+                continue;
+            };
+            if let Some(b) = layout_generated_box(
+                arena,
+                &generated,
+                containing,
+                &mut Cursor {
+                    y,
+                    prev_bottom_margin: 0,
+                },
+                context,
+                Some(rect),
+            ) {
+                out.push(b);
+            }
+            x = start
+                .saturating_add(m.width)
+                .saturating_add(m.margin_after);
+            continue;
         }
         let rect = Rect::new(
-            x.saturating_add(m.margin_before),
+            start,
             y,
             m.width.max(1),
             m.height.max(1),
         );
-        let Some(generated) = generate_node(arena, id) else {
+        let Some(generated) = generate_node(arena, item.id) else {
             continue;
         };
         if let Some(b) = layout_generated_box(
@@ -229,8 +324,7 @@ fn layout_inline_row(
         ) {
             out.push(b);
         }
-        x = x
-            .saturating_add(m.margin_before)
+        x = start
             .saturating_add(m.width)
             .saturating_add(m.margin_after);
     }
