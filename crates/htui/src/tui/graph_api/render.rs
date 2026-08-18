@@ -8,7 +8,7 @@ use crossterm::{
 
 use super::{
     canvas::TermLayout,
-    cell::{Block, styled_string},
+    cell::{Block, FontStyle, styled_string},
 };
 
 impl Display for TermLayout {
@@ -105,6 +105,10 @@ impl TermLayout {
             .min(self.layout.len());
 
         let mut i = scroll_start;
+        // One reusable batch buffer per call: each run clears and refills it,
+        // so a styled run no longer allocates a fresh `String` (the buffer
+        // grows to the longest run once and is reused thereafter).
+        let mut batch = String::new();
 
         while i < scroll_end {
             // 跳过宽字符的填充格（空字符串标记）
@@ -124,7 +128,7 @@ impl TermLayout {
             // space) must still receive the SGR codes — otherwise spaces
             // between underlined/italic letters would drop the underline.
             let is_empty = cell.word == " " && cell.bcolor.is_none() && cell.style.is_empty();
-            let mut batch = String::new();
+            batch.clear();
 
             while i < scroll_end {
                 let c = &self.layout[i];
@@ -157,7 +161,7 @@ impl TermLayout {
                 if is_empty {
                     out.extend_from_slice(batch.as_bytes());
                 } else {
-                    out.extend_from_slice(styled_string(&batch, cell_style, fg, bg).as_bytes());
+                    push_styled(&mut out, &batch, cell_style, fg, bg);
                 }
             }
         }
@@ -203,6 +207,10 @@ impl TermLayout {
         }
 
         let mut i = scroll_start;
+        // Reusable batch buffer (see `render_to_bytes`): avoids a per-run
+        // `String` allocation on the incremental frame path.
+        let mut batch = String::new();
+
         while i < scroll_end {
             // 跳过宽字符的填充格（空字符串标记）
             if self.layout[i].word.is_empty() {
@@ -216,7 +224,7 @@ impl TermLayout {
             let bg = cell.bcolor;
             let cell_style = cell.style;
             let is_empty = cell.word == " " && cell.bcolor.is_none() && cell.style.is_empty();
-            let mut batch = String::new();
+            batch.clear();
             let mut any_changed = false;
 
             while i < scroll_end {
@@ -252,7 +260,7 @@ impl TermLayout {
                 if is_empty {
                     out.extend_from_slice(batch.as_bytes());
                 } else {
-                    out.extend_from_slice(styled_string(&batch, cell_style, fg, bg).as_bytes());
+                    push_styled(&mut out, &batch, cell_style, fg, bg);
                 }
             }
         }
@@ -280,6 +288,24 @@ impl TermLayout {
 /// True when two cells render identically (same text, colors and style).
 fn block_state_eq(a: &Block, b: &Block) -> bool {
     a.word == b.word && a.fcolor == b.fcolor && a.bcolor == b.bcolor && a.style == b.style
+}
+
+/// Write the SGR escape codes for `style` / `fg` / `bg` plus `text` straight
+/// into `out`, avoiding the intermediate `String` that the old
+/// `format!("{styled}")` path allocated per styled run. `Vec<u8>` implements
+/// `io::Write`, so `write!` dispatches through it and the bytes land directly
+/// in the output buffer (the writer is infallible for `Vec<u8>`; the error
+/// branch exists only to satisfy the `io::Write` contract).
+fn push_styled(
+    out: &mut Vec<u8>,
+    text: &str,
+    style: FontStyle,
+    fg: Option<Color>,
+    bg: Option<Color>,
+) {
+    if let Err(e) = write!(out, "{}", styled_string(text, style, fg, bg)) {
+        log::error!("Failed to write styled run: {}", e);
+    }
 }
 
 /// Returns true when a cell should be rendered as a "bare" space without

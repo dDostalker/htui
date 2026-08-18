@@ -1,6 +1,11 @@
 id: no-ignore-result
 language: Rust
+ignores:
+  - "**/tests/**"
+  - "**/benches/**"
 rule:
   pattern: let _ = $EXPR
 message: "`let _ = ...` silently discards a return value, masking errors from Result-returning calls. If you truly need to drop a Result, use `.ok()` or `if let Ok(_) = ...`; if only suppressing an unused-variable warning, add a comment explaining why."
 severity: warning
+note: |
+  Tests and benchmarks are excluded — patterns like `let _ = env_logger::try_init()` are standard in test setup.

@@ -182,11 +182,11 @@ pub fn command(attr: TokenStream, item: TokenStream) -> TokenStream {
         }
     }
 
-    let ret_ty = match &func.sig.output {
+    let _ret_ty = match &func.sig.output {
         ReturnType::Type(_, ty) => (**ty).clone(),
         ReturnType::Default => syn::parse_quote!(()),
     };
-    let _ = ret_ty; // `IntoJs` on the return value handles `Result<_, E>` too.
+    // `IntoJs` on the return value handles `Result<_, E>` too.
 
     let arg_slots: Vec<TokenStream2> = arg_idents
         .iter()
@@ -242,7 +242,7 @@ fn returns_host_fn(output: &ReturnType) -> bool {
 }
 
 /// `(js_key, field_ident)` pairs for a named-field struct.
-fn struct_field_names(input: &DeriveInput, hint: &str) -> Option<Vec<(String, Ident)>> {
+fn struct_field_names(input: &DeriveInput, _hint: &str) -> Option<Vec<(String, Ident)>> {
     let fields = match &input.data {
         Data::Struct(data) => match &data.fields {
             Fields::Named(named) => &named.named,
@@ -272,7 +272,6 @@ fn struct_field_names(input: &DeriveInput, hint: &str) -> Option<Vec<(String, Id
                 }
             })
             .unwrap_or_else(|| fident.to_string());
-        let _ = hint;
         out.push((key, fident.clone()));
     }
     Some(out)

@@ -13,7 +13,7 @@
 以下是项目的结构，如果不是特殊要求不得修改项目结构，仅当提示词要求需要时修改，修改前进行询问，并**必须**对项目结构进行同步
 ```
 htui/
-├── Cargo.toml              # workspace 根（members: crates/htui, crates/htui-macros, visual_test；example 为独立 workspace，不在 members 内）
+├── Cargo.toml              # workspace 根（members: crates/htui, crates/htui-macros, visual_test, example）
 ├── crates/
 │   ├── htui/               # 主库 crate：终端 HTML/CSS 渲染引擎（独立发布单元）
 │   │   ├── Cargo.toml
@@ -231,13 +231,14 @@ htui/
 │       ├── place/        # place-content/place-items/place-self 简写演示（单值双轴/双值/声明顺序优先：后声明胜出，与浏览器一致）
 │       ├── fetch_demo/   # fetch 演示：<script src="mem://…"> 加载 + fetch 经 Promise 微任务事件循环写 DOM
 │       └── viewport_units/
-└── example/              # 完整交互示例（独立 workspace；cargo run --manifest-path example/Cargo.toml -- music|music-light|codex|sticky）
+└── example/              # 完整交互示例（workspace 成员；cargo run -p example 交互运行，-- --dump 为 headless 预览）
     └── src/
-        ├── main.rs      # 运行器：dump（headless 预览）/ render_with_events 分派
-        ├── music/       # "Neon" 深色 Spotify 风格音乐界面
-        ├── music_light/ # "Paper" 浅色极简居中卡片
-        ├── codex/       # Codex CLI 风格聊天界面（input + change 提交，无执行）
-        └── sticky/      # sticky 定位演示（长列表 + 顶部/底部钉住条，方向键/滚轮滚动）
+        ├── main.rs      # btm 风格系统监控器：mock 数据 + host commands + setInterval 刷新
+        └── btm/          # index.html + style.css
+sg/                       # ast-grep 配套目录（sgconfig.yml 在仓库根）
+├── rules/                # ast-grep 规则定义（每个 .yml 一条规则）
+├── utils/                # 可复用规则片段（被 rules 通过 utils 引用）
+└── tests/                # 规则快照测试（ast-grep test）
 ```
 
 ## 架构
@@ -401,19 +402,19 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
 - 在 `NodeType::tag_name()` 中登记标签名（`from_tag_name()`、`html_parse::tag_name_to_node_type()`、CSS 选择器类型映射均派生自它，无需重复维护）
 
 通过 `Node.css_attr`（类型 `CssAttr`）访问已解析的 CSS 属性。不要直接解析 style 属性字符串。
-使用 `log::debug! / info! / warn! / error!`，不要使用 `println!` 进行调试输出。
+使用 `log::debug! / info! / warn! / error!`，不要使用 `println!` 进行调试输出。（ast-grep 规则：`no-println`）
 修改代码时不得随意修改已经存在的API的注释，只有实现修改导致内容和实现不符时修改，并询问用户
 
 ## 禁止使用git
 本项目禁止LLM调用git
 
 ## 避免unsafe和添加足够的调试信息支持
-本项目不需要 `unsafe` 代码。如需性能优化，优先考虑算法层面。
+本项目不需要 `unsafe` 代码。如需性能优化，优先考虑算法层面。（ast-grep 规则：`no-unsafe`，severity: error）
 在必要要的情况下添加调试信息，
 
 ## 错误处理
-- 返回报错时不得直接unwrap而是处理错误或是返回完整报错信息
-- 不得使用let _ = 等任何形式忽略报错
+- 返回报错时不得直接unwrap而是处理错误或是返回完整报错信息（ast-grep 规则：`no-unwrap`）
+- 不得使用let _ = 等任何形式忽略报错（ast-grep 规则：`no-ignore-result`）
 - 禁止使用无意义的Result<>进行包裹信息
 
 ## 测试不依赖终端
@@ -427,11 +428,47 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
 
 - **注释语言**：公开 API 后续必须使用英文注释。
 - **命名规范**：遵循 Rust 标准命名（snake_case 函数/变量，CamelCase 类型，SCREAMING_SNAKE_CASE 常量）。
-- **import 风格**：使用 crate 内相对路径引用，不在模块顶部做通配导入。
+- **import 风格**：使用 crate 内相对路径引用，不在模块顶部做通配导入。（ast-grep 规则：`no-wildcard-import`）
 
 ## API创建
 - API创建时必须对功能进行///注释，并且其他位置除难以理解的部分不要注释，必要时可以注释。
 - 对于API的共享保持最小共享原则。
+
+## ast-grep 自动检查
+
+以下规则定义在 `sg/rules/` 中，配置入口为仓库根 `sgconfig.yml`。LLM 在修改代码后**必须**运行 `ast-grep scan` 自检，确保不引入违规。
+
+| 规则 ID | 对应条款 | severity | 适用范围 | 说明 |
+| ------- | -------- | -------- | -------- | ---- |
+| `no-unsafe` | 避免unsafe | error | 全部 | 禁止 `unsafe` 块 / `unsafe fn` / `unsafe impl`；如需 FFI 等正当理由需 PR 说明 |
+| `no-unwrap` | 错误处理 | warning | 仅 src | 禁止 `.unwrap()`；改用 `?` / `.expect("说明")` / `match`。不会误报 `.unwrap_or*()` |
+| `no-ignore-result` | 错误处理 | warning | 仅 src | 禁止 `let _ = expr` 忽略返回值；改用 `.ok()` / `if let Ok(_) = …` 或加注释 |
+| `no-println` | 日志 | warning | 仅 src | 禁止 `println!` / `eprintln!` / `dbg!`；改用 `log::debug!` 等 |
+| `no-wildcard-import` | import 风格 | warning | 全部 | 禁止 `use ...::*;` / `pub use ...::*;` 通配导入 |
+
+**测试与基准代码的宽松策略**：`no-unwrap` / `no-ignore-result` / `no-println` 三条规则通过 `ignores` 字段排除了 `**/tests/**`、`**/benches/**` 和 `visual_test/**`。在这些目录中，`.unwrap()`、`let _ = env_logger::try_init()` 和 `eprintln!` 是标准测试模式，不视为违规。`no-unsafe` 和 `no-wildcard-import` 在所有目录生效。
+
+### 使用方式
+```powershell
+ast-grep scan                           # 全项目扫描（用 sg/rules/ 全部规则）
+ast-grep scan crates/htui/src           # 只扫指定路径
+ast-grep scan -r sg/rules/no-unwrap.yml # 只跑某条规则
+ast-grep run -p 'PATTERN' --lang rust crates  # 一次性查询（不需规则文件）
+ast-grep test                           # 跑 sg/tests/ 快照测试
+```
+
+### 跳过规则（仅限正当理由）
+在违规行**上一行**加注释：
+```rust
+// ast-grep-ignore-next-line no-unwrap
+let x = find(b).unwrap();
+```
+跳过需在 PR 中说明理由。`no-unsafe` 不允许跳过。
+
+### 添加新规则
+1. 在 `sg/rules/` 新建 `<rule-id>.yml`（参考现有规则文件结构）
+2. 在本表登记规则 ID 与对应条款
+3. （可选）在 `sg/tests/` 添加快照测试：`ast-grep new test`
 
 ## 添加新 HTML 元素支持 — 操作清单
 
@@ -452,7 +489,7 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
 | `NodeId`           | `tdom::node`            | slotmap 生成的类型安全 ID |
 | `NodeArena`        | `tdom::node`            | `SlotMap<NodeId, Node>`   |
 | `Node`             | `tdom::node`            | DOM 节点（含子节点/属性） |
-| `NodeType`         | `tdom::node`            | 节点类型枚举（30 种标签） |
+| `NodeType`         | `tdom::node`            | 节点类型枚举（95 个变体：90 种 HTML 标签 + Document/DocumentType/DocumentFragment/Text/Comment） |
 | `Attr`             | `tdom::attribute`      | HTML 属性存储与查询       |
 | `CssAttr`          | `html::css_parse::properties` | 解析后的 CSS 属性（`IndexMap<String, String>` + 30+ 个 getter） |
 | `CssRule`          | `html::css_parse`       | 完整 CSS 规则表           |

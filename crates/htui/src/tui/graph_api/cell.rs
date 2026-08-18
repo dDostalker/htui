@@ -4,7 +4,7 @@ use std::{
 };
 
 use bitflags::bitflags;
-use crossterm::style::{Color, Stylize};
+use crossterm::style::{Color, StyledContent, Stylize};
 
 bitflags! {
     /// Display flags applied to a [`Block`].
@@ -55,16 +55,20 @@ impl Display for Block {
 }
 
 /// Apply a [`FontStyle`] bitfield and optional foreground/background colors to
-/// `text` and return the rendered ANSI sequence as a `String`.
+/// `text` and return the [`StyledContent`] wrapper (borrowing `text`) ready
+/// for display.
 ///
-/// Used by both [`Block`]'s `Display` impl and `TermLayout::render_to_bytes`
-/// so the SGR emission lives in one place.
+/// Used by both [`Block`]'s `Display` impl and the render path so the SGR
+/// emission lives in one place. Returning the wrapper instead of a formatted
+/// `String` lets callers write the ANSI bytes straight into their output
+/// buffer (`Vec<u8>` via `io::Write`, or a `fmt::Formatter` via `fmt::Write`)
+/// without an intermediate heap allocation per styled run.
 pub(super) fn styled_string(
     text: &str,
     style: FontStyle,
     fg: Option<Color>,
     bg: Option<Color>,
-) -> String {
+) -> StyledContent<&str> {
     let mut styled = text.stylize();
     if style.contains(FontStyle::BOLD) {
         styled = styled.bold();
@@ -78,13 +82,12 @@ pub(super) fn styled_string(
     if style.contains(FontStyle::CROSSED_OUT) {
         styled = styled.crossed_out();
     }
-    styled = match (fg, bg) {
+    match (fg, bg) {
         (Some(f), Some(b)) => styled.with(f).on(b),
         (Some(f), None) => styled.with(f),
         (None, Some(b)) => styled.on(b),
         (None, None) => styled,
-    };
-    format!("{styled}")
+    }
 }
 
 impl Default for Block {

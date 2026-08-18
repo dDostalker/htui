@@ -1,5 +1,8 @@
 id: no-unwrap
 language: Rust
+ignores:
+  - "**/tests/**"
+  - "**/benches/**"
 rule:
   pattern: $RECEIVER.unwrap()
 message: unwrap() is forbidden. It panics on Err/None and hides the failure cause. Use `?` to propagate, `.expect("msg")` to state the invariant, or `match` to handle both arms explicitly.
@@ -7,3 +10,4 @@ severity: warning
 note: |
   Allowed alternatives: `.ok()` to convert to Option, `.expect("...")` with explanation, `?` to propagate.
   This rule only matches no-arg `.unwrap()`; it does not false-positive on `.unwrap_or()` / `.unwrap_or_default()` / `.unwrap_or_else()`.
+  Tests and benchmarks are excluded — `.unwrap()` is standard practice in test assertions.

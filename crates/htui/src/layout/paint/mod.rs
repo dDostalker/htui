@@ -468,11 +468,53 @@ fn paint_children(
 /// Higher `z-index` paints later (on top); among equal values a positioned
 /// box paints above static content (browser rule); the stable sort keeps DOM
 /// order within the same level.
-fn sorted_children(lb: &LayoutBox) -> Vec<&LayoutBox> {
-    let mut children: Vec<&LayoutBox> = lb.children.iter().collect();
-    children.sort_by_key(|c| {
-        let positioned = !matches!(c.positioning.position, Position::Static);
-        (c.positioning.z_index.unwrap_or(0), positioned as u8)
-    });
-    children
+///
+/// The common case — no positioned child and uniform `z-index` — leaves the
+/// sort key identical for every child, so a stable sort cannot reorder
+/// anything. [`SortedChildren`] fast-paths that case by iterating the
+/// children slice directly (zero allocation); only when the keys actually
+/// differ does it collect into a `Vec` and sort.
+fn sorted_children(lb: &LayoutBox) -> SortedChildren<'_> {
+    let key = |c: &LayoutBox| {
+        (
+            c.positioning.z_index.unwrap_or(0),
+            !matches!(c.positioning.position, Position::Static) as u8,
+        )
+    };
+    let first = lb.children.first().map(|c| key(c));
+    let needs_sort = lb.children.iter().any(|c| Some(key(c)) != first);
+    if needs_sort {
+        let mut children: Vec<&LayoutBox> = lb.children.iter().collect();
+        children.sort_by_key(|c| key(c));
+        SortedChildren::Sorted(children.into_iter())
+    } else {
+        SortedChildren::Straight(lb.children.iter())
+    }
+}
+
+/// Iterator over a box's children in paint stacking order — see
+/// [`sorted_children`].
+enum SortedChildren<'a> {
+    /// Sort keys are all equal: iterate the slice as-is (no allocation).
+    Straight(std::slice::Iter<'a, LayoutBox>),
+    /// Mixed sort keys: a collected, sorted `Vec`.
+    Sorted(std::vec::IntoIter<&'a LayoutBox>),
+}
+
+impl<'a> Iterator for SortedChildren<'a> {
+    type Item = &'a LayoutBox;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            SortedChildren::Straight(it) => it.next(),
+            SortedChildren::Sorted(it) => it.next(),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match self {
+            SortedChildren::Straight(it) => it.size_hint(),
+            SortedChildren::Sorted(it) => it.size_hint(),
+        }
+    }
 }
