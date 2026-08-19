@@ -340,21 +340,32 @@ fn natural_intrinsic_size(
     // children. `<input>` takes its HTML `width` attribute (default 8 cells)
     // and one row; `<select>` sizes to the longest option label plus the
     // frame / chevron — without these, flex measurement reports the 1x1
-    // floor and a control inside a flex row collapses to a sliver.
+    // floor and a control inside a flex row collapses to a sliver. A CSS
+    // `border:` adds its thickness on both axes, matching the geometry phase.
     if matches!(node.node_type, NodeType::Input) {
         // Checkbox / radio are two-cell toggles (glyph + spacing); other
-        // kinds take the HTML `width` attribute (default 8 cells).
+        // kinds take the HTML `width` attribute (default 8 cells). Toggles
+        // paint no chrome of their own, so they reserve no border cells.
         let is_toggle = node
             .get_type()
             .is_some_and(|t| matches!(t.to_ascii_lowercase().as_str(), "checkbox" | "radio"));
+        let edges = css.get_box_edges(usize::MAX, child_context.font, child_context.viewport);
+        let (border_h, border_v) = if is_toggle {
+            (0, 0)
+        } else {
+            (
+                edges.border.horizontal_thickness(),
+                edges.border.vertical_thickness(),
+            )
+        };
         let w = if is_toggle {
             2
         } else {
             node.get_width().map(|w| w as usize).unwrap_or(8)
         };
         return NaturalIntrinsicSize {
-            width: w.max(FLEX_ITEM_MIN_CROSS),
-            height: FLEX_ITEM_MIN_CROSS,
+            width: w.saturating_add(border_h).max(FLEX_ITEM_MIN_CROSS),
+            height: 1usize.saturating_add(border_v).max(FLEX_ITEM_MIN_CROSS),
         };
     }
     if matches!(node.node_type, NodeType::Select) {
@@ -363,13 +374,18 @@ fn natural_intrinsic_size(
             .map(|opt| opt.label.chars().map(char_width).sum::<usize>())
             .max()
             .unwrap_or(0);
+        let edges = css.get_box_edges(usize::MAX, child_context.font, child_context.viewport);
         let w = node
             .get_width()
             .map(|w| w as usize)
             .unwrap_or(text_w.saturating_add(4));
         return NaturalIntrinsicSize {
-            width: w.max(FLEX_ITEM_MIN_CROSS),
-            height: FLEX_ITEM_MIN_CROSS,
+            width: w
+                .saturating_add(edges.border.horizontal_thickness())
+                .max(FLEX_ITEM_MIN_CROSS),
+            height: 1usize
+                .saturating_add(edges.border.vertical_thickness())
+                .max(FLEX_ITEM_MIN_CROSS),
         };
     }
 

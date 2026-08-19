@@ -14,10 +14,10 @@ use crate::{
     html::css_parse::parse_color_str,
     layout::{LayoutBox, Rect},
     tdom::node::NodeArena,
-    tui::graph_api::{FontStyle, char_width},
+    tui::graph_api::char_width,
 };
 
-use super::{PaintCanvas, clamp_rect_to_canvas, intersect_rects, paint_control_chrome};
+use super::{PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put};
 
 /// Highlight colour for the selected character range (Tokyo Night selection).
 const SELECTION_BG: &str = "#3b4261";
@@ -233,28 +233,4 @@ pub(crate) fn paint_textarea(
             }
         }
     }
-}
-
-fn cell_index(canvas: &PaintCanvas<'_>, x: usize, y: usize) -> usize {
-    canvas.cell_index(x, y)
-}
-
-fn put(
-    canvas: &mut PaintCanvas<'_>,
-    idx: usize,
-    word: Option<char>,
-    fg: Option<Color>,
-    bg: Option<Color>,
-) {
-    if idx >= canvas.layout.len() || !canvas.in_region(idx) {
-        return;
-    }
-    let cell = &mut canvas.layout[idx];
-    cell.word.clear();
-    if let Some(c) = word {
-        cell.word.push(c);
-    }
-    cell.fcolor = fg;
-    cell.bcolor = bg;
-    cell.style = FontStyle::empty();
 }

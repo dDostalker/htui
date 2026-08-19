@@ -398,6 +398,35 @@ fn flex_row_with_input_renders_the_field() {
     );
 }
 
+#[test]
+fn flex_row_with_bordered_input_reserves_border_cells() {
+    init();
+    // A CSS `border:` on a control inside a flex row adds its thickness to
+    // the item's intrinsic width — without it the measured slot (6 + 2)
+    // would be border-less and the frame would be clipped or misaligned.
+    let html = r#"<div class="container"><input id="f" width="6" value="ab"></div>"#;
+    let css = ".container { display: flex; } #f { border: 1ch solid yellow; }";
+    let (rows, _) = render_rows(html, css);
+    let joined = rows.join("\n");
+    assert!(
+        joined.contains('┌'),
+        "flex input must reserve border cells and paint its frame; rows:\n{}",
+        rows.iter()
+            .filter(|r| !r.trim().is_empty())
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    assert!(
+        joined.contains('└'),
+        "bottom frame edge must paint too"
+    );
+    assert!(
+        joined.contains("ab"),
+        "the value still renders inside the bordered flex field"
+    );
+}
+
 // ============================================================
 // place-content / place-items / place-self shorthands
 // ============================================================

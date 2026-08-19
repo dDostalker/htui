@@ -460,8 +460,10 @@ pub enum Length {
     Pct(f32),
     /// Em multiplier (CSS `2em`). 1em == 1 cell on the terminal grid.
     Em(f32),
-    /// Root-em multiplier (CSS `2rem`). Same semantics as `em` here — the
-    /// terminal has no root font-size distinction.
+    /// Root-em multiplier (CSS `2rem`). Resolves against the root's font-size
+    /// (`root_font_size_cells`), which is 1 cell by default and grows when the
+    /// document root sets an explicit `font-size` rule — unlike `em`, which
+    /// resolves against the element's own font-size.
     Rem(f32),
     /// Character-width multiplier (CSS `12ch`). In a browser `1ch` is the
     /// advance width of the `0` glyph — exactly one cell on the terminal's

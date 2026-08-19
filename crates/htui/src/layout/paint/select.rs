@@ -2,17 +2,15 @@
 //! the selected option's label with a trailing chevron. No bracket frame; a
 //! `border:` declaration opts into a CSS frame via the shared control chrome.
 
-use crossterm::style::Color;
-
 use crate::{
     html::css_parse::parse_color_str,
     layout::layoutbox::geometry::select_options,
     layout::{LayoutBox, Rect},
     tdom::node::NodeArena,
-    tui::graph_api::{FontStyle, char_width},
+    tui::graph_api::char_width,
 };
 
-use super::{PaintCanvas, clamp_rect_to_canvas, intersect_rects, paint_control_chrome};
+use super::{PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put};
 
 /// Frame colour for an open (focused) dropdown (Tokyo Night accent cyan).
 const OPEN_FRAME: &str = "#2ac3de";
@@ -102,28 +100,4 @@ pub(crate) fn paint_select(
             bg,
         );
     }
-}
-
-fn cell_index(canvas: &PaintCanvas<'_>, x: usize, y: usize) -> usize {
-    canvas.cell_index(x, y)
-}
-
-fn put(
-    canvas: &mut PaintCanvas<'_>,
-    idx: usize,
-    word: Option<char>,
-    fg: Option<Color>,
-    bg: Option<Color>,
-) {
-    if idx >= canvas.layout.len() || !canvas.in_region(idx) {
-        return;
-    }
-    let cell = &mut canvas.layout[idx];
-    cell.word.clear();
-    if let Some(c) = word {
-        cell.word.push(c);
-    }
-    cell.fcolor = fg;
-    cell.bcolor = bg;
-    cell.style = FontStyle::empty();
 }

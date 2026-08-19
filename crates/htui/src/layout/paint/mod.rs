@@ -33,7 +33,7 @@ use crate::{
     html::css_parse::{Position, Visibility},
     layout::{BoxKind, LayoutBox, Rect, ReplacedContent},
     tdom::node::{NodeArena, NodeId, NodeType},
-    tui::graph_api::{Block, ImageCache, InputRenderState, TermLayout},
+    tui::graph_api::{Block, FontStyle, ImageCache, InputRenderState, TermLayout},
 };
 
 use self::block::paint_block;
@@ -155,6 +155,34 @@ impl<'a> PaintCanvas<'a> {
             }
         }
     }
+}
+
+/// Map `(x, y)` to a flat canvas index. Shared by the control painters
+/// (`input` / `button` / `select` / `textarea`).
+pub(super) fn cell_index(canvas: &PaintCanvas<'_>, x: usize, y: usize) -> usize {
+    canvas.cell_index(x, y)
+}
+
+/// Write one canvas cell — word + fg + bg + plain style — gated to the
+/// repaint region. Shared by the control painters.
+pub(super) fn put(
+    canvas: &mut PaintCanvas<'_>,
+    idx: usize,
+    word: Option<char>,
+    fg: Option<Color>,
+    bg: Option<Color>,
+) {
+    if idx >= canvas.layout.len() || !canvas.in_region(idx) {
+        return;
+    }
+    let cell = &mut canvas.layout[idx];
+    cell.word.clear();
+    if let Some(c) = word {
+        cell.word.push(c);
+    }
+    cell.fcolor = fg;
+    cell.bcolor = bg;
+    cell.style = FontStyle::empty();
 }
 
 /// Paint every box in `boxes` into `term_layout`.
