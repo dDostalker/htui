@@ -160,8 +160,6 @@ pub(crate) fn paint_textarea(
     };
 
     let fg = node.css_attr.get_color();
-    // Background fill (+ opt-in CSS border); the text draws into the returned
-    // content rect.
     let content = paint_control_chrome(lb, arena, canvas, r, fg);
     let bg = node.css_attr.get_bg_color().or(Some(super::CONTROL_DEFAULT_BG));
     // `caret-color` paints the caret block with the declared colour; the

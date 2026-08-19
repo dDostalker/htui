@@ -27,8 +27,8 @@ pub const PX_PER_CELL: f32 = 8.0;
 /// [`EdgeSizes`].
 ///
 /// Each value is parsed by [`Length::parse`]; unparseable tokens become `0`.
-/// Per-side longhands are layered on top of the shorthand so `padding: 0;
-/// padding-top: 5px;` resolves to top=5, others=0.
+/// Per-side longhands are layered on top of the shorthand so `padding: 1ch;
+/// padding-top: 2ch;` resolves to top=2, others=1.
 pub(crate) fn parse_edge_sizes(
     decls: &IndexMap<String, String>,
     shorthand: &str,
@@ -44,7 +44,6 @@ pub(crate) fn parse_edge_sizes(
         viewport,
     );
 
-    // Layer per-side longhands on top (they take precedence).
     let top_raw = decls.get(&format!("{shorthand}-top")).map(|s| s.as_str());
     if let Some(v) = parse_length_token(top_raw, containing_width, font_ctx, viewport) {
         edges.top = v;
@@ -433,7 +432,7 @@ impl FontContext {
 ///
 /// Accepted forms:
 /// - `auto`                         → [`Length::Auto`]   (caller decides what to fill)
-/// - `40px`, bare `40`              → [`Length::Cells(n)`]
+/// - `40px`, bare `40`              → [`Length::Px(n)`]   (÷ `PX_PER_CELL` at resolve)
 /// - `50%`                          → [`Length::Pct(p)`] (raw 0–100, divided at resolve)
 /// - `2em`, `1.5em`                 → [`Length::Em(n)`]
 /// - `2rem`, `1.5rem`               → [`Length::Rem(n)`]
@@ -452,12 +451,11 @@ impl FontContext {
 pub enum Length {
     /// `auto` — defer to the containing block.
     Auto,
-    /// Absolute CSS pixel length. Converted to terminal cells during resolve.
+    /// Absolute CSS pixel length (including bare numbers, which CSS treats
+    /// as px). Converted to terminal cells at resolve time by dividing by
+    /// [`PX_PER_CELL`]. (The engine's own tests write `Nch` when they mean
+    /// "N cells".)
     Px(f32),
-    /// Bare numeric lengths. CSS treats a unitless number as px, so the
-    /// terminal conversion layer divides by [`PX_PER_CELL`] like `px`.
-    /// (The engine's own tests write `Nch` when they mean "N cells".)
-    Cells(f32),
     /// Percentage 0..=100 of the containing block (CSS `50%`).
     Pct(f32),
     /// Em multiplier (CSS `2em`). 1em == 1 cell on the terminal grid.
@@ -493,7 +491,6 @@ pub enum Length {
 #[derive(Debug, Clone, Copy)]
 enum PreLength {
     Px(f32),
-    Cells(f32),
     Pct(f32),
     Em(f32),
     Rem(f32),
@@ -530,7 +527,7 @@ impl Length {
                 int_value,
                 has_sign: false,
                 ..
-            } => PreLength::Cells(int_value.map(|i| i as f32).unwrap_or(*value)),
+            } => PreLength::Px(int_value.map(|i| i as f32).unwrap_or(*value)),
             Token::Dimension {
                 value,
                 int_value,
@@ -584,7 +581,6 @@ impl Length {
         }
         Some(match pre {
             PreLength::Px(n) => Length::Px(n),
-            PreLength::Cells(n) => Length::Cells(n),
             PreLength::Pct(p) => Length::Pct(p),
             PreLength::Em(n) => Length::Em(n),
             PreLength::Rem(n) => Length::Rem(n),
@@ -604,7 +600,7 @@ impl Length {
     /// a change to the per-cell px ratio needs exactly one edit point.
     ///
     /// - `Auto`              → `containing` (fill the container)
-    /// - `Cells(n)`          → round(n / PX_PER_CELL)
+    /// - `Px(n)`             → round(n / PX_PER_CELL)
     /// - `Pct(p)`            → round(containing * p / 100), min 1
     /// - `Em(n)`             → round(n * context.font.font_size_cells), clamped at 0
     /// - `Rem(n)`            → round(n * context.font.root_font_size_cells), clamped at 0
@@ -630,7 +626,6 @@ impl Length {
         match self {
             Length::Auto => context.containing,
             &Length::Px(px) => (px / PX_PER_CELL).round().max(0.0) as usize,
-            &Length::Cells(cells) => (cells / PX_PER_CELL).round().max(0.0) as usize,
             &Length::Pct(p) => {
                 let raw = (context.containing as f32 * p / 100.0).round();
                 (raw as usize).max(1)

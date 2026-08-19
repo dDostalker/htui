@@ -86,11 +86,8 @@ pub(crate) fn paint_input(
     let fg = node.css_attr.get_color();
 
     // `<input type=checkbox|radio>` is a bare terminal toggle — no background
-    // fill and no frame (unlike the text-field controls). The checked state
-    // comes from the DOM `checked` attribute (toggled by the script thread on
-    // click). Both controls follow the hollow → solid pattern so they read as
-    // one family: checkbox `□` / `■`, radio `○` / `●` — all four are basic
-    // block glyphs every terminal font renders crisply.
+    // fill and no frame. Both controls follow the hollow → solid pattern so
+    // they read as one family: checkbox `□` / `■`, radio `○` / `●`.
     if matches!(input_type.as_str(), "checkbox" | "radio") {
         let checked = node.attributes.contains_key("checked");
         let disabled = node.attributes.contains_key("disabled");
@@ -100,23 +97,20 @@ pub(crate) fn paint_input(
             ("radio", true) => '\u{25CF}',    // ●
             _ => '\u{25CB}',                   // ○
         };
-        // A disabled toggle is dimmed grey (the click is already swallowed by
-        // the input loop).
         let toggle_fg = if disabled {
             Color::DarkGrey
         } else {
             fg.unwrap_or(Color::White)
         };
-        // The glyph cell carries no background of its own: the surrounding
-        // page background shows through, like a browser checkbox.
+        // The glyph carries no background of its own: the surrounding page
+        // background shows through, like a browser checkbox.
         put_bare(
             canvas,
             cell_index(canvas, r.x, r.y),
             Some(glyph),
             Some(toggle_fg),
         );
-        // The trailing cell is a spacing column so the toggle never glues
-        // onto adjacent text (a `■` followed directly by a label).
+        // One spacing column so the toggle never glues onto adjacent text.
         put_bare(
             canvas,
             cell_index(canvas, r.x.saturating_add(1), r.y),
@@ -126,9 +120,6 @@ pub(crate) fn paint_input(
         return;
     }
 
-    // Background fill (CSS `background-color` or the default control grey) +
-    // an opt-in CSS border; the returned rect is the content area the value
-    // draws into.
     let content = paint_control_chrome(lb, arena, canvas, r, fg);
     let bg = node.css_attr.get_bg_color().or(Some(super::CONTROL_DEFAULT_BG));
 
@@ -170,16 +161,11 @@ pub(crate) fn paint_input(
         None => (Some(bg.unwrap_or(Color::Black)), Some(fg.unwrap_or(Color::White))),
     };
 
-    // The value fills the whole content area (no bracket frame any more).
+    // The value fills the whole content area.
     let inner_width = content.width;
     let inner_x = content.x;
     let inner_y = content.y;
 
-    // Value window in *display columns* (CJK characters occupy two cells):
-    // walk back from the caret until the width before it plus the caret's own
-    // column fits, then extend forward while columns remain. This keeps the
-    // caret visible without letting a multi-column glyph push past the field's
-    // right edge.
     let v: Vec<char> = display.chars().collect();
     let cursor = cursor.min(value.chars().count());
     let (start, end) = value_window(display, cursor, inner_width);
@@ -210,7 +196,6 @@ pub(crate) fn paint_input(
                 // blue) over the field's own colours.
                 (Some(Color::White), parse_color_str(SELECTION_BG))
             } else if showing_placeholder {
-                // Placeholder hint text is dimmed grey.
                 (Some(Color::DarkGrey), bg)
             } else {
                 (text_fg, bg)

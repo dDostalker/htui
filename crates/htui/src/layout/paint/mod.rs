@@ -55,10 +55,6 @@ pub(super) const CONTROL_DEFAULT_BG: Color = Color::DarkGrey;
 /// when unset), then the CSS `border` frame when one is declared. Returns the
 /// content rect — the border-box shrunk by the border thickness — that the
 /// caller draws its value / label into; with no border this is the full box.
-///
-/// Controls no longer render the old `[ value ]` bracket frame: like a
-/// browser, the field is a background-coloured rectangle, and a frame only
-/// appears when the author writes `border: …`.
 pub(super) fn paint_control_chrome(
     lb: &LayoutBox,
     arena: &NodeArena,

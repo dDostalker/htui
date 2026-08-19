@@ -198,7 +198,7 @@ impl CssAttr {
     /// Element width (CSS `width`).
     ///
     /// - `auto` / missing / unsupported unit → `None` (fill available)
-    /// - `40px` / `40` → fixed columns
+    /// - `40px` / bare `40` → px, divided by [`PX_PER_CELL`] (e.g. 40px → 5 cells)
     /// - `50%` → fraction of terminal width (rounded, minimum 1 column)
     /// - `2em` → cells (resolved against the current element's font-size)
     /// - `2rem` → cells (resolved against the root's font-size)

@@ -903,7 +903,7 @@ pub fn parse_flex_shorthand(s: &str) -> Option<FlexShorthand> {
     if tokens.is_empty() || tokens.len() > 3 {
         return None;
     }
-    let zero_basis = FlexBasis::Length(Length::Cells(0.0));
+    let zero_basis = FlexBasis::Length(Length::Px(0.0));
     match tokens.as_slice() {
         [t] => {
             if let Some(g) = parse_non_negative_number(t) {

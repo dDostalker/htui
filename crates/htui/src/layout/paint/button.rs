@@ -43,8 +43,8 @@ pub(crate) fn paint_button(
     let fg = node.css_attr.get_color().unwrap_or(Color::White);
     let text_fg = if disabled { Color::DarkGrey } else { fg };
 
-    // Background fill (+ opt-in CSS border); the label is centred inside the
-    // returned content area, like a browser button.
+    // The label is centred inside the chrome's content area, like a browser
+    // button.
     let content = paint_control_chrome(lb, arena, canvas, r, Some(fg));
 
     let text_w: usize = text.chars().map(|c| char_width(c).max(1)).sum();

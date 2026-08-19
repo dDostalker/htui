@@ -377,6 +377,7 @@ fn layout_input(
     context: LayoutContext,
     pre_allocated_rect: Option<Rect>,
 ) -> Option<LayoutBox> {
+    let style = replaced_chrome(arena, generated, containing.width, context);
     let (x, y, block_width, height) = match pre_allocated_rect {
         Some(rect) => (rect.x, rect.y, rect.width.max(1), rect.height.max(1)),
         None => {
@@ -396,7 +397,7 @@ fn layout_input(
             let (border_h, border_v) = if is_toggle {
                 (0, 0)
             } else {
-                replaced_border(arena, generated, containing.width, context)
+                (style.1, style.2)
             };
             let content_w = if is_toggle {
                 2
@@ -419,57 +420,41 @@ fn layout_input(
         generated.node_id,
         Rect::new(x, y, block_width, height),
         ReplacedContent::Input,
-        replaced_paint_style(arena, generated, containing.width, context),
+        style.0,
     ))
 }
 
-/// Resolve a replaced control's [`PaintStyle`]: the CSS `border` edges (an
-/// opt-in frame — the default chrome is background-only, like a browser) over
-/// the default replaced-element style. The border thickness is consumed by the
-/// control painters, which shrink their content area accordingly.
-fn replaced_paint_style(
+/// Resolve a replaced control's chrome in a single pass: the [`PaintStyle`]
+/// (CSS border edges over the default replaced-element style) and the border
+/// thickness on both axes. Layout reserves the border cells up front so a
+/// declared `border:` renders as a real frame around the content; the control
+/// painters then draw it from the same style.
+fn replaced_chrome(
     arena: &NodeArena,
     generated: &GeneratedBox,
     containing_width: usize,
     context: LayoutContext,
-) -> PaintStyle {
-    let node = &arena[generated.node_id];
-    let edges = node
-        .css_attr
-        .get_box_edges(containing_width, context.font, context.viewport);
-    PaintStyle {
-        box_edges: edges,
-        ..PaintStyle::default()
-    }
-}
-
-/// Resolve a replaced control's CSS border thickness (the opt-in frame). The
-/// layout reserves the border cells on both axes so a declared `border:`
-/// renders as a real frame around the content instead of being clipped by a
-/// single-row / content-width box.
-fn replaced_border(
-    arena: &NodeArena,
-    generated: &GeneratedBox,
-    containing_width: usize,
-    context: LayoutContext,
-) -> (usize, usize) {
+) -> (PaintStyle, usize, usize) {
     let node = &arena[generated.node_id];
     let edges = node
         .css_attr
         .get_box_edges(containing_width, context.font, context.viewport);
     (
+        PaintStyle {
+            box_edges: edges,
+            ..PaintStyle::default()
+        },
         edges.border.horizontal_thickness(),
         edges.border.vertical_thickness(),
     )
 }
 
-/// Geometry for `<textarea>`: a fixed multi-line field with a box-drawing
-/// border.
+/// Geometry for `<textarea>`: a fixed multi-line editable field.
 ///
-/// Width is `cols` (browser default 20) plus the two frame columns, height
-/// is `rows` (browser default 2) plus the top/bottom border rows. The size is
-/// independent of the value, so editing only repaints the field's rectangle
-/// — same as `<input>`.
+/// Width is `cols` (browser default 20) and height is `rows` (browser
+/// default 2), plus any CSS `border` thickness. The size is independent of
+/// the value, so editing only repaints the field's rectangle — same as
+/// `<input>`.
 fn layout_textarea(
     arena: &NodeArena,
     generated: &GeneratedBox,
@@ -478,6 +463,7 @@ fn layout_textarea(
     context: LayoutContext,
     pre_allocated_rect: Option<Rect>,
 ) -> Option<LayoutBox> {
+    let style = replaced_chrome(arena, generated, containing.width, context);
     let (x, y, block_width, height) = match pre_allocated_rect {
         Some(rect) => (rect.x, rect.y, rect.width.max(1), rect.height.max(1)),
         None => {
@@ -492,24 +478,22 @@ fn layout_textarea(
                 .get("rows")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(2);
-            let (border_h, border_v) =
-                replaced_border(arena, generated, containing.width, context);
             let block_width = cols
                 .max(1)
-                .saturating_add(border_h)
+                .saturating_add(style.1)
                 .min(containing.width)
                 .max(1);
             let content_rows = rows.max(1);
             let x = containing.x;
-            let y = cursor.allocate(content_rows.saturating_add(border_v));
-            (x, y, block_width, content_rows.saturating_add(border_v))
+            let y = cursor.allocate(content_rows.saturating_add(style.2));
+            (x, y, block_width, content_rows.saturating_add(style.2))
         }
     };
     Some(LayoutBox::new_replaced(
         generated.node_id,
         Rect::new(x, y, block_width, height),
         ReplacedContent::Textarea,
-        replaced_paint_style(arena, generated, containing.width, context),
+        style.0,
     ))
 }
 
@@ -524,6 +508,7 @@ fn layout_button(
     context: LayoutContext,
     pre_allocated_rect: Option<Rect>,
 ) -> Option<LayoutBox> {
+    let style = replaced_chrome(arena, generated, containing.width, context);
     let (x, y, block_width, height) = match pre_allocated_rect {
         Some(rect) => (rect.x, rect.y, rect.width.max(1), rect.height.max(1)),
         None => {
@@ -533,27 +518,25 @@ fn layout_button(
                 .chars()
                 .map(|c| char_width(c).max(1))
                 .sum();
-            let (border_h, border_v) =
-                replaced_border(arena, generated, containing.width, context);
-            let block_width = (text_w.saturating_add(4).saturating_add(border_h))
+            let block_width = (text_w.saturating_add(4).saturating_add(style.1))
                 .min(containing.width)
                 .max(4);
             let x = containing.x;
-            let y = cursor.allocate(1usize.saturating_add(border_v));
-            (x, y, block_width, 1usize.saturating_add(border_v))
+            let y = cursor.allocate(1usize.saturating_add(style.2));
+            (x, y, block_width, 1usize.saturating_add(style.2))
         }
     };
     Some(LayoutBox::new_replaced(
         generated.node_id,
         Rect::new(x, y, block_width, height),
         ReplacedContent::Button,
-        replaced_paint_style(arena, generated, containing.width, context),
+        style.0,
     ))
 }
 
 /// Geometry for `<select>`: a single-line dropdown field.
 ///
-/// Width is the longest option label plus the frame / chevron, or the HTML
+/// Width is the longest option label plus the chevron / padding, or the HTML
 /// `width` attribute when set. The dropdown overlay is painted by the render
 /// thread, so the box itself is always one row.
 fn layout_select(
@@ -564,6 +547,7 @@ fn layout_select(
     context: LayoutContext,
     pre_allocated_rect: Option<Rect>,
 ) -> Option<LayoutBox> {
+    let style = replaced_chrome(arena, generated, containing.width, context);
     let (x, y, block_width, height) = match pre_allocated_rect {
         Some(rect) => (rect.x, rect.y, rect.width.max(1), rect.height.max(1)),
         None => {
@@ -573,23 +557,21 @@ fn layout_select(
                 .map(|opt| opt.label.chars().map(char_width).sum::<usize>())
                 .max()
                 .unwrap_or(0);
-            let (border_h, border_v) =
-                replaced_border(arena, generated, containing.width, context);
             let content_w = match node.get_width() {
                 Some(w) => (w as usize).min(containing.width).max(1),
                 None => (text_w.saturating_add(4)).min(containing.width).max(4),
             };
-            let block_width = content_w.saturating_add(border_h);
+            let block_width = content_w.saturating_add(style.1);
             let x = containing.x;
-            let y = cursor.allocate(1usize.saturating_add(border_v));
-            (x, y, block_width, 1usize.saturating_add(border_v))
+            let y = cursor.allocate(1usize.saturating_add(style.2));
+            (x, y, block_width, 1usize.saturating_add(style.2))
         }
     };
     Some(LayoutBox::new_replaced(
         generated.node_id,
         Rect::new(x, y, block_width, height),
         ReplacedContent::Select,
-        replaced_paint_style(arena, generated, containing.width, context),
+        style.0,
     ))
 }
 

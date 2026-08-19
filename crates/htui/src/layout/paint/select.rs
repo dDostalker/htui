@@ -39,8 +39,6 @@ pub(crate) fn paint_select(
     let fg = node.css_attr.get_color();
     let open = canvas.open_select == Some(lb.node_id);
 
-    // Background fill (+ opt-in CSS border); the label + chevron draw into
-    // the returned content area.
     let content = paint_control_chrome(lb, arena, canvas, r, fg);
     let bg = node.css_attr.get_bg_color().or(Some(super::CONTROL_DEFAULT_BG));
     // While the dropdown is open the label is drawn with the accent colour

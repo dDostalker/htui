@@ -1205,13 +1205,13 @@ fn length_parse_cells_px_divide_matches_browser_scale() {
 #[test]
 fn length_parse_cells_bare_number() {
     init();
-    // Bare integers and floats parse as `Cells`; CSS treats a unitless
-    // number as px, so `Length::resolve` divides by PX_PER_CELL. `parse`
-    // preserves the raw f32 value; rounding happens inside `Length::resolve`.
-    assert_eq!(Length::parse("40"), Some(Length::Cells(40.0)));
-    assert_eq!(Length::parse("0"), Some(Length::Cells(0.0)));
-    assert_eq!(Length::parse("1.5"), Some(Length::Cells(1.5)));
-    assert_eq!(Length::parse("0.5"), Some(Length::Cells(0.5)));
+    // Bare integers and floats parse as `Px`; CSS treats a unitless number
+    // as px, so `Length::resolve` divides by PX_PER_CELL. `parse` preserves
+    // the raw f32 value; rounding happens inside `Length::resolve`.
+    assert_eq!(Length::parse("40"), Some(Length::Px(40.0)));
+    assert_eq!(Length::parse("0"), Some(Length::Px(0.0)));
+    assert_eq!(Length::parse("1.5"), Some(Length::Px(1.5)));
+    assert_eq!(Length::parse("0.5"), Some(Length::Px(0.5)));
 }
 
 #[test]
@@ -1298,15 +1298,15 @@ fn length_resolve_auto_and_cells() {
     // A bare number is px per CSS, so it divides by PX_PER_CELL like `px`:
     // 40 -> 5 cells at 8px/cell.
     assert_eq!(
-        Length::Cells(40.0).resolve(length_ctx(80, default_font_ctx())),
+        Length::Px(40.0).resolve(length_ctx(80, default_font_ctx())),
         5
     );
     assert_eq!(
-        Length::Cells(0.0).resolve(length_ctx(80, default_font_ctx())),
+        Length::Px(0.0).resolve(length_ctx(80, default_font_ctx())),
         0
     ); // caller clamps via resolve_block_width
     assert_eq!(
-        Length::Cells(1000.0).resolve(length_ctx(80, default_font_ctx())),
+        Length::Px(1000.0).resolve(length_ctx(80, default_font_ctx())),
         125
     ); // ditto
 }
