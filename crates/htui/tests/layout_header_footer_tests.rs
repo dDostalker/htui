@@ -159,7 +159,7 @@ fn test_header_width_fixed() {
     // Browser-like geometry: a fixed-width `<header>` sits flush left at col 0.
     init();
     let html = "<header>Fix</header>";
-    let css = "header { width: 20px; background-color: red; }";
+    let css = "header { width: 20ch; background-color: red; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;

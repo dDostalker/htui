@@ -87,8 +87,8 @@ fn absolute_positions_within_relative_parent() {
         </div>
     "#;
     let css = r#"
-        .wrap { position: relative; width: 10; }
-        .abs { position: absolute; top: 1; left: 2; }
+        .wrap { position: relative; width: 10ch; }
+        .abs { position: absolute; top: 1ch; left: 2ch; }
     "#;
     let (rows, _) = render_rows(html, css);
     assert_eq!(
@@ -110,7 +110,7 @@ fn absolute_does_not_consume_flow_space() {
     "#;
     let css = r#"
         .wrap { position: relative; }
-        .abs { position: absolute; top: 3; left: 0; }
+        .abs { position: absolute; top: 3ch; left: 0ch; }
     "#;
     let (rows, _) = render_rows(html, css);
     // The absolute box claims no flow rows: the (min-height 1) wrapper is
@@ -137,7 +137,7 @@ fn absolute_anchors_to_initial_containing_block() {
         <div class="abs">A</div>
     "#;
     let css = r#"
-        .abs { position: absolute; top: 0; left: 0; }
+        .abs { position: absolute; top: 0ch; left: 0ch; }
     "#;
     let (rows, _) = render_rows(html, css);
     // No positioned ancestor: the absolute box anchors to the initial
@@ -157,8 +157,8 @@ fn absolute_uses_right_and_bottom_to_anchor() {
         </div>
     "#;
     let css = r#"
-        .wrap { position: relative; width: 10; }
-        .abs { position: absolute; right: 1; bottom: 1; width: 3; }
+        .wrap { position: relative; width: 10ch; }
+        .abs { position: absolute; right: 1ch; bottom: 1ch; width: 3ch; }
     "#;
     let (rows, _) = render_rows(html, css);
     // Parent content: width 10, two lines (height 2). The absolute box is
@@ -175,7 +175,7 @@ fn fixed_anchors_to_viewport() {
         <div>G</div>
     "#;
     let css = r#"
-        .abs { position: fixed; top: 1; left: 5; }
+        .abs { position: fixed; top: 1ch; left: 5ch; }
     "#;
     let (rows, _) = render_rows(html, css);
     // Fixed anchors to the viewport, independent of flow: F at (5, 1) while
@@ -203,7 +203,7 @@ fn fixed_stays_pinned_to_the_screen_when_scrolled() {
         <div>G</div>
     "#;
     let css = r#"
-        .abs { position: fixed; top: 1; left: 5; }
+        .abs { position: fixed; top: 1ch; left: 5ch; }
     "#;
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
@@ -234,7 +234,7 @@ fn fixed_right_bottom_anchors_follow_the_scrolled_viewport() {
         <div>G</div>
     "#;
     let css = r#"
-        .abs { position: fixed; right: 1; bottom: 1; width: 3; }
+        .abs { position: fixed; right: 1ch; bottom: 1ch; width: 3ch; }
     "#;
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
@@ -261,7 +261,7 @@ fn relative_offsets_without_moving_siblings() {
         <div>B</div>
     "#;
     let css = r#"
-        .rel { position: relative; top: 2; left: 1; }
+        .rel { position: relative; top: 2ch; left: 1ch; }
     "#;
     let (rows, _) = render_rows(html, css);
     // A keeps its flow slot (row 0) and shifts down 2 / right 1.
@@ -282,8 +282,8 @@ fn z_index_paints_high_value_on_top() {
     "#;
     let css = r#"
         .wrap { position: relative; }
-        .a { position: absolute; top: 0; left: 0; }
-        .b { position: absolute; top: 0; left: 0; z-index: 1; }
+        .a { position: absolute; top: 0ch; left: 0ch; }
+        .b { position: absolute; top: 0ch; left: 0ch; z-index: 1; }
     "#;
     let (rows, _) = render_rows(html, css);
     assert_eq!(
@@ -304,7 +304,7 @@ fn z_index_negative_paints_below_static_content() {
     "#;
     let css = r#"
         .wrap { position: relative; }
-        .n { position: absolute; top: 0; left: 0; z-index: -1; }
+        .n { position: absolute; top: 0ch; left: 0ch; z-index: -1; }
     "#;
     let (rows, _) = render_rows(html, css);
     // Negative z-index paints below static content.
@@ -322,7 +322,7 @@ fn positioned_paints_above_static_sibling() {
     "#;
     let css = r#"
         .wrap { position: relative; }
-        .a { position: absolute; top: 0; left: 0; }
+        .a { position: absolute; top: 0ch; left: 0ch; }
     "#;
     let (rows, _) = render_rows(html, css);
     // Positioned (z-index auto) paints above static content regardless of DOM
@@ -341,7 +341,7 @@ fn absolute_detaches_from_flex_container() {
     "#;
     let css = r#"
         .flex { display: flex; }
-        .abs { position: absolute; top: 0; left: 0; }
+        .abs { position: absolute; top: 0ch; left: 0ch; }
     "#;
     let (rows, _) = render_rows(html, css);
     // The absolute child detaches from the flex layout: B is the only flex
@@ -365,10 +365,10 @@ fn relative_box_inside_relative_frame_renders_offset_text() {
         </div>
     "#;
     let css = r#"
-        .frame { position: relative; width: 20; }
-        .row { margin: 1; }
+        .frame { position: relative; width: 20ch; }
+        .row { margin: 1ch; }
         .s { background-color: #24283b; }
-        .rel { position: relative; top: 2; left: 4; }
+        .rel { position: relative; top: 2ch; left: 4ch; }
     "#;
     let (rows, _) = render_rows(html, css);
     // .row margin:1 → one(y=1, x=1); the adjacent 1-row margins collapse, so
@@ -396,8 +396,8 @@ fn absolute_box_keeps_its_background() {
         </div>
     "#;
     let css = r#"
-        .wrap { position: relative; width: 10; }
-        .abs { position: absolute; top: 0; left: 0; background-color: red; }
+        .wrap { position: relative; width: 10ch; }
+        .abs { position: absolute; top: 0ch; left: 0ch; background-color: red; }
     "#;
     let (rows, tl) = render_rows(html, css);
     assert_eq!(cell(&rows, 0, 0), Some('A'));
@@ -420,7 +420,7 @@ fn sticky_keeps_its_flow_slot() {
         <div class="body">B</div>
     "#;
     let css = r#"
-        .stick { position: sticky; top: 0; height: 2; }
+        .stick { position: sticky; top: 0ch; height: 2ch; }
     "#;
     let (rows, _) = render_rows(html, css);
     assert_eq!(cell(&rows, 0, 0), Some('S'), "sticky box at its flow row");
@@ -441,7 +441,7 @@ fn sticky_clamps_to_viewport_top_when_scrolled() {
         <div class="body">B</div>
     "#;
     let css = r#"
-        .stick { position: sticky; top: 0; }
+        .stick { position: sticky; top: 0ch; }
     "#;
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
@@ -471,8 +471,8 @@ fn sticky_bottom_clamps_deep_box_to_viewport_bottom() {
         <div class="stick">S</div>
     "#;
     let css = r#"
-        .pad { height: 23; }
-        .stick { position: sticky; bottom: 1; }
+        .pad { height: 23ch; }
+        .stick { position: sticky; bottom: 1ch; }
     "#;
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
@@ -495,11 +495,11 @@ fn sticky_repin_uses_recorded_flow_row() {
     // deep sticky box sticks at a stale offset instead of returning to its
     // document position once the viewport scrolls to it.
     let html = r#"
-        <div style="height: 30;">pad</div>
+        <div style="height: 30ch;">pad</div>
         <div class="stick">S</div>
     "#;
     let css = r#"
-        .stick { position: sticky; top: 0; }
+        .stick { position: sticky; top: 0ch; }
     "#;
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();

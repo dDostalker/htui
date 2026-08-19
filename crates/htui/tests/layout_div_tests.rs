@@ -200,7 +200,7 @@ fn test_div_width_fixed() {
     // block occupies cols 0..20.
     init();
     let html = "<div>Fix</div>";
-    let css = "div { width: 20px; background-color: red; }";
+    let css = "div { width: 20ch; background-color: red; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
@@ -239,7 +239,7 @@ fn test_div_text_align_center() {
     // inside is centered within the block.
     init();
     let html = "<div>Centered</div>";
-    let css = "div { text-align: center; width: 40px; }";
+    let css = "div { text-align: center; width: 40ch; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
@@ -267,7 +267,7 @@ fn test_div_text_align_right() {
     // inside is right-aligned within the block.
     init();
     let html = "<div>Right</div>";
-    let css = "div { text-align: right; width: 40px; }";
+    let css = "div { text-align: right; width: 40ch; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;

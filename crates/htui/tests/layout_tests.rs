@@ -490,7 +490,7 @@ fn inline_block_boxes_flow_side_by_side() {
         <div class="card">BB</div>
         <div class="card">CC</div>
     "#;
-    let css = ".card { display: inline-block; width: 20px; margin-right: 2px; }";
+    let css = ".card { display: inline-block; width: 20ch; margin-right: 2ch; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
@@ -518,7 +518,7 @@ fn inline_block_whitespace_separates_and_collapses() {
     // no whitespace between them keep only their margins — both match the
     // browser.
     let html = "<div class=\"a\">A</div>  <div class=\"b\">B</div><div class=\"c\">C</div>";
-    let css = ".a, .b, .c { display: inline-block; width: 10px; margin-right: 2px; }";
+    let css = ".a, .b, .c { display: inline-block; width: 10ch; margin-right: 2ch; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
@@ -536,7 +536,7 @@ fn inline_block_line_start_space_is_removed() {
     // A wrapped line drops its leading collapsed space (browser rule), so
     // the second card starts at column 0 of the wrapped row, not column 1.
     let html = "<div class=\"a\">A</div> <div class=\"b\">B</div>";
-    let css = ".a, .b { display: inline-block; width: 10px; margin-right: 2px; }";
+    let css = ".a, .b { display: inline-block; width: 10ch; margin-right: 2ch; }";
     let (root_id, arena) = setup(html, css);
     // 11 columns: 10 + 2 + 1 + 10 = 23 does not fit; the second card wraps.
     let term_map = TermMap {
@@ -558,7 +558,7 @@ fn inline_block_keeps_its_own_box_and_width() {
     // An `inline-block` produces its own box (border / background / width)
     // instead of flattening its children into the parent flow.
     let html = r#"<div class="card">hi</div>"#;
-    let css = ".card { display: inline-block; width: 10px; border: 1px solid red; }";
+    let css = ".card { display: inline-block; width: 10ch; border: 1ch solid red; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);
@@ -582,7 +582,7 @@ fn inline_block_wraps_at_line_width() {
         <div class="card">BB</div>
         <div class="card">CC</div>
     "#;
-    let css = ".card { display: inline-block; width: 39px; }";
+    let css = ".card { display: inline-block; width: 39ch; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);

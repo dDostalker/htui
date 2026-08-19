@@ -71,7 +71,7 @@ fn test_multicol_count_fragments_block_children() {
             <div>A1</div><div>A2</div><div>B1</div><div>B2</div>
         </div>
     "#;
-    let css = ".cols { width: 60px; column-count: 2; column-gap: 0; }";
+    let css = ".cols { width: 60ch; column-count: 2; column-gap: 0ch; }";
     let tl = setup(html, css);
     // Column 0 holds A1/A2 stacked at x 0; column 1 holds B1/B2 at x 30.
     assert_eq!(row(&tl, 0), format!("A1{}B1{}", " ".repeat(28), " ".repeat(48)));
@@ -88,7 +88,7 @@ fn test_multicol_balance_uneven_content() {
             <div>A</div><div>B</div><div>C</div><div>D</div><div>E</div>
         </div>
     "#;
-    let css = ".cols { width: 60px; column-count: 3; column-gap: 0; }";
+    let css = ".cols { width: 60ch; column-count: 3; column-gap: 0ch; }";
     let tl = setup(html, css);
     // Column 0: A, B at x 0. Column 1: C, D at x 20. Column 2: E at x 40.
     assert_eq!(cell_word(&tl, 0, 0), "A");
@@ -111,7 +111,7 @@ fn test_multicol_balance_packs_uneven_heights_browser_style() {
             <div class="t">A</div><div class="t">B</div><div class="t">C</div>
         </div>
     "#;
-    let css = ".cols { width: 60px; column-count: 2; column-gap: 0; } .t { padding: 1px; }";
+    let css = ".cols { width: 60ch; column-count: 2; column-gap: 0ch; } .t { padding: 1ch; }";
     let tl = setup(html, css);
     // Each `.t` box is 3 rows tall (padding 1 + content 1 + padding 1), so
     // the content glyph sits at x 1 (padding-left) on the box's middle row.
@@ -133,16 +133,16 @@ fn test_multicol_balance_packs_uneven_heights_browser_style() {
 #[test]
 fn test_multicol_column_width_derives_count() {
     init();
-    // `column-width: 20px` in the default 80-col viewport → 4 columns of
+    // `column-width: 20ch` in the default 80-col viewport → 4 columns of
     // 20 cells, no gap. Four one-row children fill one column each.
     let html = r#"
         <div class="cols">
             <div>A</div><div>B</div><div>C</div><div>D</div>
         </div>
     "#;
-    let css = ".cols { column-width: 20px; column-gap: 0; }";
+    let css = ".cols { column-width: 20ch; column-gap: 0ch; }";
     let tl = setup(html, css);
-    // `column-width: 20px` in 80 cols → 4 columns of 20 cells, no gap. Four
+    // `column-width: 20ch` in 80 cols → 4 columns of 20 cells, no gap. Four
     // one-row children fill one column each, all on the top row.
     assert_eq!(cell_word(&tl, 0, 0), "A");
     assert_eq!(cell_word(&tl, 20, 0), "B");
@@ -154,14 +154,14 @@ fn test_multicol_column_width_derives_count() {
 #[test]
 fn test_multicol_columns_shorthand() {
     init();
-    // `columns: 30px 2` sets both width and count; the smaller wins and the
+    // `columns: 30ch 2` sets both width and count; the smaller wins and the
     // columns widen to fill the 60-col container (30 each).
     let html = r#"
         <div class="cols">
             <div>A</div><div>B</div><div>C</div><div>D</div>
         </div>
     "#;
-    let css = ".cols { width: 60px; columns: 30px 2; column-gap: 0; }";
+    let css = ".cols { width: 60ch; columns: 30ch 2; column-gap: 0ch; }";
     let tl = setup(html, css);
     assert_eq!(cell_word(&tl, 0, 0), "A");
     assert_eq!(cell_word(&tl, 0, 1), "B");
@@ -183,7 +183,7 @@ fn test_multicol_gap_spaces_columns() {
             <div>A</div><div>B</div>
         </div>
     "#;
-    let css = ".cols { column-count: 2; column-gap: 4px; }";
+    let css = ".cols { column-count: 2; column-gap: 4ch; }";
     let tl = setup(html, css);
     assert_eq!(cell_word(&tl, 0, 0), "A");
     assert_eq!(cell_word(&tl, 42, 0), "B");
@@ -202,7 +202,7 @@ fn test_multicol_percentage_gap_resolves_against_container() {
             <div>A</div><div>B</div>
         </div>
     "#;
-    let css = ".cols { width: 60px; column-count: 2; column-gap: 50%; }";
+    let css = ".cols { width: 60ch; column-count: 2; column-gap: 50%; }";
     let tl = setup(html, css);
     assert_eq!(cell_word(&tl, 0, 0), "A");
     assert_eq!(cell_word(&tl, 45, 0), "B");
@@ -224,7 +224,7 @@ fn test_multicol_fill_auto_stacks_first_column() {
             <div>A</div><div>B</div><div>C</div><div>D</div>
         </div>
     "#;
-    let css = ".cols { column-count: 2; column-gap: 0; column-fill: auto; height: 4px; }";
+    let css = ".cols { column-count: 2; column-gap: 0ch; column-fill: auto; height: 4ch; }";
     let tl = setup(html, css);
     for y in 0..4 {
         assert_eq!(cell_word(&tl, 0, y), "ABCD".chars().nth(y).unwrap().to_string());
@@ -250,7 +250,7 @@ fn test_multicol_inline_text_fragments() {
             AAAA<br>BBBB<br>CCCC<br>DDDD<br>EEEE<br>FFFF
         </div>
     "#;
-    let css = ".cols { width: 60px; column-count: 3; column-gap: 0; }";
+    let css = ".cols { width: 60ch; column-count: 3; column-gap: 0ch; }";
     let tl = setup(html, css);
     assert_eq!(cell_word(&tl, 0, 0), "A");
     assert_eq!(cell_word(&tl, 1, 0), "A");
@@ -276,7 +276,7 @@ fn test_multicol_column_rule_painted() {
             <div>A</div><div>B</div><div>C</div><div>D</div>
         </div>
     "#;
-    let css = ".cols { column-count: 2; column-gap: 4px; column-rule: 1px solid red; }";
+    let css = ".cols { column-count: 2; column-gap: 4ch; column-rule: 1ch solid red; }";
     let tl = setup(html, css);
     assert_eq!(cell_word(&tl, 40, 0), "│", "rule glyph in the gap");
     assert_eq!(
@@ -298,7 +298,7 @@ fn test_multicol_no_rule_without_style() {
             <div>A</div><div>B</div>
         </div>
     "#;
-    let css = ".cols { column-count: 2; column-gap: 4px; column-rule-color: blue; }";
+    let css = ".cols { column-count: 2; column-gap: 4ch; column-rule-color: blue; }";
     let tl = setup(html, css);
     assert_eq!(cell_word(&tl, 40, 0), " ", "no rule without a style");
 }
@@ -336,7 +336,7 @@ fn test_multicol_narrow_container_reduces_count() {
             <div>A</div><div>B</div>
         </div>
     "#;
-    let css = ".cols { width: 4px; column-count: 3; column-gap: 0; }";
+    let css = ".cols { width: 4ch; column-count: 3; column-gap: 0ch; }";
     let tl = setup(html, css);
     assert_eq!(cell_word(&tl, 0, 0), "A");
     assert_eq!(cell_word(&tl, 1, 0), "B", "4 cells fit 4 one-cell columns");

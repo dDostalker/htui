@@ -7,15 +7,14 @@
   body { font-family: monospace; }
   .demo { width: 26em; margin-bottom: 1.5em; display: inline-block; vertical-align: top; margin-right: 2em; }
   .demo h2 { font-size: 1em; margin: 0.5em 0; }
-  /* No padding: a browser's 2px padding is visually negligible (~3% of the
-     box), while the engine maps 1px to a full terminal cell (px = cell), so
-     `padding: 2px` would eat 2 cells per side (~15%) and push the items
-     disproportionately far from the frame. Zero keeps both engines flush. */
-  .box { display: flex; border: 1px solid #999; padding: 0;
-         box-sizing: content-box; line-height: 1; }
-  /* No item margin: a browser's 1px margins are visually negligible, while
-     the engine maps 1px to a full terminal cell (px = cell), so a margin
-     would read as a wide gap. Items sit flush, like the browser looks. */
+  /* px lengths now divide by PX_PER_CELL (8px per cell), so `border: 1px`
+     and `padding: 2px` are sub-cell and vanish — exactly like a browser
+     rendered on a character grid. The box therefore has no frame by
+     default; the place-content demos opt back in with a 1ch frame so the
+     container extent stays visible. Items sit flush against the box edge,
+     matching the browser. */
+  .box { display: flex; padding: 0; box-sizing: content-box; line-height: 1; }
+  .pc-center, .pc-two, .pc-stretch { border: 1ch solid #999; }
   .box div, .box span { background: #def; }
   .box .b { background: #fdd; }
   /* place-content demos: items are 5ch wide so 3 items (15ch) overflow the

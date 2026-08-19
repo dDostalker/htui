@@ -180,7 +180,7 @@ fn test_aside_width_fixed_px() {
     // block occupies cols 0..20; no centering offset.
     init();
     let html = "<aside>Fix</aside>";
-    let css = "aside { width: 20px; background-color: red; }";
+    let css = "aside { width: 20ch; background-color: red; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
 
@@ -247,7 +247,7 @@ fn test_aside_text_align_center() {
     // The block must not be centered in the terminal.
     init();
     let html = "<aside>Centered</aside>";
-    let css = "aside { text-align: center; width: 40px; background-color: darkblue; }";
+    let css = "aside { text-align: center; width: 40ch; background-color: darkblue; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
@@ -290,7 +290,7 @@ fn test_aside_text_align_right() {
     // inside is right-aligned within the block (offset = 40 - len("Right") = 35).
     init();
     let html = "<aside>Right</aside>";
-    let css = "aside { text-align: right; width: 40px; background-color: darkblue; }";
+    let css = "aside { text-align: right; width: 40ch; background-color: darkblue; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
@@ -717,13 +717,13 @@ fn test_nested_p_inherits_when_parent_has_no_bg() {
 
 #[test]
 fn test_nested_p_in_aside_with_fixed_width_centered() {
-    // Mirror the visual_test scenario exactly: `<aside width=30px bg=cyan>`
+    // Mirror the visual_test scenario exactly: `<aside width=30ch bg=cyan>`
     // containing `<p>30col</p>`. The aside sits flush left at col 0; the
     // text "30col" (5 chars) is centered within the 30-col block, so it
     // starts at col (30 - 5) / 2 = 12.
     init();
     let html = "<aside><p>30col</p></aside>";
-    let css = "aside { width: 30px; text-align: center; background-color: cyan; color: black; }";
+    let css = "aside { width: 30ch; text-align: center; background-color: cyan; color: black; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;

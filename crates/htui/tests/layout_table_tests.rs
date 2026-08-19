@@ -238,7 +238,7 @@ fn test_table_with_tfoot_section() {
 fn test_table_css_border_draws_box_glyphs() {
     init();
     let html = "<table><tr><td>A</td><td>B</td></tr></table>";
-    let css = "table, td { border: 1px solid white; }";
+    let css = "table, td { border: 1ch solid white; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);

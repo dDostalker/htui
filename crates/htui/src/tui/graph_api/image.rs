@@ -69,7 +69,7 @@ pub enum ImageError {
 // braille mode. The ratio is intentionally independent of
 // `crate::html::css_parse::values::PX_PER_CELL`, which governs CSS px
 // in the box model — the two answer different questions:
-//   - PX_PER_CELL: how many CSS px is one terminal cell? Answer: 1.
+//   - PX_PER_CELL: how many CSS px is one terminal cell? Answer: 8.
 //   - The constants below: how many source-image pixels does one
 //     terminal cell render? 1 wide x 2 tall.
 

@@ -7,15 +7,18 @@ use crate::html::box_edges::{Border, BorderStyle, EdgeAuto, EdgeSizes};
 use super::color::parse_color_str;
 
 /// Number of CSS px represented by one terminal cell on each axis.
-/// CSS defines 1px as 1/96 inch; terminals cannot query physical DPI,
-/// so we anchor px to the cell grid (1px == 1 cell column or row). This
-/// makes every parsed px an integer cell count without rounding. The
-/// constant is named so future changes (e.g. a 2x DPI mode) have one
-/// edit point. This constant only governs CSS px, not the numeric
-/// pixels on img HTML attributes, which describe source-image pixels
-/// and are sampled at the ratios defined in tui::graph_api::image
-/// (IMAGE_PIXELS_PER_CELL_COL / IMAGE_PIXELS_PER_CELL_ROW).
-pub const PX_PER_CELL: f32 = 1.0;
+/// CSS defines 1px as 1/96 inch; terminals cannot query physical DPI, so
+/// px lengths are converted to cells at layout time via this ratio. A
+/// monospace glyph is 0.5em wide at the 16px default font-size, so one
+/// cell anchors at 8px — small values like `border: 1px` resolve to 0
+/// cells (sub-cell, invisible), mirroring a browser rendered on a
+/// character grid. The constant is named so future changes (e.g. a 2x DPI
+/// mode) have one edit point. This constant only governs CSS px, not the
+/// numeric pixels on img HTML attributes, which describe source-image
+/// pixels and are sampled at the ratios defined in
+/// tui::graph_api::image (IMAGE_PIXELS_PER_CELL_COL /
+/// IMAGE_PIXELS_PER_CELL_ROW).
+pub const PX_PER_CELL: f32 = 8.0;
 // ============================================================
 // Box-model shorthand parsing
 // ============================================================
@@ -419,7 +422,14 @@ impl FontContext {
 /// A typed CSS length value resolved against the terminal's monospace grid.
 ///
 /// Terminals render in **cells**, not pixels or points. Every length we
-/// accept is normalised to an integer column count by [`Length::resolve`].
+/// accept is normalised to an integer column count by [`Length::resolve`]
+/// through a single conversion layer: absolute lengths (`px`, bare
+/// numbers, `em`, `rem`) first become CSS px, then divide by
+/// [`PX_PER_CELL`] (8px per cell); `ch` stays cell-aligned by definition
+/// (one cell per `0` glyph); percentages and viewport units keep their
+/// relative semantics. The whole pipeline is anchored on this one
+/// function, so every length-bearing property (width / height / padding /
+/// border / margin / inset / flex-basis / ...) shares the same scale.
 ///
 /// Accepted forms:
 /// - `auto`                         → [`Length::Auto`]   (caller decides what to fill)
@@ -434,7 +444,8 @@ impl FontContext {
 /// Rejected (returns `None` from [`Length::parse`]):
 /// - `vmin`, `vmax` — derive from `vw` / `vh` after `Layout` has viewport info;
 ///   not yet wired through.
-/// - `pt`, `cm`, `mm`, `in`, `pc` — no DPI. Use `px` (= cells).
+/// - `pt`, `cm`, `mm`, `in`, `pc` — no DPI. Use `px` (converted via
+///   [`PX_PER_CELL`]).
 /// - Negative or signed (`+`, `-`) values — CSS forbids these for `width`.
 /// - Trailing junk after the value.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -443,7 +454,9 @@ pub enum Length {
     Auto,
     /// Absolute CSS pixel length. Converted to terminal cells during resolve.
     Px(f32),
-    /// Absolute cell count for bare numeric lengths.
+    /// Bare numeric lengths. CSS treats a unitless number as px, so the
+    /// terminal conversion layer divides by [`PX_PER_CELL`] like `px`.
+    /// (The engine's own tests write `Nch` when they mean "N cells".)
     Cells(f32),
     /// Percentage 0..=100 of the containing block (CSS `50%`).
     Pct(f32),
@@ -527,10 +540,10 @@ impl Length {
             } => {
                 let n = int_value.map(|i| i as f32).unwrap_or(*value);
                 match unit.to_ascii_lowercase().as_str() {
-                    // CSS px: anchor to the cell grid via PX_PER_CELL. With the
-                    // current 1.0 ratio this collapses to the raw value, but the
-                    // explicit multiply makes the conversion searchable and gives
-                    // a single edit-point should the per-cell px ratio ever change.
+                    // CSS px: kept as a distinct `Px` variant and converted to
+                    // cells at resolve time by dividing by PX_PER_CELL (8px
+                    // per cell). parse only records the raw multiplier; the
+                    // ratio lives in one edit point.
                     "px" => PreLength::Px(n),
                     "em" => PreLength::Em(n),
                     "rem" => PreLength::Rem(n),
@@ -584,8 +597,14 @@ impl Length {
     /// Resolve the length into a concrete column count given the containing
     /// block's width in cells and the active length-resolution context.
     ///
+    /// This is the single conversion layer every CSS length flows through:
+    /// absolute units (`px`, bare numbers, `em`, `rem`) convert to px and
+    /// divide by [`PX_PER_CELL`]; `ch` maps one-to-one to cells; relative
+    /// units keep their ratio. Layout code never re-implements this math, so
+    /// a change to the per-cell px ratio needs exactly one edit point.
+    ///
     /// - `Auto`              → `containing` (fill the container)
-    /// - `Cells(n)`          → `n`
+    /// - `Cells(n)`          → round(n / PX_PER_CELL)
     /// - `Pct(p)`            → round(containing * p / 100), min 1
     /// - `Em(n)`             → round(n * context.font.font_size_cells), clamped at 0
     /// - `Rem(n)`            → round(n * context.font.root_font_size_cells), clamped at 0
@@ -593,9 +612,11 @@ impl Length {
     /// - `Vh(n)`             → round(n * context.viewport.rows / 100), min 1
     ///
     /// `em` resolves against the **current element's** effective font-size
-    /// (in cells); `rem` resolves against the **root's** font-size. On a
-    /// terminal the root font-size is 1 cell by default — it grows when the
-    /// document root sets an explicit `font-size` rule.
+    /// (in cells, itself derived from the same conversion layer — so
+    /// `font-size: 16px` yields a 2-cell font and `1em` == 2 cells, exactly
+    /// like a browser at 8px/cell); `rem` resolves against the **root's**
+    /// font-size. On a terminal the root font-size is 1 cell by default — it
+    /// grows when the document root sets an explicit `font-size` rule.
     ///
     /// `vw` / `vh` anchor to the terminal viewport (columns / rows), not to
     /// the containing block. They are axis-independent: `vw` always uses
@@ -609,7 +630,7 @@ impl Length {
         match self {
             Length::Auto => context.containing,
             &Length::Px(px) => (px / PX_PER_CELL).round().max(0.0) as usize,
-            &Length::Cells(cells) => cells.round().max(0.0) as usize,
+            &Length::Cells(cells) => (cells / PX_PER_CELL).round().max(0.0) as usize,
             &Length::Pct(p) => {
                 let raw = (context.containing as f32 * p / 100.0).round();
                 (raw as usize).max(1)

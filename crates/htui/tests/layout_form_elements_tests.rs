@@ -277,13 +277,13 @@ fn test_progress_author_width_controls_bar() {
     init();
     let (boxes, arena) = layout_boxes(
         "<progress value=\"0.5\"></progress>",
-        "progress { width: 20px; }",
+        "progress { width: 20ch; }",
     );
     let p = find_box_by_type(&boxes, &NodeType::Progress, &arena).expect("progress box");
     assert_eq!(p.rect.width, 20, "CSS width constrains the bar");
     let tl = draw(
         "<progress value=\"0.5\"></progress>",
-        "progress { width: 20px; }",
+        "progress { width: 20ch; }",
     );
     assert_eq!(count_word(&tl, "█"), 10);
     assert_eq!(count_word(&tl, "░"), 10);

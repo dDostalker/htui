@@ -4,12 +4,12 @@
 
     <style>
         /* htui cell-friendly CSS:
-           - 1px == 1 cell, so all sizes use small em / % values
+           - 1ch == 1 cell, so all sizes use small em / % values
            - only SUPPORTED_PROPERTIES are honoured (no calc / border-radius /
              box-shadow / transition / transform / :hover / flex shorthand) */
 
         body {
-            margin: 0;
+            margin: 0ch;
             background-color: #f4f6f8;
             display: flex;
             flex-direction: column;
@@ -20,7 +20,7 @@
         header {
             background-color: #1e293b;
             color: white;
-            padding: 1 2;
+            padding: 1ch 2ch;
             font-size: 2em;
             font-weight: bold;
         }
@@ -36,37 +36,37 @@
             width: 20%;
             background-color: #0f172a;
             color: white;
-            padding: 1;
+            padding: 1ch;
         }
 
         .sidebar h3 {
-            margin-top: 0;
+            margin-top: 0ch;
         }
 
         .sidebar a {
             display: block;
             color: #cbd5e1;
             text-decoration: none;
-            padding: 1 0;
+            padding: 1ch 0;
         }
 
         /* 右侧内容 */
         .content {
             flex-grow: 1;
-            flex-basis: 0;
-            padding: 2;
+            flex-basis: 0ch;
+            padding: 2ch;
         }
 
         /* 卡片布局 */
         .cards {
             display: flex;
-            gap: 1;
+            gap: 1ch;
             flex-wrap: wrap;
         }
 
         .card {
             background-color: white;
-            padding: 1;
+            padding: 1ch;
             flex-basis: 20%;
         }
 
@@ -75,7 +75,7 @@
             background-color: #1e293b;
             color: #cbd5e1;
             text-align: center;
-            padding: 1;
+            padding: 1ch;
         }
     </style>
 </head>

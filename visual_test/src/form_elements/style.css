@@ -2,10 +2,10 @@
 
 /* Constrain the bars so they read as gauges, not full-width stripes. */
 progress {
-  width: 40px;
+  width: 40ch;
 }
 meter {
-  width: 40px;
+  width: 40ch;
 }
 
 /* Hover feedback on the interactive rows. */

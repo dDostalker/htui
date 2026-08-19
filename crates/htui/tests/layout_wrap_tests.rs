@@ -70,7 +70,7 @@ fn long_paragraph_wraps_across_rows() {
     // content-box width — a paragraph in a narrow container must split.
     init();
     let html = r#"<p>The quick brown fox jumps over the lazy dog.</p>"#;
-    let css = r#"p { width: 20px; }"#;
+    let css = r#"p { width: 20ch; }"#;
     let (rows, _) = render_rows(html, css);
     let first_idx = rows
         .iter()
@@ -134,7 +134,7 @@ fn nowrap_keeps_text_on_one_line() {
 fn cjk_wraps_between_characters() {
     init();
     let html = r#"<p>你好世界欢迎使用终端渲染器</p>"#;
-    let css = r#"p { width: 4px; }"#;
+    let css = r#"p { width: 4ch; }"#;
     let (rows, _) = render_rows(html, css);
     let first_idx = rows
         .iter()
@@ -154,7 +154,7 @@ fn cjk_wraps_between_characters() {
 fn keep_all_keeps_cjk_intact() {
     init();
     let html = r#"<p style="word-break: keep-all;">你好世界</p>"#;
-    let css = r#"p { width: 2px; }"#;
+    let css = r#"p { width: 2ch; }"#;
     let (rows, _) = render_rows(html, css);
     // Under `word-break: keep-all` the CJK sequence is treated as one
     // unbreakable word, so the paragraph should still occupy a single
@@ -243,7 +243,7 @@ fn pre_element_uses_ua_default_white_space() {
 fn break_word_splits_long_word() {
     init();
     let html = r#"<p style="overflow-wrap: break-word;">aaaaaaaaaaaaaaaaaaaa</p>"#;
-    let css = r#"p { width: 10px; }"#;
+    let css = r#"p { width: 10ch; }"#;
     let (rows, _) = render_rows(html, css);
     let first_idx = rows
         .iter()
@@ -267,7 +267,7 @@ fn overflow_wrap_normal_does_not_split() {
     // opportunity to use.
     init();
     let html = "<p>aaaaaaaaaaaaaaaaaaaa</p>";
-    let css = "p { width: 10px; }";
+    let css = "p { width: 10ch; }";
     let (rows, _) = render_rows(html, css);
     let first_idx = rows
         .iter()
@@ -291,7 +291,7 @@ fn overflow_wrap_normal_does_not_split() {
 fn li_marker_stays_on_first_line() {
     init();
     let html = "<ul><li>alpha beta gamma delta epsilon zeta eta theta iota kappa</li></ul>";
-    let css = "ul { width: 12px; }";
+    let css = "ul { width: 12ch; }";
     let (rows, _) = render_rows(html, css);
     // The '•' marker should be on the same row as 'alpha' (the first
     // word of the body) — never on a later wrap line.
@@ -328,7 +328,7 @@ fn h2_prefix_stays_on_first_line() {
     // though the visual layout is identical.
     init();
     let html = "<h2>alpha beta gamma</h2>";
-    let css = "h2 { width: 30px; font-size: 1em; }";
+    let css = "h2 { width: 30ch; font-size: 1em; }";
     let (rows, _) = render_rows(html, css);
     let prefix_idx = rows
         .iter()

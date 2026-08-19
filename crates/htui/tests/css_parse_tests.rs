@@ -1152,10 +1152,12 @@ fn length_parse_cells_px() {
 }
 
 #[test]
-fn px_per_cell_constant_anchors_px_to_one_cell() {
-    // Standardized px semantics: 1 CSS px == 1 terminal cell. This is the
-    // single edit-point for any future DPI mode (e.g. 2x retina = 2.0).
-    assert_eq!(PX_PER_CELL, 1.0);
+fn px_per_cell_constant_anchors_px_to_browser_scale() {
+    // Browser-scale px semantics: one terminal cell is 8 CSS px (a monospace
+    // glyph is 0.5em wide at the 16px default font-size). px lengths divide
+    // by this at resolution; this is the single edit-point for any future
+    // DPI mode (e.g. 2x retina = 16.0).
+    assert_eq!(PX_PER_CELL, 8.0);
 }
 
 #[test]
@@ -1185,29 +1187,27 @@ fn length_parse_cells_px_zero_and_integer_exact() {
 }
 
 #[test]
-fn length_parse_cells_px_multiply_matches_raw_value_when_ratio_is_one() {
-    // With PX_PER_CELL == 1.0, `Length::Px(n).resolve(...)` multiplies by
-    // 1.0 and rounds. `parse` keeps the raw multiplier; resolve applies
-    // PX_PER_CELL. This test pins the multiplication so any future change
-    // to the constant forces a deliberate update here.
+fn length_parse_cells_px_divide_matches_browser_scale() {
+    // `Length::Px(n).resolve(...)` divides by PX_PER_CELL (8px per cell) and
+    // rounds, mirroring a browser rendered on a character grid: `parse`
+    // keeps the raw px multiplier; resolve applies the ratio. This test pins
+    // the division so any future change to the constant forces a deliberate
+    // update here.
     init();
     assert_eq!(
-        (40.0_f32 * PX_PER_CELL).round() as usize,
+        (40.0_f32 / PX_PER_CELL).round() as usize,
         Length::parse("40px")
-            .map(|l| match l {
-                Length::Px(n) => n as usize,
-                _ => panic!("expected Px"),
-            })
             .unwrap()
+            .resolve(length_ctx(80, default_font_ctx()))
     );
 }
 
 #[test]
 fn length_parse_cells_bare_number() {
     init();
-    // Bare integers and floats are accepted as cells — convenient shorthand.
-    // `parse` preserves the raw f32 value; rounding happens inside
-    // `Length::resolve`.
+    // Bare integers and floats parse as `Cells`; CSS treats a unitless
+    // number as px, so `Length::resolve` divides by PX_PER_CELL. `parse`
+    // preserves the raw f32 value; rounding happens inside `Length::resolve`.
     assert_eq!(Length::parse("40"), Some(Length::Cells(40.0)));
     assert_eq!(Length::parse("0"), Some(Length::Cells(0.0)));
     assert_eq!(Length::parse("1.5"), Some(Length::Cells(1.5)));
@@ -1295,9 +1295,11 @@ fn length_parse_rejects_signed_and_junk() {
 fn length_resolve_auto_and_cells() {
     init();
     assert_eq!(Length::Auto.resolve(length_ctx(80, default_font_ctx())), 80);
+    // A bare number is px per CSS, so it divides by PX_PER_CELL like `px`:
+    // 40 -> 5 cells at 8px/cell.
     assert_eq!(
         Length::Cells(40.0).resolve(length_ctx(80, default_font_ctx())),
-        40
+        5
     );
     assert_eq!(
         Length::Cells(0.0).resolve(length_ctx(80, default_font_ctx())),
@@ -1305,7 +1307,7 @@ fn length_resolve_auto_and_cells() {
     ); // caller clamps via resolve_block_width
     assert_eq!(
         Length::Cells(1000.0).resolve(length_ctx(80, default_font_ctx())),
-        1000
+        125
     ); // ditto
 }
 
@@ -1455,7 +1457,7 @@ fn css_attr_get_width_end_to_end() {
 
     let mut attr = CssAttr::new();
     let mut decls = IndexMap::new();
-    decls.insert("width".into(), "40px".into());
+    decls.insert("width".into(), "40ch".into());
     attr.add(CssAttr(decls));
     assert_eq!(
         attr.get_width(
@@ -1571,7 +1573,7 @@ fn attr_from_decl(name: &str, value: &str) -> CssAttr {
 
 #[test]
 fn padding_shorthand_one_value_fills_all_sides() {
-    let attr = attr_from_decl("padding", "5px");
+    let attr = attr_from_decl("padding", "5ch");
     let edges = attr.get_padding(
         80,
         font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
@@ -1582,8 +1584,8 @@ fn padding_shorthand_one_value_fills_all_sides() {
 
 #[test]
 fn padding_shorthand_two_values_vertical_horizontal() {
-    // `padding: 10px 20px;` → top/bottom = 10, left/right = 20
-    let attr = attr_from_decl("padding", "10px 20px");
+    // `padding: 10ch 20ch;` → top/bottom = 10, left/right = 20
+    let attr = attr_from_decl("padding", "10ch 20ch");
     assert_eq!(
         attr.get_padding(
             80,
@@ -1596,8 +1598,8 @@ fn padding_shorthand_two_values_vertical_horizontal() {
 
 #[test]
 fn padding_shorthand_three_values_top_horizontal_bottom() {
-    // `padding: 1px 2px 3px;` → top=1, left/right=2, bottom=3
-    let attr = attr_from_decl("padding", "1px 2px 3px");
+    // `padding: 1ch 2ch 3ch;` → top=1, left/right=2, bottom=3
+    let attr = attr_from_decl("padding", "1ch 2ch 3ch");
     assert_eq!(
         attr.get_padding(
             80,
@@ -1610,8 +1612,8 @@ fn padding_shorthand_three_values_top_horizontal_bottom() {
 
 #[test]
 fn padding_shorthand_four_values_clockwise() {
-    // `padding: 1px 2px 3px 4px;` → top=1, right=2, bottom=3, left=4
-    let attr = attr_from_decl("padding", "1px 2px 3px 4px");
+    // `padding: 1ch 2ch 3ch 4ch;` → top=1, right=2, bottom=3, left=4
+    let attr = attr_from_decl("padding", "1ch 2ch 3ch 4ch");
     assert_eq!(
         attr.get_padding(
             80,
@@ -1624,10 +1626,10 @@ fn padding_shorthand_four_values_clockwise() {
 
 #[test]
 fn padding_longhands_override_shorthand() {
-    // `padding: 0; padding-top: 7px;` → top=7, others=0
+    // `padding: 0; padding-top: 7ch;` → top=7, others=0
     let mut decls = IndexMap::new();
     decls.insert("padding".into(), "0".into());
-    decls.insert("padding-top".into(), "7px".into());
+    decls.insert("padding-top".into(), "7ch".into());
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));
     assert_eq!(
@@ -1666,7 +1668,7 @@ fn padding_supports_percent_and_em() {
 
 #[test]
 fn margin_shorthand_mirrors_padding() {
-    let attr = attr_from_decl("margin", "2px 4px");
+    let attr = attr_from_decl("margin", "2ch 4ch");
     assert_eq!(
         attr.get_margin(
             80,
@@ -1675,7 +1677,7 @@ fn margin_shorthand_mirrors_padding() {
         ),
         EdgeSizes::new(2, 4, 2, 4)
     );
-    let attr = attr_from_decl("margin-left", "6px");
+    let attr = attr_from_decl("margin-left", "6ch");
     assert_eq!(
         attr.get_margin(
             80,
@@ -1703,7 +1705,7 @@ fn margin_auto_collapses_to_zero() {
 
 #[test]
 fn border_shorthand_solid_parses_width_and_style() {
-    let attr = attr_from_decl("border", "1px solid red");
+    let attr = attr_from_decl("border", "1ch solid red");
     let sides = attr.get_border(
         80,
         font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
@@ -1726,9 +1728,9 @@ fn border_shorthand_solid_parses_width_and_style() {
 
 #[test]
 fn border_shorthand_parses_functional_colors() {
-    // `border: 1px solid rgb(255, 0, 0)` — the parenthesised color must stay
+    // `border: 1ch solid rgb(255, 0, 0)` — the parenthesised color must stay
     // one token through the shorthand's whitespace split.
-    let attr = attr_from_decl("border", "1px solid rgb(255, 0, 0)");
+    let attr = attr_from_decl("border", "1ch solid rgb(255, 0, 0)");
     let sides = attr.get_border(
         80,
         font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
@@ -1742,7 +1744,7 @@ fn border_shorthand_parses_functional_colors() {
     assert_eq!(sides.top.style, BorderStyle::Solid);
 
     // Space-syntax hsl() with internal spaces also works.
-    let attr = attr_from_decl("border", "2px solid hsl(120 100% 50%)");
+    let attr = attr_from_decl("border", "2ch solid hsl(120 100% 50%)");
     let sides = attr.get_border(
         80,
         font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
@@ -1772,11 +1774,11 @@ fn border_shorthand_style_alone_applies_to_all_sides() {
 
 #[test]
 fn border_longhand_overrides_universal_shorthand() {
-    // `border: 1px solid red; border-top: 3px solid blue;` — top wins, others
+    // `border: 1ch solid red; border-top: 3ch solid blue;` — top wins, others
     // come from the shorthand.
     let mut decls = IndexMap::new();
-    decls.insert("border".into(), "1px solid red".into());
-    decls.insert("border-top".into(), "3px solid blue".into());
+    decls.insert("border".into(), "1ch solid red".into());
+    decls.insert("border-top".into(), "3ch solid blue".into());
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));
     let sides = attr.get_border(
@@ -1806,10 +1808,10 @@ fn border_longhand_overrides_universal_shorthand() {
 
 #[test]
 fn border_universal_width_style_color_layers_correctly() {
-    // `border-width: 2px; border-style: solid; border-color: green;`
-    // should produce a green 2px border on every side.
+    // `border-width: 2ch; border-style: solid; border-color: green;`
+    // should produce a green 2ch border on every side.
     let mut decls = IndexMap::new();
-    decls.insert("border-width".into(), "2px".into());
+    decls.insert("border-width".into(), "2ch".into());
     decls.insert("border-style".into(), "solid".into());
     decls.insert("border-color".into(), "green".into());
     let mut attr = CssAttr::new();
@@ -1846,7 +1848,7 @@ fn border_style_none_hides_the_border() {
 fn border_unknown_style_falls_back_to_solid() {
     // `dashed`, `dotted`, `double` etc. all render as solid in the terminal.
     for keyword in ["dashed", "dotted", "double", "groove"] {
-        let attr = attr_from_decl("border", &format!("1px {keyword} red"));
+        let attr = attr_from_decl("border", &format!("1ch {keyword} red"));
         let sides = attr.get_border(
             80,
             font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
@@ -1863,9 +1865,9 @@ fn border_unknown_style_falls_back_to_solid() {
 #[test]
 fn get_box_edges_returns_combined_padding_border_margin() {
     let mut decls = IndexMap::new();
-    decls.insert("padding".into(), "2px".into());
-    decls.insert("margin".into(), "4px".into());
-    decls.insert("border".into(), "1px solid red".into());
+    decls.insert("padding".into(), "2ch".into());
+    decls.insert("margin".into(), "4ch".into());
+    decls.insert("border".into(), "1ch solid red".into());
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));
     let edges = attr.get_box_edges(
@@ -2062,7 +2064,7 @@ fn box_sizing_is_supported() {
 fn border_radius_parses_one_to_four_values() {
     init();
     // One value -> every corner.
-    let attr = attr_from_decl("border-radius", "2px");
+    let attr = attr_from_decl("border-radius", "2ch");
     let r = attr.get_border_radius(80, default_font_ctx(), viewport());
     assert_eq!(
         r,
@@ -2074,7 +2076,7 @@ fn border_radius_parses_one_to_four_values() {
         }
     );
     // Two values -> diagonal pairs.
-    let attr = attr_from_decl("border-radius", "4px 1px");
+    let attr = attr_from_decl("border-radius", "4ch 1ch");
     let r = attr.get_border_radius(80, default_font_ctx(), viewport());
     assert_eq!(
         r,
@@ -2086,7 +2088,7 @@ fn border_radius_parses_one_to_four_values() {
         }
     );
     // Four values -> clockwise order.
-    let attr = attr_from_decl("border-radius", "1px 2px 3px 4px");
+    let attr = attr_from_decl("border-radius", "1ch 2ch 3ch 4ch");
     let r = attr.get_border_radius(80, default_font_ctx(), viewport());
     assert_eq!(
         r,
@@ -2113,11 +2115,11 @@ fn border_radius_is_supported() {
 #[test]
 fn border_radius_corner_longhands_override_shorthand() {
     init();
-    // `border-radius: 2px` then `border-top-left-radius: 5px` — the longhand
+    // `border-radius: 2ch` then `border-top-left-radius: 5ch` — the longhand
     // wins on that corner, the others keep the shorthand value.
     let mut decls = IndexMap::new();
-    decls.insert("border-radius".into(), "2px".into());
-    decls.insert("border-top-left-radius".into(), "5px".into());
+    decls.insert("border-radius".into(), "2ch".into());
+    decls.insert("border-top-left-radius".into(), "5ch".into());
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));
     assert_eq!(
@@ -2135,7 +2137,7 @@ fn border_radius_corner_longhands_override_shorthand() {
 fn border_radius_corner_longhand_alone() {
     init();
     // Only the longhand declared — the other corners stay square.
-    let attr = attr_from_decl("border-top-right-radius", "3px");
+    let attr = attr_from_decl("border-top-right-radius", "3ch");
     assert_eq!(
         attr.get_border_radius(80, default_font_ctx(), viewport()),
         CornerRadii {
@@ -2170,9 +2172,9 @@ fn border_side_component_longhand_overrides_side_shorthand() {
     // 5px;` — the component longhand overrides just the width of the side
     // shorthand; style / color stay from `border-top`.
     let mut decls = IndexMap::new();
-    decls.insert("border".into(), "1px solid red".into());
-    decls.insert("border-top".into(), "3px solid blue".into());
-    decls.insert("border-top-width".into(), "5px".into());
+    decls.insert("border".into(), "1ch solid red".into());
+    decls.insert("border-top".into(), "3ch solid blue".into());
+    decls.insert("border-top-width".into(), "5ch".into());
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));
     let sides = attr.get_border(
@@ -2273,9 +2275,9 @@ fn margin_auto_flags_parse_from_shorthand_and_longhand() {
 fn min_max_size_getters_resolve_and_default_to_none() {
     init();
     let mut decls = IndexMap::new();
-    decls.insert("min-width".into(), "10px".into());
-    decls.insert("max-width".into(), "40px".into());
-    decls.insert("min-height".into(), "3px".into());
+    decls.insert("min-width".into(), "10ch".into());
+    decls.insert("max-width".into(), "40ch".into());
+    decls.insert("min-height".into(), "3ch".into());
     decls.insert("max-height".into(), "none".into());
     let mut attr = CssAttr::new();
     attr.add(CssAttr(decls));

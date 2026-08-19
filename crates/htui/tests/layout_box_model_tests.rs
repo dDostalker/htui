@@ -69,7 +69,7 @@ fn padding_pushes_inline_content_inward() {
     // at row 2 (below 2 padding rows) and col 3 (after 3 padding cols).
     let (term_map, tl) = draw(
         "<div>Hi</div>",
-        "div { padding: 2px 3px; background-color: yellow; }",
+        "div { padding: 2ch 3ch; background-color: yellow; }",
     );
     let cols = term_map.columns as usize;
 
@@ -89,7 +89,7 @@ fn padding_expands_rect_vertically() {
     init();
     // An empty `<div>` with padding-top=4, padding-bottom=2 should still
     // own a border-box of `1 (own row) + 6 (padding)` = 7 rows.
-    let (_term_map, tl) = draw("<div></div>", "div { padding: 4px 0 2px 0; }");
+    let (_term_map, tl) = draw("<div></div>", "div { padding: 4ch 0 2ch 0; }");
 
     // No bg → no filled cells; we inspect `rendered_rows` which tracks the
     // deepest descendant's bottom row.
@@ -106,7 +106,7 @@ fn padding_background_fills_padding_box() {
     // Padding area carries the bg, not just the content row.
     let (term_map, tl) = draw(
         "<div>X</div>",
-        "div { padding: 3px; background-color: cyan; }",
+        "div { padding: 3ch; background-color: cyan; }",
     );
     let cols = term_map.columns as usize;
 
@@ -137,7 +137,7 @@ fn padding_shrinks_inner_containing_block() {
     // margin-top puts the text at row 3.
     let (term_map, tl) = draw(
         "<div><p>Inner</p></div>",
-        "div { padding-top: 2px; padding-left: 5px; }",
+        "div { padding-top: 2ch; padding-left: 5ch; }",
     );
     let cols = term_map.columns as usize;
     let text_idx = tl
@@ -157,7 +157,7 @@ fn padding_shrinks_inner_containing_block() {
 fn margin_left_shifts_box_horizontally() {
     init();
     // margin-left=4 should push the box 4 cols to the right.
-    let (term_map, tl) = draw("<div>X</div>", "div { margin-left: 4px; }");
+    let (term_map, tl) = draw("<div>X</div>", "div { margin-left: 4ch; }");
     let cols = term_map.columns as usize;
     let text_idx = tl
         .layout
@@ -173,7 +173,7 @@ fn margin_top_reserves_rows_above() {
     // Two paragraphs: each `margin-top` row must land above its own box.
     // First sits at row 3 (margin-top=3); Second sits at row 7
     // (= 3 + 1 own + 3 margin-top).
-    let (term_map, tl) = draw("<p>First</p><p>Second</p>", "p { margin-top: 3px; }");
+    let (term_map, tl) = draw("<p>First</p><p>Second</p>", "p { margin-top: 3ch; }");
     let cols = term_map.columns as usize;
     let first_idx = tl
         .layout
@@ -198,10 +198,10 @@ fn margin_top_reserves_rows_above() {
 #[test]
 fn margin_shorthand_two_values_applies_to_top_bottom_and_left_right() {
     init();
-    // `margin: 2px 8px` → top/bottom=2, left/right=8. Both X and Y carry
+    // `margin: 2ch 8ch` → top/bottom=2, left/right=8. Both X and Y carry
     // margin-top=2, so Y sits 1 own-row + the collapsed 2-row margin below
     // X (adjacent vertical margins merge to the larger — CSS collapsing).
-    let (term_map, tl) = draw("<p>X</p><p>Y</p>", "p { margin: 2px 8px; }");
+    let (term_map, tl) = draw("<p>X</p><p>Y</p>", "p { margin: 2ch 8ch; }");
     let cols = term_map.columns as usize;
     let x_idx = tl.layout.iter().position(|b| b.word == "X").unwrap();
     let y_idx = tl.layout.iter().position(|b| b.word == "Y").unwrap();
@@ -221,7 +221,7 @@ fn margin_auto_centers_block_horizontally() {
     // share the free space. 80-col canvas, width 20 → left = (80-20)/2 = 30.
     let (term_map, tl) = draw(
         "<div>X</div>",
-        "div { width: 20px; margin: 0 auto; background-color: yellow; }",
+        "div { width: 20ch; margin: 0 auto; background-color: yellow; }",
     );
     let cols = term_map.columns as usize;
     let text_idx = tl.layout.iter().position(|b| b.word == "X").unwrap();
@@ -237,7 +237,7 @@ fn margin_right_auto_pushes_box_to_the_left() {
     init();
     // `margin-right: auto` absorbs the whole remainder: the box stays flush
     // left with the free space on its right.
-    let (term_map, tl) = draw("<div>X</div>", "div { width: 20px; margin-right: auto; }");
+    let (term_map, tl) = draw("<div>X</div>", "div { width: 20ch; margin-right: auto; }");
     let cols = term_map.columns as usize;
     let text_idx = tl.layout.iter().position(|b| b.word == "X").unwrap();
     assert_eq!(text_idx % cols, 0, "left margin stays 0, auto right absorbs");
@@ -250,7 +250,7 @@ fn margin_left_auto_pushes_box_to_the_right() {
     // against the right edge of the containing block.
     let (term_map, tl) = draw(
         "<div>X</div>",
-        "div { width: 20px; margin-left: auto; background-color: yellow; }",
+        "div { width: 20ch; margin-left: auto; background-color: yellow; }",
     );
     let cols = term_map.columns as usize;
     let text_idx = tl.layout.iter().position(|b| b.word == "X").unwrap();
@@ -264,13 +264,13 @@ fn margin_left_auto_pushes_box_to_the_right() {
 #[test]
 fn border_side_component_longhand_renders() {
     init();
-    // `border-left-width: 3px; border-left-style: solid; border-left-color:
+    // `border-left-width: 3ch; border-left-style: solid; border-left-color:
     // green;` — the longhands alone must paint a left border edge. The
     // padding-top gives the box a second row so the edge isn't overwritten
     // by the corner glyph on row 0.
     let (_, tl) = draw(
         "<div></div>",
-        "div { width: 5px; padding-top: 1px; border-left-width: 3px; border-left-style: solid; border-left-color: green; }",
+        "div { width: 5ch; padding-top: 1ch; border-left-width: 3ch; border-left-style: solid; border-left-color: green; }",
     );
     // The left edge glyph renders as a vertical bar somewhere in the box.
     let edge = tl
@@ -294,11 +294,11 @@ fn border_side_component_longhand_renders() {
 #[test]
 fn border_component_longhand_overrides_side_shorthand_in_layout() {
     init();
-    // `border: 1px solid red; border-left-color: blue;` — the component
+    // `border: 1ch solid red; border-left-color: blue;` — the component
     // longhand overrides just the left color, others stay red.
     let (_, tl) = draw(
         "<div></div>",
-        "div { width: 5px; border: 1px solid red; border-left-color: blue; }",
+        "div { width: 5ch; border: 1ch solid red; border-left-color: blue; }",
     );
     let left_edge = tl
         .layout
@@ -352,7 +352,7 @@ fn border_draws_four_edges_with_corners() {
     // content(1) + padding-bottom(0) + border-bottom(1) = 4 rows.
     let (term_map, tl) = draw(
         "<div>X</div>",
-        "div { width: 5px; padding-top: 1px; border: 1px solid red; background-color: yellow; }",
+        "div { width: 5ch; padding-top: 1ch; border: 1ch solid red; background-color: yellow; }",
     );
     let cols = term_map.columns as usize;
 
@@ -407,11 +407,11 @@ fn border_draws_four_edges_with_corners() {
 #[test]
 fn border_color_overrides_text_color() {
     init();
-    // `border: 1px solid green;` paints the borders green even though the
+    // `border: 1ch solid green;` paints the borders green even though the
     // text color (if any) is unset.
     let (_, tl) = draw(
         "<div></div>",
-        "div { width: 5px; padding: 1px; border: 1px solid green; }",
+        "div { width: 5ch; padding: 1ch; border: 1ch solid green; }",
     );
     let border_cells: Vec<_> = tl
         .layout
@@ -435,11 +435,11 @@ fn border_color_overrides_text_color() {
 #[test]
 fn border_per_side_longhand_overrides_universal() {
     init();
-    // `border: 1px solid red; border-top: 2px solid blue;` — top edge blue,
+    // `border: 1ch solid red; border-top: 2ch solid blue;` — top edge blue,
     // others red. (Width > 1 still renders as 1 cell.)
     let (_, tl) = draw(
         "<div></div>",
-        "div { width: 5px; padding: 1px; border: 1px solid red; border-top: 2px solid blue; }",
+        "div { width: 5ch; padding: 1ch; border: 1ch solid red; border-top: 2ch solid blue; }",
     );
     let cols = 80;
     let top_color = tl.layout[0].fcolor;
@@ -461,7 +461,7 @@ fn border_style_none_hides_the_border() {
     init();
     let (_, tl) = draw(
         "<div></div>",
-        "div { width: 5px; padding: 1px; border-style: none; border-color: red; }",
+        "div { width: 5ch; padding: 1ch; border-style: none; border-color: red; }",
     );
     let has_border = tl.layout.iter().any(|b| {
         matches!(
@@ -484,7 +484,7 @@ fn border_wins_over_overflowing_content() {
     // painting over the border (the "出框" symptom in general form).
     let (term_map, tl) = draw(
         "<div>ABC</div>",
-        "div { width: 5px; border: 1px solid red; max-height: 2; }",
+        "div { width: 5ch; border: 1ch solid red; max-height: 2ch; }",
     );
     let cols = term_map.columns as usize;
     let rows: Vec<String> = tl
@@ -517,7 +517,7 @@ fn combined_padding_border_margin_size_correctly() {
     // padding=2 + border=1 on all sides; content sits in the inner box.
     let (term_map, tl) = draw(
         "<div>Hi</div>",
-        "div { width: 10px; padding: 2px; border: 1px solid red; margin: 3px; background-color: yellow; }",
+        "div { width: 10ch; padding: 2ch; border: 1ch solid red; margin: 3ch; background-color: yellow; }",
     );
     let cols = term_map.columns as usize;
 
@@ -572,7 +572,7 @@ fn margin_top_creates_visible_gap_between_siblings() {
     // Two `<div>`s; the second should land `margin-top` rows below the first.
     let (term_map, tl) = draw(
         "<div>A</div><div>B</div>",
-        "div { margin-top: 5px; background-color: yellow; }",
+        "div { margin-top: 5ch; background-color: yellow; }",
     );
     let cols = term_map.columns as usize;
 
@@ -598,7 +598,7 @@ fn box_sizing_content_box_adds_padding_and_border_to_width() {
         g: 255,
         b: 0,
     };
-    let css = "div { width: 10px; padding: 2px; border: 1px solid red; background-color: yellow; }";
+    let css = "div { width: 10ch; padding: 2ch; border: 1ch solid red; background-color: yellow; }";
 
     // Default (border-box): `width` is the full border-box, so the bg
     // (padding-box) covers cols 1..9 (10 minus the 1-col borders). Count the
@@ -612,11 +612,11 @@ fn box_sizing_content_box_adds_padding_and_border_to_width() {
         .count();
     assert_eq!(bg_count_row1, 8, "border-box width=10 -> 8 bg cells");
 
-    // `box-sizing: content-box`: the 10px width is the content box, so the
+    // `box-sizing: content-box`: the 10ch width is the content box, so the
     // border-box grows to 10 + 4 (padding) + 2 (border) = 16 -> 14 bg cells.
     let (_, tl) = draw(
         "<div>Hi</div>",
-        "div { width: 10px; padding: 2px; border: 1px solid red; background-color: yellow; box-sizing: content-box; }",
+        "div { width: 10ch; padding: 2ch; border: 1ch solid red; background-color: yellow; box-sizing: content-box; }",
     );
     let bg_count_row1 = tl.layout[cols..2 * cols]
         .iter()
@@ -632,11 +632,11 @@ fn box_sizing_content_box_adds_padding_and_border_to_width() {
 #[test]
 fn min_width_overrides_declared_width() {
     init();
-    // `min-width` floors the border-box width: 10px declared, 30px minimum
+    // `min-width` floors the border-box width: 10ch declared, 30ch minimum
     // -> the box spans 30 columns even though its content is narrow.
     let (term_map, tl) = draw(
         "<div>Hi</div>",
-        "div { width: 10px; min-width: 30px; background-color: yellow; }",
+        "div { width: 10ch; min-width: 30ch; background-color: yellow; }",
     );
     let cols = term_map.columns as usize;
     let yellow = Color::Rgb {
@@ -666,7 +666,7 @@ fn max_width_caps_auto_and_declared_width() {
     // it to 30 columns.
     let (term_map, tl) = draw(
         "<div>Hi</div>",
-        "div { max-width: 30px; background-color: yellow; }",
+        "div { max-width: 30ch; background-color: yellow; }",
     );
     let cols = term_map.columns as usize;
     let max_bg_col = tl.layout[0..cols]
@@ -681,7 +681,7 @@ fn max_width_caps_auto_and_declared_width() {
     // `max-width` also caps an explicit `width`.
     let (_, tl) = draw(
         "<div>Hi</div>",
-        "div { width: 60px; max-width: 30px; background-color: yellow; }",
+        "div { width: 60ch; max-width: 30ch; background-color: yellow; }",
     );
     let max_bg_col = tl.layout[0..cols]
         .iter()
@@ -704,7 +704,7 @@ fn min_height_expands_short_box() {
     // the border-box to 4 rows.
     let (term_map, tl) = draw(
         "<div>X</div>",
-        "div { min-height: 4px; background-color: yellow; }",
+        "div { min-height: 4ch; background-color: yellow; }",
     );
     let cols = term_map.columns as usize;
     let yellow = Color::Rgb {
@@ -736,7 +736,7 @@ fn border_radius_renders_rounded_corner_glyphs() {
     // row + top/bottom border).
     let (term_map, tl) = draw(
         "<div>X</div>",
-        "div { border: 1px solid red; border-radius: 2px; width: 6px; }",
+        "div { border: 1ch solid red; border-radius: 2ch; width: 6ch; }",
     );
     let cols = term_map.columns as usize;
     let word_at = |tl: &TermLayout, x: usize, y: usize| tl.layout[y * cols + x].word.clone();
@@ -746,7 +746,7 @@ fn border_radius_renders_rounded_corner_glyphs() {
     assert_eq!(word_at(&tl, 5, 2), "╯", "bottom-right corner");
 
     // Control: without `border-radius` the corners stay square.
-    let (_, tl) = draw("<div>X</div>", "div { border: 1px solid red; width: 6px; }");
+    let (_, tl) = draw("<div>X</div>", "div { border: 1ch solid red; width: 6ch; }");
     assert_eq!(word_at(&tl, 0, 0), "┌", "square corner without radius");
 }
 
@@ -763,7 +763,7 @@ fn css_height_fixes_the_frame_and_clips_text() {
     // the text when the two conflict on a small terminal.
     let (term_map, tl) = draw(
         r#"<div class="card">line one<br>line two<br>line three<br>line four<br>line five<br>line six</div>"#,
-        "body { margin: 0; } .card { height: 3; border: 1px solid red; }",
+        "body { margin: 0ch; } .card { height: 3ch; border: 1ch solid red; }",
     );
     let cols = term_map.columns as usize;
     let row_text = |y: usize| {

@@ -5,35 +5,35 @@
     <meta charset="UTF-8" />
     <title>htui Box Model Demo</title>
     <style>
-        body { color: white; font-family: monospace; line-height: 1; }
+        body { color: white; font-family: monospace; line-height: 1ch; }
 
         /* 1. Padding — background extends into the padding area */
         .pad {
             background-color: darkblue;
             color: yellow;
-            padding: 2px 4px;
+            padding: 2ch 4ch;
         }
 
         /* 2. Margin — gap reserved around the box */
         .gap {
             background-color: black;
-            margin: 1px 6px;
+            margin: 1ch 6ch;
         }
 
         /* 3. Border — box-drawing characters frame the box */
         .frame {
-            border: 1px solid cyan;
+            border: 1ch solid cyan;
             color: cyan;
-            padding: 1px 2px;
+            padding: 1ch 2ch;
         }
 
         /* 4. Mixed — card-like layout combining all three */
         .card {
-            border: 1px solid green;
+            border: 1ch solid green;
             background-color: grey;
             color: white;
-            padding: 1px 3px;
-            margin: 2px 4px;
+            padding: 1ch 3ch;
+            margin: 2ch 4ch;
         }
 
         .card-title { color: yellow; }
@@ -45,7 +45,7 @@
             margin: 0 auto;
             background-color: darkblue;
             color: yellow;
-            border: 1px solid cyan;
+            border: 1ch solid cyan;
         }
         .right-pushed {
             width: 20ch;
@@ -56,17 +56,17 @@
 
         /* 6. border-{side}-{prop} component longhands */
         .partial-border {
-            border: 1px solid cyan;
-            border-top-width: 3px;
+            border: 1ch solid cyan;
+            border-top-width: 3ch;
             border-top-color: yellow;
             border-left-color: magenta;
         }
 
         /* 7. border-radius per-corner longhands */
         .round-top {
-            border: 1px solid green;
-            border-top-left-radius: 3px;
-            border-top-right-radius: 3px;
+            border: 1ch solid green;
+            border-top-left-radius: 3ch;
+            border-top-right-radius: 3ch;
         }
     </style>
 </head>

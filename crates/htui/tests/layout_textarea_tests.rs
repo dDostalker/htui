@@ -572,7 +572,7 @@ fn wide_textarea_clamps_frame_to_canvas() {
     let html = r#"
       <style>
         .row { display: flex; }
-        textarea { width: 40; height: 3; flex-shrink: 0; }
+        textarea { width: 40ch; height: 3ch; flex-shrink: 0; }
       </style>
       <div class="row"><textarea>content</textarea></div>
       <p>below line</p>

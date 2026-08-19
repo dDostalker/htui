@@ -1,7 +1,7 @@
 //! `<blockquote>` tests — block-level extended quotation.
 //!
 //! The element carries browser UA default margins (`margin-block: 1em`,
-//! `margin-inline: 40px`) adapted to the terminal as 1 blank row above /
+//! `margin-inline: 40ch`) adapted to the terminal as 1 blank row above /
 //! below and 4 columns on each side. Any side the author overrides with an
 //! explicit `margin` declaration loses its UA default, mirroring the
 //! cascade priority of an author stylesheet over the UA stylesheet.
@@ -150,7 +150,7 @@ fn test_blockquote_author_margin_zero_removes_ua_defaults() {
     init();
     let (_, tl) = draw(
         "<blockquote>Quote</blockquote>",
-        "blockquote { margin: 0; }",
+        "blockquote { margin: 0ch; }",
     );
     let idx = tl
         .layout
@@ -168,7 +168,7 @@ fn test_blockquote_author_margin_left_override_drops_only_that_side() {
     // margin still shrinks the box width to 76.
     let (boxes, arena) = layout_boxes(
         "<blockquote>Quote</blockquote>",
-        "blockquote { margin-left: 0; }",
+        "blockquote { margin-left: 0ch; }",
     );
     let bq = find_box_by_type(&boxes, &NodeType::BlockQuote, &arena).expect("blockquote box");
     assert_eq!(bq.rect.x, 0, "left UA margin dropped");
@@ -236,7 +236,7 @@ fn test_blockquote_border_insets_content() {
     init();
     let (term_map, tl) = draw(
         "<blockquote>Quote</blockquote>",
-        "blockquote { border: 1px solid red; }",
+        "blockquote { border: 1ch solid red; }",
     );
     let cols = term_map.columns as usize;
     let idx = tl
@@ -248,7 +248,7 @@ fn test_blockquote_border_insets_content() {
     assert_eq!(idx % cols, 5, "content shifts past the 1-col border");
     let (boxes, arena) = layout_boxes(
         "<blockquote>Quote</blockquote>",
-        "blockquote { border: 1px solid red; }",
+        "blockquote { border: 1ch solid red; }",
     );
     let bq = find_box_by_type(&boxes, &NodeType::BlockQuote, &arena).expect("blockquote box");
     assert_eq!(bq.rect.height, 3, "content row + top/bottom borders");

@@ -3,7 +3,7 @@
 /* Make the open dialog read as a panel (the UA default border is 1 cell). */
 dialog {
   background-color: #1a1a1a;
-  width: 90px;
+  width: 90ch;
 }
 
 /* The close button inside a dialog gets a hover highlight. */

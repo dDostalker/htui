@@ -80,7 +80,7 @@ fn test_flex_wrap_reverse_stacks_lines_from_the_cross_end() {
         </div>
     "#;
     let css = r#"
-        .container { display: flex; flex-wrap: wrap-reverse; width: 6px; height: 5; align-content: flex-start; }
+        .container { display: flex; flex-wrap: wrap-reverse; width: 6ch; height: 5ch; align-content: flex-start; }
     "#;
     let (rows, _) = render_rows(html, css);
     assert!(
@@ -111,7 +111,7 @@ fn test_flex_align_items_baseline_aligns_first_text_rows() {
             <div class="b">B</div>
         </div>
     "#;
-    let css = ".container { display: flex; align-items: baseline; } .b { padding-top: 2; }";
+    let css = ".container { display: flex; align-items: baseline; } .b { padding-top: 2ch; }";
     let (rows, _) = render_rows(html, css);
     assert!(
         rows[2].starts_with("AB"),
@@ -134,7 +134,7 @@ fn test_flex_align_content_stretch_fills_the_container() {
         </div>
     "#;
     let css = r#"
-        .container { display: flex; flex-wrap: wrap; width: 6px; height: 7; align-content: stretch; }
+        .container { display: flex; flex-wrap: wrap; width: 6ch; height: 7ch; align-content: stretch; }
     "#;
     let (rows, _) = render_rows(html, css);
     assert!(rows[0].contains("AAAA"), "first line at the top: {:?}", rows[0]);
@@ -150,7 +150,7 @@ fn test_flex_shorthand_grow_and_full_form() {
     let html = r#"
         <div class="container"><div class="a">A</div><div class="b">B</div></div>
     "#;
-    let css = ".container { display: flex; width: 10px; } .a { flex: 1; } .b { flex: 1; }";
+    let css = ".container { display: flex; width: 10ch; } .a { flex: 1; } .b { flex: 1; }";
     let (rows, _) = render_rows(html, css);
     // `flex: 1` gives each item 5 of the 10 cells; the plain items render
     // their single glyph at their slot start.
@@ -162,7 +162,7 @@ fn test_flex_shorthand_grow_and_full_form() {
     let html = r#"
         <div class="container"><div class="a">A</div><div class="b">B</div></div>
     "#;
-    let css = ".container { display: flex; width: 30px; } .a { flex: 2 1 20px; } .b { flex: 1 1 10px; }";
+    let css = ".container { display: flex; width: 30ch; } .a { flex: 2 1 20ch; } .b { flex: 1 1 10ch; }";
     let (rows, _) = render_rows(html, css);
     assert_eq!(rows[0].chars().nth(0), Some('A'));
     assert_eq!(rows[0].chars().nth(20), Some('B'));
@@ -179,7 +179,7 @@ fn test_flex_flow_shorthand_sets_direction_and_wrap() {
             <div class="c">C</div><div class="d">D</div>
         </div>
     "#;
-    let css = ".container { display: flex; flex-flow: column wrap; width: 2px; height: 2px; }";
+    let css = ".container { display: flex; flex-flow: column wrap; width: 2ch; height: 2ch; }";
     let (rows, _) = render_rows(html, css);
     assert!(rows[0].starts_with("AC"), "column 0 = A, column 1 = C: {:?}", rows[0]);
     assert!(rows[1].starts_with("BD"), "column 0 = B, column 1 = D: {:?}", rows[1]);
@@ -254,7 +254,7 @@ fn test_flex_container_margin_auto_centers() {
     let html = r#"
         <div class="container"><div class="a">A</div></div>
     "#;
-    let css = ".container { display: flex; width: 20px; margin: 0 auto; }";
+    let css = ".container { display: flex; width: 20ch; margin: 0 auto; }";
     let (rows, _) = render_rows(html, css);
     assert!(
         rows[0].starts_with(&" ".repeat(30)),
@@ -415,7 +415,7 @@ fn test_place_content_single_value_applies_to_both_axes() {
             <div class="c">CCCC</div>
         </div>
     "#;
-    let css = ".container { display: flex; flex-wrap: wrap; width: 6px; height: 7; place-content: center; }";
+    let css = ".container { display: flex; flex-wrap: wrap; width: 6ch; height: 7ch; place-content: center; }";
     let (rows, _) = render_rows(html, css);
     assert!(
         rows[2].starts_with(" AAAA"),
@@ -438,7 +438,7 @@ fn test_place_content_two_values_set_both_axes() {
     let html = r#"
         <div class="container"><div class="a">A</div><div class="b">B</div></div>
     "#;
-    let css = ".container { display: flex; width: 10px; height: 5px; place-content: center space-between; }";
+    let css = ".container { display: flex; width: 10ch; height: 5ch; place-content: center space-between; }";
     let (rows, _) = render_rows(html, css);
     assert!(
         rows[0].starts_with("A        B"),
@@ -461,7 +461,7 @@ fn test_place_content_stretch_does_not_touch_justify() {
             <div class="c">CCCC</div>
         </div>
     "#;
-    let css = ".container { display: flex; flex-wrap: wrap; width: 6px; height: 7; place-content: stretch; }";
+    let css = ".container { display: flex; flex-wrap: wrap; width: 6ch; height: 7ch; place-content: stretch; }";
     let (rows, _) = render_rows(html, css);
     assert!(rows[0].starts_with("AAAA"), "stretched line 1, items left: {:?}", rows[0]);
     assert!(rows[2].starts_with("BBBB"), "stretched gap: {:?}", rows[2]);
@@ -475,7 +475,7 @@ fn test_justify_space_evenly_single_item_is_centered() {
     // holding a single alignment subject (the free space is split at both
     // ends), not a flush-to-the-end placement.
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
-    let css = ".container { display: flex; width: 10px; justify-content: space-evenly; }";
+    let css = ".container { display: flex; width: 10ch; justify-content: space-evenly; }";
     let (rows, _) = render_rows(html, css);
     assert!(
         rows[0].chars().nth(4) == Some('A'),
@@ -490,7 +490,7 @@ fn test_place_items_centers_on_the_cross_axis() {
     // `place-items: center` → `align-items: center`: the 1-row item floats to
     // the middle of the 5-row container.
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
-    let css = ".container { display: flex; height: 5px; place-items: center; }";
+    let css = ".container { display: flex; height: 5ch; place-items: center; }";
     let (rows, _) = render_rows(html, css);
     assert!(rows[2].starts_with("A"), "item centred on row 2: {:?}", rows[2]);
     assert!(rows[0].trim().is_empty() && rows[1].trim().is_empty());
@@ -502,7 +502,7 @@ fn test_place_items_two_values_syntax_checked() {
     // `place-items: center center` — the second value (`justify-items`) is
     // not rendered by this engine but must still be syntactically valid.
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
-    let css = ".container { display: flex; height: 5px; place-items: center center; }";
+    let css = ".container { display: flex; height: 5ch; place-items: center center; }";
     let (rows, _) = render_rows(html, css);
     assert!(rows[2].starts_with("A"), "item centred on row 2: {:?}", rows[2]);
 }
@@ -516,7 +516,7 @@ fn test_place_self_aligns_one_item() {
     let html = r#"
         <div class="container"><div class="a">A</div><div class="b">B</div></div>
     "#;
-    let css = ".container { display: flex; height: 5px; } .b { place-self: flex-end; }";
+    let css = ".container { display: flex; height: 5ch; } .b { place-self: flex-end; }";
     let (rows, _) = render_rows(html, css);
     assert!(rows[0].starts_with("A"), "stretched item A on the top row: {:?}", rows[0]);
     assert!(rows[4].contains("B"), "item B pinned to the bottom: {:?}", rows[4]);
@@ -526,14 +526,14 @@ fn test_place_self_aligns_one_item() {
 fn test_align_self_margin_box_pins_to_line_end() {
     init();
     // `align-self: flex-end` aligns the item's *margin-box* to the line end
-    // (browser semantics): with `margin: 1px`, B's 3-row margin-box hugs the
+    // (browser semantics): with `margin: 1ch`, B's 3-row margin-box hugs the
     // container bottom, so the content sits on row 7-1-1 = 5. Regression for
     // the bug where the leading margin was added on top of the alignment,
     // pushing B past the container edge.
     let html = r#"
         <div class="container"><div class="a">A</div><div class="b">B</div></div>
     "#;
-    let css = ".container { display: flex; height: 7px; } .b { margin: 1px; align-self: flex-end; }";
+    let css = ".container { display: flex; height: 7ch; } .b { margin: 1ch; align-self: flex-end; }";
     let (rows, _) = render_rows(html, css);
     assert!(
         rows[5].contains("B"),
@@ -553,7 +553,7 @@ fn test_place_shorthand_order_decides_winner() {
     // declaration wins regardless of shorthand / longhand form. A
     // `place-items` written *after* `align-items` therefore overrides it.
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
-    let css = ".container { display: flex; height: 5px; align-items: flex-start; place-items: center; }";
+    let css = ".container { display: flex; height: 5ch; align-items: flex-start; place-items: center; }";
     let (rows, _) = render_rows(html, css);
     assert!(
         rows[2].starts_with("A") && rows[0].trim().is_empty(),
@@ -562,7 +562,7 @@ fn test_place_shorthand_order_decides_winner() {
     );
 
     // The reverse order keeps the explicit longhand on top.
-    let css = ".container { display: flex; height: 5px; place-items: center; align-items: flex-start; }";
+    let css = ".container { display: flex; height: 5ch; place-items: center; align-items: flex-start; }";
     let (rows, _) = render_rows(html, css);
     assert!(rows[0].starts_with("A"), "later align-items wins: {:?}", rows[0]);
 }
@@ -574,7 +574,7 @@ fn test_place_shorthand_vs_longhand_across_rules() {
     // beats the earlier rule's shorthand (cascade order decides, not the
     // shorthand / longhand form).
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
-    let css = ".container { display: flex; height: 5px; place-items: center; }\n.container { align-items: flex-start; }";
+    let css = ".container { display: flex; height: 5ch; place-items: center; }\n.container { align-items: flex-start; }";
     let (rows, _) = render_rows(html, css);
     assert!(rows[0].starts_with("A"), "later rule's longhand wins: {:?}", rows);
 }
@@ -586,7 +586,7 @@ fn test_place_shorthand_survives_invalid_longhand() {
     // error), so an earlier `place-items` still applies instead of being
     // overridden by the garbage value.
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
-    let css = ".container { display: flex; height: 5px; place-items: center; align-items: garbage; }";
+    let css = ".container { display: flex; height: 5ch; place-items: center; align-items: garbage; }";
     let (rows, _) = render_rows(html, css);
     assert!(rows[2].starts_with("A"), "invalid longhand dropped: {:?}", rows);
 }
@@ -597,12 +597,12 @@ fn test_justify_content_left_right_keywords() {
     // `left` / `right` are valid justify-content keywords; in LTR they map
     // to flex-start / flex-end.
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
-    let css = ".container { display: flex; width: 10px; justify-content: right; }";
+    let css = ".container { display: flex; width: 10ch; justify-content: right; }";
     let (rows, _) = render_rows(html, css);
     assert_eq!(rows[0].chars().nth(9), Some('A'), "right packs to the edge: {:?}", rows[0]);
 
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
-    let css = ".container { display: flex; width: 10px; justify-content: left; }";
+    let css = ".container { display: flex; width: 10ch; justify-content: left; }";
     let (rows, _) = render_rows(html, css);
     assert_eq!(rows[0].chars().nth(0), Some('A'), "left packs to the start: {:?}", rows[0]);
 }
@@ -615,7 +615,7 @@ fn test_align_self_start_end_keywords() {
     let html = r#"
         <div class="container"><div class="a">A</div><div class="b">B</div></div>
     "#;
-    let css = ".container { display: flex; height: 5px; } .b { align-self: self-end; }";
+    let css = ".container { display: flex; height: 5ch; } .b { align-self: self-end; }";
     let (rows, _) = render_rows(html, css);
     assert!(rows[0].starts_with("A"), "stretched item A on the top row: {:?}", rows[0]);
     assert!(rows[4].contains("B"), "item B pinned to the bottom: {:?}", rows[4]);
@@ -634,7 +634,7 @@ fn test_flex_wrap_counts_item_margins() {
     let html = r#"
         <div class="container"><div class="a">AAAA</div><div class="b">BBBB</div></div>
     "#;
-    let css = ".container { display: flex; flex-wrap: wrap; width: 10px; } .a, .b { margin: 1px; }";
+    let css = ".container { display: flex; flex-wrap: wrap; width: 10ch; } .a, .b { margin: 1ch; }";
     let (rows, _) = render_rows(html, css);
     // Line 1: the first item's margin-box (row 0 margin-top, row 1 content,
     // row 2 margin-bottom). Line 2 starts at row 3, so the second item's
@@ -656,7 +656,7 @@ fn test_flex_item_margin_box_sizes_the_line() {
     // fills the margin-box, so the item's own box is 1 row tall; the rows
     // above / below show through as blank (the container has no bg).
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
-    let css = ".container { display: flex; } .a { margin: 1px; background-color: yellow; }";
+    let css = ".container { display: flex; } .a { margin: 1ch; background-color: yellow; }";
     let (rows, _tl) = render_rows(html, css);
     assert!(
         rows[0].trim().is_empty(),
@@ -823,7 +823,7 @@ fn test_flex_gap_separates_items_in_row() {
         </div>
     "#;
     let css = r#"
-        .container { display: flex; gap: 2; }
+        .container { display: flex; gap: 2ch; }
         .a, .b { background-color: red; }
     "#;
     let (rows, _) = render_rows(html, css);
@@ -871,7 +871,7 @@ fn test_flex_wrap_moves_overflow_items_to_next_line() {
         </div>
     "#;
     let css = r#"
-        .container { display: flex; flex-wrap: wrap; width: 12px; }
+        .container { display: flex; flex-wrap: wrap; width: 12ch; }
         .a, .b { background-color: red; flex-shrink: 0; }
     "#;
     let (rows, _) = render_rows(html, css);
@@ -898,7 +898,7 @@ fn test_flex_align_items_stretch_with_explicit_height() {
         </div>
     "#;
     let css = r#"
-        .container { display: flex; height: 3; }
+        .container { display: flex; height: 3ch; }
         .a { background-color: red; }
     "#;
     let (rows, _) = render_rows(html, css);
@@ -1037,7 +1037,7 @@ fn test_flex_basis_auto_uses_text_width() {
 #[test]
 fn test_flex_basis_explicit_resolves_against_main_axis() {
     init();
-    // `flex-basis: 10px` on every item should make each item 10 cells
+    // `flex-basis: 10ch` on every item should make each item 10 cells
     // wide, regardless of the natural text content.
     let html = r#"
         <div class="container">
@@ -1047,7 +1047,7 @@ fn test_flex_basis_explicit_resolves_against_main_axis() {
     "#;
     let css = r#"
         .container { display: flex; }
-        .a, .b { background-color: red; flex-basis: 10px; }
+        .a, .b { background-color: red; flex-basis: 10ch; }
     "#;
     let (rows, _) = render_rows(html, css);
     let line0 = &rows[0];
@@ -1189,7 +1189,7 @@ fn test_flex_align_self_overrides_align_items() {
         </div>
     "#;
     let css = r#"
-        .container { display: flex; height: 5; }
+        .container { display: flex; height: 5ch; }
         .top { align-self: flex-start; }
         .bot { align-self: flex-end; }
     "#;
@@ -1222,7 +1222,7 @@ fn test_flex_justify_space_evenly_distributes_equally() {
         </div>
     "#;
     let css = r#"
-        .container { display: flex; width: 10px; justify-content: space-evenly; }
+        .container { display: flex; width: 10ch; justify-content: space-evenly; }
     "#;
     let (rows, _) = render_rows(html, css);
     // Container width 10 is clamped at the term width (80) so the rows
@@ -1241,7 +1241,7 @@ fn test_flex_justify_space_evenly_distributes_equally() {
 #[test]
 fn test_flex_shrink_redistributes_overflow_proportionally() {
     init();
-    // 3 items each with `flex-basis: 4px` in a 10-cell container.
+    // 3 items each with `flex-basis: 4ch` in a 10-cell container.
     // Total basis = 12, overflow = 2. The first and last items have
     // `flex-shrink: 0` (they stay fixed at 4), so the middle item
     // absorbs the entire 2-cell overflow and shrinks to 2 cells.
@@ -1253,8 +1253,8 @@ fn test_flex_shrink_redistributes_overflow_proportionally() {
         </div>
     "#;
     let css = r#"
-        .container { display: flex; width: 10px; }
-        .a, .b, .c { flex-basis: 4px; }
+        .container { display: flex; width: 10ch; }
+        .a, .b, .c { flex-basis: 4ch; }
         .a { flex-shrink: 0; }
         .b { flex-shrink: 1; }
         .c { flex-shrink: 0; }
@@ -1289,7 +1289,7 @@ fn test_flex_align_content_center_centers_lines() {
         </div>
     "#;
     let css = r#"
-        .container { display: flex; flex-wrap: wrap; width: 12px; height: 7; align-content: center; }
+        .container { display: flex; flex-wrap: wrap; width: 12ch; height: 7ch; align-content: center; }
         .a, .b, .c { flex-shrink: 0; }
     "#;
     let (rows, _) = render_rows(html, css);
@@ -1591,7 +1591,7 @@ fn test_flex_justify_space_around_distributes_with_edge_halves() {
         </div>
     "#;
     let css = r#"
-        .container { display: flex; width: 7px; justify-content: space-around; }
+        .container { display: flex; width: 7ch; justify-content: space-around; }
     "#;
     let (rows, _) = render_rows(html, css);
     let line0 = &rows[0];
@@ -1616,7 +1616,7 @@ fn test_flex_align_content_space_around_distributes_with_edge_halves() {
         </div>
     "#;
     let css = r#"
-        .container { display: flex; flex-wrap: wrap; width: 12px; height: 7; align-content: space-around; }
+        .container { display: flex; flex-wrap: wrap; width: 12ch; height: 7ch; align-content: space-around; }
         .a, .b, .c { flex-shrink: 0; }
     "#;
     let (rows, _) = render_rows(html, css);
@@ -1750,7 +1750,7 @@ fn test_flex_overflow_is_clipped_not_wrapped_on_small_terminals() {
     "#;
     let css = r#"
         .container { display: flex; }
-        .a, .b { flex-basis: 60px; flex-shrink: 0; }
+        .a, .b { flex-basis: 60ch; flex-shrink: 0; }
     "#;
     let (root_id, arena) = setup(html, css);
     let map = TermMap {
@@ -1809,8 +1809,8 @@ fn test_flex_column_keeps_items_at_min_content_when_viewport_is_small() {
         </div>
     "#;
     let css = r#"
-        .app { display: flex; flex-direction: column; height: 2; }
-        .card { border: 1px solid white; }
+        .app { display: flex; flex-direction: column; height: 2ch; }
+        .card { border: 1ch solid white; }
     "#;
     let (rows, _) = render_rows(html, css);
     let label_row = rows
@@ -1853,7 +1853,7 @@ fn test_flex_item_content_clipped_to_allocated_rect() {
         <div class="after">AFTER</div>
     "#;
     let css = r#"
-        .row { display: flex; height: 1; }
+        .row { display: flex; height: 1ch; }
         .tall { flex-shrink: 0; }
     "#;
     let (rows, _) = render_rows(html, css);
@@ -1891,7 +1891,7 @@ fn test_flex_container_max_width_caps_fill() {
         </div>
     "#;
     let css = r#"
-        .container { display: flex; max-width: 30px; background-color: yellow; }
+        .container { display: flex; max-width: 30ch; background-color: yellow; }
     "#;
     let (rows, tl) = render_rows(html, css);
     let cols = COLS as usize;
@@ -1918,7 +1918,7 @@ fn test_flex_container_max_width_caps_fill() {
 fn test_flex_item_max_width_caps_grow() {
     init();
     // Two growing items in a 40-cell container split it evenly (20 each).
-    // `.a { max-width: 5px }` caps A's grown size at 5, so B starts at
+    // `.a { max-width: 5ch }` caps A's grown size at 5, so B starts at
     // column 5 instead of column 20.
     let html = r#"
         <div class="container">
@@ -1927,8 +1927,8 @@ fn test_flex_item_max_width_caps_grow() {
         </div>
     "#;
     let css = r#"
-        .container { display: flex; width: 40px; }
-        .a { flex-grow: 1; max-width: 5px; }
+        .container { display: flex; width: 40ch; }
+        .a { flex-grow: 1; max-width: 5ch; }
         .b { flex-grow: 1; }
     "#;
     let (rows, _) = render_rows(html, css);
@@ -1943,7 +1943,7 @@ fn test_flex_item_max_width_caps_grow() {
 fn test_flex_item_min_width_prevents_shrink_below_floor() {
     init();
     // Two 10-cell items in a 24-cell container: without constraints the
-    // line exactly fills the container (10 + 10). `.a { min-width: 14px }`
+    // line exactly fills the container (10 + 10). `.a { min-width: 14ch }`
     // floors A's size at 14, pushing B to column 14 — the line still fits
     // inside the container (14 + 10 = 24), so nothing is clipped.
     let html = r#"
@@ -1953,9 +1953,9 @@ fn test_flex_item_min_width_prevents_shrink_below_floor() {
         </div>
     "#;
     let css = r#"
-        .container { display: flex; width: 24px; }
-        .a { flex-basis: 10px; min-width: 14px; }
-        .b { flex-basis: 10px; }
+        .container { display: flex; width: 24ch; }
+        .a { flex-basis: 10ch; min-width: 14ch; }
+        .b { flex-basis: 10ch; }
     "#;
     let (rows, _) = render_rows(html, css);
     let line0 = &rows[0];
@@ -1985,8 +1985,8 @@ fn test_flex_item_content_taller_than_container_height_is_not_clipped() {
         </div>
     "#;
     let css = r#"
-        .container { display: flex; height: 4; align-items: center; justify-content: center; }
-        .item { width: 20; border: 1px solid #888; }
+        .container { display: flex; height: 4ch; align-items: center; justify-content: center; }
+        .item { width: 20ch; border: 1ch solid #888; }
     "#;
     let (rows, _) = render_rows(html, css);
     let head = rows
@@ -2034,8 +2034,8 @@ fn test_flex_row_line_grows_when_item_content_wraps() {
         </div>
     "#;
     let css = r#"
-        .row { display: flex; gap: 2; }
-        .card { border: 1px solid red; padding: 1px 2px; }
+        .row { display: flex; gap: 2ch; }
+        .card { border: 1ch solid red; padding: 1ch 2ch; }
     "#;
     let (root_id, arena) = setup(html, css);
     let map = TermMap {
@@ -2093,7 +2093,7 @@ fn tall_column_flex_keeps_items_within_container_width() {
         html.push_str(&format!(r#"<div class="row">row {i} content</div>"#));
     }
     html.push_str(r#"</div>"#);
-    let css = "body { margin: 0; } .app { display: flex; flex-direction: column; } .row { display: flex; }";
+    let css = "body { margin: 0ch; } .app { display: flex; flex-direction: column; } .row { display: flex; }";
     let (root_id, arena) = setup(&html, css);
     let map = TermMap {
         columns: 30,

@@ -2,32 +2,32 @@
 <html>
 <head>
 <style>
-  body { margin: 0; }
+  body { margin: 0ch; }
 
   /* Layout helpers — used by both text inputs and JS-built controls. */
   .card {
-    width: 76;
-    padding: 1;
-    margin: 1;
+    width: 76ch;
+    padding: 1ch;
+    margin: 1ch;
   }
-  .row { display: flex; gap: 1; margin: 1; }
-  .label { width: 12; }
-  .preview { padding: 1; white-space: pre-line; }
+  .row { display: flex; gap: 1ch; margin: 1ch; }
+  .label { width: 12ch; }
+  .preview { padding: 1ch; white-space: pre-line; }
 
   /* Click-to-select option (no native <select>; hover / selected states
      demonstrate :hover-driven cascade + class flipping via JS). */
-  .opt { padding-left: 1; padding-right: 1; }
+  .opt { padding-left: 1ch; padding-right: 1ch; }
   .opt:hover { background-color: #28304d; }
   .opt.sel   { background-color: #3b4261; }
 
   /* Toggle switch: ON / OFF states distinguished only by class — text
      labels ([ ON ] / [ OFF ]) and the ON accent are the visible state. */
-  .toggle { width: 9; text-align: center; }
+  .toggle { width: 9ch; text-align: center; }
   .toggle.on  { background-color: #2ac3de; color: #1a1b26; }
   .toggle.off { background-color: #24283b; color: #7aa2f7; }
 
   /* Buttons — bordered so they read as tappable; hover lights up. */
-  .btn        { padding-left: 1; padding-right: 1; border: 1px solid #7aa2f7; color: #7aa2f7; }
+  .btn        { padding-left: 1ch; padding-right: 1ch; border: 1ch solid #7aa2f7; color: #7aa2f7; }
   .btn:hover  { background-color: #28304d; }
 </style>
 </head>

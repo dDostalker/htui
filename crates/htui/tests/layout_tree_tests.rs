@@ -127,12 +127,12 @@ fn nested_paragraph_shares_aside_row_with_bg() {
 
 #[test]
 fn nested_paragraph_uses_parent_containing_block_for_text_align() {
-    // When <aside width: 40px> contains <p> with inherited `text-align: center`,
+    // When <aside width: 40ch> contains <p> with inherited `text-align: center`,
     // the paragraph's text must be centered within the *aside* (40 cols), not
     // within the terminal (80 cols). Browser-like geometry: aside sits flush
     // left at col 0, so the paragraph text should sit at col 0 + (40 - text_w) / 2.
     let html = "<aside><p>Centered</p></aside>";
-    let css = "aside { width: 40px; background-color: darkblue; text-align: center; }";
+    let css = "aside { width: 40ch; background-color: darkblue; text-align: center; }";
     let (root_id, arena) = setup(html, css);
     let term_map = mock_term_map();
     let cols = term_map.columns as usize;
@@ -190,7 +190,7 @@ fn layout_box_rect_is_deterministic() {
 
     let (root_id, arena) = setup(
         "<div>A</div><div>B</div><div>C</div>",
-        "div { width: 20px; background-color: red; }",
+        "div { width: 20ch; background-color: red; }",
     );
     let containing = BoxConstraint::root(&mock_term_map());
     let mut c1 = Cursor::new();

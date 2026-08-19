@@ -316,7 +316,7 @@ fn region_repaint_clears_stale_cells_of_a_shorter_value() {
     // A fixed-width box whose value shrinks: the trailing cells must be
     // blanked (they were cleared with the region), not keep the old glyphs.
     let html = concat!(
-        "<style>p { width: 20px; background-color: yellow }</style>",
+        "<style>p { width: 20ch; background-color: yellow }</style>",
         "<p id=\"a\">longvalue</p>"
     );
     let (root_id, mut arena) = setup(html);
@@ -686,7 +686,7 @@ fn selection_highlight_keeps_plain_highlight_on_default_bg() {
 fn selection_reapply_after_full_repaint_keeps_single_blend() {
     let html = r#"
       <style>
-        .prog { display: flex; height: 1; }
+        .prog { display: flex; height: 1ch; }
         .fill { background-color: #bb9af7; }
         .rest { background-color: #2f334d; }
       </style>

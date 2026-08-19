@@ -29,7 +29,7 @@
     <style>
         /* ---------- palette (Tokyo Night inspired) ---------- */
         body {
-            margin: 0;
+            margin: 0ch;
             background-color: #1a1b26;
             color: #c0caf5;
         }
@@ -53,51 +53,51 @@
         .col    { display: flex; flex-direction: column; }
         .grow   { flex-grow: 1; }
         .ta-r   { text-align: right; }
-        .gap-1  { gap: 1; }
-        .gap-2  { gap: 2; }
-        .pad-x1 { padding: 0px 1px; }
-        .pad-x2 { padding: 0px 2px; }
-        .mar-t1 { margin: 1px 0 0 0; }
+        .gap-1  { gap: 1ch; }
+        .gap-2  { gap: 2ch; }
+        .pad-x1 { padding: 0ch 1ch; }
+        .pad-x2 { padding: 0ch 2ch; }
+        .mar-t1 { margin: 1ch 0 0 0; }
 
         /* ---------- header ---------- */
         header.app-header {
             color: #c0caf5;
             background-color: #1f2335;
-            padding: 0px 2px;
+            padding: 0ch 2ch;
         }
         .brand-mark { color: #7dcfff; font-weight: bold; }
 
         /* ---------- sidebar ---------- */
         .sidebar {
-            width: 17;
+            width: 17ch;
             flex-shrink: 0;
             background-color: #1f2335;
-            padding: 1px 0;
+            padding: 1ch 0;
         }
-        .nav-item    { color: #737aa2; padding: 0px 1px; }
-        .nav-active  { color: #7aa2f7; background-color: #2f334d; padding: 0px 1px; font-weight: bold; }
-        .nav-section { color: #565f89; padding: 1px 1px 0px 1px; }
+        .nav-item    { color: #737aa2; padding: 0ch 1ch; }
+        .nav-active  { color: #7aa2f7; background-color: #2f334d; padding: 0ch 1ch; font-weight: bold; }
+        .nav-section { color: #565f89; padding: 1ch 1ch 0ch 1ch; }
 
         /* ---------- cards / panels ---------- */
         .panel {
-            border: 1px solid #2f334d;
+            border: 1ch solid #2f334d;
             background-color: #24283b;
         }
         .panel-head {
             color: #7dcfff;
             background-color: #2f334d;
-            padding: 0px 2px;
+            padding: 0ch 2ch;
             font-weight: bold;
         }
         .stat-card {
-            border: 1px solid #2f334d;
+            border: 1ch solid #2f334d;
             background-color: #24283b;
-            padding: 1px 2px;
+            padding: 1ch 2ch;
         }
         .card-value { color: #7dcfff; font-weight: bold; }
 
         /* ---------- progress bars ---------- */
-        .bar { display: flex; height: 1; }
+        .bar { display: flex; height: 1ch; }
         .bar-fill   { background-color: #9ece6a; }
         .bar-empty  { background-color: #2f334d; }
         .bar-fill-y { background-color: #e0af68; }
@@ -107,16 +107,16 @@
 
         /* ---------- faux table columns ---------- */
         .tbl-head { color: #7dcfff; background-color: #2f334d; }
-        .c-pid   { flex-basis: 6; flex-shrink: 0; }
-        .c-cpu   { flex-basis: 6; flex-shrink: 0; }
-        .c-mem   { flex-basis: 6; flex-shrink: 0; }
+        .c-pid   { flex-basis: 6ch; flex-shrink: 0; }
+        .c-cpu   { flex-basis: 6ch; flex-shrink: 0; }
+        .c-mem   { flex-basis: 6ch; flex-shrink: 0; }
         .stripe  { background-color: #2a2e44; }
 
         /* ---------- footer ---------- */
         footer.app-footer {
             color: #737aa2;
             background-color: #1f2335;
-            padding: 0px 2px;
+            padding: 0ch 2ch;
         }
     </style>
 </head>
@@ -148,7 +148,7 @@
             </div>
 
             <!-- ---------- MAIN (flex column: sections stack, panels row grows) ---------- -->
-            <div class="col grow gap-1" style="padding: 1px 2px;">
+            <div class="col grow gap-1" style="padding: 1ch 2ch;">
 
                 <!-- page title -->
                 <div class="row">
@@ -238,7 +238,7 @@
                     <!-- right: volume + services (panel = normal block, sections stack in flow) -->
                     <div class="panel grow">
                         <div class="panel-head">Volume Usage</div>
-                        <div class="col gap-1 pad-x2" style="padding: 1px 2px;">
+                        <div class="col gap-1 pad-x2" style="padding: 1ch 2ch;">
                             <div class="row">
                                 <div class="grow">/var/data</div>
                                 <div class="small">78%</div>
@@ -274,7 +274,7 @@
                         </div>
 
                         <div class="panel-head">Services</div>
-                        <div class="col gap-1" style="padding: 1px 2px;">
+                        <div class="col gap-1" style="padding: 1ch 2ch;">
                             <div class="row">
                                 <div class="grow c-green">● api-gateway</div>
                                 <div class="small">200 OK</div>
@@ -298,7 +298,7 @@
                 <!-- ---------- ACTIVITY LOG ---------- -->
                 <div class="panel">
                     <div class="panel-head">Recent Events</div>
-                    <div class="col gap-1" style="padding: 1px 2px;">
+                    <div class="col gap-1" style="padding: 1ch 2ch;">
                         <div><span class="c-muted">12:04:21</span><span class="c-red bold"> ALERT </span><span>backups &gt; 90%</span></div>
                         <div><span class="c-muted">11:58:02</span><span class="c-green bold"> DEPLOY </span><span>auth-svc v3.4.1</span></div>
                         <div><span class="c-muted">11:41:55</span><span class="c-blue bold"> SCALE </span><span>+2 instances</span></div>

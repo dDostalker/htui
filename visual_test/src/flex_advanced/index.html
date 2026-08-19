@@ -11,7 +11,7 @@
     <meta charset="UTF-8" />
     <title>htui Flex — 简写 / reverse / baseline / content</title>
     <style>
-        body { color: white; font-family: monospace; line-height: 1; }
+        body { color: white; font-family: monospace; line-height: 1ch; }
         h2 { color: cyan; }
         h3 { color: yellow; }
         .row  { display: flex; flex-direction: row; }
@@ -31,7 +31,7 @@
            1em height with `min-height: 0` keeps both renderers at two
            items per column. */
         .ff-column-wrap > *,
-        .cr-wrap > *   { height: 1em; min-height: 0; }
+        .cr-wrap > *   { height: 1em; min-height: 0ch; }
         .rr-wrap  { display: flex; flex-direction: row-reverse; flex-wrap: wrap; }
         .cr-wrap  { display: flex; flex-direction: column-reverse; flex-wrap: wrap; }
         .width-8  { width: 8ch; }

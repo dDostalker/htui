@@ -1149,7 +1149,7 @@ fn every_element_becomes_a_hit_region() {
 #[test]
 fn hit_test_prefers_the_deepest_element() {
     let (_, geo) = build_geometry(
-        r#"<div id="outer"><div id="inner" style="width: 10px">inner</div></div>"#,
+        r#"<div id="outer"><div id="inner" style="width: 10ch">inner</div></div>"#,
         EventBindings::default(),
     );
     let map = HitMap::build(&geo);
@@ -1433,7 +1433,7 @@ fn resize_relayout_keeps_node_ids_and_events_fire() {
         document.getElementById('btn')
           .addEventListener('mouseover', function () { report('over'); });
       </script>
-      <div id="btn" style="padding: 1px 10px;">button</div>
+      <div id="btn" style="padding: 1ch 10ch;">button</div>
     "#;
     let (mut engine, geo) = build_geometry(
         html,
@@ -1482,8 +1482,8 @@ fn resize_reflow_revalidates_hover_under_the_stationary_pointer() {
         document.getElementById('b')
           .addEventListener('mouseout', function () { report('out-b'); });
       </script>
-      <div id="a" style="padding: 1px;">AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA</div>
-      <div id="b" style="padding: 1px;">bbbb</div>
+      <div id="a" style="padding: 1ch;">AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA AAAA</div>
+      <div id="b" style="padding: 1ch;">bbbb</div>
     "#;
     let (mut engine, geo) = build_geometry(
         html,
@@ -1786,7 +1786,7 @@ fn hover_background_fills_padding_cells_not_just_the_text_run() {
     // cells of a bordered/padded `.btn:hover` keep the page background and the
     // highlight reads as a hollow frame (the configurator save/reset bug).
     let html = r#"<div id="save" class="btn">Save</div>"#;
-    let css = ".btn { padding-left: 1; padding-right: 1; border: 1px solid #7aa2f7; }\n\
+    let css = ".btn { padding-left: 1ch; padding-right: 1ch; border: 1ch solid #7aa2f7; }\n\
                .btn:hover { background-color: #28304d; }";
     let (root_id, mut arena) = setup(html);
     let mut css_parser = CssParser::new(css);
@@ -1859,7 +1859,7 @@ fn hover_clear_reuses_cached_boxes_without_stale_run_background() {
     // the glyph cell keeps the stale `:hover` background, the single
     // highlighted character left behind after a button click.
     let html = r#"<div id="save" class="btn">Save</div>"#;
-    let css = ".btn { padding-left: 1; padding-right: 1; border: 1px solid #7aa2f7; }\n\
+    let css = ".btn { padding-left: 1ch; padding-right: 1ch; border: 1ch solid #7aa2f7; }\n\
                .btn:hover { background-color: #28304d; }";
     let (root_id, mut arena) = setup(html);
     let mut css_parser = CssParser::new(css);
