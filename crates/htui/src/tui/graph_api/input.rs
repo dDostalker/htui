@@ -831,15 +831,15 @@ fn is_textarea_node(arena: &NodeArena, node_id: NodeId) -> bool {
 
 /// Map a pointer cell inside a `<textarea>` rect to a character index, using
 /// the same wrapped-line + caret-derived scroll the painter draws. The rect
-/// includes the top/bottom border rows; content starts one row in.
+/// is the whole field — with an opt-in CSS border the one-cell frame offsets
+/// are ignored for hit-mapping (a frame cell click maps to the first/last
+/// content cell).
 fn textarea_index_at(state: &InputState, rect: Rect, x: u32, y: u32) -> usize {
-    let content_width = rect.width.saturating_sub(2).max(1);
-    let rows = rect.height.saturating_sub(2).max(1);
+    let content_width = rect.width.max(1);
+    let rows = rect.height.max(1);
     let scroll = textarea_scroll_row(&state.input_value, content_width, rows, state.input_cursor);
-    let local_row = (y as usize)
-        .saturating_sub(rect.y.saturating_add(1))
-        .saturating_add(scroll);
-    let local_col = (x as usize).saturating_sub(rect.x.saturating_add(1));
+    let local_row = (y as usize).saturating_sub(rect.y).saturating_add(scroll);
+    let local_col = (x as usize).saturating_sub(rect.x);
     textarea_char_at(&state.input_value, content_width, local_row, local_col)
 }
 
@@ -1626,8 +1626,8 @@ pub fn handle_mouse_down(
                                 let idx = if is_textarea_node(arena, node_id) {
                                     textarea_index_at(state, region.rect, x, y)
                                 } else {
-                                    let inner_x = region.rect.x.saturating_add(1);
-                                    let inner_w = region.rect.width.saturating_sub(2);
+                                    let inner_x = region.rect.x;
+                                    let inner_w = region.rect.width;
                                     char_index_at_x(
                                         &state.input_value,
                                         state.input_cursor,
@@ -1735,8 +1735,8 @@ pub fn handle_mouse_move(
                 let idx = if state.focused_is_textarea {
                     textarea_index_at(state, region.rect, x, y)
                 } else {
-                    let inner_x = region.rect.x.saturating_add(1);
-                    let inner_w = region.rect.width.saturating_sub(2);
+                    let inner_x = region.rect.x;
+                    let inner_w = region.rect.width;
                     char_index_at_x(
                         &state.input_value,
                         state.input_cursor,

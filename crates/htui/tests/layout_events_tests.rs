@@ -293,12 +293,12 @@ fn drag_on_input_selects_a_character_range() {
     let ry = region.rect.y as u32;
 
     let mut state = InputState::new();
-    mouse_down(&mut state, &mut engine, &map, rx + 1, ry, MouseButton::Left);
+    mouse_down(&mut state, &mut engine, &map, rx, ry, MouseButton::Left);
     assert_eq!(state.input_cursor, 0, "press on the first column → char 0");
 
     // The input loop tracks the press position; a plain move is a drag.
     state.pressed = Some((0, 0));
-    let cmds = mouse_move(&mut state, &mut engine, &map, rx + 3, ry);
+    let cmds = mouse_move(&mut state, &mut engine, &map, rx + 2, ry);
     assert_eq!(state.input_cursor, 2, "drag to the third column → char 2");
     let sel = cmds.iter().find_map(|c| match c {
         RenderCmd::RenderInput {

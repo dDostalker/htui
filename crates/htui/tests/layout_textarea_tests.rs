@@ -130,14 +130,14 @@ fn eval_str(engine: &mut ScriptEngine, expr: &str) -> String {
 }
 
 #[test]
-fn test_textarea_renders_framed_default_value() {
-    // `cols`/`rows` size the box (width = cols + 2 frame columns, height =
-    // rows); the initial value is the element's text content.
+fn test_textarea_renders_default_value() {
+    // `cols`/`rows` size the box (width = cols, height = rows); the initial
+    // value is the element's text content.
     let (boxes, arena) = layout_boxes(r#"<textarea id="t" cols="6" rows="2">ab&#10;cd</textarea>"#);
     let t = find_node_by_id(&arena, "t");
     let b = find_box(&boxes, t).expect("textarea box");
-    assert_eq!(b.rect.width, 8, "6 cols + 2 frame columns");
-    assert_eq!(b.rect.height, 4, "2 content rows + top/bottom borders");
+    assert_eq!(b.rect.width, 6, "6 cols");
+    assert_eq!(b.rect.height, 2, "2 content rows");
 
     let term_map = mock_term_map();
     let (root_id, arena) = setup(r#"<textarea id="t" cols="6" rows="2">ab&#10;cd</textarea>"#);
@@ -152,18 +152,6 @@ fn test_textarea_renders_framed_default_value() {
     let joined = chars.join("");
     assert!(joined.contains("ab"), "first line paints (got {joined:?})");
     assert!(joined.contains("cd"), "second line paints (got {joined:?})");
-    // Box-drawing border: one `│` per content row per side, plus the
-    // `┌─┐` / `└─┘` rows.
-    assert_eq!(
-        tl.layout.iter().filter(|b| b.word == "│").count(),
-        4,
-        "two side columns × two content rows"
-    );
-    assert!(tl.layout.iter().any(|b| b.word == "┌"), "top-left corner");
-    assert!(
-        tl.layout.iter().any(|b| b.word == "└"),
-        "bottom-left corner"
-    );
 }
 
 #[test]
@@ -176,8 +164,8 @@ fn test_textarea_default_size() {
         .map(|(id, _)| id)
         .expect("textarea node");
     let b = find_box(&boxes, t).expect("textarea box");
-    assert_eq!(b.rect.width, 22, "20 default cols + 2 frame columns");
-    assert_eq!(b.rect.height, 4, "2 content rows + top/bottom borders");
+    assert_eq!(b.rect.width, 20, "20 default cols");
+    assert_eq!(b.rect.height, 2, "2 default rows");
 }
 
 #[test]
@@ -441,10 +429,10 @@ fn test_textarea_focused_paints_inverted_caret() {
     let caret_idx = tl
         .layout
         .iter()
-        .position(|b| b.fcolor == Some(Color::Black) && b.bcolor == Some(Color::White))
+        .position(|b| b.fcolor == Some(Color::DarkGrey) && b.bcolor == Some(Color::White))
         .expect("inverted caret cell");
     let cols = term_map.columns as usize;
-    assert_eq!(caret_idx % cols, 2, "caret sits at column 1 of the content");
+    assert_eq!(caret_idx % cols, 1, "caret sits at column 1 of the content");
 }
 
 #[test]
@@ -471,17 +459,17 @@ fn test_textarea_caret_at_line_end_stays_on_its_line() {
     let caret_idx = tl
         .layout
         .iter()
-        .position(|b| b.fcolor == Some(Color::Black) && b.bcolor == Some(Color::White))
+        .position(|b| b.fcolor == Some(Color::DarkGrey) && b.bcolor == Some(Color::White))
         .expect("inverted caret cell");
     let cols = term_map.columns as usize;
     let (row, col) = (caret_idx / cols, caret_idx % cols);
-    // The textarea box sits at y=0 (border row), so the first content row is
-    // canvas y=1; the caret paints at column 3 — after 'ab' (x=0 border,
-    // x=1..2 'ab', x=3 caret). Before the fix it landed on the second
-    // content row (canvas y=2, 'c' start) instead.
+    // The textarea box sits at y=0 and the content starts at (0,0) (no
+    // frame); the caret paints at column 2 — after 'ab' (x=0..1 'ab', x=2
+    // caret). Before the fix it landed on the second content row (canvas
+    // y=1, 'c' start) instead.
     assert_eq!(
         (row, col),
-        (1, 3),
+        (0, 2),
         "caret paints after 'ab' on the first content line"
     );
 }
@@ -550,25 +538,25 @@ fn test_textarea_wide_char_caret_matches_editing() {
     let caret_idx = tl
         .layout
         .iter()
-        .position(|b| b.fcolor == Some(Color::Black) && b.bcolor == Some(Color::White))
+        .position(|b| b.fcolor == Some(Color::DarkGrey) && b.bcolor == Some(Color::White))
         .expect("inverted caret cell");
     let cols = term_map.columns as usize;
     assert_eq!(
         caret_idx % cols,
-        3,
-        "caret paints after the two-cell '中' (x=0 border, x=1..2 '中', x=3 caret)"
+        2,
+        "caret paints after the two-cell '中' (x=0..1 '中', x=2 caret)"
     );
 }
 
 /// A `<textarea>` whose rect exceeds the terminal must paint a clamped,
-/// intact frame instead of wrapping its frame writes into the next row.
+/// intact background instead of wrapping its frame writes into the next row.
 ///
 /// As a flex item with `flex-shrink: 0` the field keeps its full CSS width
 /// even when the viewport is narrower; the painter clamps the rect to the
-/// canvas (like `paint_block` does) so the `┌─┐` frame shows and the content
-/// below is not corrupted.
+/// canvas (like `paint_block` does) so the field's background reads cleanly
+/// and the content below is not corrupted.
 #[test]
-fn wide_textarea_clamps_frame_to_canvas() {
+fn wide_textarea_clamps_background_to_canvas() {
     let html = r#"
       <style>
         .row { display: flex; }
@@ -586,28 +574,20 @@ fn wide_textarea_clamps_frame_to_canvas() {
     tl.draw(&arena, root_id, &narrow);
 
     let cols = narrow.columns as usize;
-    // Row 0 is the textarea's top border: a full clamped frame.
-    let top: Vec<char> = tl.layout[0..cols]
-        .iter()
-        .map(|c| c.word.chars().next().unwrap_or(' '))
-        .collect();
-    assert_eq!(top[0], '┌', "left top corner");
+    // The first row carries the field's default control background across
+    // the clamped width (the field content starts at the left edge).
     assert_eq!(
-        top[cols - 1],
-        '┐',
-        "right top corner sits at the canvas edge"
+        tl.layout[0].bcolor,
+        Some(crossterm::style::Color::DarkGrey),
+        "textarea background fills the clamped row"
     );
-    assert!(
-        top[1..cols - 1].iter().all(|&c| c == '─'),
-        "top edge spans the clamped width"
+    // Content rows keep the fill too.
+    let mid = &tl.layout[cols];
+    assert_eq!(
+        mid.bcolor,
+        Some(crossterm::style::Color::DarkGrey),
+        "content row background"
     );
-    // Content rows keep both side borders.
-    let mid: Vec<char> = tl.layout[cols..2 * cols]
-        .iter()
-        .map(|c| c.word.chars().next().unwrap_or(' '))
-        .collect();
-    assert_eq!(mid[0], '│', "left side");
-    assert_eq!(mid[cols - 1], '│', "right side at the canvas edge");
     // The following paragraph starts on its own clean row (no wrapped frame
     // writes landing on it).
     let rows_txt: Vec<String> = tl

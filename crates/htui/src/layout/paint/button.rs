@@ -1,14 +1,16 @@
-//! `<button>` painting — a single-row push-button frame (`[ text ]`).
+//! `<button>` painting — a background-filled push-button with its label
+//! centred (browser style). No bracket frame: a `border:` declaration opts
+//! into a CSS frame via the shared control chrome.
 
 use crossterm::style::Color;
 
 use crate::{
     layout::{LayoutBox, Rect},
-    tdom::node::{NodeArena, NodeType},
+    tdom::node::{Node, NodeArena, NodeType},
     tui::graph_api::{FontStyle, char_width},
 };
 
-use super::{PaintCanvas, clamp_rect_to_canvas, intersect_rects};
+use super::{PaintCanvas, clamp_rect_to_canvas, intersect_rects, paint_control_chrome};
 
 pub(crate) fn paint_button(
     lb: &LayoutBox,
@@ -32,41 +34,26 @@ pub(crate) fn paint_button(
     let disabled = node.attributes.contains_key("disabled");
     // `<button>` draws its text content; an `<input type=button|submit|reset>`
     // draws its `value` attribute (with the browser default label when the
-    // attribute is absent) through the same `[ text ]` frame.
+    // attribute is absent) through the same painter.
     let text = if node.node_type == NodeType::Input {
         node.input_button_label().unwrap_or_default()
     } else {
         node.text_content(arena)
     };
     let fg = node.css_attr.get_color().unwrap_or(Color::White);
-    let bg = node.css_attr.get_bg_color();
-    // A disabled button is dimmed (frame and text both grey).
-    let frame = if disabled {
-        Some(Color::DarkGrey)
-    } else {
-        Some(fg)
-    };
-    let text_fg = if disabled {
-        Some(Color::DarkGrey)
-    } else {
-        Some(fg)
-    };
+    let text_fg = if disabled { Color::DarkGrey } else { fg };
 
-    // `[ text ]`: frame brackets, one padding column each side, then the
-    // text content clipped to the box.
-    put(canvas, cell_index(canvas, r.x, r.y), Some('['), frame, bg);
-    put(
-        canvas,
-        cell_index(canvas, r.x.saturating_add(1), r.y),
-        Some(' '),
-        text_fg,
-        bg,
-    );
+    // Background fill (+ opt-in CSS border); the label is centred inside the
+    // returned content area, like a browser button.
+    let content = paint_control_chrome(lb, arena, canvas, r, Some(fg));
+
+    let text_w: usize = text.chars().map(|c| char_width(c).max(1)).sum();
+    let leading = content.width.saturating_sub(text_w) / 2;
     let mut col = 0usize;
     for c in text.chars() {
         let w = char_width(c).max(1);
-        let base = r.x.saturating_add(2).saturating_add(col);
-        if base >= r.x.saturating_add(r.width).saturating_sub(1) {
+        let base = content.x.saturating_add(leading).saturating_add(col);
+        if base >= content.x.saturating_add(content.width) {
             break;
         }
         for sub in 0..w {
@@ -76,25 +63,22 @@ pub(crate) fn paint_button(
             }
             put(
                 canvas,
-                cell_index(canvas, abs, r.y),
+                cell_index(canvas, abs, content.y),
                 if sub == 0 { Some(c) } else { None },
-                text_fg,
-                bg,
+                Some(text_fg),
+                Some(bg_for(node)),
             );
         }
         col += w;
     }
-    let right = r.x.saturating_add(r.width).saturating_sub(1);
-    if right > r.x.saturating_add(2).saturating_add(col) {
-        put(
-            canvas,
-            cell_index(canvas, right.saturating_sub(1), r.y),
-            Some(' '),
-            text_fg,
-            bg,
-        );
-    }
-    put(canvas, cell_index(canvas, right, r.y), Some(']'), frame, bg);
+}
+
+/// The background the button's text cells sit on — the CSS `background-color`
+/// or the default control grey the chrome painted.
+fn bg_for(node: &Node) -> Color {
+    node.css_attr
+        .get_bg_color()
+        .unwrap_or(super::CONTROL_DEFAULT_BG)
 }
 
 fn cell_index(canvas: &PaintCanvas<'_>, x: usize, y: usize) -> usize {

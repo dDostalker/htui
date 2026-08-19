@@ -1,10 +1,12 @@
-//! `<textarea>` painting — a framed multi-line editable field with a caret.
+//! `<textarea>` painting — a background-filled multi-line editable field with
+//! a caret.
 //!
 //! The value (the node's text content, or the focused edit state) is split
 //! into visual lines wrapped to the content width; the box shows a scroll
 //! window derived from the caret so the caret always stays visible. The line
 //! math here is shared with the input loop (caret placement / up-down
-//! movement), which re-imports it through `paint::mod`.
+//! movement), which re-imports it through `paint::mod`. No bracket frame; a
+//! `border:` declaration opts into a CSS frame via the shared control chrome.
 
 use crossterm::style::Color;
 
@@ -15,10 +17,7 @@ use crate::{
     tui::graph_api::{FontStyle, char_width},
 };
 
-use super::{PaintCanvas, clamp_rect_to_canvas, intersect_rects};
-
-/// Frame colour for a focused field (Tokyo Night accent cyan).
-const FOCUS_FRAME: &str = "#2ac3de";
+use super::{PaintCanvas, clamp_rect_to_canvas, intersect_rects, paint_control_chrome};
 
 /// Highlight colour for the selected character range (Tokyo Night selection).
 const SELECTION_BG: &str = "#3b4261";
@@ -161,12 +160,10 @@ pub(crate) fn paint_textarea(
     };
 
     let fg = node.css_attr.get_color();
-    let bg = node.css_attr.get_bg_color();
-    let frame = if focused {
-        parse_color_str(FOCUS_FRAME).or(fg)
-    } else {
-        fg
-    };
+    // Background fill (+ opt-in CSS border); the text draws into the returned
+    // content rect.
+    let content = paint_control_chrome(lb, arena, canvas, r, fg);
+    let bg = node.css_attr.get_bg_color().or(Some(super::CONTROL_DEFAULT_BG));
     // `caret-color` paints the caret block with the declared colour; the
     // default is the inverted cell (field background <-> text colour swap).
     let caret_color = node.css_attr.get_caret_color();
@@ -175,30 +172,18 @@ pub(crate) fn paint_textarea(
         None => (Some(bg.unwrap_or(Color::Black)), Some(fg.unwrap_or(Color::White))),
     };
 
-    let content_width = r.width.saturating_sub(2).max(1);
-    let content_rows = r.height.saturating_sub(2).max(1);
+    let content_width = content.width.max(1);
+    let content_rows = content.height.max(1);
     let lines = textarea_visual_lines(&value, content_width);
     let scroll = textarea_scroll_row(&value, content_width, content_rows, cursor);
     let (caret_row, caret_col) = textarea_caret_position(&value, content_width, cursor);
 
-    // Box-drawing border: `┌─┐` top, `│` sides, `└─┘` bottom. The content
-    // rows live between the two border rows, so a `rows`-attribute value
-    // yields exactly `rows` visible text rows inside the frame.
-    paint_hframe(canvas, r.x, r.y, r.width, '┌', '─', '┐', frame, bg, visible);
     for vis_row in 0..content_rows {
-        let y = r.y.saturating_add(1).saturating_add(vis_row);
+        let y = content.y.saturating_add(vis_row);
         if y < visible.y || y >= visible.y.saturating_add(visible.height) {
             continue;
         }
-        put(canvas, cell_index(canvas, r.x, y), Some('│'), frame, bg);
         let Some(line) = lines.get(scroll.saturating_add(vis_row)) else {
-            put(
-                canvas,
-                cell_index(canvas, r.x.saturating_add(r.width).saturating_sub(1), y),
-                Some('│'),
-                frame,
-                bg,
-            );
             continue;
         };
         let line_row = scroll.saturating_add(vis_row);
@@ -217,11 +202,8 @@ pub(crate) fn paint_textarea(
                 (fg, bg)
             };
             for sub in 0..w {
-                let abs_col =
-                    r.x.saturating_add(1)
-                        .saturating_add(col)
-                        .saturating_add(sub);
-                if abs_col >= r.x.saturating_add(r.width).saturating_sub(1) {
+                let abs_col = content.x.saturating_add(col).saturating_add(sub);
+                if abs_col >= content.x.saturating_add(content_width) {
                     break;
                 }
                 if abs_col < visible.x || abs_col >= visible.x.saturating_add(visible.width) {
@@ -238,10 +220,10 @@ pub(crate) fn paint_textarea(
             col += w;
         }
         // Caret past the last character of its visual line: an inverted blank
-        // cell at the caret column (kept inside the frame).
+        // cell at the caret column (kept inside the field).
         if focused && line_row == caret_row && caret_col >= col && caret_col < content_width {
-            let abs_col = r.x.saturating_add(1).saturating_add(caret_col);
-            if abs_col < r.x.saturating_add(r.width).saturating_sub(1) {
+            let abs_col = content.x.saturating_add(caret_col);
+            if abs_col < content.x.saturating_add(content_width) {
                 let (cf, cb) = caret_cell(fg, bg);
                 put(
                     canvas,
@@ -252,60 +234,7 @@ pub(crate) fn paint_textarea(
                 );
             }
         }
-        put(
-            canvas,
-            cell_index(canvas, r.x.saturating_add(r.width).saturating_sub(1), y),
-            Some('│'),
-            frame,
-            bg,
-        );
     }
-    paint_hframe(
-        canvas,
-        r.x,
-        r.y.saturating_add(r.height).saturating_sub(1),
-        r.width,
-        '└',
-        '─',
-        '┘',
-        frame,
-        bg,
-        visible,
-    );
-}
-
-/// Paint one horizontal border row (`┌─┐` / `└─┘`): corners at `x` and
-/// `x + width - 1`, `─` across the content columns between them.
-fn paint_hframe(
-    canvas: &mut PaintCanvas<'_>,
-    x: usize,
-    y: usize,
-    width: usize,
-    left: char,
-    fill: char,
-    right: char,
-    fg: Option<Color>,
-    bg: Option<Color>,
-    visible: Rect,
-) {
-    if y < visible.y || y >= visible.y.saturating_add(visible.height) {
-        return;
-    }
-    put(canvas, cell_index(canvas, x, y), Some(left), fg, bg);
-    for col in 1..width.saturating_sub(1) {
-        let abs_col = x.saturating_add(col);
-        if abs_col < visible.x || abs_col >= visible.x.saturating_add(visible.width) {
-            continue;
-        }
-        put(canvas, cell_index(canvas, abs_col, y), Some(fill), fg, bg);
-    }
-    put(
-        canvas,
-        cell_index(canvas, x.saturating_add(width).saturating_sub(1), y),
-        Some(right),
-        fg,
-        bg,
-    );
 }
 
 fn cell_index(canvas: &PaintCanvas<'_>, x: usize, y: usize) -> usize {

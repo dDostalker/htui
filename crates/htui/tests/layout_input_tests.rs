@@ -89,16 +89,16 @@ fn find_box(
 }
 
 #[test]
-fn select_renders_as_frame_with_current_label() {
+fn select_renders_as_field_with_current_label() {
     init();
-    // A `<select>` draws a bracketed field showing the option that matches
-    // the `value` attribute (falling back to the first option).
+    // A `<select>` draws a background-filled field showing the option that
+    // matches the `value` attribute (falling back to the first option).
     let (rows, _) = render_rows(
         r#"<div><select value="b"><option>A</option><option value="b">BB</option></select></div>"#,
     );
     let r = &rows[0];
     assert!(
-        r.contains("[BB"),
+        r.contains("BB"),
         "select must show the selected option; row={r:?}"
     );
 }
@@ -111,7 +111,7 @@ fn select_renders_first_option_without_value() {
         render_rows(r#"<div><select><option>Alpha</option><option>Beta</option></select></div>"#);
     let r = &rows[0];
     assert!(
-        r.contains("[Alpha"),
+        r.contains("Alpha"),
         "select must fall back to the first option; row={r:?}"
     );
 }
@@ -166,14 +166,19 @@ fn input_renders_selection_highlight() {
         },
     );
     tl.draw(&arena, root_id, &term_map);
-    // Cells: `[h e l l o · ]`. Selection (1..4) = `ell` (cols 2-4) get the
-    // Tokyo Night selection blue; the caret sits on `o` (inverted) and the
-    // unselected `h` keeps the field's (none) colours.
+    // Cells: `h e l l o` (cols 0-4) on the default grey field background.
+    // Selection (1..4) = `ell` (cols 1-3) get the Tokyo Night selection
+    // blue; the caret sits on `o` (inverted) and the unselected `h` keeps
+    // the field's default background.
     let cell = |x: usize| -> &Block { &tl.layout[x] };
-    assert_eq!(cell(1).word, "h");
-    assert_eq!(cell(1).bcolor, None, "unselected char keeps default bg");
+    assert_eq!(cell(0).word, "h");
     assert_eq!(
-        cell(2).bcolor,
+        cell(0).bcolor,
+        Some(crossterm::style::Color::DarkGrey),
+        "unselected char sits on the default control background"
+    );
+    assert_eq!(
+        cell(1).bcolor,
         Some(crossterm::style::Color::Rgb {
             r: 0x3b,
             g: 0x42,
@@ -181,9 +186,9 @@ fn input_renders_selection_highlight() {
         }),
         "selected char gets the highlight bg"
     );
-    assert_eq!(cell(4).bcolor, cell(2).bcolor, "selection is contiguous");
+    assert_eq!(cell(3).bcolor, cell(1).bcolor, "selection is contiguous");
     assert_eq!(
-        cell(5).bcolor,
+        cell(4).bcolor,
         Some(crossterm::style::Color::White),
         "caret cell stays inverted"
     );
@@ -192,11 +197,14 @@ fn input_renders_selection_highlight() {
 #[test]
 fn input_renders_empty_field_without_panicking() {
     init();
-    // An `<input>` with no `value` renders an empty bracketed field — the
-    // caret window must not index past the empty character vector.
+    // An `<input>` with no `value` renders an empty background-filled field —
+    // the caret window must not index past the empty character vector.
     let (rows, _) = render_rows(r#"<div><input></div>"#);
-    assert_eq!(rows[0].chars().next(), Some('['));
-    assert_eq!(rows[0].chars().nth(7), Some(']'));
+    assert!(
+        rows[0].chars().take(8).all(|c| c == ' '),
+        "empty field paints 8 blank cells; row={:?}",
+        rows[0]
+    );
 }
 
 #[test]
@@ -221,10 +229,10 @@ fn input_long_value_windows_around_the_caret() {
     );
     tl.draw(&arena, root_id, &term_map);
     // Caret at the end (a blank inverted cell): the window follows the caret
-    // and shows `hijkl` (indices 7..12 of "abcdefghijkl") + the caret cell,
-    // with the right frame intact.
+    // and shows `fghijkl` (indices 5..12 of "abcdefghijkl") + the caret cell
+    // across the field's full 8-cell width.
     let row: String = tl.layout.iter().take(8).map(|b| b.word.as_str()).collect();
-    assert_eq!(row, "[hijkl ]");
+    assert_eq!(row, "fghijkl ");
 }
 
 #[test]
@@ -232,18 +240,13 @@ fn input_renders_multibyte_values_at_display_width() {
     init();
     let (rows, _) = render_rows(r#"<div><input value="你好"></div>"#);
     // CJK glyphs occupy two columns each: the renderer skips their second
-    // (empty-word) cells, so the field reads `[你好  ]` and the right frame
-    // bracket stays intact.
+    // (empty-word) cells, so the field reads `你好    ` (wide glyphs then
+    // blank filler to the default 8-cell width).
     let r = &rows[0];
-    assert_eq!(r.chars().next(), Some('['));
-    assert_eq!(r.chars().nth(1), Some('你'));
-    assert_eq!(r.chars().nth(2), Some('好'));
-    assert_eq!(r.chars().nth(3), Some(' '), "padding after the wide glyphs");
-    assert_eq!(
-        r.chars().nth(5),
-        Some(']'),
-        "right frame must survive wide glyphs"
-    );
+    assert_eq!(r.chars().next(), Some('你'));
+    assert_eq!(r.chars().nth(1), Some('好'));
+    assert_eq!(r.chars().nth(2), Some(' '), "filler after the wide glyphs");
+    assert_eq!(r.chars().nth(7), Some(' '), "field stays 8 cells wide");
 }
 
 #[test]
@@ -307,7 +310,7 @@ fn layout_drops_unfocused_input_state_but_keeps_focused() {
         "layout must drop stale unfocused entries"
     );
     let row: String = tl.layout.iter().take(8).map(|b| b.word.as_str()).collect();
-    assert_eq!(row, "[hi    ]", "unfocused field paints the DOM value");
+    assert_eq!(row, "hi      ", "unfocused field paints the DOM value");
 
     // A focused entry holds the live edit buffer and must survive layout.
     tl.input_states.insert(
@@ -325,22 +328,18 @@ fn layout_drops_unfocused_input_state_but_keeps_focused() {
         "focused edit state must survive layout"
     );
     let row: String = tl.layout.iter().take(8).map(|b| b.word.as_str()).collect();
-    assert_eq!(row, "[typing]", "focused field paints the live edit buffer");
+    assert_eq!(row, "typing  ", "focused field paints the live edit buffer");
 }
 
 #[test]
-fn input_renders_as_bracketed_field_with_value() {
+fn input_renders_as_field_with_value() {
     init();
     let (rows, _) = render_rows(r#"<div><input value="hi"></div>"#);
-    // Default field width = value + 2, clamped to a tappable minimum of 8.
-    assert_eq!(rows[0].chars().next(), Some('['));
-    assert_eq!(rows[0].chars().nth(1), Some('h'));
-    assert_eq!(rows[0].chars().nth(2), Some('i'));
-    assert_eq!(
-        rows[0].chars().nth(7),
-        Some(']'),
-        "field must close at col 7"
-    );
+    // Default field width = 8 cells (tappable minimum); the value fills the
+    // content area from the left edge (no bracket frame).
+    assert_eq!(rows[0].chars().next(), Some('h'));
+    assert_eq!(rows[0].chars().nth(1), Some('i'));
+    assert_eq!(rows[0].chars().nth(7), Some(' '), "field is 8 cells wide");
     assert_eq!(rows[0].chars().nth(8), Some(' '), "field must not overflow");
 }
 
@@ -348,12 +347,12 @@ fn input_renders_as_bracketed_field_with_value() {
 fn input_respects_width_attribute() {
     init();
     let (rows, _) = render_rows(r#"<div><input width="4" value="abc"></div>"#);
-    // width=4 cells: the frame brackets + 2 content cells. The caret starts
-    // at position 0, so the window shows `ab`.
-    assert_eq!(rows[0].chars().next(), Some('['));
-    assert_eq!(rows[0].chars().nth(1), Some('a'));
-    assert_eq!(rows[0].chars().nth(2), Some('b'));
-    assert_eq!(rows[0].chars().nth(3), Some(']'), "close at width-1");
+    // width=4 cells of content, no bracket columns. The caret starts at
+    // position 0, so the window shows `abc` + one blank cell.
+    assert_eq!(rows[0].chars().next(), Some('a'));
+    assert_eq!(rows[0].chars().nth(1), Some('b'));
+    assert_eq!(rows[0].chars().nth(2), Some('c'));
+    assert_eq!(rows[0].chars().nth(3), Some(' '), "field is 4 cells wide");
 }
 
 #[test]
@@ -468,17 +467,16 @@ fn engine_input_state_renders_value_and_caret() {
 
     // Field shows the engine value `abc`, caret inverts the char at index 1.
     let cell = |x: usize| -> &Block { &tl.layout[x] };
-    assert_eq!(cell(0).word, "[");
-    assert_eq!(cell(1).word, "a");
-    assert_eq!(cell(2).word, "b");
-    assert_eq!(cell(3).word, "c");
+    assert_eq!(cell(0).word, "a");
+    assert_eq!(cell(1).word, "b");
+    assert_eq!(cell(2).word, "c");
     // Default field width is fixed at 8 cells, independent of the value.
-    assert_eq!(cell(7).word, "]");
-    // No CSS colours on the input: plain cells have no fg / bg, while the
-    // caret cell (char index 1 → column 2) is inverted to black-on-white.
-    assert_eq!(cell(1).fcolor, None);
-    assert_eq!(cell(1).bcolor, None);
-    assert_eq!(cell(2).bcolor, Some(crossterm::style::Color::White));
+    assert_eq!(cell(7).word, " ");
+    // The unselected `a` sits on the default control grey; the caret cell
+    // (char index 1 → column 1) is inverted to black-on-white.
+    assert_eq!(cell(0).fcolor, None);
+    assert_eq!(cell(0).bcolor, Some(crossterm::style::Color::DarkGrey));
+    assert_eq!(cell(1).bcolor, Some(crossterm::style::Color::White));
 }
 
 #[test]
@@ -505,14 +503,14 @@ fn input_caret_color_paints_the_caret_cell() {
     tl.draw(&arena, root_id, &term_map);
 
     let cell = |x: usize| -> &Block { &tl.layout[x] };
-    // Caret on char index 1 → column 2: its background is the declared colour.
+    // Caret on char index 1 → column 1: its background is the declared colour.
     assert_eq!(
-        cell(2).bcolor,
+        cell(1).bcolor,
         Some(crossterm::style::Color::Rgb { r: 255, g: 0, b: 0 }),
         "caret cell must take the caret-color"
     );
-    // Non-caret cells keep the plain field colours.
-    assert_eq!(cell(1).bcolor, None);
+    // Non-caret cells keep the field's default background.
+    assert_eq!(cell(0).bcolor, Some(crossterm::style::Color::DarkGrey));
 }
 
 #[test]
@@ -539,10 +537,10 @@ fn textarea_caret_color_paints_the_caret_cell() {
     tl.draw(&arena, root_id, &term_map);
 
     let cols = term_map.columns as usize;
-    // Textarea border occupies row 0; content starts at row 1, column 1.
+    // No border: content starts at row 0, column 0 of the field.
     let cell = |x: usize, y: usize| -> &Block { &tl.layout[y * cols + x] };
     assert_eq!(
-        cell(2, 1).bcolor,
+        cell(1, 0).bcolor,
         Some(crossterm::style::Color::Rgb { r: 0, g: 0, b: 255 }),
         "caret cell must take the caret-color"
     );
@@ -816,26 +814,30 @@ fn input_state_clamps_scroll_to_the_content_ceiling() {
 // ============================================================
 
 #[test]
-fn input_button_types_render_as_bracketed_buttons() {
+fn input_button_types_render_as_buttons() {
     init();
-    // `button` / `submit` / `reset` paint the `[ label ]` frame instead of a
-    // text field; the label comes from the `value` attribute. Each inline
-    // replaced element claims its own row (the engine's flow semantics).
+    // `button` / `submit` / `reset` paint a background-filled button with the
+    // label centred (browser style); the label comes from the `value`
+    // attribute. Each inline replaced element claims its own row (the
+    // engine's flow semantics).
     let (rows, _) = render_rows(
         r#"<div><input type="button" value="X"><input type="submit" value="Save"><input type="reset" value="Clear"></div>"#,
     );
-    assert!(
-        rows[0].contains("[ X ]"),
-        "button input paints `[ label ]`; row={:?}",
+    assert_eq!(
+        rows[0].trim(),
+        "X",
+        "button input paints its label centred; row={:?}",
         rows[0]
     );
-    assert!(
-        rows[1].contains("[ Save ]"),
+    assert_eq!(
+        rows[1].trim(),
+        "Save",
         "submit input paints its value label; row={:?}",
         rows[1]
     );
-    assert!(
-        rows[2].contains("[ Clear ]"),
+    assert_eq!(
+        rows[2].trim(),
+        "Clear",
         "reset input paints its value label; row={:?}",
         rows[2]
     );
@@ -846,13 +848,15 @@ fn input_button_default_labels_submit_reset() {
     init();
     // No `value` attribute → the browser default labels `Submit` / `Reset`.
     let (rows, _) = render_rows(r#"<div><input type="submit"><input type="reset"></div>"#);
-    assert!(
-        rows[0].contains("[ Submit ]"),
+    assert_eq!(
+        rows[0].trim(),
+        "Submit",
         "default submit label; row={:?}",
         rows[0]
     );
-    assert!(
-        rows[1].contains("[ Reset ]"),
+    assert_eq!(
+        rows[1].trim(),
+        "Reset",
         "default reset label; row={:?}",
         rows[1]
     );
@@ -861,7 +865,7 @@ fn input_button_default_labels_submit_reset() {
 #[test]
 fn input_button_geometry_sizes_from_label() {
     init();
-    // The button input width adapts to its label (`[ text ]`), like `<button>`
+    // The button input width adapts to its label, like `<button>`
     // — not the fixed `width` attribute used for text fields.
     let (root_id, arena) = setup(
         r#"<div><input id="sub" type="submit" value="Go"><input id="txt" type="text" width="20"></div>"#,
@@ -875,7 +879,7 @@ fn input_button_geometry_sizes_from_label() {
             .expect(id)
     };
     let submit = find_box(&boxes, id_of("sub")).expect("submit box");
-    assert_eq!(submit.rect.width, 6, "`[ Go ]` is 6 columns");
+    assert_eq!(submit.rect.width, 6, "`Go` button is 6 columns (label + padding)");
     let text = find_box(&boxes, id_of("txt")).expect("text box");
     assert_eq!(text.rect.width, 20, "text field keeps the width attribute");
 }
@@ -919,7 +923,7 @@ fn input_placeholder_shows_dimmed_hint_when_empty() {
     let hint_cells: Vec<&Block> = tl
         .layout
         .iter()
-        .filter(|b| !b.word.is_empty() && b.word != "[" && b.word != "]")
+        .filter(|b| !b.word.is_empty())
         .collect();
     let text: String = hint_cells.iter().map(|b| b.word.as_str()).collect();
     let text = text.trim();
@@ -946,7 +950,7 @@ fn input_placeholder_hidden_when_value_present() {
     let text: String = tl
         .layout
         .iter()
-        .filter(|b| !b.word.is_empty() && b.word != " " && b.word != "[" && b.word != "]")
+        .filter(|b| !b.word.is_empty() && b.word != " ")
         .map(|b| b.word.as_str())
         .collect();
     assert_eq!(text, "val", "the value renders, not the placeholder");
@@ -964,7 +968,7 @@ fn input_disabled_field_is_dimmed() {
         .filter(|b| !b.word.is_empty() && b.word != " ")
         .collect();
     let text: String = cells.iter().map(|b| b.word.as_str()).collect();
-    assert_eq!(text, "[off]", "disabled field keeps its value");
+    assert_eq!(text, "off", "disabled field keeps its value");
     assert!(
         cells
             .iter()
@@ -990,19 +994,19 @@ fn number_input_character_filter_matches_browser() {
 fn input_checkbox_radio_disabled_is_dimmed() {
     init();
     // A disabled toggle paints its glyph in grey (clicks are already
-    // swallowed); the enabled one keeps its normal colour.
-    let (_, tl) = render_rows(
+    // swallowed); the enabled one keeps its normal colour. Both controls are
+    // block-level: the checkbox fills row 0, the radio row 1.
+    let (rows, tl) = render_rows(
         r#"<div><input id="c" type="checkbox" disabled><input id="r" type="radio" disabled checked></div>"#,
     );
     let dark = crossterm::style::Color::DarkGrey;
-    let glyphs: Vec<&Block> = tl
-        .layout
-        .iter()
-        .filter(|b| matches!(b.word.as_str(), "☐" | "☑" | "○" | "◉"))
-        .collect();
-    assert_eq!(glyphs.len(), 2, "both disabled toggles paint their glyph");
+    let cols = COLS as usize;
+    let head = |row: &str| row.chars().take(2).collect::<String>();
+    assert_eq!(head(&rows[0]), "□ ");
+    assert_eq!(head(&rows[1]), "● ");
+    let glyph_idx: [usize; 4] = [0, 1, cols, cols + 1];
     assert!(
-        glyphs.iter().all(|b| b.fcolor == Some(dark)),
+        glyph_idx.iter().all(|&i| tl.layout[i].fcolor == Some(dark)),
         "disabled toggles must be dimmed grey"
     );
 }
@@ -1010,24 +1014,28 @@ fn input_checkbox_radio_disabled_is_dimmed() {
 #[test]
 fn input_image_renders_as_button() {
     init();
-    // `image` is a button-shaped control: it paints the `[ label ]` frame
-    // (the browser's own look) even though the terminal has no image — the
-    // label comes from its `value` / `alt` with a default fallback.
+    // `image` is a button-shaped control: it paints its label on the filled
+    // background (the browser's own look) even though the terminal has no
+    // image — the label comes from its `value` / `alt` with a default
+    // fallback.
     let (rows, _) = render_rows(
         r#"<div><input type="image" value="Go"><input type="image" alt="Logo"><input type="image"></div>"#,
     );
-    assert!(
-        rows[0].contains("[ Go ]"),
+    assert_eq!(
+        rows[0].trim(),
+        "Go",
         "image input uses its value label; row={:?}",
         rows[0]
     );
-    assert!(
-        rows[1].contains("[ Logo ]"),
+    assert_eq!(
+        rows[1].trim(),
+        "Logo",
         "image input falls back to alt; row={:?}",
         rows[1]
     );
-    assert!(
-        rows[2].contains("[ Submit Query ]"),
+    assert_eq!(
+        rows[2].trim(),
+        "Submit Query",
         "image input defaults to `Submit Query`; row={:?}",
         rows[2]
     );

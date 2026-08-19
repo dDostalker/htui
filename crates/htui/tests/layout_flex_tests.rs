@@ -371,7 +371,7 @@ fn test_flex_item_height_percentage_resolves_to_auto() {
 #[test]
 fn flex_row_with_input_renders_the_field() {
     init();
-    // An `<input>` as a flex item must render its bracketed field at the
+    // An `<input>` as a flex item must render its background field at the
     // measured intrinsic width (HTML `width` attribute or the 8-cell
     // default), not collapse to a single cell.
     let html = r#"<div class="container"><input id="f" width="10" value="abc"></div>"#;
@@ -388,7 +388,7 @@ fn flex_row_with_input_renders_the_field() {
         .collect();
     let joined = rows.join("\n");
     assert!(
-        joined.contains("[abc"),
+        joined.contains("abc"),
         "flex input must render its field; rows:\n{}",
         rows.iter()
             .filter(|r| !r.trim().is_empty())

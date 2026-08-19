@@ -10,8 +10,9 @@
 //! - `<label>` is inline and owns a hit region over its text; a click
 //!   delegates to the control named by `for` (or the first wrapped
 //!   labelable element).
-//! - `<button>` paints `[ text ]`; a `disabled` button swallows clicks and
-//!   `type=submit` / `reset` fire the matching event on the containing
+//! - `<button>` paints a centred label on a filled background; a `disabled`
+//!   button swallows clicks and `type=submit` / `reset` fire the matching
+//!   event on the containing
 //!   `<form>` (the engine never navigates or resets controls itself).
 
 use htui::events::{EventBindings, Geometry, HitMap, interaction::HoverState};
@@ -254,39 +255,32 @@ fn test_checkbox_unchecked_renders_box_glyph() {
     let (boxes, arena) = layout_boxes(r#"<div><input id="c" type="checkbox"></div>"#);
     let c = find_node_by_id(&arena, "c");
     let b = find_box(&boxes, c).expect("checkbox box");
-    assert_eq!(b.rect.width, 2, "checkbox is glyph + one spacing cell");
+    assert_eq!(b.rect.width, 2, "checkbox is the glyph + one spacing cell");
 
     let (_, tl) = draw(r#"<input type="checkbox">"#, "");
+    // The checkbox is a bare glyph — no background fill and no frame, so the
+    // page background shows through.
+    assert_eq!(tl.layout[0].word, "□");
+    assert_eq!(tl.layout[1].word, " ");
     assert!(
-        tl.layout.iter().any(|b| b.word == "\u{2610}"),
-        "unchecked checkbox must paint `☐`"
-    );
-    assert!(
-        !tl.layout.iter().any(|b| b.word == "[" || b.word == "]"),
-        "toggle controls must not draw the text-field frame"
+        tl.layout[..2].iter().all(|b| b.bcolor.is_none()),
+        "toggle controls must not paint a background of their own"
     );
 }
 
 #[test]
 fn test_checkbox_checked_renders_box_glyph() {
     let (_, tl) = draw(r#"<input type="checkbox" checked>"#, "");
-    assert!(
-        tl.layout.iter().any(|b| b.word == "\u{2611}"),
-        "checked checkbox must paint `☑`"
-    );
+    assert_eq!(tl.layout[0].word, "■");
 }
 
 #[test]
 fn test_radio_renders_circle_glyphs() {
+    // Each radio is block-level (one per row): `○` unchecked then `●`.
     let (_, tl) = draw(r#"<input type="radio"><input type="radio" checked>"#, "");
-    assert!(
-        tl.layout.iter().any(|b| b.word == "\u{25CB}"),
-        "unchecked radio must paint `○`"
-    );
-    assert!(
-        tl.layout.iter().any(|b| b.word == "\u{25C9}"),
-        "checked radio must paint `◉`"
-    );
+    let cols = COLS as usize;
+    assert_eq!(tl.layout[0].word, "○");
+    assert_eq!(tl.layout[cols].word, "●");
 }
 
 // ============================================================
@@ -615,13 +609,13 @@ fn test_label_wrapped_checkbox_renders_box() {
     let b = find_box(&boxes, c).expect("wrapped checkbox must keep its box");
     assert_eq!(
         b.rect.width, 2,
-        "toggle control is glyph + one spacing cell"
+        "toggle control is the glyph + one spacing cell"
     );
 
     let (_, tl) = draw(r#"<p><label><input type="checkbox"> Agree</label></p>"#, "");
     assert!(
-        tl.layout.iter().any(|b| b.word == "\u{2610}"),
-        "wrapped checkbox must paint `☐`"
+        tl.layout.iter().any(|b| b.word == "□"),
+        "wrapped checkbox must paint `□`"
     );
 }
 
@@ -630,7 +624,7 @@ fn test_label_wrapped_checkbox_renders_box() {
 // ============================================================
 
 #[test]
-fn test_button_renders_bracketed_label() {
+fn test_button_renders_centred_label() {
     let (_, tl) = draw(r#"<button>Save</button>"#, "");
     let glyphs: String = tl
         .layout
@@ -638,7 +632,7 @@ fn test_button_renders_bracketed_label() {
         .filter(|b| !b.word.is_empty() && b.word != " ")
         .map(|b| b.word.clone())
         .collect();
-    assert_eq!(glyphs, "[Save]", "button must paint `[ text ]` frame");
+    assert_eq!(glyphs, "Save", "button paints its label on the filled background");
 }
 
 #[test]
@@ -998,4 +992,70 @@ fn test_readonly_input_focuses_but_disabled_does_not() {
         "disabled fields must never take focus"
     );
     assert_ne!(state.focused_input, Some(d));
+}
+
+#[test]
+fn test_css_border_paints_a_control_frame() {
+    // A `border:` declaration on a replaced control opts into a CSS frame
+    // around the background-filled field — the browser-style chrome.
+    let (term_map, tl) = draw(
+        r#"<input id="b" value="bordered">"#,
+        "input { border: 1ch solid yellow; }",
+    );
+    let cols = term_map.columns as usize;
+    let rows: Vec<String> = tl
+        .layout
+        .chunks(cols)
+        .map(|chunk| chunk.iter().map(|b| b.word.as_str()).collect())
+        .collect();
+    let words: Vec<&str> = tl.layout.iter().map(|b| b.word.as_str()).collect();
+    for glyph in ['┌', '┐', '└', '┘', '─', '│'] {
+        assert!(
+            words.iter().any(|w| *w == glyph.to_string()),
+            "border glyph `{glyph}` must be painted"
+        );
+    }
+    // The border colour is the declared yellow.
+    let frame_cell = tl
+        .layout
+        .iter()
+        .find(|b| b.word == "─")
+        .expect("a horizontal edge cell exists");
+    assert_eq!(
+        frame_cell.fcolor,
+        Some(crossterm::style::Color::Rgb {
+            r: 255,
+            g: 255,
+            b: 0
+        }),
+        "border must use the declared colour"
+    );
+    // The value still renders inside the frame.
+    assert!(
+        rows.iter().any(|r| r.contains("bordered")),
+        "the value must render inside the bordered field"
+    );
+}
+
+#[test]
+fn test_control_without_border_paints_no_frame() {
+    // Without a `border:` declaration the control is a plain background
+    // rectangle — no box-drawing glyphs.
+    let (term_map, tl) = draw(r#"<input id="b" value="plain">"#, "");
+    assert!(
+        !tl.layout.iter().any(|b| {
+            matches!(b.word.as_str(), "┌" | "┐" | "└" | "┘" | "─" | "│")
+        }),
+        "no frame glyphs without a CSS border"
+    );
+    let cols = term_map.columns as usize;
+    let rows: Vec<String> = tl
+        .layout
+        .chunks(cols)
+        .map(|chunk| chunk.iter().map(|b| b.word.as_str()).collect())
+        .collect();
+    assert!(
+        rows.iter().any(|r| r.contains("plain")),
+        "the value must render"
+    );
 }

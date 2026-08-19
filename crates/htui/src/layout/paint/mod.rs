@@ -37,11 +37,70 @@ use crate::{
 };
 
 use self::block::paint_block;
+use self::border::paint_borders;
 use self::button::paint_button;
 use self::image::paint_image;
 use self::input::paint_input;
 use self::select::paint_select;
 use self::textarea::paint_textarea;
+
+/// Default background for replaced controls (`<input>` / `<button>` /
+/// `<select>` / `<textarea>`) when the CSS `background-color` is unset — a
+/// neutral grey that reads as a field on both light and dark terminals,
+/// mirroring a browser's UA field colour.
+pub(super) const CONTROL_DEFAULT_BG: Color = Color::DarkGrey;
+
+/// Paint a replaced control's shared chrome: the background fill across the
+/// whole border-box (the CSS `background-color`, or [`CONTROL_DEFAULT_BG`]
+/// when unset), then the CSS `border` frame when one is declared. Returns the
+/// content rect — the border-box shrunk by the border thickness — that the
+/// caller draws its value / label into; with no border this is the full box.
+///
+/// Controls no longer render the old `[ value ]` bracket frame: like a
+/// browser, the field is a background-coloured rectangle, and a frame only
+/// appears when the author writes `border: …`.
+pub(super) fn paint_control_chrome(
+    lb: &LayoutBox,
+    arena: &NodeArena,
+    canvas: &mut PaintCanvas<'_>,
+    rect: Rect,
+    fg: Option<Color>,
+) -> Rect {
+    let node = &arena[lb.node_id];
+    let bg = node.css_attr.get_bg_color().or(Some(CONTROL_DEFAULT_BG));
+    let cols = canvas.columns as usize;
+    let start = canvas.cell_index(rect.x, rect.y);
+    for row_off in 0..rect.height {
+        for col_off in 0..rect.width {
+            let idx = start.saturating_add(row_off.saturating_mul(cols).saturating_add(col_off));
+            if idx < canvas.layout.len() && canvas.in_region(idx) {
+                let cell = &mut canvas.layout[idx];
+                if cell.word.is_empty() {
+                    cell.word.push(' ');
+                }
+                cell.bcolor = bg;
+            }
+        }
+    }
+    // CSS border opt-in frame (border thickness lives on the paint style,
+    // resolved at layout time).
+    let sides = &lb.paint_style.box_edges.border;
+    if sides.any_visible() {
+        paint_borders(lb, rect, canvas, fg, bg);
+    }
+    Rect::new(
+        rect.x.saturating_add(sides.left.thickness()),
+        rect.y.saturating_add(sides.top.thickness()),
+        rect
+            .width
+            .saturating_sub(sides.left.thickness())
+            .saturating_sub(sides.right.thickness()),
+        rect
+            .height
+            .saturating_sub(sides.top.thickness())
+            .saturating_sub(sides.bottom.thickness()),
+    )
+}
 
 /// Shared caret-centred value-window computation for `<input>` fields, used by
 /// both the painter and the input loop's column→character mapping.

@@ -1,5 +1,6 @@
-//! `<select>` field painting — a single-line `[label ▾]` frame with an
-//! accent border while the dropdown is open.
+//! `<select>` field painting — a background-filled single-line field showing
+//! the selected option's label with a trailing chevron. No bracket frame; a
+//! `border:` declaration opts into a CSS frame via the shared control chrome.
 
 use crossterm::style::Color;
 
@@ -11,7 +12,7 @@ use crate::{
     tui::graph_api::{FontStyle, char_width},
 };
 
-use super::{PaintCanvas, clamp_rect_to_canvas, intersect_rects};
+use super::{PaintCanvas, clamp_rect_to_canvas, intersect_rects, paint_control_chrome};
 
 /// Frame colour for an open (focused) dropdown (Tokyo Night accent cyan).
 const OPEN_FRAME: &str = "#2ac3de";
@@ -36,9 +37,15 @@ pub(crate) fn paint_select(
 
     let node = &arena[lb.node_id];
     let fg = node.css_attr.get_color();
-    let bg = node.css_attr.get_bg_color();
     let open = canvas.open_select == Some(lb.node_id);
-    let frame = if open {
+
+    // Background fill (+ opt-in CSS border); the label + chevron draw into
+    // the returned content area.
+    let content = paint_control_chrome(lb, arena, canvas, r, fg);
+    let bg = node.css_attr.get_bg_color().or(Some(super::CONTROL_DEFAULT_BG));
+    // While the dropdown is open the label is drawn with the accent colour
+    // (a border, when declared, keeps its own colour from the chrome).
+    let label_fg = if open {
         parse_color_str(OPEN_FRAME).or(fg)
     } else {
         fg
@@ -54,7 +61,7 @@ pub(crate) fn paint_select(
         .map(|o| o.label.clone())
         .unwrap_or_else(|| options.first().map(|o| o.label.clone()).unwrap_or_default());
 
-    let inner_width = r.width.saturating_sub(2);
+    let inner_width = content.width;
     // The chevron occupies the last content cell; the label is truncated to
     // fit in front of it.
     let chevron_w = char_width('▾').max(1);
@@ -65,43 +72,35 @@ pub(crate) fn paint_select(
         shown.pop();
     }
 
-    put(canvas, cell_index(canvas, r.x, r.y), Some('['), frame, bg);
-    put(
-        canvas,
-        cell_index(canvas, r.x.saturating_add(r.width).saturating_sub(1), r.y),
-        Some(']'),
-        frame,
-        bg,
-    );
-
-    let inner_x = r.x.saturating_add(1);
+    let inner_x = content.x;
     let mut col = 0usize;
     for ch in shown.chars() {
         let w = char_width(ch).max(1);
         for sub in 0..w {
             let abs_col = inner_x.saturating_add(col).saturating_add(sub);
-            if abs_col >= visible.x && abs_col < visible.x.saturating_add(visible.width) {
-                put(
-                    canvas,
-                    cell_index(canvas, abs_col, r.y),
-                    if sub == 0 { Some(ch) } else { None },
-                    fg,
-                    bg,
-                );
+            if abs_col < visible.x || abs_col >= visible.x.saturating_add(visible.width) {
+                continue;
             }
+            put(
+                canvas,
+                cell_index(canvas, abs_col, content.y),
+                if sub == 0 { Some(ch) } else { None },
+                label_fg,
+                bg,
+            );
         }
         col += w;
     }
-    // Chevron sits in the last content cell, right before `]`.
+    // Chevron sits in the last content cell.
     let chevron_col = inner_x
         .saturating_add(inner_width)
         .saturating_sub(chevron_w);
     if chevron_col >= visible.x && chevron_col < visible.x.saturating_add(visible.width) {
         put(
             canvas,
-            cell_index(canvas, chevron_col, r.y),
+            cell_index(canvas, chevron_col, content.y),
             Some('▾'),
-            fg,
+            label_fg,
             bg,
         );
     }

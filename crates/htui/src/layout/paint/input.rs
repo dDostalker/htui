@@ -1,5 +1,7 @@
-//! Input-field painting — a single-line `[value]` field with an optional
-//! caret cell and a focused frame colour.
+//! Input-field painting — a background-filled single-line field (no bracket
+//! frame) with an optional caret cell and a focused frame colour. A `border:`
+//! declaration opts into a CSS frame; otherwise the field reads as a plain
+//! rectangle, like a browser's default `<input>`.
 
 use crossterm::style::Color;
 
@@ -11,10 +13,7 @@ use crate::{
 };
 
 use super::button::paint_button;
-use super::{PaintCanvas, clamp_rect_to_canvas, intersect_rects};
-
-/// Frame colour for a focused field (Tokyo Night accent cyan).
-const FOCUS_FRAME: &str = "#2ac3de";
+use super::{PaintCanvas, clamp_rect_to_canvas, intersect_rects, paint_control_chrome};
 
 /// Highlight colour for the selected character range (Tokyo Night selection).
 const SELECTION_BG: &str = "#3b4261";
@@ -76,52 +75,62 @@ pub(crate) fn paint_input(
         .map(|t| t.to_ascii_lowercase())
         .unwrap_or_default();
 
-    // `<input type=button|submit|reset|image>` paints as a push-button
-    // (`[ label ]`) sharing the `<button>` frame painter (the label comes
-    // from the `value` attribute, with browser defaults when absent).
+    // `<input type=button|submit|reset|image>` paints as a push-button sharing
+    // the `<button>` painter (the label comes from the `value` attribute, with
+    // browser defaults when absent).
     if node.input_button_label().is_some() {
         paint_button(lb, arena, canvas, clip);
         return;
     }
 
-    // `<input type=checkbox|radio>` paints a single-cell toggle glyph with
-    // no frame; the checked state comes from the DOM `checked` attribute
-    // (toggled by the script thread on click).
+    let fg = node.css_attr.get_color();
+
+    // `<input type=checkbox|radio>` is a bare terminal toggle — no background
+    // fill and no frame (unlike the text-field controls). The checked state
+    // comes from the DOM `checked` attribute (toggled by the script thread on
+    // click). Both controls follow the hollow → solid pattern so they read as
+    // one family: checkbox `□` / `■`, radio `○` / `●` — all four are basic
+    // block glyphs every terminal font renders crisply.
     if matches!(input_type.as_str(), "checkbox" | "radio") {
         let checked = node.attributes.contains_key("checked");
         let disabled = node.attributes.contains_key("disabled");
         let glyph = match (input_type.as_str(), checked) {
-            ("checkbox", true) => '\u{2611}',  // ☑
-            ("checkbox", false) => '\u{2610}', // ☐
-            ("radio", true) => '\u{25C9}',     // ◉
+            ("checkbox", true) => '\u{25A0}', // ■
+            ("checkbox", false) => '\u{25A1}', // □
+            ("radio", true) => '\u{25CF}',    // ●
             _ => '\u{25CB}',                   // ○
         };
         // A disabled toggle is dimmed grey (the click is already swallowed by
         // the input loop).
-        let fg = if disabled {
+        let toggle_fg = if disabled {
             Color::DarkGrey
         } else {
-            node.css_attr.get_color().unwrap_or(Color::White)
+            fg.unwrap_or(Color::White)
         };
-        let bg = node.css_attr.get_bg_color();
-        put(
+        // The glyph cell carries no background of its own: the surrounding
+        // page background shows through, like a browser checkbox.
+        put_bare(
             canvas,
             cell_index(canvas, r.x, r.y),
             Some(glyph),
-            Some(fg),
-            bg,
+            Some(toggle_fg),
         );
-        // The second cell is a spacing column so the toggle never glues onto
-        // adjacent text (checkbox `☐` followed directly by a label).
-        put(
+        // The trailing cell is a spacing column so the toggle never glues
+        // onto adjacent text (a `■` followed directly by a label).
+        put_bare(
             canvas,
             cell_index(canvas, r.x.saturating_add(1), r.y),
             Some(' '),
-            Some(fg),
-            bg,
+            Some(toggle_fg),
         );
         return;
     }
+
+    // Background fill (CSS `background-color` or the default control grey) +
+    // an opt-in CSS border; the returned rect is the content area the value
+    // draws into.
+    let content = paint_control_chrome(lb, arena, canvas, r, fg);
+    let bg = node.css_attr.get_bg_color().or(Some(super::CONTROL_DEFAULT_BG));
 
     // Live edit state wins while focused, and an unfocused entry covers only
     // the single repaint right after a blur (so the committed text doesn't
@@ -151,17 +160,8 @@ pub(crate) fn paint_input(
     };
 
     let disabled = node.attributes.contains_key("disabled");
-    // A disabled field is dimmed (frame and text both grey).
-    let fg = node.css_attr.get_color();
-    let bg = node.css_attr.get_bg_color();
+    // A disabled field is dimmed (text grey); the background keeps its fill.
     let text_fg = if disabled { Some(Color::DarkGrey) } else { fg };
-    let frame = if disabled {
-        Some(Color::DarkGrey)
-    } else if focused {
-        parse_color_str(FOCUS_FRAME).or(fg)
-    } else {
-        fg
-    };
     // `caret-color` paints the caret block with the declared colour; the
     // default is the inverted cell (field background <-> text colour swap).
     let caret_color = node.css_attr.get_caret_color();
@@ -170,23 +170,16 @@ pub(crate) fn paint_input(
         None => (Some(bg.unwrap_or(Color::Black)), Some(fg.unwrap_or(Color::White))),
     };
 
-    let inner_width = r.width.saturating_sub(2);
-    let inner_x = r.x.saturating_add(1);
-
-    // Frame brackets.
-    put(canvas, cell_index(canvas, r.x, r.y), Some('['), frame, bg);
-    put(
-        canvas,
-        cell_index(canvas, r.x.saturating_add(r.width).saturating_sub(1), r.y),
-        Some(']'),
-        frame,
-        bg,
-    );
+    // The value fills the whole content area (no bracket frame any more).
+    let inner_width = content.width;
+    let inner_x = content.x;
+    let inner_y = content.y;
 
     // Value window in *display columns* (CJK characters occupy two cells):
     // walk back from the caret until the width before it plus the caret's own
     // column fits, then extend forward while columns remain. This keeps the
-    // caret visible without letting a multi-column glyph push past the `]`.
+    // caret visible without letting a multi-column glyph push past the field's
+    // right edge.
     let v: Vec<char> = display.chars().collect();
     let cursor = cursor.min(value.chars().count());
     let (start, end) = value_window(display, cursor, inner_width);
@@ -230,7 +223,7 @@ pub(crate) fn paint_input(
             // the background reads as continuous.
             put(
                 canvas,
-                cell_index(canvas, abs_col, r.y),
+                cell_index(canvas, abs_col, inner_y),
                 if sub == 0 { Some(glyph) } else { None },
                 cell_fg,
                 cell_bg,
@@ -240,14 +233,14 @@ pub(crate) fn paint_input(
     }
 
     // Caret past the last character: an inverted blank cell at the content
-    // end (kept inside the frame).
+    // end (kept inside the field).
     if focused && cursor == value.chars().count() && col < inner_width {
         let abs_col = inner_x.saturating_add(col);
-        if abs_col < r.x.saturating_add(r.width).saturating_sub(1) {
+        if abs_col < inner_x.saturating_add(inner_width) {
             let (cf, cb) = caret_cell(fg, bg);
             put(
                 canvas,
-                cell_index(canvas, abs_col, r.y),
+                cell_index(canvas, abs_col, inner_y),
                 Some(' '),
                 cf,
                 cb,
@@ -277,5 +270,21 @@ fn put(
     }
     cell.fcolor = fg;
     cell.bcolor = bg;
+    cell.style = FontStyle::empty();
+}
+
+/// Write a toggle cell: word + fg only — the background stays whatever the
+/// surrounding page painted, so a checkbox / radio reads as a bare glyph on
+/// the page background instead of a filled field.
+fn put_bare(canvas: &mut PaintCanvas<'_>, idx: usize, word: Option<char>, fg: Option<Color>) {
+    if idx >= canvas.layout.len() || !canvas.in_region(idx) {
+        return;
+    }
+    let cell = &mut canvas.layout[idx];
+    cell.word.clear();
+    if let Some(c) = word {
+        cell.word.push(c);
+    }
+    cell.fcolor = fg;
     cell.style = FontStyle::empty();
 }
