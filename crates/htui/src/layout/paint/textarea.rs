@@ -11,16 +11,12 @@
 use crossterm::style::Color;
 
 use crate::{
-    html::css_parse::parse_color_str,
     layout::{LayoutBox, Rect},
     tdom::node::NodeArena,
     tui::graph_api::char_width,
 };
 
 use super::{PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put};
-
-/// Highlight colour for the selected character range (Tokyo Night selection).
-const SELECTION_BG: &str = "#3b4261";
 
 /// One visual line of a `<textarea>` value: the display text wrapped to
 /// `content_width` cells, plus the character index in `value` where the line
@@ -161,7 +157,7 @@ pub(crate) fn paint_textarea(
 
     let fg = node.css_attr.get_color();
     let content = paint_control_chrome(lb, arena, canvas, r, fg);
-    let bg = node.css_attr.get_bg_color().or(Some(super::CONTROL_DEFAULT_BG));
+    let bg = node.css_attr.get_bg_color().or(Some(canvas.control_bg));
     // `caret-color` paints the caret block with the declared colour; the
     // default is the inverted cell (field background <-> text colour swap).
     let caret_color = node.css_attr.get_caret_color();
@@ -195,7 +191,7 @@ pub(crate) fn paint_textarea(
                 // end of the value (a blank inverted cell).
                 caret_cell(fg, bg)
             } else if selection.is_some_and(|(s, e)| global_char >= s && global_char < e) {
-                (Some(Color::White), parse_color_str(SELECTION_BG))
+                (Some(Color::White), Some(canvas.selection_bg))
             } else {
                 (fg, bg)
             };

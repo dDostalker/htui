@@ -195,6 +195,44 @@ fn input_renders_selection_highlight() {
 }
 
 #[test]
+fn input_highlight_follows_session_theme() {
+    init();
+    // The control background and selection highlight come from the session
+    // theme (the `Config.theme` set on a `Session`); overriding them on the
+    // layout must repaint the field with the new colours.
+    let (root_id, arena) = setup(r#"<div><input></div>"#);
+    let input_id = find_input(&arena, root_id);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.set_theme(htui::Theme {
+        control_bg: crossterm::style::Color::Red,
+        selection_bg: crossterm::style::Color::Green,
+        ..htui::Theme::default()
+    });
+    tl.input_states.insert(
+        input_id,
+        InputRenderState {
+            value: "ab".to_string(),
+            cursor: 2,
+            focused: true,
+            selection: Some((0, 1)),
+        },
+    );
+    tl.draw(&arena, root_id, &term_map);
+    let cell = |x: usize| -> &Block { &tl.layout[x] };
+    assert_eq!(
+        cell(0).bcolor,
+        Some(crossterm::style::Color::Green),
+        "selected char takes the session selection colour"
+    );
+    assert_eq!(
+        cell(1).bcolor,
+        Some(crossterm::style::Color::Red),
+        "unselected char sits on the session control background"
+    );
+}
+
+#[test]
 fn input_renders_empty_field_without_panicking() {
     init();
     // An `<input>` with no `value` renders an empty background-filled field —

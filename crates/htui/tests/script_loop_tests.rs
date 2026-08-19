@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use htui::events::{EventBindings, Geometry, HitMap, HoverState, KeyEventInfo};
 use htui::layout::layout::TermMap;
 use htui::layout::{BoxConstraint, Cursor, layout_tree};
+use htui::resources::{ResourceRegistry, with_registry};
 use htui::script::{ScriptEngine, ScriptMsg, ScriptResponse, apply_message, run_script_thread};
 use htui::tdom::node::{NodeArena, NodeId};
 use htui::tui::graph_api::RenderCmd;
@@ -794,64 +795,70 @@ fn fetch_mem_resource_resolves_promise_and_text() {
     // A `mem://` resource is resolved synchronously by `poll_fetches`; the
     // promise's `.then` (microtask) runs through the job queue — the engine's
     // event loop.
-    htui::resources::register("mem://hello", b"hi from memory".to_vec())
+    let reg = Arc::new(ResourceRegistry::new());
+    reg.register("mem://hello", b"hi from memory".to_vec())
         .expect("register mem resource");
-    let mut engine = ScriptEngine::new(
-        r#"<script>
-          fetch('mem://hello').then(function (res) {
-            return res.text();
-          }).then(function (t) {
-            document.getElementById('out').textContent = t;
-          });
-        </script>
-        <div id="out"></div>"#,
-        EventBindings::default(),
-    )
-    .expect("engine initializes");
+    with_registry(Arc::clone(&reg), || {
+        let mut engine = ScriptEngine::new(
+            r#"<script>
+              fetch('mem://hello').then(function (res) {
+                return res.text();
+              }).then(function (t) {
+                document.getElementById('out').textContent = t;
+              });
+            </script>
+            <div id="out"></div>"#,
+            EventBindings::default(),
+        )
+        .expect("engine initializes");
 
-    // The fetch was started during script evaluation but the load reports
-    // back only when the loop polls — mirror the script thread's per-tick
-    // drain.
-    engine.poll_fetches();
-    engine.poll_fetches();
+        // The fetch was started during script evaluation but the load reports
+        // back only when the loop polls — mirror the script thread's per-tick
+        // drain.
+        engine.poll_fetches();
+        engine.poll_fetches();
 
-    assert_eq!(
-        eval_str(&mut engine, "document.getElementById('out').textContent"),
-        "hi from memory",
-        "the .then chain must run to completion and write the fetched body"
-    );
-    htui::resources::unregister("mem://hello");
+        assert_eq!(
+            eval_str(&mut engine, "document.getElementById('out').textContent"),
+            "hi from memory",
+            "the .then chain must run to completion and write the fetched body"
+        );
+    });
 }
 
 #[test]
 fn fetch_mem_missing_rejects_promise() {
     // Fetching an unregistered `mem://` key rejects the promise; the rejection
-    // handler (microtask) must run.
-    let mut engine = ScriptEngine::new(
-        r#"<script>
-          globalThis.__rejected = 'no';
-          fetch('mem://nope').then(function () {
-            globalThis.__rejected = 'resolved';
-          }, function (err) {
-            globalThis.__rejected = 'rejected:' + String(err);
-          });
-        </script>"#,
-        EventBindings::default(),
-    )
-    .expect("engine initializes");
+    // handler (microtask) must run. An empty registry is installed so the
+    // error is the key's absence (not a missing session scope).
+    let reg = Arc::new(ResourceRegistry::new());
+    with_registry(Arc::clone(&reg), || {
+        let mut engine = ScriptEngine::new(
+            r#"<script>
+              globalThis.__rejected = 'no';
+              fetch('mem://nope').then(function () {
+                globalThis.__rejected = 'resolved';
+              }, function (err) {
+                globalThis.__rejected = 'rejected:' + String(err);
+              });
+            </script>"#,
+            EventBindings::default(),
+        )
+        .expect("engine initializes");
 
-    engine.poll_fetches();
-    engine.poll_fetches();
+        engine.poll_fetches();
+        engine.poll_fetches();
 
-    let rejected = eval_str(&mut engine, "String(globalThis.__rejected)");
-    assert!(
-        rejected.starts_with("rejected:"),
-        "unregistered mem key must reject, got {rejected}"
-    );
-    assert!(
-        rejected.contains("not registered"),
-        "rejection reason should carry the resource error, got {rejected}"
-    );
+        let rejected = eval_str(&mut engine, "String(globalThis.__rejected)");
+        assert!(
+            rejected.starts_with("rejected:"),
+            "unregistered mem key must reject, got {rejected}"
+        );
+        assert!(
+            rejected.contains("not registered"),
+            "rejection reason should carry the resource error, got {rejected}"
+        );
+    });
 }
 
 #[test]
@@ -859,8 +866,9 @@ fn fetch_mem_resource_resolves_through_poll() {
     // A `mem://` fetch resolves synchronously inside `poll_fetches` (the
     // registry is in-memory), but the `.then` microtask chain still runs
     // through the job queue.
+    let reg = Arc::new(ResourceRegistry::new());
     let key = format!("mem://fetch/file_{}.txt", std::process::id());
-    htui::resources::register(&key, b"file body".to_vec()).expect("register mem file");
+    reg.register(&key, b"file body".to_vec()).expect("register mem file");
 
     let html = format!(
         r#"<script>
@@ -869,29 +877,31 @@ fn fetch_mem_resource_resolves_through_poll() {
         </script>
         <div id="out"></div>"#
     );
-    let mut engine =
-        ScriptEngine::new(&html, EventBindings::default()).expect("engine initializes");
+    with_registry(Arc::clone(&reg), || {
+        let mut engine =
+            ScriptEngine::new(&html, EventBindings::default()).expect("engine initializes");
 
-    // A single drain settles the promise; run the microtask queue to land the
-    // text in the DOM.
-    engine.poll_fetches();
-    engine.poll_fetches();
+        // A single drain settles the promise; run the microtask queue to land the
+        // text in the DOM.
+        engine.poll_fetches();
+        engine.poll_fetches();
 
-    assert_eq!(
-        eval_str(&mut engine, "document.getElementById('out').textContent"),
-        "file body",
-        "mem fetch must resolve through poll_fetches"
-    );
-    htui::resources::unregister(&key);
+        assert_eq!(
+            eval_str(&mut engine, "document.getElementById('out').textContent"),
+            "file body",
+            "mem fetch must resolve through poll_fetches"
+        );
+    });
 }
 
 #[test]
 fn fetch_relative_url_resolves_against_document_base() {
     // JS `fetch()` resolves relative URLs against the document base URL
     // (`<base href>`) the same way `<img src>` / `<script src>` do.
+    let reg = Arc::new(ResourceRegistry::new());
     let pid = std::process::id();
     let key = format!("mem://api/data_{pid}.json");
-    htui::resources::register(&key, br#"{"ok":true}"#.to_vec()).expect("register mem file");
+    reg.register(&key, br#"{"ok":true}"#.to_vec()).expect("register mem file");
 
     let html = format!(
         r#"<base href="mem://api/">
@@ -901,17 +911,18 @@ fn fetch_relative_url_resolves_against_document_base() {
         </script>
         <div id="out"></div>"#
     );
-    let mut engine =
-        ScriptEngine::new(&html, EventBindings::default()).expect("engine initializes");
-    engine.poll_fetches();
-    engine.poll_fetches();
+    with_registry(Arc::clone(&reg), || {
+        let mut engine =
+            ScriptEngine::new(&html, EventBindings::default()).expect("engine initializes");
+        engine.poll_fetches();
+        engine.poll_fetches();
 
-    assert_eq!(
-        eval_str(&mut engine, "document.getElementById('out').textContent"),
-        r#"{"ok":true}"#,
-        "relative fetch must resolve against <base href>"
-    );
-    htui::resources::unregister(&key);
+        assert_eq!(
+            eval_str(&mut engine, "document.getElementById('out').textContent"),
+            r#"{"ok":true}"#,
+            "relative fetch must resolve against <base href>"
+        );
+    });
 }
 
 #[test]

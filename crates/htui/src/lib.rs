@@ -1,8 +1,10 @@
+pub mod config;
 pub mod events;
 pub mod html;
 pub mod layout;
 pub mod resources;
 pub mod script;
+pub mod session;
 pub mod tdom;
 pub mod tui;
 
@@ -16,29 +18,7 @@ pub use htui_macros::commands;
 /// `#[derive(IntoJs)]` / `#[derive(FromJs)]` — struct ↔ JS object.
 pub use htui_macros::{FromJs, IntoJs};
 
+pub use config::{Config, Theme};
 pub use html::html_parse::Parser;
 pub use layout::layout::TermMap;
-
-use crate::events::EventBindings;
-
-/// Render an HTML document in the terminal with keyboard navigation, mouse
-/// scrolling and zoom.
-///
-/// This is the plain entry point without event handling; use
-/// [`render_with_events`] to enable click / hover interaction.
-pub fn render(html: &str, css: &str) {
-    crate::tui::run::run(html, css, None);
-}
-
-/// Render an HTML document with JS-like event handling enabled.
-///
-/// In addition to everything [`render`] does, elements that declare `onclick`
-/// / `onmouseover` / `onmouseout` attributes become hit regions, a dedicated
-/// hit-test thread records their positions, and events bubble through the DOM
-/// ancestor chain to the handlers registered in `bindings`. Hovering produces
-/// no visual highlight (matching a browser without CSS `:hover` rules) —
-/// only the `onmouseover` / `onmouseout` events fire. See the
-/// [`events`](crate::events) module for the event model.
-pub fn render_with_events(html: &str, css: &str, bindings: EventBindings) {
-    crate::tui::run::run(html, css, Some(bindings));
-}
+pub use session::Session;

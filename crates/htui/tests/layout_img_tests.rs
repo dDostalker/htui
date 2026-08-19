@@ -8,6 +8,8 @@
 //!     `LayoutBox::cols`, while `rect.width` was clamped to the terminal
 //!     width, so painting could overflow the rect into neighboring boxes.
 
+use std::sync::Arc;
+
 use crossterm::style::Color;
 use htui::html::html_parse;
 use htui::layout::inner_formatting_context::flow::layout_img;
@@ -15,6 +17,7 @@ use htui::layout::layout::TermMap;
 use htui::layout::{
     BoxConstraint, BoxKind, Cursor, LayoutBox, LayoutContext, ReplacedContent, Viewport,
 };
+use htui::resources::{ResourceRegistry, with_registry};
 use htui::tdom::node::{self, NodeType};
 use htui::tui::graph_api::{
     ClipRect, IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, ImageCache, TermLayout,
@@ -158,7 +161,7 @@ fn image_sampling_constants_lock_in_1_by_2_ratio() {
 /// unique `mem://` key, returning the key. Tests use these instead of disk
 /// fixtures: the image pipeline resolves every source through the `mem://`
 /// registry, so byte-fed tests exercise the exact same decode path.
-fn register_test_png(tag: &str) -> String {
+fn register_test_png(reg: &ResourceRegistry, tag: &str) -> String {
     let key = format!("mem://img/{tag}_{}", std::process::id());
     let mut bytes: Vec<u8> = Vec::new();
     let img = ImageBuffer::<Rgb<u8>, _>::from_fn(64, 64, |x, y| {
@@ -175,14 +178,14 @@ fn register_test_png(tag: &str) -> String {
         image::ImageFormat::Png,
     )
     .expect("encode test png");
-    htui::resources::register(&key, bytes).expect("register mem image");
+    reg.register(&key, bytes).expect("register mem image");
     key
 }
 
 /// Build a 800×200 source PNG in memory and register it, returning the key.
 /// Four times wider than tall, so a default (no attributes) `<img>` must NOT
 /// lay out as a square.
-fn register_wide_test_png(tag: &str) -> String {
+fn register_wide_test_png(reg: &ResourceRegistry, tag: &str) -> String {
     let key = format!("mem://img/{tag}_wide_{}", std::process::id());
     let mut bytes: Vec<u8> = Vec::new();
     let img = ImageBuffer::<Rgb<u8>, _>::from_fn(800, 200, |_, _| Rgb([200, 100, 50]));
@@ -191,53 +194,55 @@ fn register_wide_test_png(tag: &str) -> String {
         image::ImageFormat::Png,
     )
     .expect("encode wide test png");
-    htui::resources::register(&key, bytes).expect("register mem image");
+    reg.register(&key, bytes).expect("register mem image");
     key
 }
 
 #[test]
 fn paint_image_at_fills_requested_cell_area() {
     init();
+    let reg = Arc::new(ResourceRegistry::new());
+    with_registry(Arc::clone(&reg), || {
+        let key = register_test_png(&reg, "paint_fill");
 
-    let key = register_test_png("paint_fill");
+        let term_map = mock_term_map();
+        let mut tl = TermLayout::new(&term_map, 1.0);
 
-    let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0);
+        // Request 40 cells wide × 10 cells tall. `_create_img` multiplies the
+        // vertical axis by IMAGE_PIXELS_PER_CELL_ROW (2) internally and resizes
+        // exactly, so the source 64×64 PNG is squashed to 40×20 pixels
+        // and rasterized into 40×10 cells.
+        let cell_w: u32 = 40;
+        let cell_h: u32 = 10;
+        render_image_at(&mut tl, &key, (0, 0), (cell_w, cell_h))
+            .expect("paint_image_at should succeed");
 
-    // Request 40 cells wide × 10 cells tall. `_create_img` multiplies the
-    // vertical axis by IMAGE_PIXELS_PER_CELL_ROW (2) internally and resizes
-    // exactly, so the source 64×64 PNG is squashed to 40×20 pixels
-    // and rasterized into 40×10 cells.
-    let cell_w: u32 = 40;
-    let cell_h: u32 = 10;
-    render_image_at(&mut tl, &key, (0, 0), (cell_w, cell_h))
-        .expect("paint_image_at should succeed");
-
-    // Every cell the image requested must have been written — none should
-    // still hold the default space. Before the fix only `cell_w/2 × cell_h/4`
-    // cells got filled, leaving most of the rect blank.
-    let cells_per_row = term_map.columns as usize;
-    for row in 0..(cell_h as usize) {
-        for col in 0..(cell_w as usize) {
-            let idx = row * cells_per_row + col;
-            let word = &tl.layout[idx].word;
-            assert_ne!(
-                word, " ",
-                "image cell at row={row} col={col} still holds default space (idx={idx})"
-            );
+        // Every cell the image requested must have been written — none should
+        // still hold the default space. Before the fix only `cell_w/2 × cell_h/4`
+        // cells got filled, leaving most of the rect blank.
+        let cells_per_row = term_map.columns as usize;
+        for row in 0..(cell_h as usize) {
+            for col in 0..(cell_w as usize) {
+                let idx = row * cells_per_row + col;
+                let word = &tl.layout[idx].word;
+                assert_ne!(
+                    word, " ",
+                    "image cell at row={row} col={col} still holds default space (idx={idx})"
+                );
+            }
         }
-    }
 
-    // The image uses half-block glyphs (BMP > U+007F). A
-    // blank canvas would only carry ASCII spaces.
-    let has_unicode = tl
-        .layout
-        .iter()
-        .any(|b| b.word.chars().any(|c| c as u32 > 0x7F));
-    assert!(
-        has_unicode,
-        "canvas should contain braille/quarter-block glyphs"
-    );
+        // The image uses half-block glyphs (BMP > U+007F). A
+        // blank canvas would only carry ASCII spaces.
+        let has_unicode = tl
+            .layout
+            .iter()
+            .any(|b| b.word.chars().any(|c| c as u32 > 0x7F));
+        assert!(
+            has_unicode,
+            "canvas should contain braille/quarter-block glyphs"
+        );
+    });
 }
 
 // ============================================================
@@ -247,36 +252,39 @@ fn paint_image_at_fills_requested_cell_area() {
 #[test]
 fn image_cells_store_half_block_glyph_and_colors_separately() {
     init();
-    let key = register_test_png("cell_format");
+    let reg = Arc::new(ResourceRegistry::new());
+    with_registry(Arc::clone(&reg), || {
+        let key = register_test_png(&reg, "cell_format");
 
-    let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0);
-    let cell_w: u32 = 40;
-    let cell_h: u32 = 10;
-    render_image_at(&mut tl, &key, (0, 0), (cell_w, cell_h))
-        .expect("render_image_at should succeed");
+        let term_map = mock_term_map();
+        let mut tl = TermLayout::new(&term_map, 1.0);
+        let cell_w: u32 = 40;
+        let cell_h: u32 = 10;
+        render_image_at(&mut tl, &key, (0, 0), (cell_w, cell_h))
+            .expect("render_image_at should succeed");
 
-    let cells_per_row = term_map.columns as usize;
-    for row in 0..(cell_h as usize) {
-        for col in 0..(cell_w as usize) {
-            let cell = &tl.layout[row * cells_per_row + col];
-            assert_eq!(
-                cell.word, "\u{2580}",
-                "cell word must be the upper-half-block glyph, got {:?}",
-                cell.word
-            );
-            assert!(
-                matches!(cell.fcolor, Some(Color::Rgb { .. })),
-                "top source-pixel color must live in fcolor, got {:?}",
-                cell.fcolor
-            );
-            assert!(
-                matches!(cell.bcolor, Some(Color::Rgb { .. })),
-                "bottom source-pixel color must live in bcolor, got {:?}",
-                cell.bcolor
-            );
+        let cells_per_row = term_map.columns as usize;
+        for row in 0..(cell_h as usize) {
+            for col in 0..(cell_w as usize) {
+                let cell = &tl.layout[row * cells_per_row + col];
+                assert_eq!(
+                    cell.word, "\u{2580}",
+                    "cell word must be the upper-half-block glyph, got {:?}",
+                    cell.word
+                );
+                assert!(
+                    matches!(cell.fcolor, Some(Color::Rgb { .. })),
+                    "top source-pixel color must live in fcolor, got {:?}",
+                    cell.fcolor
+                );
+                assert!(
+                    matches!(cell.bcolor, Some(Color::Rgb { .. })),
+                    "bottom source-pixel color must live in bcolor, got {:?}",
+                    cell.bcolor
+                );
+            }
         }
-    }
+    });
 }
 
 // ============================================================
@@ -286,46 +294,52 @@ fn image_cells_store_half_block_glyph_and_colors_separately() {
 #[test]
 fn image_cache_reuses_decoded_raster() {
     init();
-    let key = register_test_png("cache_reuse");
-    let mut cache = ImageCache::new();
+    let reg = Arc::new(ResourceRegistry::new());
+    with_registry(Arc::clone(&reg), || {
+        let key = register_test_png(&reg, "cache_reuse");
+        let mut cache = ImageCache::new();
 
-    let first = cache
-        .get_or_decode(&key, (40, 10))
-        .expect("first decode should succeed");
-    let (cols, rows, size) = (first.cloumns, first.rows, first.term_size);
+        let first = cache
+            .get_or_decode(&key, (40, 10))
+            .expect("first decode should succeed");
+        let (cols, rows, size) = (first.cloumns, first.rows, first.term_size);
 
-    // The raster is cached: unregistering the source must not break a second
-    // request, which would otherwise re-resolve the bytes and fail.
-    assert!(htui::resources::unregister(&key), "unregister mem image");
+        // The raster is cached: unregistering the source must not break a second
+        // request, which would otherwise re-resolve the bytes and fail.
+        assert!(reg.unregister(&key), "unregister mem image");
 
-    let second = cache
-        .get_or_decode(&key, (40, 10))
-        .expect("cached entry must serve the second request without re-reading");
-    assert_eq!(cols, second.cloumns);
-    assert_eq!(rows, second.rows);
-    assert_eq!(size, second.term_size);
+        let second = cache
+            .get_or_decode(&key, (40, 10))
+            .expect("cached entry must serve the second request without re-reading");
+        assert_eq!(cols, second.cloumns);
+        assert_eq!(rows, second.rows);
+        assert_eq!(size, second.term_size);
+    });
 }
 
 #[test]
 fn image_cache_keys_by_size() {
     init();
-    let key = register_test_png("cache_sizes");
-    let mut cache = ImageCache::new();
+    let reg = Arc::new(ResourceRegistry::new());
+    with_registry(Arc::clone(&reg), || {
+        let key = register_test_png(&reg, "cache_sizes");
+        let mut cache = ImageCache::new();
 
-    let (small_cols, small_rows) = {
-        let small = cache
-            .get_or_decode(&key, (20, 5))
-            .expect("decode small size");
-        (small.cloumns, small.rows)
-    };
-    let (large_cols, large_rows) = {
-        let large = cache
-            .get_or_decode(&key, (40, 10))
-            .expect("decode large size");
-        (large.cloumns, large.rows)
-    };
-    assert_eq!((small_cols, small_rows), (20, 5));
-    assert_eq!((large_cols, large_rows), (40, 10));
+        let (small_cols, small_rows) = {
+            let small = cache
+                .get_or_decode(&key, (20, 5))
+                .expect("decode small size");
+            (small.cloumns, small.rows)
+        };
+        let (large_cols, large_rows) = {
+            let large = cache
+                .get_or_decode(&key, (40, 10))
+                .expect("decode large size");
+            (large.cloumns, large.rows)
+        };
+        assert_eq!((small_cols, small_rows), (20, 5));
+        assert_eq!((large_cols, large_rows), (40, 10));
+    });
 }
 
 // ============================================================
@@ -335,33 +349,36 @@ fn image_cache_keys_by_size() {
 #[test]
 fn layout_img_default_size_preserves_intrinsic_aspect_ratio() {
     init();
-    let key = register_wide_test_png("aspect");
+    let reg = Arc::new(ResourceRegistry::new());
+    with_registry(Arc::clone(&reg), || {
+        let key = register_wide_test_png(&reg, "aspect");
 
-    let mut p = html_parse::Parser::new(&format!(r#"<img src="{key}">"#));
-    let (root_id, arena, _) = p.parse();
-    let img_id = find_img_node(&arena, root_id);
+        let mut p = html_parse::Parser::new(&format!(r#"<img src="{key}">"#));
+        let (root_id, arena, _) = p.parse();
+        let img_id = find_img_node(&arena, root_id);
 
-    let containing = BoxConstraint { x: 0, width: 80 };
-    let mut cursor = Cursor::new();
-    let lb = layout_img(
-        &arena,
-        img_id,
-        containing,
-        &mut cursor,
-        LayoutContext {
-            font: htui::html::css_parse::FontContext::root(),
-            viewport: Viewport { cols: 80, rows: 24 },
-        },
-    )
-    .expect("<img> should produce a LayoutBox");
+        let containing = BoxConstraint { x: 0, width: 80 };
+        let mut cursor = Cursor::new();
+        let lb = layout_img(
+            &arena,
+            img_id,
+            containing,
+            &mut cursor,
+            LayoutContext {
+                font: htui::html::css_parse::FontContext::root(),
+                viewport: Viewport { cols: 80, rows: 24 },
+            },
+        )
+        .expect("<img> should produce a LayoutBox");
 
-    // 800×200 source capped to an 80-col container: 80 cols wide, height
-    // follows the 4:1 aspect -> 80 * 200 / 800 = 20 source px = 10 rows.
-    assert_eq!(lb.rect.width, 80, "default width = containing width");
-    assert_eq!(
-        lb.rect.height, 10,
-        "default height must preserve the source aspect ratio, not be a square"
-    );
+        // 800×200 source capped to an 80-col container: 80 cols wide, height
+        // follows the 4:1 aspect -> 80 * 200 / 800 = 20 source px = 10 rows.
+        assert_eq!(lb.rect.width, 80, "default width = containing width");
+        assert_eq!(
+            lb.rect.height, 10,
+            "default height must preserve the source aspect ratio, not be a square"
+        );
+    });
 }
 
 // ============================================================
@@ -371,76 +388,79 @@ fn layout_img_default_size_preserves_intrinsic_aspect_ratio() {
 #[test]
 fn render_image_at_slice_crops_to_clip_region() {
     init();
-    // 64×64 source: the top 16 pixel rows are black, the rest white. At full
-    // scale (64×32 cells, 2 source px per cell row) the top 8 cell rows are
-    // all-black half-blocks.
-    let key = format!("mem://img/clip_{}", std::process::id());
-    let mut bytes: Vec<u8> = Vec::new();
-    let img = ImageBuffer::<Rgb<u8>, _>::from_fn(64, 64, |_, y| {
-        if y < 16 {
-            Rgb([0, 0, 0])
-        } else {
-            Rgb([255, 255, 255])
+    let reg = Arc::new(ResourceRegistry::new());
+    with_registry(Arc::clone(&reg), || {
+        // 64×64 source: the top 16 pixel rows are black, the rest white. At full
+        // scale (64×32 cells, 2 source px per cell row) the top 8 cell rows are
+        // all-black half-blocks.
+        let key = format!("mem://img/clip_{}", std::process::id());
+        let mut bytes: Vec<u8> = Vec::new();
+        let img = ImageBuffer::<Rgb<u8>, _>::from_fn(64, 64, |_, y| {
+            if y < 16 {
+                Rgb([0, 0, 0])
+            } else {
+                Rgb([255, 255, 255])
+            }
+        });
+        img.write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .expect("encode clip png");
+        reg.register(&key, bytes).expect("register clip image");
+
+        let term_map = mock_term_map();
+        // The canvas now starts at one viewport (24 rows) but this unit test
+        // stamps a raw 64×32-cell grid directly through `render_image_at_slice`
+        // (bypassing the paint pipeline's on-demand grow), so give it enough
+        // rows to hold the full image.
+        let term_map = TermMap {
+            columns: term_map.columns,
+            rows: 48,
+        };
+        let mut tl = TermLayout::new(&term_map, 1.0);
+        let mut cache = ImageCache::new();
+        let cells_per_row = term_map.columns as usize;
+
+        // Decode at the FULL 64×32-cell grid but stamp only rows 0..8.
+        render_image_at_slice(
+            &mut cache,
+            &mut tl.layout,
+            term_map.columns,
+            &key,
+            (0, 0),
+            (64, 32),
+            Some(ClipRect {
+                x: 0,
+                y: 0,
+                width: 64,
+                height: 8,
+            }),
+        )
+        .expect("render_image_at_slice should succeed");
+
+        // Inside the clip: the top of the image at native scale — every cell is
+        // a black half-block. (Squeezing the whole image into 8 rows would mix
+        // in the white below the black band, so all-black rows prove the crop.)
+        for row in 0..8usize {
+            for col in 0..64usize {
+                let cell = &tl.layout[row * cells_per_row + col];
+                assert_eq!(cell.word, "\u{2580}", "clipped row must be painted");
+                assert_eq!(
+                    cell.fcolor,
+                    Some(Color::Rgb { r: 0, g: 0, b: 0 }),
+                    "clipped row must show the image's top band at native scale"
+                );
+            }
+        }
+        // Outside the clip: rows 8..32 must remain untouched blank cells.
+        for row in 8..32usize {
+            for col in 0..64usize {
+                let cell = &tl.layout[row * cells_per_row + col];
+                assert_eq!(cell.word, " ", "rows outside the clip must stay blank");
+            }
         }
     });
-    img.write_to(
-        &mut std::io::Cursor::new(&mut bytes),
-        image::ImageFormat::Png,
-    )
-    .expect("encode clip png");
-    htui::resources::register(&key, bytes).expect("register clip image");
-
-    let term_map = mock_term_map();
-    // The canvas now starts at one viewport (24 rows) but this unit test
-    // stamps a raw 64×32-cell grid directly through `render_image_at_slice`
-    // (bypassing the paint pipeline's on-demand grow), so give it enough
-    // rows to hold the full image.
-    let term_map = TermMap {
-        columns: term_map.columns,
-        rows: 48,
-    };
-    let mut tl = TermLayout::new(&term_map, 1.0);
-    let mut cache = ImageCache::new();
-    let cells_per_row = term_map.columns as usize;
-
-    // Decode at the FULL 64×32-cell grid but stamp only rows 0..8.
-    render_image_at_slice(
-        &mut cache,
-        &mut tl.layout,
-        term_map.columns,
-        &key,
-        (0, 0),
-        (64, 32),
-        Some(ClipRect {
-            x: 0,
-            y: 0,
-            width: 64,
-            height: 8,
-        }),
-    )
-    .expect("render_image_at_slice should succeed");
-
-    // Inside the clip: the top of the image at native scale — every cell is
-    // a black half-block. (Squeezing the whole image into 8 rows would mix
-    // in the white below the black band, so all-black rows prove the crop.)
-    for row in 0..8usize {
-        for col in 0..64usize {
-            let cell = &tl.layout[row * cells_per_row + col];
-            assert_eq!(cell.word, "\u{2580}", "clipped row must be painted");
-            assert_eq!(
-                cell.fcolor,
-                Some(Color::Rgb { r: 0, g: 0, b: 0 }),
-                "clipped row must show the image's top band at native scale"
-            );
-        }
-    }
-    // Outside the clip: rows 8..32 must remain untouched blank cells.
-    for row in 8..32usize {
-        for col in 0..64usize {
-            let cell = &tl.layout[row * cells_per_row + col];
-            assert_eq!(cell.word, " ", "rows outside the clip must stay blank");
-        }
-    }
 }
 
 // ============================================================
@@ -450,88 +470,95 @@ fn render_image_at_slice_crops_to_clip_region() {
 /// Register a small 200×100 SVG (solid orange fill) under a unique `mem://`
 /// key and return the key. Byte-fed tests exercise the exact same decode path
 /// as a page `<img src="mem://…svg">`.
-fn register_test_svg(tag: &str) -> String {
+fn register_test_svg(reg: &ResourceRegistry, tag: &str) -> String {
     let key = format!("mem://img/{tag}_svg_{}", std::process::id());
     let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">
       <rect x="0" y="0" width="200" height="100" fill="#ff8800"/>
     </svg>"##;
-    htui::resources::register(&key, svg.as_bytes().to_vec()).expect("register mem svg");
+    reg.register(&key, svg.as_bytes().to_vec()).expect("register mem svg");
     key
 }
 
 #[test]
 fn svg_image_decodes_through_resvg() {
     init();
-    let key = register_test_svg("decode");
+    let reg = Arc::new(ResourceRegistry::new());
+    with_registry(Arc::clone(&reg), || {
+        let key = register_test_svg(&reg, "decode");
 
-    let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0);
-    // 200×100 source rendered into a 40×20-cell area (80×40 source pixels
-    // after the half-block vertical doubling).
-    render_image_at(&mut tl, &key, (0, 0), (40, 20)).expect("svg should decode and render");
+        let term_map = mock_term_map();
+        let mut tl = TermLayout::new(&term_map, 1.0);
+        // 200×100 source rendered into a 40×20-cell area (80×40 source pixels
+        // after the half-block vertical doubling).
+        render_image_at(&mut tl, &key, (0, 0), (40, 20))
+            .expect("svg should decode and render");
 
-    // The solid fill survives the resize: every cell carries the half-block
-    // glyph with the source color in both fcolor and bcolor.
-    let cells_per_row = term_map.columns as usize;
-    for row in 0..20usize {
-        for col in 0..40usize {
-            let cell = &tl.layout[row * cells_per_row + col];
-            assert_eq!(
-                cell.word, "\u{2580}",
-                "svg cell at row={row} col={col} must hold the half-block glyph"
-            );
-            assert_eq!(
-                cell.fcolor,
-                Some(Color::Rgb {
-                    r: 0xff,
-                    g: 0x88,
-                    b: 0x00
-                }),
-                "svg solid fill must land in fcolor"
-            );
-            assert_eq!(
-                cell.bcolor,
-                Some(Color::Rgb {
-                    r: 0xff,
-                    g: 0x88,
-                    b: 0x00
-                }),
-                "svg solid fill must land in bcolor"
-            );
+        // The solid fill survives the resize: every cell carries the half-block
+        // glyph with the source color in both fcolor and bcolor.
+        let cells_per_row = term_map.columns as usize;
+        for row in 0..20usize {
+            for col in 0..40usize {
+                let cell = &tl.layout[row * cells_per_row + col];
+                assert_eq!(
+                    cell.word, "\u{2580}",
+                    "svg cell at row={row} col={col} must hold the half-block glyph"
+                );
+                assert_eq!(
+                    cell.fcolor,
+                    Some(Color::Rgb {
+                        r: 0xff,
+                        g: 0x88,
+                        b: 0x00
+                    }),
+                    "svg solid fill must land in fcolor"
+                );
+                assert_eq!(
+                    cell.bcolor,
+                    Some(Color::Rgb {
+                        r: 0xff,
+                        g: 0x88,
+                        b: 0x00
+                    }),
+                    "svg solid fill must land in bcolor"
+                );
+            }
         }
-    }
+    });
 }
 
 #[test]
 fn svg_intrinsic_aspect_ratio_drives_default_layout() {
     init();
-    let key = register_test_svg("aspect");
+    let reg = Arc::new(ResourceRegistry::new());
+    with_registry(Arc::clone(&reg), || {
+        let key = register_test_svg(&reg, "aspect");
 
-    let mut p = html_parse::Parser::new(&format!(r#"<img src="{key}">"#));
-    let (root_id, arena, _) = p.parse();
-    let img_id = find_img_node(&arena, root_id);
+        let mut p = html_parse::Parser::new(&format!(r#"<img src="{key}">"#));
+        let (root_id, arena, _) = p.parse();
+        let img_id = find_img_node(&arena, root_id);
 
-    let containing = BoxConstraint { x: 0, width: 80 };
-    let mut cursor = Cursor::new();
-    let lb = layout_img(
-        &arena,
-        img_id,
-        containing,
-        &mut cursor,
-        LayoutContext {
-            font: htui::html::css_parse::FontContext::root(),
-            viewport: Viewport { cols: 80, rows: 24 },
-        },
-    )
-    .expect("<img> should produce a LayoutBox");
+        let containing = BoxConstraint { x: 0, width: 80 };
+        let mut cursor = Cursor::new();
+        let lb = layout_img(
+            &arena,
+            img_id,
+            containing,
+            &mut cursor,
+            LayoutContext {
+                font: htui::html::css_parse::FontContext::root(),
+                viewport: Viewport { cols: 80, rows: 24 },
+            },
+        )
+        .expect("<img> should produce a LayoutBox");
 
-    // 200×100 SVG capped to an 80-col container: 80 cols wide, height follows
-    // the 2:1 aspect -> 80 * 100 / 200 = 40 source px = 20 cells.
-    assert_eq!(lb.rect.width, 80, "default width = containing width");
-    assert_eq!(
-        lb.rect.height, 20,
-        "default height must follow the SVG intrinsic aspect ratio"
-    );
+        // 200×100 SVG capped to an 80-col container: 80 cols wide, height follows
+        // the 2:1 aspect -> 80 * 100 / 200 = 40 source px = 20 cells.
+        assert_eq!(lb.rect.width, 80, "default width = containing width");
+        assert_eq!(
+            lb.rect.height, 20,
+            "default height must follow the SVG intrinsic aspect ratio"
+        );
+    });
 }
 
 // ============================================================
@@ -544,31 +571,34 @@ fn layout_img_resolves_src_against_document_base() {
     // generation time, so the geometry/paint phases only ever see the
     // absolute `mem://` key.
     init();
-    let pid = std::process::id();
-    let key = format!("mem://dir/pic_{pid}.png");
-    htui::resources::register(&key, vec![0u8; 16]).expect("register mem image");
+    let reg = Arc::new(ResourceRegistry::new());
+    with_registry(Arc::clone(&reg), || {
+        let pid = std::process::id();
+        let key = format!("mem://dir/pic_{pid}.png");
+        reg.register(&key, vec![0u8; 16]).expect("register mem image");
 
-    let html =
-        format!("<base href=\"mem://dir/\"><img src=\"pic_{pid}.png\" width=\"20\" height=\"10\">");
-    let (root_id, arena, _) = html_parse::Parser::new(&html).parse();
-    let term_map = mock_term_map();
-    let mut tl = TermLayout::new(&term_map, 1.0);
-    let boxes = tl.draw(&arena, root_id, &term_map);
+        let html = format!(
+            "<base href=\"mem://dir/\"><img src=\"pic_{pid}.png\" width=\"20\" height=\"10\">"
+        );
+        let (root_id, arena, _) = html_parse::Parser::new(&html).parse();
+        let term_map = mock_term_map();
+        let mut tl = TermLayout::new(&term_map, 1.0);
+        let boxes = tl.draw(&arena, root_id, &term_map);
 
-    // The img box sits under the implicit <html>/<body> wrappers, so search
-    // the whole box tree.
-    let img_box = find_img_box(&boxes).expect("img must produce a replaced layout box");
-    match &img_box.kind {
-        BoxKind::Replaced(ReplacedContent::Image { path, .. }) => {
-            assert_eq!(
-                path.as_str(),
-                key.as_str(),
-                "relative img src must resolve against <base href>"
-            );
+        // The img box sits under the implicit <html>/<body> wrappers, so search
+        // the whole box tree.
+        let img_box = find_img_box(&boxes).expect("img must produce a replaced layout box");
+        match &img_box.kind {
+            BoxKind::Replaced(ReplacedContent::Image { path, .. }) => {
+                assert_eq!(
+                    path.as_str(),
+                    key.as_str(),
+                    "relative img src must resolve against <base href>"
+                );
+            }
+            _ => unreachable!(),
         }
-        _ => unreachable!(),
-    }
-    htui::resources::unregister(&key);
+    });
 }
 
 fn find_img_box(boxes: &[LayoutBox]) -> Option<&LayoutBox> {

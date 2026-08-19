@@ -97,7 +97,8 @@ fn main() {
 
     let html = include_str!("page/index.html");
     let css = include_str!("page/style.css");
-    htui::render_with_events(html, css, bindings);
+    let session = htui::Session::new();
+    session.render_with_events(html, css, bindings);
 }
 ```
 

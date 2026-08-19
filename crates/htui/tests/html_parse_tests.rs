@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use htui::html::html_parse::{self, Parser};
+use htui::resources::{ResourceRegistry, with_registry};
 use htui::tdom::node::{NodeType, document_base_href};
 
 fn init() {
@@ -279,11 +282,12 @@ fn test_script_src_wins_over_inline() {
     // script content is ignored). The external content now comes from a
     // `mem://` resource (no file system).
     init();
+    let reg = Arc::new(ResourceRegistry::new());
     let key = format!("mem://script/srcwin_{}.js", std::process::id());
-    htui::resources::register(&key, b"globalThis.__ext = true;".to_vec())
+    reg.register(&key, b"globalThis.__ext = true;".to_vec())
         .expect("register mem script");
     let html = format!("<script src=\"{key}\">globalThis.__inline = true;</script>");
-    let doc = Parser::new(&html).parse_with_scripts();
+    let doc = with_registry(Arc::clone(&reg), || Parser::new(&html).parse_with_scripts());
     assert!(
         doc.scripts.iter().any(|s| s.contains("__ext = true")),
         "external resource content must be extracted"
@@ -292,7 +296,6 @@ fn test_script_src_wins_over_inline() {
         doc.scripts.iter().all(|s| !s.contains("__inline")),
         "inline body must be ignored when src is present"
     );
-    htui::resources::unregister(&key);
 }
 
 #[test]
@@ -300,16 +303,16 @@ fn test_script_src_loads_mem_resource() {
     // `<script src="mem://…">` resolves through the unified resource layer
     // instead of the file system.
     init();
+    let reg = Arc::new(ResourceRegistry::new());
     let key = format!("mem://script/{}.js", std::process::id());
-    htui::resources::register(&key, b"globalThis.__memLoaded = 7;".to_vec())
+    reg.register(&key, b"globalThis.__memLoaded = 7;".to_vec())
         .expect("register mem script");
     let html = format!("<script src=\"{key}\"></script><p>x</p>");
-    let doc = Parser::new(&html).parse_with_scripts();
+    let doc = with_registry(Arc::clone(&reg), || Parser::new(&html).parse_with_scripts());
     assert!(
         doc.scripts.iter().any(|s| s.contains("__memLoaded = 7")),
         "<script src> must load the mem:// resource"
     );
-    htui::resources::unregister(&key);
 }
 
 #[test]
@@ -317,15 +320,15 @@ fn test_link_href_loads_mem_stylesheet() {
     // `<link rel="stylesheet" href="mem://…">` loads CSS from the resource
     // layer.
     init();
+    let reg = Arc::new(ResourceRegistry::new());
     let key = format!("mem://css/{}.css", std::process::id());
-    htui::resources::register(&key, b"p { color: red; }".to_vec()).expect("register mem css");
+    reg.register(&key, b"p { color: red; }".to_vec()).expect("register mem css");
     let html = format!("<link rel=\"stylesheet\" href=\"{key}\"><p>x</p>");
-    let (_root, _arena, css) = Parser::new(&html).parse();
+    let (_root, _arena, css) = with_registry(Arc::clone(&reg), || Parser::new(&html).parse());
     assert!(
         css.contains("color: red"),
         "<link> must load the mem:// stylesheet"
     );
-    htui::resources::unregister(&key);
 }
 
 // ============================================================
@@ -359,35 +362,35 @@ fn test_parse_base_keeps_dom_node_with_href() {
 fn test_base_resolves_script_src() {
     // `<script src>` relative paths resolve against the `<base href>`.
     init();
+    let reg = Arc::new(ResourceRegistry::new());
     let pid = std::process::id();
     let key = format!("mem://app/main_{pid}.js");
-    htui::resources::register(&key, b"globalThis.__basedScript = true;".to_vec())
+    reg.register(&key, b"globalThis.__basedScript = true;".to_vec())
         .expect("register mem script");
     let html = format!("<base href=\"mem://app/\"><script src=\"main_{pid}.js\"></script><p>x</p>");
-    let doc = Parser::new(&html).parse_with_scripts();
+    let doc = with_registry(Arc::clone(&reg), || Parser::new(&html).parse_with_scripts());
     assert!(
         doc.scripts.iter().any(|s| s.contains("__basedScript")),
         "<script src> must resolve against <base href>"
     );
-    htui::resources::unregister(&key);
 }
 
 #[test]
 fn test_base_resolves_link_stylesheet_href() {
     // `<link rel=stylesheet>` relative `href` resolves against `<base href>`.
     init();
+    let reg = Arc::new(ResourceRegistry::new());
     let pid = std::process::id();
     let key = format!("mem://assets/style_{pid}.css");
-    htui::resources::register(&key, b"p { color: green; }".to_vec()).expect("register mem css");
+    reg.register(&key, b"p { color: green; }".to_vec()).expect("register mem css");
     let html = format!(
         "<base href=\"mem://assets/\"><link rel=\"stylesheet\" href=\"style_{pid}.css\"><p>x</p>"
     );
-    let (_root, _arena, css) = Parser::new(&html).parse();
+    let (_root, _arena, css) = with_registry(Arc::clone(&reg), || Parser::new(&html).parse());
     assert!(
         css.contains("color: green"),
         "<link> stylesheet href must resolve against <base href>"
     );
-    htui::resources::unregister(&key);
 }
 
 #[test]

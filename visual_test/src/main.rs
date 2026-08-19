@@ -15,9 +15,8 @@
 //!   src/{name}/index.html    — HTML document
 //!   src/{name}/style.css     — stylesheet (optional)
 
+use htui::Session;
 use htui::events::EventBindings;
-use htui::render;
-use htui::render_with_events;
 use log::info;
 
 /// Headless preview: parse the document, run the full layout pipeline into a
@@ -123,6 +122,11 @@ fn main() {
 
     let test_name = positional.first().copied().unwrap_or("showcase");
 
+    // One session per run: resources registered below (image bytes, demo
+    // scripts) are scoped to it, and the interactive render uses the same
+    // session so `<img>` / `<script src>` / fetch resolve them.
+    let session = Session::new();
+
     let (html, css) = match test_name {
         "all_in_one" => test_case!(all_in_one, no_css),
         "headings" => test_case!(headings, no_css),
@@ -227,7 +231,7 @@ fn main() {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
-            render_with_events(html, css, EventBindings::default());
+            session.render_with_events(html, css, EventBindings::default());
         }
         info!("Test '{test_name}' completed");
         return;
@@ -240,7 +244,7 @@ fn main() {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
-            render_with_events(html, css, EventBindings::default());
+            session.render_with_events(html, css, EventBindings::default());
         }
         info!("Test '{test_name}' completed");
         return;
@@ -253,7 +257,7 @@ fn main() {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
-            render_with_events(html, css, EventBindings::default());
+            session.render_with_events(html, css, EventBindings::default());
         }
         info!("Test '{test_name}' completed");
         return;
@@ -266,7 +270,7 @@ fn main() {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
-            render_with_events(html, css, EventBindings::default());
+            session.render_with_events(html, css, EventBindings::default());
         }
         info!("Test '{test_name}' completed");
         return;
@@ -280,7 +284,7 @@ fn main() {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
-            render_with_events(html, css, EventBindings::default());
+            session.render_with_events(html, css, EventBindings::default());
         }
         info!("Test '{test_name}' completed");
         return;
@@ -295,7 +299,7 @@ fn main() {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
-            render_with_events(html, css, EventBindings::default());
+            session.render_with_events(html, css, EventBindings::default());
         }
         info!("Test '{test_name}' completed");
         return;
@@ -309,7 +313,7 @@ fn main() {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
-            render_with_events(html, css, EventBindings::default());
+            session.render_with_events(html, css, EventBindings::default());
         }
         info!("Test '{test_name}' completed");
         return;
@@ -324,7 +328,7 @@ fn main() {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
-            htui::resources::register(
+            session.register(
                 "mem://demo/app.js",
                 r#"
                   function boot() {
@@ -345,12 +349,12 @@ fn main() {
                 .to_vec(),
             )
             .expect("register mem demo script");
-            htui::resources::register(
+            session.register(
                 "mem://demo/hello.txt",
                 b"hello from the mem:// registry".to_vec(),
             )
             .expect("register mem demo data");
-            render_with_events(html, css, EventBindings::default());
+            session.render_with_events(html, css, EventBindings::default());
         }
         info!("Test '{test_name}' completed");
         return;
@@ -361,12 +365,12 @@ fn main() {
     // `mem://` registry (no file system), so register the bundled PNG bytes
     // before rendering — for both the interactive and `--dump` paths.
     if test_name == "image" || test_name == "all_in_one" {
-        htui::resources::register(
+        session.register(
             "mem://image/pic.png",
             include_bytes!("image/pic.png").to_vec(),
         )
         .expect("register bundled pic.png");
-        htui::resources::register(
+        session.register(
             "mem://image/pic.svg",
             include_bytes!("image/pic.svg").to_vec(),
         )
@@ -374,9 +378,11 @@ fn main() {
     }
 
     if dump_mode {
-        dump(html, css, cols, rows, bg_map);
+        // The headless preview drives the pipeline manually, so install the
+        // session's registry for this thread (image bytes must resolve).
+        session.with_registry(|| dump(html, css, cols, rows, bg_map));
         return;
     }
-    render(html, css);
+    session.render(html, css);
     info!("Test '{test_name}' completed");
 }

@@ -16,13 +16,13 @@ use crossterm::{
     cursor::{Hide, Show},
     event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
     execute,
-    style::Color,
     terminal::{
         EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode, size,
     },
 };
 
 use crate::{
+    config::{Config, Theme},
     events::{EventBindings, Geometry, HitMap},
     html::css_parse::{
         self, CssRule, DynamicState, Position, PseudoClass, PseudoClassSet, css_into_node_with_state,
@@ -34,6 +34,7 @@ use crate::{
     },
     layout::layoutbox::{pin_fixed_boxes, pin_sticky_boxes},
     layout::{LayoutBox, Rect},
+    resources::{self, ResourceRegistry},
     script::{ScriptMsg, ScriptResponse, run_script_thread},
     tdom::node::{NodeArena, NodeId, NodeType},
     tui::graph_api::{
@@ -60,16 +61,6 @@ fn flush_frame<W: Write>(out: &mut BufWriter<W>) {
         log::error!("Failed to flush stdout: {}", e);
     }
 }
-
-/// Minimum time between two render-thread frames.
-///
-/// A fast wheel scroll can queue a full-viewport diff per tick; without a cap
-/// the render thread would try to draw at the event rate, saturate the
-/// terminal's output pipe and stall on the write (the console can't drain
-/// that fast), which looks exactly like an app freeze. Waiting out the gap
-/// lets bursts coalesce into fewer, larger frames and bounds the output rate
-/// at ~60 fps. 16 ms is imperceptible to interactive input.
-const MIN_FRAME_GAP: Duration = Duration::from_millis(16);
 
 fn combined_css_source(html: &str, css: &str) -> String {
     let mut html_parser = crate::html::html_parse::Parser::new(html);
@@ -132,36 +123,6 @@ fn extract_title(arena: &NodeArena, root_id: NodeId) -> Option<String> {
 /// Holds everything that outlives a single frame: the session document, the
 /// stylesheet, the reused canvas, the cached geometry and the scroll bound
 /// shared with the input loop.
-/// Highlight colour for the page text selection (Tokyo Night selection).
-const SELECTION_BG: Color = Color::Rgb {
-    r: 0x3b,
-    g: 0x42,
-    b: 0x61,
-};
-
-/// Dropdown overlay background (Tokyo Night panel).
-const OVERLAY_BG: Color = Color::Rgb {
-    r: 0x24,
-    g: 0x28,
-    b: 0x3b,
-};
-
-/// Overlay text colour (Tokyo Night foreground).
-const OVERLAY_FG: Color = Color::Rgb {
-    r: 0xc0,
-    g: 0xca,
-    b: 0xf5,
-};
-
-/// Foreground of `<optgroup>` header rows — dimmer than the options so a
-/// group label reads as a non-option heading (clicking it still picks the
-/// group's first option).
-const GROUP_FG: Color = Color::Rgb {
-    r: 0x7a,
-    g: 0x83,
-    b: 0xa8,
-};
-
 /// An active page text selection: the two canvas-space endpoints and the
 /// shape connecting them (`Flow` follows reading order, `Block` is a
 /// rectangle). The highlight and the extractable text are both derived from
@@ -244,6 +205,8 @@ struct RenderState {
     /// The `<select>` dropdown overlay currently painted (`None` = none).
     open_select: Option<OpenSelect>,
     max_scroll: Arc<AtomicU32>,
+    /// The session colour theme (selection / overlay / group colours).
+    theme: Theme,
 }
 
 impl RenderState {
@@ -349,7 +312,7 @@ impl RenderState {
                 tl.open_select = Some(node_id);
                 tl.repaint_region(&geo.arena, &geo.boxes, union_rect(select_rect, rect));
                 if let Some(open) = &self.open_select {
-                    apply_select_overlay(tl, open);
+                    apply_select_overlay(tl, open, self.theme);
                 }
                 tl.render(out);
                 flush_frame(out);
@@ -392,7 +355,7 @@ impl RenderState {
                     return;
                 };
                 tl.repaint_region(&geo.arena, &geo.boxes, open.rect);
-                apply_select_overlay(tl, open);
+                apply_select_overlay(tl, open, self.theme);
                 tl.render(out);
                 flush_frame(out);
             }
@@ -455,7 +418,7 @@ impl RenderState {
         };
         if let Some(r) = region {
             tl.repaint_region(&geo.arena, &geo.boxes, r);
-            tl.apply_text_selection(&new_lines, SELECTION_BG);
+            tl.apply_text_selection(&new_lines, self.theme.selection_bg);
         }
         tl.render(out);
         flush_frame(out);
@@ -529,7 +492,9 @@ impl RenderState {
             None => true,
         };
         if size_changed {
-            self.term_layout = Some(TermLayout::new(term_map, zoom));
+            let mut tl = TermLayout::new(term_map, zoom);
+            tl.set_theme(self.theme);
+            self.term_layout = Some(tl);
             // A resize invalidates the canvas-coordinate caches the overlay /
             // selection repaints rely on: drop them so the fresh frame paints
             // clean instead of re-applying stale rectangles onto the new
@@ -641,11 +606,11 @@ impl RenderState {
         // never spills over borders / padding / trailing whitespace.
         if let Some(sel) = &self.text_selection {
             let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
-            tl.apply_text_selection(&lines, SELECTION_BG);
+            tl.apply_text_selection(&lines, self.theme.selection_bg);
         }
         // Re-apply an open dropdown overlay (a repaint would clear it).
         if let Some(open) = &self.open_select {
-            apply_select_overlay(tl, open);
+            apply_select_overlay(tl, open, self.theme);
         }
 
         // The incremental renderer emits only the changed cells (and a
@@ -770,10 +735,10 @@ impl RenderState {
         // highlight must be overlaid again.
         if let Some(sel) = &self.text_selection {
             let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
-            tl.apply_text_selection(&lines, SELECTION_BG);
+            tl.apply_text_selection(&lines, self.theme.selection_bg);
         }
         if let Some(open) = &self.open_select {
-            apply_select_overlay(tl, open);
+            apply_select_overlay(tl, open, self.theme);
         }
         tl.render(out);
         flush_frame(out);
@@ -825,10 +790,10 @@ impl RenderState {
         // The repaint reset the region; re-apply the active overlays on top.
         if let Some(sel) = &self.text_selection {
             let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
-            tl.apply_text_selection(&lines, SELECTION_BG);
+            tl.apply_text_selection(&lines, self.theme.selection_bg);
         }
         if let Some(open) = &self.open_select {
-            apply_select_overlay(tl, open);
+            apply_select_overlay(tl, open, self.theme);
         }
     }
 
@@ -994,7 +959,7 @@ fn lines_bounds(lines: &[(u32, u32, u32)]) -> Option<Rect> {
 /// row of the overlay rectangle, then write each option label with the
 /// highlighted row on the selection background and the rest on the overlay
 /// background. Overlays cover whatever the layout painted underneath.
-fn apply_select_overlay(tl: &mut TermLayout, open: &OpenSelect) {
+fn apply_select_overlay(tl: &mut TermLayout, open: &OpenSelect, theme: Theme) {
     let cols = tl.columns as usize;
     let max = tl.layout.len();
     // The overlay may extend below the layout's content (a `<select>` near
@@ -1018,17 +983,17 @@ fn apply_select_overlay(tl: &mut TermLayout, open: &OpenSelect) {
         }
         let (label, fg, is_item) = match row {
             // `<optgroup>` headers are dimmed and never take the highlight.
-            SelectRow::Group(g) => (g.as_str(), GROUP_FG, false),
+            SelectRow::Group(g) => (g.as_str(), theme.group_fg, false),
             SelectRow::Item(i) => (
                 open.options.get(*i).map(|o| o.label.as_str()).unwrap_or(""),
-                OVERLAY_FG,
+                theme.overlay_fg,
                 true,
             ),
         };
         let bg = if is_item && row_idx == open.highlight_row() {
-            Some(SELECTION_BG)
+            Some(theme.selection_bg)
         } else {
-            Some(OVERLAY_BG)
+            Some(theme.overlay_bg)
         };
         // Clear the whole row, then write the label.
         for x in open.rect.x..x_end {
@@ -1191,6 +1156,7 @@ fn render_thread(
     geo_tx: Option<mpsc::Sender<Arc<Geometry>>>,
     selection_text: Arc<Mutex<String>>,
     render_beat: Arc<AtomicU64>,
+    config: Config,
 ) {
     // One persistent write buffer for the whole session: every frame writes
     // into it and is flushed exactly once, so a frame costs a single write
@@ -1213,6 +1179,7 @@ fn render_thread(
         selection_text,
         open_select: None,
         max_scroll,
+        theme: config.theme,
     };
 
     let mut last_frame_at: Option<Instant> = None;
@@ -1233,8 +1200,8 @@ fn render_thread(
         // into one frame and bounds the ANSI output rate.
         if let Some(t) = last_frame_at {
             let since = t.elapsed();
-            if since < MIN_FRAME_GAP {
-                std::thread::sleep(MIN_FRAME_GAP - since);
+            if since < config.frame_gap {
+                std::thread::sleep(config.frame_gap - since);
             }
         }
         // Commands split into two classes with different merge semantics:
@@ -1577,7 +1544,13 @@ fn fold_script_event(
 
 // debug panic hook
 // this fun only used in debug to hook render panic
-pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
+pub(crate) fn run(
+    html: &str,
+    css: &str,
+    bindings: Option<EventBindings>,
+    registry: Arc<ResourceRegistry>,
+    config: Config,
+) {
     // install debug hook
     #[cfg(debug_assertions)]
     install_debug_panic_hook();
@@ -1625,8 +1598,13 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
     let script_thread: Option<std::thread::JoinHandle<()>> = bindings.map(|bindings| {
         let html = Arc::clone(&html);
         let hit_map_thread = Arc::clone(&hit_map);
+        let script_registry = Arc::clone(&registry);
         std::thread::spawn(move || {
-            run_script_thread(html, bindings, script_rx, script_out_tx, hit_map_thread)
+            // The script thread resolves `fetch` / `<script src>` through the
+            // session's registry for its whole lifetime.
+            resources::with_registry(script_registry, || {
+                run_script_thread(html, bindings, script_rx, script_out_tx, hit_map_thread)
+            });
         })
     });
 
@@ -1667,21 +1645,28 @@ pub(crate) fn run(html: &str, css: &str, bindings: Option<EventBindings>) {
         let max_scroll_clone = Arc::clone(&max_scroll);
         let selection_text_clone = Arc::clone(&selection_text);
         let render_beat_clone = Arc::clone(&render_beat);
+        let render_registry = Arc::clone(&registry);
         let geo_tx = events_active.then_some(geo_tx);
         move || {
-            render_thread(
-                rx,
-                html_clone,
-                css_clone,
-                max_scroll_clone,
-                geo_tx,
-                selection_text_clone,
-                render_beat_clone,
-            );
+            // The render thread resolves `<img src>` / `<script src>` / `<link
+            // href>` through the session's registry for its whole lifetime.
+            resources::with_registry(render_registry, || {
+                render_thread(
+                    rx,
+                    html_clone,
+                    css_clone,
+                    max_scroll_clone,
+                    geo_tx,
+                    selection_text_clone,
+                    render_beat_clone,
+                    config,
+                );
+            });
         }
     });
 
     let mut state = InputState::new();
+    state.zoom = config.zoom;
     state.selection_text = Arc::clone(&selection_text);
     let (mut columns, mut rows): (u16, u16) = match TermMap::get_ter_map() {
         Ok(m) => (m.columns, m.rows),

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use super::{cell::Block, image::ImageCache};
+use crate::config::Theme;
 use crate::tdom::node::NodeId;
 
 /// Render-time state of one `<input>` field.
@@ -49,9 +50,21 @@ pub struct TermLayout {
     /// The `<select>` node whose dropdown is open (rendered as an overlay),
     /// set by the render thread while a dropdown is expanded.
     pub open_select: Option<NodeId>,
+    /// Colour theme read by the painters (control / selection colours). The
+    /// render thread copies the session config's theme here; manual pipeline
+    /// users get [`Theme::default`].
+    pub(crate) theme: Theme,
 }
 
 impl TermLayout {
+    /// Override the colour theme (control / selection colours) used by the
+    /// painters. Manual pipeline users set this before [`TermLayout::draw`];
+    /// [`Session`](crate::session::Session) renders copy their config's theme
+    /// automatically.
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.theme = theme;
+    }
+
     pub fn effective_columns(&self) -> u16 {
         (self.columns as f32 / self.zoom).round() as u16
     }

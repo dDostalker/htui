@@ -2,11 +2,14 @@
 //! serialization on read, `<style>` CSS extraction, `<script>` skipping and
 //! element-context parsing. Pure in-memory — no terminal required.
 
+use std::sync::Arc;
+
 use crossterm::style::Color;
 
 use htui::events::{ElementRef, EventBindings, EventType, HitRegion};
 use htui::html::css_parse;
 use htui::layout::Rect;
+use htui::resources::{ResourceRegistry, with_registry};
 use htui::script::ScriptEngine;
 use htui::tdom::node::{NodeArena, NodeId, NodeType};
 
@@ -293,35 +296,37 @@ fn inner_html_style_css_applies_to_fragment() {
 
 #[test]
 fn inner_html_setter_loads_link_stylesheet() {
-    htui::resources::register("inner-html-test.css", b"li { color: blue; }".to_vec())
+    let reg = Arc::new(ResourceRegistry::new());
+    reg.register("inner-html-test.css", b"li { color: blue; }".to_vec())
         .expect("register css");
-    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
-        .expect("engine initializes");
-    eval_str(
-        &mut engine,
-        "document.getElementById('d').innerHTML = '<link rel=\"stylesheet\" href=\"inner-html-test.css\"><ul><li id=\"l\">x</li></ul>'",
-    );
-    let dirty = engine.take_dirty();
-    assert!(
-        dirty.style_css.contains("color: blue"),
-        "linked stylesheet CSS must be extracted: {:?}",
-        dirty.style_css
-    );
-    let mut arena = engine.arena();
-    let root_id = engine.root_id();
-    let rules = css_parse::Parser::new(&dirty.style_css).parse();
-    css_parse::css_into_node(&mut arena, root_id, &rules);
-    let l = find_node_by_id(&arena, "l");
-    assert_eq!(
-        arena[l].css_attr.get_color(),
-        Some(Color::Rgb {
-            r: 0x00,
-            g: 0x00,
-            b: 0xFF
-        }),
-        "linked stylesheet must style the fragment"
-    );
-    htui::resources::unregister("inner-html-test.css");
+    with_registry(Arc::clone(&reg), || {
+        let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
+            .expect("engine initializes");
+        eval_str(
+            &mut engine,
+            "document.getElementById('d').innerHTML = '<link rel=\"stylesheet\" href=\"inner-html-test.css\"><ul><li id=\"l\">x</li></ul>'",
+        );
+        let dirty = engine.take_dirty();
+        assert!(
+            dirty.style_css.contains("color: blue"),
+            "linked stylesheet CSS must be extracted: {:?}",
+            dirty.style_css
+        );
+        let mut arena = engine.arena();
+        let root_id = engine.root_id();
+        let rules = css_parse::Parser::new(&dirty.style_css).parse();
+        css_parse::css_into_node(&mut arena, root_id, &rules);
+        let l = find_node_by_id(&arena, "l");
+        assert_eq!(
+            arena[l].css_attr.get_color(),
+            Some(Color::Rgb {
+                r: 0x00,
+                g: 0x00,
+                b: 0xFF
+            }),
+            "linked stylesheet must style the fragment"
+        );
+    });
 }
 
 #[test]

@@ -44,14 +44,8 @@ use self::input::paint_input;
 use self::select::paint_select;
 use self::textarea::paint_textarea;
 
-/// Default background for replaced controls (`<input>` / `<button>` /
-/// `<select>` / `<textarea>`) when the CSS `background-color` is unset — a
-/// neutral grey that reads as a field on both light and dark terminals,
-/// mirroring a browser's UA field colour.
-pub(super) const CONTROL_DEFAULT_BG: Color = Color::DarkGrey;
-
 /// Paint a replaced control's shared chrome: the background fill across the
-/// whole border-box (the CSS `background-color`, or [`CONTROL_DEFAULT_BG`]
+/// whole border-box (the CSS `background-color`, or [`Theme::control_bg`]
 /// when unset), then the CSS `border` frame when one is declared. Returns the
 /// content rect — the border-box shrunk by the border thickness — that the
 /// caller draws its value / label into; with no border this is the full box.
@@ -63,7 +57,7 @@ pub(super) fn paint_control_chrome(
     fg: Option<Color>,
 ) -> Rect {
     let node = &arena[lb.node_id];
-    let bg = node.css_attr.get_bg_color().or(Some(CONTROL_DEFAULT_BG));
+    let bg = node.css_attr.get_bg_color().or(Some(canvas.control_bg));
     let cols = canvas.columns as usize;
     let start = canvas.cell_index(rect.x, rect.y);
     for row_off in 0..rect.height {
@@ -131,6 +125,12 @@ pub(super) struct PaintCanvas<'a> {
     /// The `<select>` node whose dropdown is currently open (`None` = none).
     /// Read by the select painter for the open-frame colour.
     pub open_select: Option<NodeId>,
+    /// Default background of replaced controls when the CSS
+    /// `background-color` is unset (from the session theme).
+    pub(crate) control_bg: Color,
+    /// Highlight colour for the selected character range (from the session
+    /// theme).
+    pub(crate) selection_bg: Color,
 }
 
 impl<'a> PaintCanvas<'a> {
@@ -223,6 +223,8 @@ pub fn paint_layout_tree(boxes: &[LayoutBox], arena: &NodeArena, term_layout: &m
         region: None,
         input_states: &term_layout.input_states,
         open_select: term_layout.open_select,
+        control_bg: term_layout.theme.control_bg,
+        selection_bg: term_layout.theme.selection_bg,
     };
     for b in boxes {
         paint_box(b, arena, &mut canvas, None, None);
@@ -266,6 +268,8 @@ pub fn paint_layout_tree_region(
         region: Some(region),
         input_states: &term_layout.input_states,
         open_select: term_layout.open_select,
+        control_bg: term_layout.theme.control_bg,
+        selection_bg: term_layout.theme.selection_bg,
     };
     for b in boxes {
         if intersect_rects(b.rect, region).is_some() {

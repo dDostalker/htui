@@ -87,6 +87,7 @@ impl TermLayout {
             image_cache: ImageCache::new(),
             input_states: std::collections::HashMap::new(),
             open_select: None,
+            theme: crate::config::Theme::default(),
         }
     }
 }

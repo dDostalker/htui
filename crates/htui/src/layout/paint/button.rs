@@ -66,7 +66,7 @@ pub(crate) fn paint_button(
                 cell_index(canvas, abs, content.y),
                 if sub == 0 { Some(c) } else { None },
                 Some(text_fg),
-                Some(bg_for(node)),
+                Some(bg_for(node, canvas)),
             );
         }
         col += w;
@@ -75,8 +75,8 @@ pub(crate) fn paint_button(
 
 /// The background the button's text cells sit on — the CSS `background-color`
 /// or the default control grey the chrome painted.
-fn bg_for(node: &Node) -> Color {
+fn bg_for(node: &Node, canvas: &PaintCanvas<'_>) -> Color {
     node.css_attr
         .get_bg_color()
-        .unwrap_or(super::CONTROL_DEFAULT_BG)
+        .unwrap_or(canvas.control_bg)
 }
