@@ -1,5 +1,6 @@
 pub mod config;
 pub mod events;
+pub mod graphics;
 pub mod html;
 pub mod layout;
 pub mod resources;

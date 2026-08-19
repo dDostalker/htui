@@ -6,10 +6,7 @@ use crossterm::{
     terminal::{Clear, ClearType},
 };
 
-use super::{
-    canvas::TermLayout,
-    cell::{Block, FontStyle, styled_string},
-};
+use crate::graphics::{Block, FontStyle, TermLayout, styled_string};
 
 impl Display for TermLayout {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

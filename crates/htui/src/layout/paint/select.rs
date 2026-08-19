@@ -7,7 +7,7 @@ use crate::{
     layout::layoutbox::geometry::select_options,
     layout::{LayoutBox, Rect},
     tdom::node::NodeArena,
-    tui::graph_api::char_width,
+    graphics::char_width,
 };
 
 use super::{PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put};

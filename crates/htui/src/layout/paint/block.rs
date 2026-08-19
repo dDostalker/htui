@@ -4,7 +4,7 @@ use crate::{
     html::css_parse::TextAlign,
     layout::{LayoutBox, Rect},
     tdom::node::NodeArena,
-    tui::graph_api::{FontStyle, block_style},
+    graphics::{FontStyle, block_style},
 };
 
 use super::{PaintCanvas, border::paint_borders, intersect_rects, text::paint_runs};

@@ -8,7 +8,7 @@ use crate::{
         paint::{paint_layout_tree, paint_layout_tree_region},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
-    tui::graph_api::{Block, FontStyle, ImageCache, TermLayout},
+    graphics::{Block, FontStyle, ImageCache, TermLayout},
 };
 
 /// Upper bound for the terminal viewport width.

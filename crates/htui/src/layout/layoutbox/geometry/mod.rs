@@ -21,7 +21,7 @@ use crate::{
         },
     },
     tdom::node::{NodeArena, NodeId, NodeType},
-    tui::graph_api::{
+    graphics::{
         IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, char_width, image_intrinsic_size,
     },
 };

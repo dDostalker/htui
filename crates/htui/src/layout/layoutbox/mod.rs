@@ -12,7 +12,7 @@
 //! - [`layout_tree`](crate::layout::layoutbox::inner_formatting_context::flow::layout_tree) builds the tree and
 //!   assigns rectangles from containing-block constraints.
 //! - [`paint_layout_tree`](crate::layout::paint::paint_layout_tree) walks the
-//!   tree and writes [`Block`](crate::tui::graph_api::Block) cells into the
+//!   tree and writes [`Block`](crate::graphics::Block) cells into the
 //!   terminal canvas.
 //!
 //! ## Architecture

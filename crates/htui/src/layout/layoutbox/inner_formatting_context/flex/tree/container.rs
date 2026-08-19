@@ -12,7 +12,7 @@ use crate::{
         },
     },
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
-    tui::graph_api::block_style,
+    graphics::block_style,
 };
 
 use crate::html::css_parse::Position;

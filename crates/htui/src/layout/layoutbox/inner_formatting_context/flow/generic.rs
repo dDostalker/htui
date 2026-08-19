@@ -10,7 +10,7 @@ use crate::{
         },
     },
     tdom::node::{Node, NodeArena, NodeId, NodeType},
-    tui::graph_api::block_style,
+    graphics::block_style,
 };
 
 /// Build a plain block box for block-level elements without specialised

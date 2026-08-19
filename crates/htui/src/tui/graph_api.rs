@@ -1,18 +1,20 @@
-mod canvas;
-mod cell;
-mod image;
+//! Terminal-side API surface.
+//!
+//! The character-cell model, width helpers and the [`TermLayout`] canvas live
+//! in [`crate::graphics`] (below this layer); this module re-exports them so
+//! host code keeps the familiar `htui::tui::graph_api::…` paths, and adds the
+//! terminal-IO pieces: the input-loop state machine ([`InputState`]) and the
+//! canvas renderers (ANSI emission, text-selection overlay).
+
 mod input;
 mod render;
-mod style;
-mod text;
 
-pub use canvas::{InputRenderState, TermLayout};
-pub use cell::{Block, FontStyle};
-pub(crate) use image::image_intrinsic_size;
-pub use image::{
-    ClipRect, IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, ImageCache, ImageError, Img,
+pub use crate::graphics::{
+    Block, ClipRect, FontStyle, IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, ImageCache,
+    ImageError, Img, InputRenderState, TermLayout, block_style, char_width, grapheme_width,
     render_image_at, render_image_at_slice,
 };
+pub(crate) use crate::graphics::image_intrinsic_size;
 pub(crate) use input::reapply_console_modes;
 pub use input::{
     DirtyInfo, InputState, KEY_GATE_TIMEOUT, KeyGate, OverlayKind, RenderCmd, SelectOpenState,
@@ -22,5 +24,3 @@ pub use input::{
     paste_into_field, prev_word_boundary, selection_range, trigger_refresh,
 };
 pub use render::is_rendered_as_bare_space;
-pub use style::block_style;
-pub use text::{char_width, grapheme_width};

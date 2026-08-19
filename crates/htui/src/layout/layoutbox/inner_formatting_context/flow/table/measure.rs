@@ -5,7 +5,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     tdom::node::{NodeArena, NodeId, NodeType},
-    tui::graph_api::grapheme_width,
+    graphics::grapheme_width,
 };
 
 use super::cell::CellInfo;

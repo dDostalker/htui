@@ -1,6 +1,6 @@
 use crate::{
     layout::{LayoutBox, Rect, ReplacedContent},
-    tui::graph_api::{ClipRect, render_image_at_slice},
+    graphics::{ClipRect, render_image_at_slice},
 };
 
 use super::{PaintCanvas, intersect_rects};

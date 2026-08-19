@@ -16,7 +16,7 @@ use crate::{
     tdom::node::{
         NodeArena, NodeId, NodeType, effective_font_size_cells, is_collapsible_whitespace,
     },
-    tui::graph_api::{FontStyle, char_width, grapheme_width},
+    graphics::{FontStyle, char_width, grapheme_width},
 };
 
 use super::container::{AnonymousTextItem, FLEX_ITEM_MIN_CROSS, FlexItemPrep, FlexItemSource};

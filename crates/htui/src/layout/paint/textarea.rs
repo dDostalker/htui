@@ -13,7 +13,7 @@ use crossterm::style::Color;
 use crate::{
     layout::{LayoutBox, Rect},
     tdom::node::NodeArena,
-    tui::graph_api::char_width,
+    graphics::char_width,
 };
 
 use super::{PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put};

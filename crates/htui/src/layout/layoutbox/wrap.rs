@@ -18,7 +18,7 @@ use crate::{
     html::css_parse::{OverflowWrap, WhiteSpace, WordBreak},
     layout::InlineRun,
     tdom::node::NodeId,
-    tui::graph_api::{FontStyle, grapheme_width},
+    graphics::{FontStyle, grapheme_width},
 };
 
 /// One token extracted from the input run list.

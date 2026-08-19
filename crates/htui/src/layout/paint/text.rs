@@ -4,7 +4,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::{
     html::css_parse::TextAlign,
     layout::{InlineRun, Rect},
-    tui::graph_api::{FontStyle, grapheme_width},
+    graphics::{FontStyle, grapheme_width},
 };
 
 use super::PaintCanvas;

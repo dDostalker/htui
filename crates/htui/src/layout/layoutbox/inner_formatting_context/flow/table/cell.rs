@@ -9,7 +9,7 @@ use crate::{
         layoutbox::{collect_runs, wrap_runs},
     },
     tdom::node::{NodeArena, NodeId, effective_font_size_cells},
-    tui::graph_api::block_style,
+    graphics::block_style,
 };
 
 /// Information about a single cell inside a row.

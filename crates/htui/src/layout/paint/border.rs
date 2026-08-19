@@ -2,7 +2,7 @@ use crossterm::style::Color;
 
 use crate::{
     layout::{BorderStyle, LayoutBox, Rect},
-    tui::graph_api::FontStyle,
+    graphics::FontStyle,
 };
 
 use super::PaintCanvas;

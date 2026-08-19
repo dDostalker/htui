@@ -4,7 +4,7 @@ use crossterm::style::Color;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::tdom::node::NodeId;
-use crate::tui::graph_api::FontStyle;
+use crate::graphics::FontStyle;
 
 /// One inline segment of a block-level element.
 ///
@@ -89,7 +89,7 @@ impl InlineRun {
     /// would either over- or under-count them depending on how many
     /// combining / ZWJ codepoints the cluster contains.
     pub fn width(&self) -> usize {
-        use crate::tui::graph_api::grapheme_width;
+        use crate::graphics::grapheme_width;
         self.text.graphemes(true).map(grapheme_width).sum()
     }
 
@@ -99,7 +99,7 @@ impl InlineRun {
     /// heading with font-size=2 has its `text-align` measured against the
     /// expanded width — not the single-cell-per-char default.
     pub fn width_at(&self, font_size_cells: usize) -> usize {
-        use crate::tui::graph_api::grapheme_width;
+        use crate::graphics::grapheme_width;
         let font_size = font_size_cells.max(1);
         self.text
             .graphemes(true)

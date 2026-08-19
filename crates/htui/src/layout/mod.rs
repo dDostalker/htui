@@ -14,7 +14,7 @@
 //!   [`layoutbox::inner_formatting_context`] and shares the same
 //!   [`LayoutBox`] tree shape.
 //! - [`paint`] walks a finished `Vec<LayoutBox>` and writes
-//!   [`Block`](crate::tui::graph_api::Block) cells into the terminal canvas.
+//!   [`Block`](crate::graphics::Block) cells into the terminal canvas.
 //! - [`layout`] (this file) glues everything together: [`DEFAULT_LAYOUT`] is
 //!   the registry of layout functions consulted by the flow orchestrator.
 
@@ -22,7 +22,7 @@ use crate::{
     html::css_parse::TextAlign,
     layout::layout::TermMap,
     tdom::node::{NodeArena, NodeId},
-    tui::graph_api::grapheme_width,
+    graphics::grapheme_width,
 };
 use unicode_segmentation::UnicodeSegmentation;
 

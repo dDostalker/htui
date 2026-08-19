@@ -3,7 +3,7 @@
 //! Walks a [`LayoutBox`] forest produced by
 //! [`super::layoutbox::inner_formatting_context::flow::layout_tree`] (and
 //! flex / grid trees) and writes styled cells into the
-//! [`TermLayout`](crate::tui::graph_api::TermLayout) canvas. Reads no DOM
+//! [`TermLayout`](crate::graphics::TermLayout) canvas. Reads no DOM
 //! state beyond each box's `node_id`: every paint decision is derived from
 //! the box's own `rect`, `kind`, `paint_style`, and the CSS attributes
 //! stored on the source node.
@@ -33,7 +33,7 @@ use crate::{
     html::css_parse::{Position, Visibility},
     layout::{BoxKind, LayoutBox, Rect, ReplacedContent},
     tdom::node::{NodeArena, NodeId, NodeType},
-    tui::graph_api::{Block, FontStyle, ImageCache, InputRenderState, TermLayout},
+    graphics::{Block, FontStyle, ImageCache, InputRenderState, TermLayout},
 };
 
 use self::block::paint_block;

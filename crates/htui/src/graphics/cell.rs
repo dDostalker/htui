@@ -63,7 +63,7 @@ impl Display for Block {
 /// `String` lets callers write the ANSI bytes straight into their output
 /// buffer (`Vec<u8>` via `io::Write`, or a `fmt::Formatter` via `fmt::Write`)
 /// without an intermediate heap allocation per styled run.
-pub(super) fn styled_string(
+pub(crate) fn styled_string(
     text: &str,
     style: FontStyle,
     fg: Option<Color>,

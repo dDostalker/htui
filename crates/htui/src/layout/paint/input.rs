@@ -8,7 +8,7 @@ use crossterm::style::Color;
 use crate::{
     layout::{LayoutBox, Rect},
     tdom::node::NodeArena,
-    tui::graph_api::{FontStyle, char_width},
+    graphics::{FontStyle, char_width},
 };
 
 use super::button::paint_button;

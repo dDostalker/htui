@@ -31,7 +31,7 @@ pub enum ReplacedContent {
     /// `<input>` — a single-line text field.
     ///
     /// Focused editing state lives in
-    /// [`TermLayout::input_states`](crate::tui::graph_api::TermLayout::input_states);
+    /// [`TermLayout::input_states`](crate::graphics::TermLayout::input_states);
     /// unfocused fields render from the DOM `value` attribute. The box only
     /// marks this as an input leaf so the paint phase knows to draw a field.
     Input,
@@ -41,7 +41,7 @@ pub enum ReplacedContent {
     Select,
     /// `<textarea>` — a multi-line editable field sized from its `cols` /
     /// `rows` attributes. The value is the node's text content (edited state
-    /// lives in [`TermLayout::input_states`](crate::tui::graph_api::TermLayout::input_states));
+    /// lives in [`TermLayout::input_states`](crate::graphics::TermLayout::input_states));
     /// the paint phase draws the framed box with a caret.
     Textarea,
     /// `<button>` — a push-button: the node's text content painted inside a

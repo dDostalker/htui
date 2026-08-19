@@ -18,7 +18,7 @@ use crate::{
         layoutbox::{collect_runs, visible_children, wrap_runs},
     },
     tdom::node::{Node, NodeArena, NodeId, effective_font_size_cells},
-    tui::graph_api::{FontStyle, block_style},
+    graphics::{FontStyle, block_style},
 };
 
 use crossterm::style::Color;

@@ -14,7 +14,7 @@ use super::generation::visible_children;
 use crate::{
     html::css_parse::{TextTransform, WhiteSpace},
     tdom::node::{Node, NodeArena, NodeId, NodeType},
-    tui::graph_api::{FontStyle, block_style},
+    graphics::{FontStyle, block_style},
 };
 
 /// Collect inline runs from a block's inline tree, preserving `<span>` style
