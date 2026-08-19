@@ -272,7 +272,6 @@ fn border_side_component_longhand_renders() {
         "<div></div>",
         "div { width: 5px; padding-top: 1px; border-left-width: 3px; border-left-style: solid; border-left-color: green; }",
     );
-    let cols = 80;
     // The left edge glyph renders as a vertical bar somewhere in the box.
     let edge = tl
         .layout
@@ -301,7 +300,6 @@ fn border_component_longhand_overrides_side_shorthand_in_layout() {
         "<div></div>",
         "div { width: 5px; border: 1px solid red; border-left-color: blue; }",
     );
-    let cols = 80;
     let left_edge = tl
         .layout
         .iter()
