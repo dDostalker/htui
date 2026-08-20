@@ -25,10 +25,12 @@ use crate::resources::{ResourceError, ResourceRegistry};
 /// session.register("mem://app.js", b"console.log('hi')".to_vec()).unwrap();
 /// // session.render("<html>…</html>", "");
 /// ```
-#[derive(Debug)]
 pub struct Session {
     registry: Arc<ResourceRegistry>,
     config: Config,
+    /// Host-function bindings exposed to the document's scripts (used when
+    /// [`Config::events`] is enabled).
+    bindings: EventBindings,
 }
 
 impl Default for Session {
@@ -38,11 +40,13 @@ impl Default for Session {
 }
 
 impl Session {
-    /// Create a session with an empty registry and the default config.
+    /// Create a session with an empty registry, the default config (events
+    /// enabled) and no host bindings.
     pub fn new() -> Self {
         Self {
             registry: Arc::new(ResourceRegistry::new()),
             config: Config::default(),
+            bindings: EventBindings::default(),
         }
     }
 
@@ -103,32 +107,37 @@ impl Session {
         self.config.zoom
     }
 
-    /// Render an HTML document in the terminal with keyboard navigation,
-    /// mouse scrolling and zoom.
-    ///
-    /// This is the plain entry point without event handling; use
-    /// [`Session::render_with_events`] to enable click / hover interaction.
-    pub fn render(&self, html: &str, css: &str) {
-        crate::tui::run::run(html, css, None, Arc::clone(&self.registry), self.config);
+    /// Set the session's host-function bindings, exposed to the document's
+    /// scripts as JS globals (used when [`Config::events`] is enabled). Takes
+    /// effect on the next [`Session::render`].
+    pub fn set_bindings(&mut self, bindings: EventBindings) {
+        self.bindings = bindings;
     }
 
-    /// Render an HTML document with JS-like event handling enabled.
+    /// The session's host-function bindings.
+    pub fn bindings(&self) -> &EventBindings {
+        &self.bindings
+    }
+
+    /// Render an HTML document in the terminal.
     ///
-    /// In addition to everything [`Session::render`] does, elements that
-    /// declare `onclick` / `onmouseover` / `onmouseout` attributes become hit
-    /// regions, a dedicated hit-test thread records their positions, and
-    /// events bubble through the DOM ancestor chain to the handlers
-    /// registered in `bindings`. Hovering produces no visual highlight
-    /// (matching a browser without CSS `:hover` rules) — only the
-    /// `onmouseover` / `onmouseout` events fire. See the
+    /// Whether JS-like event handling (click / hover / keyboard events, the
+    /// script thread) is active is controlled by [`Config::events`] (default
+    /// `true`). With events enabled the session's host bindings (see
+    /// [`Session::set_bindings`]) are exposed to the document's scripts, hit
+    /// regions are tracked, and events bubble through the DOM ancestor chain
+    /// to the handlers registered in the bindings or in page JS. Hovering
+    /// produces no visual highlight (matching a browser without CSS `:hover`
+    /// rules) — only the `onmouseover` / `onmouseout` events fire. See the
     /// [`events`](crate::events) module for the event model.
-    pub fn render_with_events(&self, html: &str, css: &str, bindings: EventBindings) {
-        crate::tui::run::run(
-            html,
-            css,
-            Some(bindings),
-            Arc::clone(&self.registry),
-            self.config,
-        );
+    pub fn render(&mut self, html: &str, css: &str) {
+        // The bindings are consumed by the script thread; an events-disabled
+        // render never touches them.
+        let bindings = if self.config.events {
+            Some(std::mem::take(&mut self.bindings))
+        } else {
+            None
+        };
+        crate::tui::run::run(html, css, bindings, Arc::clone(&self.registry), self.config);
     }
 }

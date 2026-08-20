@@ -19,7 +19,7 @@ pub use htui_macros::commands;
 /// `#[derive(IntoJs)]` / `#[derive(FromJs)]` — struct ↔ JS object.
 pub use htui_macros::{FromJs, IntoJs};
 
-pub use config::{Config, Theme};
+pub use config::Config;
 pub use html::html_parse::Parser;
 pub use layout::layout::TermMap;
 pub use session::Session;

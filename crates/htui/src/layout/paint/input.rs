@@ -14,6 +14,13 @@ use crate::{
 use super::button::paint_button;
 use super::{PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put};
 
+/// Highlight colour for the selected character range (Tokyo Night selection).
+const SELECTION_BG: Color = Color::Rgb {
+    r: 0x3b,
+    g: 0x42,
+    b: 0x61,
+};
+
 /// Visible window of `value` for a field with `inner_width` content columns,
 /// centred on the caret (the window always contains the caret, extending left
 /// then right). Shared by the painter — draw exactly the visible slice — and
@@ -117,7 +124,7 @@ pub(crate) fn paint_input(
     }
 
     let content = paint_control_chrome(lb, arena, canvas, r, fg);
-    let bg = node.css_attr.get_bg_color().or(Some(canvas.control_bg));
+    let bg = node.css_attr.get_bg_color().or(Some(super::CONTROL_DEFAULT_BG));
 
     // Live edit state wins while focused, and an unfocused entry covers only
     // the single repaint right after a blur (so the committed text doesn't
@@ -188,9 +195,9 @@ pub(crate) fn paint_input(
                 // the end of the value (a blank inverted cell).
                 caret_cell(fg, bg)
             } else if selection.is_some_and(|(s, e)| i >= s && i < e) {
-                // Selected characters are highlighted over the field's own
-                // colours (session theme selection colour).
-                (Some(Color::White), Some(canvas.selection_bg))
+                // Selected characters are highlighted (Tokyo Night selection
+                // blue) over the field's own colours.
+                (Some(Color::White), Some(SELECTION_BG))
             } else if showing_placeholder {
                 (Some(Color::DarkGrey), bg)
             } else {

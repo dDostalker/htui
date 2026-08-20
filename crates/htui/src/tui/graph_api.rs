@@ -14,7 +14,6 @@ pub use crate::graphics::{
     ImageError, Img, InputRenderState, TermLayout, block_style, char_width, grapheme_width,
     render_image_at, render_image_at_slice,
 };
-pub(crate) use crate::graphics::image_intrinsic_size;
 pub(crate) use input::reapply_console_modes;
 pub use input::{
     DirtyInfo, InputState, KEY_GATE_TIMEOUT, KeyGate, OverlayKind, RenderCmd, SelectOpenState,

@@ -18,6 +18,13 @@ use crate::{
 
 use super::{PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put};
 
+/// Highlight colour for the selected character range (Tokyo Night selection).
+const SELECTION_BG: Color = Color::Rgb {
+    r: 0x3b,
+    g: 0x42,
+    b: 0x61,
+};
+
 /// One visual line of a `<textarea>` value: the display text wrapped to
 /// `content_width` cells, plus the character index in `value` where the line
 /// starts (so the caret / selection can map back to global indices).
@@ -157,7 +164,7 @@ pub(crate) fn paint_textarea(
 
     let fg = node.css_attr.get_color();
     let content = paint_control_chrome(lb, arena, canvas, r, fg);
-    let bg = node.css_attr.get_bg_color().or(Some(canvas.control_bg));
+    let bg = node.css_attr.get_bg_color().or(Some(super::CONTROL_DEFAULT_BG));
     // `caret-color` paints the caret block with the declared colour; the
     // default is the inverted cell (field background <-> text colour swap).
     let caret_color = node.css_attr.get_caret_color();
@@ -191,7 +198,7 @@ pub(crate) fn paint_textarea(
                 // end of the value (a blank inverted cell).
                 caret_cell(fg, bg)
             } else if selection.is_some_and(|(s, e)| global_char >= s && global_char < e) {
-                (Some(Color::White), Some(canvas.selection_bg))
+                (Some(Color::White), Some(SELECTION_BG))
             } else {
                 (fg, bg)
             };

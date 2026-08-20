@@ -16,7 +16,6 @@
 //!   src/{name}/style.css     — stylesheet (optional)
 
 use htui::Session;
-use htui::events::EventBindings;
 use log::info;
 
 /// Headless preview: parse the document, run the full layout pipeline into a
@@ -125,7 +124,7 @@ fn main() {
     // One session per run: resources registered below (image bytes, demo
     // scripts) are scoped to it, and the interactive render uses the same
     // session so `<img>` / `<script src>` / fetch resolve them.
-    let session = Session::new();
+    let mut session = Session::new();
 
     let (html, css) = match test_name {
         "all_in_one" => test_case!(all_in_one, no_css),
@@ -231,7 +230,7 @@ fn main() {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
-            session.render_with_events(html, css, EventBindings::default());
+            session.render(html, css);
         }
         info!("Test '{test_name}' completed");
         return;
@@ -244,7 +243,7 @@ fn main() {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
-            session.render_with_events(html, css, EventBindings::default());
+            session.render(html, css);
         }
         info!("Test '{test_name}' completed");
         return;
@@ -257,7 +256,7 @@ fn main() {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
-            session.render_with_events(html, css, EventBindings::default());
+            session.render(html, css);
         }
         info!("Test '{test_name}' completed");
         return;
@@ -270,7 +269,7 @@ fn main() {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
-            session.render_with_events(html, css, EventBindings::default());
+            session.render(html, css);
         }
         info!("Test '{test_name}' completed");
         return;
@@ -284,7 +283,7 @@ fn main() {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
-            session.render_with_events(html, css, EventBindings::default());
+            session.render(html, css);
         }
         info!("Test '{test_name}' completed");
         return;
@@ -299,7 +298,7 @@ fn main() {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
-            session.render_with_events(html, css, EventBindings::default());
+            session.render(html, css);
         }
         info!("Test '{test_name}' completed");
         return;
@@ -313,7 +312,7 @@ fn main() {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
-            session.render_with_events(html, css, EventBindings::default());
+            session.render(html, css);
         }
         info!("Test '{test_name}' completed");
         return;
@@ -354,7 +353,7 @@ fn main() {
                 b"hello from the mem:// registry".to_vec(),
             )
             .expect("register mem demo data");
-            session.render_with_events(html, css, EventBindings::default());
+            session.render(html, css);
         }
         info!("Test '{test_name}' completed");
         return;

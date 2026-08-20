@@ -16,13 +16,14 @@ use crossterm::{
     cursor::{Hide, Show},
     event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
     execute,
+    style::Color,
     terminal::{
         EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode, size,
     },
 };
 
 use crate::{
-    config::{Config, Theme},
+    config::Config,
     events::{EventBindings, Geometry, HitMap},
     html::css_parse::{
         self, CssRule, DynamicState, Position, PseudoClass, PseudoClassSet, css_into_node_with_state,
@@ -123,6 +124,36 @@ fn extract_title(arena: &NodeArena, root_id: NodeId) -> Option<String> {
 /// Holds everything that outlives a single frame: the session document, the
 /// stylesheet, the reused canvas, the cached geometry and the scroll bound
 /// shared with the input loop.
+/// Highlight colour for the page text selection (Tokyo Night selection).
+const SELECTION_BG: Color = Color::Rgb {
+    r: 0x3b,
+    g: 0x42,
+    b: 0x61,
+};
+
+/// Dropdown overlay background (Tokyo Night panel).
+const OVERLAY_BG: Color = Color::Rgb {
+    r: 0x24,
+    g: 0x28,
+    b: 0x3b,
+};
+
+/// Overlay text colour (Tokyo Night foreground).
+const OVERLAY_FG: Color = Color::Rgb {
+    r: 0xc0,
+    g: 0xca,
+    b: 0xf5,
+};
+
+/// Foreground of `<optgroup>` header rows — dimmer than the options so a
+/// group label reads as a non-option heading (clicking it still picks the
+/// group's first option).
+const GROUP_FG: Color = Color::Rgb {
+    r: 0x7a,
+    g: 0x83,
+    b: 0xa8,
+};
+
 /// An active page text selection: the two canvas-space endpoints and the
 /// shape connecting them (`Flow` follows reading order, `Block` is a
 /// rectangle). The highlight and the extractable text are both derived from
@@ -205,8 +236,6 @@ struct RenderState {
     /// The `<select>` dropdown overlay currently painted (`None` = none).
     open_select: Option<OpenSelect>,
     max_scroll: Arc<AtomicU32>,
-    /// The session colour theme (selection / overlay / group colours).
-    theme: Theme,
 }
 
 impl RenderState {
@@ -312,7 +341,7 @@ impl RenderState {
                 tl.open_select = Some(node_id);
                 tl.repaint_region(&geo.arena, &geo.boxes, union_rect(select_rect, rect));
                 if let Some(open) = &self.open_select {
-                    apply_select_overlay(tl, open, self.theme);
+                    apply_select_overlay(tl, open);
                 }
                 tl.render(out);
                 flush_frame(out);
@@ -355,7 +384,7 @@ impl RenderState {
                     return;
                 };
                 tl.repaint_region(&geo.arena, &geo.boxes, open.rect);
-                apply_select_overlay(tl, open, self.theme);
+                apply_select_overlay(tl, open);
                 tl.render(out);
                 flush_frame(out);
             }
@@ -418,7 +447,7 @@ impl RenderState {
         };
         if let Some(r) = region {
             tl.repaint_region(&geo.arena, &geo.boxes, r);
-            tl.apply_text_selection(&new_lines, self.theme.selection_bg);
+            tl.apply_text_selection(&new_lines, SELECTION_BG);
         }
         tl.render(out);
         flush_frame(out);
@@ -492,9 +521,7 @@ impl RenderState {
             None => true,
         };
         if size_changed {
-            let mut tl = TermLayout::new(term_map, zoom);
-            tl.set_theme(self.theme);
-            self.term_layout = Some(tl);
+            self.term_layout = Some(TermLayout::new(term_map, zoom));
             // A resize invalidates the canvas-coordinate caches the overlay /
             // selection repaints rely on: drop them so the fresh frame paints
             // clean instead of re-applying stale rectangles onto the new
@@ -606,11 +633,11 @@ impl RenderState {
         // never spills over borders / padding / trailing whitespace.
         if let Some(sel) = &self.text_selection {
             let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
-            tl.apply_text_selection(&lines, self.theme.selection_bg);
+            tl.apply_text_selection(&lines, SELECTION_BG);
         }
         // Re-apply an open dropdown overlay (a repaint would clear it).
         if let Some(open) = &self.open_select {
-            apply_select_overlay(tl, open, self.theme);
+            apply_select_overlay(tl, open);
         }
 
         // The incremental renderer emits only the changed cells (and a
@@ -735,10 +762,10 @@ impl RenderState {
         // highlight must be overlaid again.
         if let Some(sel) = &self.text_selection {
             let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
-            tl.apply_text_selection(&lines, self.theme.selection_bg);
+            tl.apply_text_selection(&lines, SELECTION_BG);
         }
         if let Some(open) = &self.open_select {
-            apply_select_overlay(tl, open, self.theme);
+            apply_select_overlay(tl, open);
         }
         tl.render(out);
         flush_frame(out);
@@ -790,10 +817,10 @@ impl RenderState {
         // The repaint reset the region; re-apply the active overlays on top.
         if let Some(sel) = &self.text_selection {
             let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
-            tl.apply_text_selection(&lines, self.theme.selection_bg);
+            tl.apply_text_selection(&lines, SELECTION_BG);
         }
         if let Some(open) = &self.open_select {
-            apply_select_overlay(tl, open, self.theme);
+            apply_select_overlay(tl, open);
         }
     }
 
@@ -959,7 +986,7 @@ fn lines_bounds(lines: &[(u32, u32, u32)]) -> Option<Rect> {
 /// row of the overlay rectangle, then write each option label with the
 /// highlighted row on the selection background and the rest on the overlay
 /// background. Overlays cover whatever the layout painted underneath.
-fn apply_select_overlay(tl: &mut TermLayout, open: &OpenSelect, theme: Theme) {
+fn apply_select_overlay(tl: &mut TermLayout, open: &OpenSelect) {
     let cols = tl.columns as usize;
     let max = tl.layout.len();
     // The overlay may extend below the layout's content (a `<select>` near
@@ -983,17 +1010,17 @@ fn apply_select_overlay(tl: &mut TermLayout, open: &OpenSelect, theme: Theme) {
         }
         let (label, fg, is_item) = match row {
             // `<optgroup>` headers are dimmed and never take the highlight.
-            SelectRow::Group(g) => (g.as_str(), theme.group_fg, false),
+            SelectRow::Group(g) => (g.as_str(), GROUP_FG, false),
             SelectRow::Item(i) => (
                 open.options.get(*i).map(|o| o.label.as_str()).unwrap_or(""),
-                theme.overlay_fg,
+                OVERLAY_FG,
                 true,
             ),
         };
         let bg = if is_item && row_idx == open.highlight_row() {
-            Some(theme.selection_bg)
+            Some(SELECTION_BG)
         } else {
-            Some(theme.overlay_bg)
+            Some(OVERLAY_BG)
         };
         // Clear the whole row, then write the label.
         for x in open.rect.x..x_end {
@@ -1179,7 +1206,6 @@ fn render_thread(
         selection_text,
         open_select: None,
         max_scroll,
-        theme: config.theme,
     };
 
     let mut last_frame_at: Option<Instant> = None;
