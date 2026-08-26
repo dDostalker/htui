@@ -21,6 +21,12 @@ pub struct Config {
     /// would try to draw at the event rate and saturate the terminal's output
     /// pipe, which looks exactly like an app freeze. Default 16 ms (~60 fps).
     pub frame_gap: Duration,
+    /// Whether the flow (left-drag) page text selection and its `Ctrl+C` copy
+    /// are enabled (browser-like reading-order selection). Default `true`.
+    pub copy_flow: bool,
+    /// Whether the block (right-drag) rectangle selection and its `Ctrl+C`
+    /// copy are enabled (vim `Ctrl+V` / tmux style). Default `true`.
+    pub copy_block: bool,
 }
 
 impl Default for Config {
@@ -29,6 +35,8 @@ impl Default for Config {
             zoom: 1.0,
             events: true,
             frame_gap: Duration::from_millis(16),
+            copy_flow: true,
+            copy_block: true,
         }
     }
 }

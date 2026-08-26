@@ -1693,6 +1693,8 @@ pub(crate) fn run(
 
     let mut state = InputState::new();
     state.zoom = config.zoom;
+    state.copy_flow = config.copy_flow;
+    state.copy_block = config.copy_block;
     state.selection_text = Arc::clone(&selection_text);
     let (mut columns, mut rows): (u16, u16) = match TermMap::get_ter_map() {
         Ok(m) => (m.columns, m.rows),

@@ -378,6 +378,20 @@ pub struct InputState {
     /// Shape of the active page text selection: left-drag is flow (reading
     /// order), right-drag is a block rectangle.
     pub text_sel_mode: SelectionMode,
+    /// Whether the current press armed a page text selection — the mode above
+    /// was set by a press whose copy feature is enabled. Without this, a
+    /// disabled feature's press would leave a stale mode behind and a later
+    /// drag could still start a selection in the wrong shape.
+    text_sel_armed: bool,
+    /// Whether the flow (left-drag) page text selection + copy is enabled.
+    /// Seeded from [`Config`](crate::config::Config); when `false` a left drag
+    /// over page content never starts a selection (and `Ctrl+C` copies
+    /// nothing).
+    pub copy_flow: bool,
+    /// Whether the block (right-drag) rectangle selection + copy is enabled.
+    /// Seeded from [`Config`](crate::config::Config); when `false` a right
+    /// drag never starts a rectangle selection (and `Ctrl+C` copies nothing).
+    pub copy_block: bool,
     /// Text inside the current page selection, refreshed by the render thread
     /// on every `TextSelection` command; read on `Ctrl+C` to copy. Shared
     /// with the render thread through `Arc<Mutex<_>>`.
@@ -414,6 +428,9 @@ impl InputState {
             text_sel_anchor: None,
             text_sel_end: None,
             text_sel_mode: SelectionMode::Flow,
+            text_sel_armed: false,
+            copy_flow: true,
+            copy_block: true,
             selection_text: Arc::new(Mutex::new(String::new())),
             open_select: None,
             next_key_id: 0,
@@ -1340,6 +1357,7 @@ fn char_index_at_x(value: &str, cursor: usize, inner_width: usize, x: usize) -> 
 
 /// Clear the page text selection, queueing a repaint only when one existed.
 fn clear_text_selection(state: &mut InputState, cmds: &mut Vec<RenderCmd>) {
+    state.text_sel_armed = false;
     if state.text_sel_anchor.is_some() || state.text_sel_end.is_some() {
         state.text_sel_anchor = None;
         state.text_sel_end = None;
@@ -1645,22 +1663,31 @@ pub fn handle_mouse_down(
             } else {
                 // Mousedown outside a field blurs it (browser timing). The
                 // flow text selection is deferred: browsers select only on a
-                // real drag, so a jittery click leaves no residue.
+                // real drag, so a jittery click leaves no residue. When the
+                // flow copy feature is disabled the mode stays untouched, so
+                // no selection can start.
                 if state.focused_input.is_some() {
                     blur_input(state, msgs, cmds);
                 }
                 clear_text_selection(state, cmds);
-                state.text_sel_mode = SelectionMode::Flow;
+                if state.copy_flow {
+                    state.text_sel_mode = SelectionMode::Flow;
+                    state.text_sel_armed = true;
+                }
             }
         }
         // Right-drag starts a rectangular (block) selection; the focused field
         // and its caret stay untouched. Like the left flow selection it only
         // starts once the drag passes the threshold (see
         // [`handle_mouse_move`]); the press clears prior selections and
-        // records the shape.
+        // records the shape. When the block copy feature is disabled no
+        // selection can start.
         MouseButton::Right => {
             clear_text_selection(state, cmds);
-            state.text_sel_mode = SelectionMode::Block;
+            if state.copy_block {
+                state.text_sel_mode = SelectionMode::Block;
+                state.text_sel_armed = true;
+            }
         }
         _ => {}
     }
@@ -1753,7 +1780,11 @@ pub fn handle_mouse_move(
             // from the press point — a jittery click (press, one-cell wiggle,
             // release) must not leave a highlighted character behind. The
             // anchor is the press point, so the selection starts where the
-            // button went down (browser behaviour).
+            // button went down (browser behaviour). A press whose copy feature
+            // is disabled never armed the selection, so no drag can start one.
+            if !state.text_sel_armed {
+                return;
+            }
             let anchor = match state.text_sel_anchor {
                 Some(a) => a,
                 None => {
@@ -2358,10 +2389,16 @@ fn page_level_builtins(
             }
             // Copy a page text selection (inside an `<input>` the Ctrl
             // shortcuts are handled earlier). `Ctrl+X` on read-only page text
-            // degrades to a copy, like a browser.
+            // degrades to a copy, like a browser. The selection can only exist
+            // when its copy feature is enabled, but the mode is also checked
+            // here so a disabled feature never copies.
             KeyCode::Char('c') | KeyCode::Char('x') => {
                 if state.focused_input.is_none()
                     && state.text_sel_anchor.is_some()
+                    && match state.text_sel_mode {
+                        SelectionMode::Flow => state.copy_flow,
+                        SelectionMode::Block => state.copy_block,
+                    }
                     && let Ok(guard) = state.selection_text.lock()
                 {
                     state.input_clipboard = guard.clone();

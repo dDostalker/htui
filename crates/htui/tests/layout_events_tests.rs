@@ -463,6 +463,66 @@ fn jittery_click_on_a_button_leaves_no_selection() {
 }
 
 #[test]
+fn disabled_flow_copy_blocks_left_drag_selection() {
+    // With `copy_flow` off, a left-drag over page content must never start a
+    // selection: the press does not arm the flow mode and the drag queues no
+    // `TextSelection` (so there is nothing to copy on `Ctrl+C`).
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="a">some text</div><div id="b">more text</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+
+    let mut state = InputState::new();
+    state.copy_flow = false;
+    mouse_down(&mut state, &mut engine, &map, 0, 0, MouseButton::Left);
+    assert_eq!(state.text_sel_anchor, None);
+    assert_eq!(state.text_sel_end, None);
+
+    state.pressed = Some((0, 0));
+    let cmds = mouse_move(&mut state, &mut engine, &map, 4, 0);
+    assert_eq!(
+        state.text_sel_anchor, None,
+        "disabled flow copy must never start a selection"
+    );
+    assert_eq!(state.text_sel_end, None);
+    assert!(
+        !cmds.iter().any(|c| matches!(c, RenderCmd::TextSelection { .. })),
+        "a disabled flow copy must queue no TextSelection"
+    );
+}
+
+#[test]
+fn disabled_block_copy_blocks_right_drag_selection() {
+    // With `copy_block` off, a right-drag must never start a selection — and
+    // in particular must not fall back to the stale `Flow` mode from the
+    // default state, which would otherwise highlight a wrong-shaped selection
+    // on a disabled feature.
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="a">some text</div><div id="b">more text</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+
+    let mut state = InputState::new();
+    state.copy_block = false;
+    mouse_down(&mut state, &mut engine, &map, 2, 0, MouseButton::Right);
+    assert_eq!(state.text_sel_anchor, None);
+
+    state.pressed = Some((2, 0));
+    let cmds = mouse_move(&mut state, &mut engine, &map, 5, 2);
+    assert_eq!(
+        state.text_sel_anchor, None,
+        "disabled block copy must never start a selection"
+    );
+    assert_eq!(state.text_sel_end, None);
+    assert!(
+        !cmds.iter().any(|c| matches!(c, RenderCmd::TextSelection { .. })),
+        "a disabled block copy must queue no TextSelection"
+    );
+}
+
+#[test]
 fn coalesce_keeps_a_newer_hover_after_a_pending_arena() {
     // The run loop used to drop `Hover` commands queued behind a
     // `RenderArena`; the render thread defers them and applies the freshest

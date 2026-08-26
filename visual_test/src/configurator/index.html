@@ -60,6 +60,14 @@
     <div class="row"><div class="label">Logging</div>
       <div id="logging" class="toggle on" onclick="toggleLog()">ON</div>
     </div>
+    <!-- Copy feature toggles: flow = left-drag reading-order selection,
+         block = right-drag rectangle selection (both copy on Ctrl+C). -->
+    <div class="row"><div class="label">Flow copy</div>
+      <div id="flow-copy" class="toggle on" onclick="toggleCopy('flow')">ON</div>
+    </div>
+    <div class="row"><div class="label">Block copy</div>
+      <div id="block-copy" class="toggle on" onclick="toggleCopy('block')">ON</div>
+    </div>
   </div>
 
   <!-- Live preview, updated on every input / change -->
@@ -85,6 +93,7 @@
 
     // ---- Toggle switches ----
     var cpuOn = false, diskOn = false, logOn = true;
+    var flowCopyOn = true, blockCopyOn = true;
     function paintToggle(id, on) {
       var el = document.getElementById(id);
       el.textContent = on ? 'ON' : 'OFF';
@@ -96,6 +105,11 @@
       updatePreview();
     }
     function toggleLog() { logOn = !logOn; paintToggle('logging', logOn); updatePreview(); }
+    function toggleCopy(key) {
+      if (key === 'flow') { flowCopyOn = !flowCopyOn; paintToggle('flow-copy', flowCopyOn); }
+      else { blockCopyOn = !blockCopyOn; paintToggle('block-copy', blockCopyOn); }
+      updatePreview();
+    }
 
     // ---- Live preview ----
     function updatePreview() {
@@ -109,7 +123,9 @@
       var base = 'Profile: ' + profile + '\n' +
         'Sampling http://' + host + ':' + port + ' every ' + refresh + 'ms\n' +
         'Theme: ' + THEME_NAMES[theme] + ' | CPU: ' + (cpuOn ? 'ON' : 'OFF') +
-        ' | Disk: ' + (diskOn ? 'ON' : 'OFF') + ' | Log: ' + (logOn ? 'ON' : 'OFF');
+        ' | Disk: ' + (diskOn ? 'ON' : 'OFF') + ' | Log: ' + (logOn ? 'ON' : 'OFF') + '\n' +
+        'Flow copy: ' + (flowCopyOn ? 'ON' : 'OFF') +
+        ' | Block copy: ' + (blockCopyOn ? 'ON' : 'OFF');
       preview.textContent = (portOk && refreshOk)
         ? base
         : base + '\n⚠ Port / refresh invalid — numbers only.';
@@ -130,7 +146,9 @@
         theme: theme,
         cpuAlarm: cpuOn,
         diskAlarm: diskOn,
-        logEnabled: logOn
+        logEnabled: logOn,
+        flowCopy: flowCopyOn,
+        blockCopy: blockCopyOn
       };
       console.log('config saved: ' + JSON.stringify(cfg));
       var s = document.querySelector('#status');
@@ -144,9 +162,12 @@
       document.getElementById('theme').value = 'tn';
       theme = 'tn';
       cpuOn = false; diskOn = false; logOn = true;
+      flowCopyOn = true; blockCopyOn = true;
       paintToggle('cpu-alarm', false);
       paintToggle('disk-alarm', false);
       paintToggle('logging', true);
+      paintToggle('flow-copy', true);
+      paintToggle('block-copy', true);
       var s = document.querySelector('#status');
       s.textContent = 'Defaults restored';
       updatePreview();
