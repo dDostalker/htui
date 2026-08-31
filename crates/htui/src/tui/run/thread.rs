@@ -1,0 +1,441 @@
+//! Worker threads: the render thread (frame loop over `RenderCmd` batches)
+//! and the hit-test thread (shared `HitMap` maintenance), plus the script
+//! reply folding shared with the input loop.
+
+use std::io::{BufWriter, stdout};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use crate::config::Config;
+use crate::events::{Geometry, HitMap};
+use crate::html::css_parse::{DynamicState, PseudoClass, css_pseudo_rule_set};
+use crate::layout::layout::TermMap;
+use crate::tdom::node::{NodeArena, NodeId};
+use crate::tui::graph_api::{InputState, RenderCmd};
+
+use super::pipeline::{flush_frame, parse_css_source};
+use super::state::RenderState;
+
+/// One coalesced `RenderCmd::RenderInput`: buffered keystroke state for a
+/// focused field. Several inputs arriving in one frame batch render
+/// together (see the merge logic at the top of `render_thread`).
+struct PendingInput {
+    node_id: NodeId,
+    value: String,
+    cursor: usize,
+    focused: bool,
+    selection: Option<(usize, usize)>,
+}
+
+pub(super) fn render_thread(
+    rx: mpsc::Receiver<RenderCmd>,
+    html: Arc<str>,
+    base_css: Arc<str>,
+    max_scroll: Arc<AtomicU32>,
+    geo_tx: Option<mpsc::Sender<Arc<Geometry>>>,
+    selection_text: Arc<Mutex<String>>,
+    render_beat: Arc<AtomicU64>,
+    config: Config,
+) {
+    // One persistent write buffer for the whole session: every frame writes
+    // into it and is flushed exactly once, so a frame costs a single write
+    // syscall instead of one per render call.
+    let mut out = BufWriter::new(stdout());
+    let css_rules = Arc::new(parse_css_source(&base_css));
+    let pseudo_rules = css_pseudo_rule_set(&css_rules);
+    let mut state = RenderState {
+        html,
+        base_css,
+        extra_css: String::new(),
+        css_rules,
+        pseudo_rules,
+        term_layout: None,
+        title_set: false,
+        geometry: None,
+        has_pinned: false,
+        dynamic: DynamicState::default(),
+        text_selection: None,
+        selection_text,
+        open_select: None,
+        max_scroll,
+    };
+
+    let mut last_frame_at: Option<Instant> = None;
+    loop {
+        let first = match rx.recv() {
+            Ok(c) => c,
+            Err(e) => {
+                log::error!("Render channel disconnected: {}", e);
+                break;
+            }
+        };
+        // Rate-limit frames: when commands arrive faster than the console can
+        // drain a frame (a fast wheel scroll can push a full-viewport diff at
+        // every tick), the render thread would otherwise queue frame after
+        // frame, saturate the output pipe and stall on the write — which
+        // looks exactly like the whole app froze. Waiting out the remainder of
+        // `MIN_FRAME_GAP` lets the `try_recv` drain below coalesce the burst
+        // into one frame and bounds the ANSI output rate.
+        if let Some(t) = last_frame_at {
+            let since = t.elapsed();
+            if since < config.frame_gap {
+                std::thread::sleep(config.frame_gap - since);
+            }
+        }
+        // Commands split into two classes with different merge semantics:
+        //
+        // - Stateful, must-run-in-order commands — `RenderInput` (a focus
+        //   switch queues blur + focus for two fields; dropping either leaves
+        //   a stale caret) and `Select*` (they mutate the render thread's
+        //   dropdown state, so a `SelectClose` must not be dropped in favour
+        //   of the `RenderArena` its `change` handler triggers). They are
+        //   collected in arrival order and all run.
+        // - Snapshot commands (`Rerender` / `Redraw` / `RenderArena` /
+        //   `RenderHtml` / `Hover` / `Quit`) — each carries a complete final
+        //   state, so a later one safely supersedes an earlier one; only the
+        //   last of the batch is kept.
+        // - `TextSelection` is *incremental*: its repaint region derives from
+        //   the previously applied selection, so superseding it with a
+        //   same-batch snapshot (a `RenderArena` triggered by a timer / hover
+        //   mid-drag) would leave the render thread re-applying the stale
+        //   highlight and make the next selection jump the edge forward — the
+        //   visible flicker. It is deferred instead and applied after the
+        //   snapshot command, on the fresh canvas.
+        // - A `Hover` arriving after a pending `RenderArena` is likewise
+        //   deferred: superseding the arena render (whose `dynamic.hovered`
+        //   was captured when the DOM change was folded) would drop the DOM
+        //   mutation — an animated widget under the pointer (e.g. the music
+        //   demo's progress bar) would then update in irregular jumps. The
+        //   deferred hover repaint re-applies the newer highlight on top.
+        let mut pending_inputs: Vec<PendingInput> = Vec::new();
+        let mut pending_selects: Vec<RenderCmd> = Vec::new();
+        let mut pending_text_sel: Option<RenderCmd> = None;
+        let mut pending_hover: Option<RenderCmd> = None;
+        let mut cmd = match first {
+            RenderCmd::RenderInput {
+                node_id,
+                value,
+                cursor,
+                focused,
+                selection,
+            } => {
+                pending_inputs.push(PendingInput {
+                    node_id,
+                    value,
+                    cursor,
+                    focused,
+                    selection,
+                });
+                None
+            }
+            sel @ (RenderCmd::SelectOpen { .. }
+            | RenderCmd::SelectClose { .. }
+            | RenderCmd::SelectMove { .. }) => {
+                pending_selects.push(sel);
+                None
+            }
+            other @ RenderCmd::TextSelection { .. } => {
+                pending_text_sel = Some(other);
+                None
+            }
+            other => Some(other),
+        };
+        while let Ok(next) = rx.try_recv() {
+            match next {
+                RenderCmd::RenderInput {
+                    node_id,
+                    value,
+                    cursor,
+                    focused,
+                    selection,
+                } => pending_inputs.push(PendingInput {
+                    node_id,
+                    value,
+                    cursor,
+                    focused,
+                    selection,
+                }),
+                sel @ (RenderCmd::SelectOpen { .. }
+                | RenderCmd::SelectClose { .. }
+                | RenderCmd::SelectMove { .. }) => pending_selects.push(sel),
+                other @ RenderCmd::TextSelection { .. } => {
+                    // Only the latest selection matters; earlier ones in the
+                    // same batch are intermediates.
+                    pending_text_sel = Some(other);
+                }
+                other @ RenderCmd::Hover { .. }
+                    if matches!(cmd, Some(RenderCmd::RenderArena { .. })) =>
+                {
+                    // The arena render re-cascades with the hover state it
+                    // carried; the newer hover repaint must not swallow the
+                    // DOM mutations, so defer it (see the merge comment).
+                    pending_hover = Some(other);
+                }
+                other => {
+                    cmd = Some(other);
+                    // Quit supersedes anything still queued in the batch.
+                    if matches!(cmd, Some(RenderCmd::Quit)) {
+                        break;
+                    }
+                }
+            }
+        }
+        for PendingInput {
+            node_id,
+            value,
+            cursor,
+            focused,
+            selection,
+        } in pending_inputs
+        {
+            state.handle_input(&mut out, node_id, value, cursor, focused, selection);
+        }
+        for sel_cmd in pending_selects {
+            state.handle_select(&mut out, sel_cmd);
+        }
+
+        // Publish the frame-completion heartbeat *before* processing: the
+        // input loop's watchdog uses it to tell a *stuck* render thread
+        // (infinite layout loop, an enormous canvas allocation, a blocked
+        // console write) apart from an idle or no-op one, which is still
+        // alive and must not trip the watchdog.
+        render_beat.store(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+            Ordering::Relaxed,
+        );
+        last_frame_at = Some(Instant::now());
+
+        // Process the deferred `TextSelection` *before* the snapshot command:
+        // its repaint uses the current canvas (the union of the old and new
+        // bounds), and the snapshot re-applies it on the fresh canvas — so it
+        // is never lost to a snapshot arm's early `continue` (see the merge
+        // comment above).
+        if let Some(RenderCmd::TextSelection { anchor, end, mode }) = pending_text_sel {
+            state.apply_text_selection_cmd(&mut out, anchor, end, mode);
+        }
+
+        if let Some(cmd) = cmd {
+            let batch_t0 = Instant::now();
+            match cmd {
+                RenderCmd::Quit => break,
+
+                RenderCmd::Rerender { scroll_y } => {
+                    // Resolve the new scroll position (with clamping) inside a
+                    // scoped borrow so the fixed-box repin below can borrow the
+                    // whole state.
+                    {
+                        let Some(tl) = state.term_layout.as_mut() else {
+                            continue;
+                        };
+                        let prev = tl.scroll_y;
+                        tl.scroll_y = scroll_y;
+                        tl.clamp_scroll();
+                        // Defense in depth: drop rerenders whose resolved scroll
+                        // position is unchanged after clamping. Most such events
+                        // are already filtered in the input thread, but if a
+                        // `Rerender` slips past (e.g. races between a Redraw
+                        // updating the max_scroll ceiling and a queued scroll
+                        // event) we still avoid the diff pass.
+                        if tl.scroll_y == prev {
+                            continue;
+                        }
+                    }
+                    // Scroll-aware `position: fixed`: re-anchor the fixed boxes
+                    // to the new scroll offset and repaint the cells they occupy
+                    // (old + new areas), so they stay pinned to their screen
+                    // position. Documents without pinned boxes keep the cheap
+                    // canvas re-slice below.
+                    if state.has_pinned {
+                        state.pin_fixed_and_repaint(&geo_tx);
+                    }
+                    // The incremental renderer diffs the shifted viewport against
+                    // the previous frame, so scrolling needs no full-screen Clear.
+                    let Some(tl) = state.term_layout.as_mut() else {
+                        continue;
+                    };
+                    tl.render(&mut out);
+                    flush_frame(&mut out);
+                }
+
+                RenderCmd::Redraw { scroll_y, zoom } => {
+                    let term_map = match TermMap::get_ter_map() {
+                        Ok(m) => m,
+                        Err(e) => {
+                            log::error!("Failed to get terminal size: {}", e);
+                            continue;
+                        }
+                    };
+                    state.redraw(&mut out, &geo_tx, &term_map, scroll_y, zoom);
+                }
+
+                RenderCmd::RenderArena {
+                    arena,
+                    root_id,
+                    scroll_y,
+                    zoom,
+                    dynamic,
+                    dirty,
+                } => {
+                    // A hover / focus change re-styles the whole tree (the
+                    // `:hover` / `:focus` highlight may sit anywhere), so the
+                    // incremental repaint is only valid when the interaction
+                    // state is unchanged.
+                    let state_changed = state.dynamic != dynamic;
+                    state.dynamic = dynamic;
+                    let term_map = match TermMap::get_ter_map() {
+                        Ok(m) => m,
+                        Err(e) => {
+                            log::error!("Failed to get terminal size: {}", e);
+                            continue;
+                        }
+                    };
+                    state.render_arena(
+                        &mut out,
+                        &geo_tx,
+                        &term_map,
+                        &arena,
+                        root_id,
+                        scroll_y,
+                        zoom,
+                        dirty,
+                        state_changed,
+                    );
+                }
+
+                RenderCmd::RenderHtml { html } => {
+                    let term_map = match TermMap::get_ter_map() {
+                        Ok(m) => m,
+                        Err(e) => {
+                            log::error!("Failed to get terminal size: {}", e);
+                            continue;
+                        }
+                    };
+                    state.render_html(&mut out, &geo_tx, &term_map, html);
+                }
+
+                RenderCmd::Hover { node_id } => {
+                    let prev = state.dynamic.hovered;
+                    state.dynamic.hovered = node_id;
+                    // Without any `:hover` rule the cascade is identical for every
+                    // pointer position, so nothing can change on screen — skip the
+                    // repaint entirely (browser behaviour: moving the pointer with
+                    // no `:hover` styles produces no drawing).
+                    if !state.pseudo_rules.contains_pseudo(PseudoClass::Hover) {
+                        continue;
+                    }
+                    state.repaint_dynamic(&mut out, PseudoClass::Hover, prev, node_id);
+                }
+
+                RenderCmd::Focus { node_id } => {
+                    let prev = state.dynamic.focused;
+                    state.dynamic.focused = node_id;
+                    // Without any `:focus` rule the cascade is identical for every
+                    // focus position, so nothing can change on screen — skip the
+                    // repaint entirely (browser behaviour: focusing with no
+                    // `:focus` styles produces no drawing).
+                    if !state.pseudo_rules.contains_pseudo(PseudoClass::Focus) {
+                        continue;
+                    }
+                    state.repaint_dynamic(&mut out, PseudoClass::Focus, prev, node_id);
+                }
+
+                // Select dropdown commands share one handler so the pending pass
+                // can also run them (see `pending_selects` above).
+                RenderCmd::SelectOpen { .. }
+                | RenderCmd::SelectClose { .. }
+                | RenderCmd::SelectMove { .. } => {
+                    state.handle_select(&mut out, cmd);
+                }
+
+                RenderCmd::TextSelection { anchor, end, mode } => {
+                    state.apply_text_selection_cmd(&mut out, anchor, end, mode);
+                }
+
+                RenderCmd::RenderInput {
+                    node_id,
+                    value,
+                    cursor,
+                    focused,
+                    selection,
+                } => {
+                    state.handle_input(&mut out, node_id, value, cursor, focused, selection);
+                }
+
+                // JS `el.focus()` / `el.blur()` requests are intercepted by the
+                // input loop (they mutate input-loop state); if one ever reaches
+                // the render thread it is stale — drop it.
+                RenderCmd::FocusRequest { .. } | RenderCmd::BlurRequest { .. } => {
+                    log::debug!("Focus request reached the render thread — dropping");
+                }
+            }
+
+            // A single command batch taking this long usually means a bogus
+            // canvas size or a blocked console write — log it so a "freeze" can
+            // be traced to its exact cause instead of staying mysterious.
+            let elapsed = batch_t0.elapsed();
+            if elapsed > Duration::from_millis(200) {
+                log::warn!("渲染线程单批命令处理耗时 {elapsed:?}");
+            }
+        }
+
+        // A deferred `Hover` runs last so its repaint re-applies the newer
+        // hover highlight on top of both the arena render and the selection.
+        if let Some(RenderCmd::Hover { node_id }) = pending_hover {
+            let prev = state.dynamic.hovered;
+            state.dynamic.hovered = node_id;
+            if state.pseudo_rules.contains_pseudo(PseudoClass::Hover) {
+                state.repaint_dynamic(&mut out, PseudoClass::Hover, prev, node_id);
+            }
+        }
+    }
+}
+
+/// Worker of the dedicated hit-test thread.
+///
+/// Consumes geometry snapshots published by the render thread and replaces
+/// the shared hit map with a freshly built region list. Exits when the render
+/// thread drops the channel (i.e. on quit).
+pub(super) fn hit_test_thread(rx: mpsc::Receiver<Arc<Geometry>>, hit_map: Arc<Mutex<Arc<HitMap>>>) {
+    while let Ok(geo) = rx.recv() {
+        let map = Arc::new(HitMap::build(&geo));
+        match hit_map.lock() {
+            Ok(mut guard) => *guard = map,
+            Err(e) => log::error!("Hit map lock poisoned: {}", e),
+        }
+    }
+    log::debug!("Hit-test thread exiting");
+}
+
+/// Fold one `ScriptResponse::Event` into the current frame: hover updates,
+/// host-pushed render commands, and — when JS mutated the DOM — a fresh arena
+/// snapshot + dirty set forwarded as a (region-repaint) `RenderArena`.
+/// Shared by the key-gate wait and the ordinary async reply fold.
+pub(super) fn fold_script_event(
+    state: &InputState,
+    cmds: &mut Vec<RenderCmd>,
+    hovered: &mut Option<NodeId>,
+    live_dom: &mut Option<(Arc<NodeArena>, NodeId)>,
+    ev: crate::script::ScriptEvent,
+) {
+    *hovered = ev.hovered;
+    cmds.extend(ev.cmds);
+    if let Some(d) = ev.dirty {
+        *live_dom = Some((Arc::clone(&d.arena), d.root_id));
+        cmds.push(RenderCmd::RenderArena {
+            arena: d.arena,
+            root_id: d.root_id,
+            scroll_y: state.scroll_y,
+            zoom: state.zoom,
+            dynamic: DynamicState {
+                hovered: ev.hovered,
+                focused: state.focused_input,
+            },
+            dirty: d.dirty,
+        });
+    }
+}

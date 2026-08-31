@@ -1,4 +1,4 @@
-# htui — 终端 HTML/CSS 渲染引擎
+﻿# htui — 终端 HTML/CSS 渲染引擎
 
 > 本文档是 对LLM Agent的**提示与约束文档**。*本文档是 LLM 操作本项目的行为契约。任何时候应当以本文件为最高优先级参考。*
 > 在LLM与本项目交互时，必须严格遵循以下规范。
@@ -18,7 +18,7 @@ htui/
 │   ├── htui/               # 主库 crate：终端 HTML/CSS 渲染引擎（独立发布单元）
 │   │   ├── Cargo.toml
 │   │   ├── src/
-│   │   │   ├── lib.rs              # 入口：render() / render_with_events()（主循环在 tui/run.rs）
+│   │   │   ├── lib.rs              # 入口：render() / render_with_events()（主循环在 tui/run/）
 │   │   │   ├── resources.rs        # 资源层：mem:// 内存注册表（前缀可选），供 <script>/<link>/<img>/fetch
 │   │   │   ├── events/             # JS 风格事件系统（旁路，不参与渲染管线）
 │   │   │   │   ├── mod.rs          # EventType / HtmlEvent / ElementRef / EventBindings（宿主函数注册表）
@@ -26,10 +26,27 @@ htui/
 │   │   │   │   ├── hit_map.rs      # HitRegion / HitMap / build / hit_test / resolve_by_id
 │   │   │   │   └── interaction.rs  # 纯逻辑鼠标交互（HoverState / on_move / on_click，脚本线程内调 ScriptEngine::fire）
 │   │   │   ├── script/             # JS 脚本层（旁路：Boa 引擎 + live DOM + 宿主函数）
-│   │   │   │   ├── mod.rs          # ScriptEngine：Context + ScriptState(thread_local) + 引导脚本 + fire/invoke_action/run_due_timers/poll_fetches + on* 属性编译
+│   │   │   │   ├── mod.rs          # 入口：mod 声明 + 显式 re-export（ScriptEngine / ScriptState / ScriptMsg / ...）
+│   │   │   │   ├── state.rs        # ScriptState（live arena + dirty + timers + fetch 通道）+ TimerEntry + ENGINE_STATE(thread_local) + EngineParts/EngineBuildError
+│   │   │   │   ├── engine.rs       # ScriptEngine：new/reload/build_engine/fire/fire_key/dispatch/eval_source/invoke_action + Drop
+│   │   │   │   ├── event_loop.rs   # 事件循环半：run_due_timers/poll_fetches/settle_fetch/timer_callback（第二个 impl ScriptEngine 块）
+│   │   │   │   ├── bindings.rs     # stop_propagation/prevent_default/register_host_global/dispatch_host/compile_attribute_listeners
 │   │   │   │   ├── host.rs         # HostFn / HostCtx（Rust 回调 → JS 可调用）+ host_fn（Boa 无关构造器）+ arg/arg_required/event/render/object 方法
 │   │   │   │   ├── convert.rs      # IntoJs/FromJs 转换层 + JsObjectBuilder（Rust ↔ JS 值）+ HostError（Boa 无关错误）
-│   │   │   │   ├── dom.rs          # DOM 绑定：document / element 包装 / style / addEventListener / console / alert / quit
+│   │   │   │   └── dom/          # DOM 绑定（mod.rs = 入口 re-export + 共享助手 with_state/mark_dirty/node_wrapper/...）
+│   │   │   │       ├── wrapper.rs       # make_node_wrapper（元素包装属性接线中心）
+│   │   │   │       ├── builtins.rs      # install_builtins（全局对象安装）
+│   │   │   │       ├── document.rs      # document 工厂/查找（getElementById/createElement/body/head/...）
+│   │   │   │       ├── traverse.rs      # 只读导航（parentNode/childNodes/contains/querySelector/...）
+│   │   │   │       ├── mutation.rs      # appendChild/insertBefore/replaceChild/removeChild/cloneNode
+│   │   │   │       ├── content.rs       # textContent/nodeValue/innerHTML/value/data
+│   │   │   │       ├── attrs.rs         # get/set/removeAttribute + id
+│   │   │   │       ├── global_attrs.rs  # class/classList/hidden/dataset
+│   │   │   │       ├── style.rs         # CSSStyleDeclaration（style_get/set/cssText）
+│   │   │   │       ├── events.rs        # add/removeEventListener + 监听器注册表 + focus/blur
+│   │   │   │       ├── timers.rs        # setTimeout/setInterval/clear
+│   │   │   │       ├── fetch.rs         # native_fetch + response_object
+│   │   │   │       └── console.rs       # console.log/warn/error + alert + quit
 │   │   │   │   └── msg.rs          # 脚本线程桥：ScriptMsg/ScriptResponse + apply_message + run_script_thread（引擎独占线程）
 │   │   │   ├── html/
 │   │   │   │   ├── mod.rs
@@ -42,7 +59,11 @@ htui/
 │   │   │   │       ├── selector.rs # CssSelector
 │   │   │   │       ├── stylesheet.rs # StyleSheet parsing 入口
 │   │   │   │       ├── values/     # CSS 值枚举 + 解析函数
-│   │   │   │       │   ├── mod.rs  # 枚举 + 解析 + re-exports（Length / TextAlign / ...）
+│   │   │   │       │   ├── mod.rs  # 入口：mod 声明 + 显式 re-exports（Length / TextAlign / ...）
+│   │   │   │       │   ├── text.rs # TextAlign/FontWeight/FontStyle/TextDecoration/TextTransform/LineHeight/WhiteSpace/WordBreak/OverflowWrap
+│   │   │   │       │   ├── box_values.rs # BoxSizing/Position/Visibility/InsetSides/Positioning/CornerRadii/CssDisplay
+│   │   │   │       │   ├── flex.rs # FlexDirection/FlexWrap/FlexBasis/FlexShorthand/flex-flow/justify·align-*/place 简写/gap/order
+│   │   │   │       │   ├── multicol.rs # ColumnFill/columns 简写/column-rule
 │   │   │   │       │   ├── color.rs# 颜色解析（hex / rgb / 命名色）
 │   │   │   │       │   └── length.rs # 长度体系（Length / FontContext / 简写解析）
 │   │   │   │       └── properties/ # CssAttr + AlignSelf
@@ -50,7 +71,9 @@ htui/
 │   │   │   │           └── align_self.rs       # AlignSelf
 │   │   │   ├── tdom/
 │   │   │   │   ├── mod.rs
-│   │   │   │   ├── node.rs         # NodeType / Node / NodeArena / NodeId
+│   │   │   │   ├── node.rs         # Node / NodeArena / NodeId（+ node/ 子模块）
+│   │   │   │   │   └── node/       # 与 node.rs 同模块
+│   │   │   │   │       └── node_type.rs # NodeType 枚举（95 变体）+ ALL/tag_name/from_tag_name 映射
 │   │   │   │   └── attribute.rs    # Attr（HTML 属性解析与查询）
 │   │   │   ├── layout/
 │   │   │   │   ├── mod.rs          # DEFAULT_LAYOUT 注册表 + LayoutFn + BoxConstraint
@@ -61,7 +84,9 @@ htui/
 │   │   │   │   │   ├── generation/  # styled DOM → geometry-free GeneratedBox tree
 │   │   │   │   │   │   └── mod.rs  # normal/text/anonymous/replaced + display classification
 │   │   │   │   │   ├── geometry/    # GeneratedBox → positioned LayoutBox tree
-│   │   │   │   │   │   └── mod.rs  # BoxKind × OuterDisplay × FormattingContext dispatch
+│   │   │   │   │   │   ├── mod.rs           # BoxKind × OuterDisplay × FormattingContext dispatch
+│   │   │   │   │   │   ├── replaced.rs      # layout_replaced（img/input/textarea/button/select）
+│   │   │   │   │   │   └── select_overlay.rs # SelectOption/SelectRow + 下拉数据（select_options/overlay_options/...）
 │   │   │   │   │   ├── box_kind/   # BoxKind { Normal, Replaced, Anonymous } + ReplacedContent
 │   │   │   │   │   │   ├── mod.rs          # enum + ReplacedContent
 │   │   │   │   │   │   ├── normal.rs       # NormalExt trait
@@ -111,13 +136,29 @@ htui/
 │   │   │   │       └── text.rs     # paint_runs
 │   │   │   └── tui/
 │   │   │       ├── mod.rs
-│   │   │   │   ├── run.rs          # 引擎驱动：渲染/命中/脚本线程 + 输入循环 + 增量重绘辅助
+│   │   │       └── run/          # 引擎驱动：run() 输入循环 + panic hook（mod.rs）+ 渲染/命中/脚本线程 + 增量重绘辅助
+│   │   │           ├── mod.rs     # run() 输入主循环 + install_debug_panic_hook
+│   │   │           ├── state.rs     # RenderState + handle_input/handle_select/TextSel/OpenSelect + 配色常量
+│   │   │           ├── pipeline.rs  # redraw/layout_and_paint/render_arena/render_html/repaint_dynamic/pin_fixed_and_repaint
+│   │   │           ├── thread.rs    # render_thread / hit_test_thread / fold_script_event / PendingInput
+│   │   │           ├── region.rs    # incremental_region / union_rect / collect_box_rects / pseudo_affected_region
+│   │   │           ├── selection.rs # selection_lines / lines_bounds / extract_selection / highlight_lines
+│   │   │           └── overlay.rs   # apply_select_overlay（select 下拉叠加绘制）
 │   │   │       └── graph_api.rs    # 模块入口：re-exports（TermLayout / Block / RenderCmd / Img / ...）
 │   │   │           └── graph_api/  # 子模块目录（与 graph_api.rs 同模块）
 │   │   │               ├── canvas.rs   # TermLayout 画布
 │   │   │               ├── cell.rs     # Block / FontStyle
 │   │   │               ├── image.rs    # Img / 图像加载
-│   │   │               ├── input.rs    # RenderCmd（含 RenderArena） / InputState / trigger_refresh / 鼠标点击与 hover 跟踪
+│   │   │               └── input/  # 输入层（mod.rs = InputState + 常量 + re-exports）
+│   │   │                   ├── cmd.rs       # RenderCmd（含 RenderArena）/ DirtyInfo / SelectionMode / coalesce_batch
+│   │   │                   ├── key_info.rs  # key_event_info / char_code / media·modifier_key
+│   │   │                   ├── edit.rs      # 纯编辑（apply_input_key/词边界/Ctrl·Shift 导航/paste）
+│   │   │                   ├── field.rs     # 字段分类（is_*_input/textarea 系列/KeyGate/collect_input_ids）
+│   │   │                   ├── focus.rs     # focus_input / blur_input / apply_focus_requests
+│   │   │                   ├── mouse.rs     # handle_click/mouse_down/mouse_move/mouse_up + label 解析
+│   │   │                   ├── select.rs    # OverlayKind / open·close_select / refresh_datalist
+│   │   │                   ├── refresh.rs   # trigger_refresh（按键分发状态机）
+│   │   │                   └── page.rs      # page_level_builtins（页面级滚动/缩放/复制）
 │   │   │               ├── render.rs   # TermLayout::render（增量） / render_diff_to_bytes / render_to_bytes
 │   │   │               ├── style.rs    # block_style
 │   │   │               └── text.rs     # char_width / grapheme_width
@@ -172,7 +213,11 @@ htui/
 │   │   └── benches/               # criterion 基准（parse / cascade / paint / render_to_bytes / full_redraw；common/ 共享辅助）
 │   └── htui-macros/             # 过程宏 crate：#[htui::command]/#[htui::commands] + #[derive(IntoJs/FromJs)]
 │       ├── Cargo.toml
-│       └── src/lib.rs           # proc-macro：命令包装（纯 fn + 返回 HostFn）/ 模块自动注册 / 结构体 ↔ JS 对象 derive + 样本 JS 接口生成（js_bindings，JSDoc）
+│       └── src/
+│           ├── lib.rs           # proc-macro 入口（rustc 要求宏定义在 crate 根）+ compile_err + 模块声明
+│           ├── derive.rs        # #[derive(IntoJs/FromJs)] 展开 + struct_field_names
+│           ├── command.rs       # #[htui::command] 展开（纯 fn 包装 HostFn / 有状态 HostFn 直通）+ command_attr 校验 + returns_host_fn
+│           └── commands.rs      # #[htui::commands] 展开（register + js_bindings 样本 JS 接口生成，JSDoc）
 ├── docs/
 │   ├── TODO.md            # 待办（B：mousedown/mouseup、[attr] 选择器、getComputedStyle；C：img change）
 │   └── zh-cn/
@@ -469,8 +514,8 @@ let x = find(b).unwrap();
 ## 添加新 HTML 元素支持 — 操作清单
 
 当你需要支持一个新的 HTML 标签时，
-1. **`tdom/node.rs`** — 在 `NodeType` 枚举中加入变体，并同步加入 `NodeType::ALL`
-2. **`tdom/node.rs`** — 在 `NodeType::tag_name()` 中登记标签名（`from_tag_name` / `html_parse::tag_name_to_node_type` / CSS 选择器类型映射均派生自它，测试 `css_parse_tests::test_e_type_selector_covers_every_element_tag` 锁完备性）
+1. **`tdom/node/node_type.rs`** — 在 `NodeType` 枚举中加入变体，并同步加入 `NodeType::ALL`
+2. **`tdom/node/node_type.rs`** — 在 `NodeType::tag_name()` 中登记标签名（`from_tag_name` / `html_parse::tag_name_to_node_type` / CSS 选择器类型映射均派生自它，测试 `css_parse_tests::test_e_type_selector_covers_every_element_tag` 锁完备性）
 3. **`layout/layoutbox/generation/`** — 添加盒类型与 display/formatting-context 分类
 4. **`layout/layoutbox/geometry/`** — 如需专用几何算法，添加分类分派
 5. **`layout/layoutbox/inner_formatting_context/flow/`** — 仅特殊 normal-flow 元素新增 `LayoutFn`
