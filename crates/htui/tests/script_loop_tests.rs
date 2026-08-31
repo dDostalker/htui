@@ -480,6 +480,56 @@ fn set_interval_repeats_until_cleared() {
 }
 
 #[test]
+fn set_interval_zero_period_is_clamped_to_browser_minimum() {
+    // `setInterval(fn, 0)` must not register a zero period: the live script
+    // thread would wake `recv_timeout(0)`, fire, re-schedule at +0 ms and
+    // spin at 100% CPU with an unbounded response rate. The browser clamps
+    // sub-4 ms intervals to ~4 ms — the registered period here must behave
+    // the same way.
+    let (mut engine, _geo) = build_geometry(
+        r#"<script>
+          var seen = [];
+          var iv = setInterval(function(){ seen.push('i'); }, 0);
+          globalThis.__seen = seen;
+          globalThis.__iv = iv;
+        </script><p>x</p>"#,
+        EventBindings::default(),
+    );
+    fn fires(engine: &mut ScriptEngine) -> usize {
+        eval_str(engine, "String(globalThis.__seen.length)")
+            .parse()
+            .expect("seen length must be a number")
+    }
+
+    std::thread::sleep(Duration::from_millis(20));
+
+    // Hot-drain: after the first fire the callback is re-scheduled 4 ms out,
+    // so a tight loop over due timers cannot re-fire it (a zero period would
+    // fire on every one of these 50 calls — the busy-spin shape).
+    let before = fires(&mut engine);
+    for _ in 0..50 {
+        engine.run_due_timers();
+    }
+    let hot_fires = fires(&mut engine) - before;
+    assert!(
+        (1..=2).contains(&hot_fires),
+        "zero-period interval must clamp to the 4 ms minimum \
+         (fired {hot_fires} times in a tight 50-call drain)"
+    );
+
+    // Still repeating: after the clamp window passes it fires again.
+    let after_hot = fires(&mut engine);
+    std::thread::sleep(Duration::from_millis(10));
+    engine.run_due_timers();
+    assert!(
+        fires(&mut engine) > after_hot,
+        "clamped interval must keep repeating"
+    );
+
+    eval_str(&mut engine, "clearInterval(globalThis.__iv)");
+}
+
+#[test]
 fn timer_callback_dom_write_marks_dirty() {
     // A timer callback that rewrites the DOM behaves like any other JS
     // mutation: it marks the touched nodes dirty for the next RenderArena.

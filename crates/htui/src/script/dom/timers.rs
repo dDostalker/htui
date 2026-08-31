@@ -26,11 +26,12 @@ pub(super) fn native_set_interval(
     schedule_timer(context, args, true)
 }
 
+const MIN_INTERVAL_PERIOD_MS: u64 = 4;
+
 /// Register `args[0]` (a callable) to fire after `args[1]` ms, returning the
 /// timer id. `repeat` selects `setInterval` (re-scheduled after each fire)
 /// vs `setTimeout` (one-shot). The callback is GC-rooted in the
 /// `__htuiTimers` JS registry; the deadline lives in the Rust timer table the
-/// script thread drives.
 fn schedule_timer(context: &mut Context, args: &[JsValue], repeat: bool) -> JsResult<JsValue> {
     let callback = args.first().cloned().unwrap_or(JsValue::undefined());
     if !callback.is_callable() {
@@ -44,6 +45,11 @@ fn schedule_timer(context: &mut Context, args: &[JsValue], repeat: bool) -> JsRe
         .transpose()?
         .unwrap_or(0.0);
     let ms = if ms.is_finite() && ms > 0.0 { ms } else { 0.0 };
+    let ms = if repeat {
+        ms.max(MIN_INTERVAL_PERIOD_MS as f64)
+    } else {
+        ms
+    };
     let period = Duration::from_millis(ms as u64);
     let Some(rc) = with_state() else {
         return Ok(JsValue::undefined());
