@@ -23,6 +23,15 @@ pub const PX_PER_CELL: f32 = 8.0;
 // Box-model shorthand parsing
 // ============================================================
 
+fn compose_key<'k>(buf: &'k mut [u8; 32], parts: &[&str]) -> &'k str {
+    let mut len = 0usize;
+    for part in parts {
+        buf[len..len + part.len()].copy_from_slice(part.as_bytes());
+        len += part.len();
+    }
+    std::str::from_utf8(&buf[..len]).expect("concatenation of &str parts is valid UTF-8")
+}
+
 /// Expand `padding` / `padding-{side}` (or `margin` / `margin-{side}`) into an
 /// [`EdgeSizes`].
 ///
@@ -44,21 +53,28 @@ pub(crate) fn parse_edge_sizes(
         viewport,
     );
 
-    let top_raw = decls.get(&format!("{shorthand}-top")).map(|s| s.as_str());
+    let mut key = [0u8; 32];
+    let top_raw = decls
+        .get(compose_key(&mut key, &[shorthand, "-top"]))
+        .map(|s| s.as_str());
     if let Some(v) = parse_length_token(top_raw, containing_width, font_ctx, viewport) {
         edges.top = v;
     }
-    let right_raw = decls.get(&format!("{shorthand}-right")).map(|s| s.as_str());
+    let right_raw = decls
+        .get(compose_key(&mut key, &[shorthand, "-right"]))
+        .map(|s| s.as_str());
     if let Some(v) = parse_length_token(right_raw, containing_width, font_ctx, viewport) {
         edges.right = v;
     }
     let bottom_raw = decls
-        .get(&format!("{shorthand}-bottom"))
+        .get(compose_key(&mut key, &[shorthand, "-bottom"]))
         .map(|s| s.as_str());
     if let Some(v) = parse_length_token(bottom_raw, containing_width, font_ctx, viewport) {
         edges.bottom = v;
     }
-    let left_raw = decls.get(&format!("{shorthand}-left")).map(|s| s.as_str());
+    let left_raw = decls
+        .get(compose_key(&mut key, &[shorthand, "-left"]))
+        .map(|s| s.as_str());
     if let Some(v) = parse_length_token(left_raw, containing_width, font_ctx, viewport) {
         edges.left = v;
     }
@@ -145,13 +161,14 @@ pub(crate) fn parse_edge_auto(decls: &IndexMap<String, String>, shorthand: &str)
         }
     }
     // Per-side longhands win over the shorthand positions.
+    let mut key = [0u8; 32];
     for (side_name, flag) in [
         ("top", &mut out.top),
         ("right", &mut out.right),
         ("bottom", &mut out.bottom),
         ("left", &mut out.left),
     ] {
-        if let Some(raw) = decls.get(&format!("{shorthand}-{side_name}")) {
+        if let Some(raw) = decls.get(compose_key(&mut key, &[shorthand, "-", side_name])) {
             *flag = raw.eq_ignore_ascii_case("auto");
         }
     }
@@ -253,16 +270,18 @@ pub(crate) fn merge_border_longhand(
     viewport: Viewport,
 ) -> Border {
     let mut side = side;
-    if let Some(raw) = decls.get(&format!("border-{side_name}-width"))
-        && let Some(w) =
-            parse_length_token(Some(raw.as_str()), containing_width, font_ctx, viewport)
+    let mut key = [0u8; 32];
+    if let Some(raw) =
+        decls.get(compose_key(&mut key, &["border-", side_name, "-width"]))
+            && let Some(w) =
+                parse_length_token(Some(raw.as_str()), containing_width, font_ctx, viewport)
     {
         side.width = w;
     }
-    if let Some(raw) = decls.get(&format!("border-{side_name}-style")) {
+    if let Some(raw) = decls.get(compose_key(&mut key, &["border-", side_name, "-style"])) {
         side.style = parse_border_style(Some(raw.as_str()));
     }
-    if let Some(raw) = decls.get(&format!("border-{side_name}-color"))
+    if let Some(raw) = decls.get(compose_key(&mut key, &["border-", side_name, "-color"]))
         && let Some(c) = parse_color_str(raw)
     {
         side.color = Some(c);
