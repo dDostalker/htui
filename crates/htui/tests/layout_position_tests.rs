@@ -12,6 +12,10 @@
 //!   above static content at the same level.
 //! - `absolute` children of a flex container detach from the flex layout.
 
+// Grid indexing is written uniformly as `row * cols + col` (including
+// row 0 / row 1) so every assertion reads the same way.
+#![allow(clippy::erasing_op, clippy::identity_op)]
+
 use crossterm::style::Color;
 use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
