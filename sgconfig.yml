@@ -1,6 +1,2 @@
 ruleDirs:
   - ./sg/rules
-utilDirs:
-  - ./sg/utils
-testConfigs:
-  - testDir: ./sg/tests

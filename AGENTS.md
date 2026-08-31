@@ -236,9 +236,7 @@ htui/
         ├── main.rs      # btm 风格系统监控器：mock 数据 + host commands + setInterval 刷新
         └── btm/          # index.html + style.css
 sg/                       # ast-grep 配套目录（sgconfig.yml 在仓库根）
-├── rules/                # ast-grep 规则定义（每个 .yml 一条规则）
-├── utils/                # 可复用规则片段（被 rules 通过 utils 引用）
-└── tests/                # 规则快照测试（ast-grep test）
+└── rules/                # ast-grep 规则定义（每个 .yml 一条规则）
 ```
 
 ## 架构
@@ -454,7 +452,6 @@ ast-grep scan                           # 全项目扫描（用 sg/rules/ 全部
 ast-grep scan crates/htui/src           # 只扫指定路径
 ast-grep scan -r sg/rules/no-unwrap.yml # 只跑某条规则
 ast-grep run -p 'PATTERN' --lang rust crates  # 一次性查询（不需规则文件）
-ast-grep test                           # 跑 sg/tests/ 快照测试
 ```
 
 ### 跳过规则（仅限正当理由）
@@ -468,7 +465,6 @@ let x = find(b).unwrap();
 ### 添加新规则
 1. 在 `sg/rules/` 新建 `<rule-id>.yml`（参考现有规则文件结构）
 2. 在本表登记规则 ID 与对应条款
-3. （可选）在 `sg/tests/` 添加快照测试：`ast-grep new test`
 
 ## 添加新 HTML 元素支持 — 操作清单
 
