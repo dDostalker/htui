@@ -1,7 +1,7 @@
 //! Mutation natives: `appendChild` / `removeChild` / `insertBefore` /
 //! `replaceChild` / `cloneNode` over the live arena.
 
-use boa_engine::{Context, JsResult, JsValue};
+use boa_engine::{Context, JsNativeError, JsResult, JsValue};
 
 use crate::{
     script::ScriptState,
@@ -9,6 +9,36 @@ use crate::{
 };
 
 use super::{mark_dirty, node_wrapper, this_node_id, with_state};
+
+/// Reject an insertion that would create a DOM cycle, with the browser's
+/// `HierarchyRequestError` semantics: `parent_id` must not be the node
+/// itself nor a descendant of it.
+///
+/// Without this check `el.appendChild(el)` produces a parent cycle in the
+/// arena, and every ancestor-chain walk — `contains`, hit-map path building,
+/// `<q>` quote pairing during layout, subtree serialization — loops forever
+/// (or recurses until the stack overflows). The mutation natives are the only
+/// place a cycle can be created, so guarding them restores the acyclicity
+/// invariant every downstream walk relies on.
+fn reject_cycle(
+    st: &ScriptState,
+    parent_id: NodeId,
+    node_id: NodeId,
+    method: &str,
+) -> JsResult<()> {
+    let mut current = Some(parent_id);
+    while let Some(id) = current {
+        if id == node_id {
+            return Err(JsNativeError::error()
+                .with_message(format!(
+                    "Failed to execute '{method}' on 'Node': The new child element contains the parent."
+                ))
+                .into());
+        }
+        current = st.arena[id].parent;
+    }
+    Ok(())
+}
 
 pub(super) fn native_insert_before(
     this: &JsValue,
@@ -23,6 +53,7 @@ pub(super) fn native_insert_before(
         return Ok(JsValue::undefined());
     };
     let mut st = rc.borrow_mut();
+    reject_cycle(&st, parent_id, child_id, "insertBefore")?;
     let position = reference_id.and_then(|ref_id| {
         st.arena
             .get(parent_id)
@@ -62,6 +93,7 @@ pub(super) fn native_replace_child(
         return Ok(JsValue::null());
     };
     let mut st = rc.borrow_mut();
+    reject_cycle(&st, parent_id, new_child, "replaceChild")?;
     // Detach `new_child` from its current parent (if any).
     let old_parent = st.arena.get(new_child).and_then(|c| c.parent);
     if let Some(op) = old_parent
@@ -138,6 +170,7 @@ pub(super) fn native_append_child(
         return Ok(JsValue::undefined());
     };
     let mut st = rc.borrow_mut();
+    reject_cycle(&st, parent_id, child_id, "appendChild")?;
     // Detach from any existing parent.
     let old_parent = st.arena.get(child_id).and_then(|c| c.parent);
     if let Some(old_parent) = old_parent

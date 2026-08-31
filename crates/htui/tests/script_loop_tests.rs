@@ -1110,3 +1110,129 @@ fn eval_str(engine: &mut ScriptEngine, expr: &str) -> String {
         .map(|s| s.to_std_string_lossy())
         .unwrap_or_default()
 }
+
+// ---------------------------------------------------------------------------
+// DOM cycle rejection (browser `HierarchyRequestError` semantics)
+// ---------------------------------------------------------------------------
+
+/// Eval `expr` and return `"ok"` on success or `"error:…"` on a JS throw.
+fn eval_catch(engine: &mut ScriptEngine, expr: &str) -> String {
+    let src = format!(
+        "try {{ {expr} ; 'ok' }} catch (e) {{ 'error:' + String(e) }}"
+    );
+    let v = engine.eval_source(&src).expect("eval runs");
+    v.as_string()
+        .map(|s| s.to_std_string_lossy())
+        .unwrap_or_default()
+}
+
+#[test]
+fn append_child_rejects_inserting_a_node_into_itself() {
+    let mut engine = ScriptEngine::new(
+        r#"<div id="outer"><div id="inner"></div></div>"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
+
+    let result = eval_catch(
+        &mut engine,
+        "document.getElementById('outer').appendChild(document.getElementById('outer'))",
+    );
+    assert!(
+        result.starts_with("error:"),
+        "self-append must throw, got: {result}"
+    );
+
+    // The failed mutation must leave the arena untouched and acyclic:
+    // `contains` walks the ancestor chain and must terminate.
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "document.getElementById('outer').contains(document.getElementById('inner'))"
+        ),
+        "true",
+        "the tree shape is unchanged"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('outer').childNodes.length"),
+        "1",
+        "the failed append must not push a duplicate child"
+    );
+    // The engine stays usable after the rejection.
+    assert_eq!(
+        eval_catch(
+            &mut engine,
+            "document.getElementById('outer').appendChild(document.createElement('p'))"
+        ),
+        "ok",
+        "a valid append still works after a rejected one"
+    );
+}
+
+#[test]
+fn append_child_rejects_inserting_a_node_into_its_own_descendant() {
+    // Appending `outer` under its own child would make an ancestor a
+    // descendant — the ancestor walk must reject it before any mutation.
+    let mut engine = ScriptEngine::new(
+        r#"<div id="outer"><div id="inner"></div></div>"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
+
+    let result = eval_catch(
+        &mut engine,
+        "document.getElementById('inner').appendChild(document.getElementById('outer'))",
+    );
+    assert!(
+        result.starts_with("error:"),
+        "descendant append must throw, got: {result}"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('inner').childNodes.length"),
+        "0",
+        "no child may be attached on the rejected path"
+    );
+}
+
+#[test]
+fn insert_before_and_replace_child_reject_cycles() {
+    let mut engine = ScriptEngine::new(
+        r#"<div id="outer"><div id="inner"></div></div>"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
+
+    let outer = "document.getElementById('outer')";
+    let inner = "document.getElementById('inner')";
+
+    // insertBefore with the node itself as both target and reference.
+    assert!(
+        eval_catch(&mut engine, &format!("{outer}.insertBefore({outer}, {inner})"))
+            .starts_with("error:"),
+        "insertBefore(self, …) must throw"
+    );
+    // insertBefore into an own descendant (reference `null` = append).
+    assert!(
+        eval_catch(&mut engine, &format!("{inner}.insertBefore({outer}, null)"))
+            .starts_with("error:"),
+        "insertBefore into an own descendant must throw"
+    );
+    // replaceChild with the node itself.
+    assert!(
+        eval_catch(&mut engine, &format!("{outer}.replaceChild({outer}, {inner})"))
+            .starts_with("error:"),
+        "replaceChild(self, …) must throw"
+    );
+
+    // Every rejected path leaves the DOM intact.
+    assert_eq!(
+        eval_str(&mut engine, &format!("{outer}.childNodes.length")),
+        "1",
+        "the tree shape survives all three rejections"
+    );
+    assert_eq!(
+        eval_str(&mut engine, &format!("{outer}.contains({inner})")),
+        "true",
+        "`contains` terminates on the intact tree"
+    );
+}
