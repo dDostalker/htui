@@ -4,6 +4,7 @@ use std::{
 };
 
 use bitflags::bitflags;
+use compact_str::CompactString;
 use crossterm::style::{Color, StyledContent, Stylize};
 
 bitflags! {
@@ -25,7 +26,7 @@ bitflags! {
 
 #[derive(Debug, Clone)]
 pub struct Block {
-    pub word: String,
+    pub word: CompactString,
     pub fcolor: Option<Color>,
     pub bcolor: Option<Color>,
     pub style: FontStyle,
@@ -97,17 +98,13 @@ impl Default for Block {
     /// painters so each per-cell fill no longer needs to spell out
     /// `" ".to_string()` at the call site.
     ///
-    /// The `word` buffer is pre-sized to 32 bytes so painters can `clear()`
-    /// and `push_str(g)` any single grapheme cluster without triggering a
-    /// reallocation. Practically every cluster (including the longest
-    /// ZWJ-flag sequences we expect, such as 👨‍👩‍👧‍👦 plus regional
-    /// indicators) fits comfortably under 32 bytes; background fills keep
-    /// the trailing capacity wasted (harmless: 16K × 32 ≈ 512 KB once).
-    /// Border glyphs (`─`, `│`, `┌`, `┐`, `└`, `┘` are 3 bytes) and single
-    /// emoji codepoints (≤ 4 bytes) also fit without reallocating.
+    /// `CompactString` stores every grapheme cluster up to 24 bytes fully
+    /// inline (ASCII, CJK, box-drawing glyphs, flags, skin-tone and keycap
+    /// sequences), so per-cell canvas init / clone / diff never touches the
+    /// heap. Longer clusters (multi-person ZWJ emoji) transparently fall
+    /// back to one heap allocation, matching the old `String` behaviour.
     fn default() -> Self {
-        let mut word = String::with_capacity(32);
-        word.push(' ');
+        let word = CompactString::new(" ");
         Self {
             word,
             fcolor: None,
@@ -125,7 +122,7 @@ impl Block {
         style: FontStyle,
     ) -> Self {
         Self {
-            word,
+            word: word.into(),
             fcolor,
             bcolor,
             style,

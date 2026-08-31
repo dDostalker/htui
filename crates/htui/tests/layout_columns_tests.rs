@@ -49,7 +49,7 @@ fn row(tl: &TermLayout, y: usize) -> String {
 }
 
 fn cell_word(tl: &TermLayout, x: usize, y: usize) -> String {
-    tl.layout[y * 80 + x].word.clone()
+    tl.layout[y * 80 + x].word.to_string()
 }
 
 fn cell_color(tl: &TermLayout, x: usize, y: usize) -> Option<Color> {

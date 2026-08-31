@@ -313,3 +313,70 @@ fn test_mixed_cjk_emoji_layout_alignment() {
         "CJK (你, 2 cols) and emoji (😀, 2 cols) must each reserve their own column"
     );
 }
+
+// ============================================================
+// CompactString heap fallback — clusters longer than 24 bytes
+// ============================================================
+
+#[test]
+fn test_cluster_over_inline_capacity_lands_intact_in_one_cell() {
+    init();
+    // 👨‍👩‍👧‍👦 = 👨 + ZWJ + 👩 + ZWJ + 👧 + ZWJ + 👦 — 4 people + 3 ZWJ =
+    // 25 bytes, one byte past the 24-byte inline capacity. The cell must
+    // take the transparent heap fallback and keep the full cluster.
+    let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}";
+    assert_eq!(family.len(), 25, "guards the inline-capacity boundary");
+    let (root_id, arena) = setup(&format!("<p>{family}</p>"), "");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let idx = tl
+        .layout
+        .iter()
+        .position(|b| b.word == family)
+        .unwrap_or_else(|| {
+            panic!("25-byte cluster must land intact in one cell (heap fallback)")
+        });
+    assert!(
+        tl.layout[idx + 1].word.is_empty(),
+        "over-capacity cluster must still reserve its trailing empty cell"
+    );
+}
+
+#[test]
+fn test_skin_tone_family_cluster_lands_intact_in_one_cell() {
+    init();
+    // 👨🏻‍👩🏻‍👧🏻‍👦🏻 — four family members each with a skin-tone
+    // modifier: 4×(4+4) + 3×3 = 41 bytes, well past inline capacity. This
+    // is the longest cluster class we expect in real documents; the cell
+    // must render it byte-for-byte (no truncation).
+    let tones = [
+        '\u{1F3FB}', '\u{1F3FC}', '\u{1F3FD}', '\u{1F3FE}', '\u{1F3FF}',
+    ];
+    let family: String = [
+        '\u{1F468}',
+        tones[1],
+        '\u{200D}',
+        '\u{1F469}',
+        tones[4],
+        '\u{200D}',
+        '\u{1F467}',
+        tones[0],
+        '\u{200D}',
+        '\u{1F466}',
+        tones[2],
+    ]
+    .iter()
+    .collect();
+    assert_eq!(family.len(), 41, "guards the heap-fallback path");
+    let (root_id, arena) = setup(&format!("<p>{family}</p>"), "");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    assert!(
+        tl.layout.iter().any(|b| b.word == family),
+        "skin-tone pair cluster must land intact in one cell"
+    );
+}
