@@ -130,6 +130,46 @@ fn scroll_bound_never_exceeds_the_canvas_buffer() {
 }
 
 #[test]
+fn stale_scroll_batch_row_never_underflows() {
+    // The per-batch cursor math used to be
+    // `(batch_start / cols) as u16 - scroll_y as u16`: a scroll past the
+    // batch's canvas row underflowed u16 (debug panic), and u32 scroll
+    // values near 2^16 silently truncated before the subtraction. Both
+    // render paths must survive every stale-scroll shape as a safe no-op.
+    let mut html = String::from("<div>");
+    for i in 0..40 {
+        html.push_str(&format!("<p>line {i}</p>"));
+    }
+    html.push_str("</div>");
+    let (root_id, arena) = setup(&html);
+    let map = TermMap {
+        columns: 10,
+        rows: 4,
+    };
+    let mut tl = TermLayout::new(&map, 1.0);
+    tl.draw(&arena, root_id, &map);
+
+    let canvas_rows = (tl.layout.len() / map.columns as usize) as u32;
+    let mut stale = vec![0u32, 1, canvas_rows, canvas_rows + 1, canvas_rows + 50];
+    // u16 boundary values: the old `as u16` cast wrapped these.
+    stale.extend([u16::MAX as u32, u16::MAX as u32 + 1, u16::MAX as u32 + 100]);
+    stale.push(u32::MAX);
+
+    for &scroll in &stale {
+        tl.scroll_y = scroll;
+        tl.render_to_bytes();
+        tl.render_diff_to_bytes();
+    }
+
+    // Sanity: a fresh in-range scroll still renders content after the sweep.
+    tl.scroll_y = 0;
+    assert!(
+        !tl.render_to_bytes().is_empty(),
+        "in-range scroll must render after stale-scroll sweeps"
+    );
+}
+
+#[test]
 fn unchanged_frame_emits_zero_bytes() {
     let (root_id, arena) = setup("<div>hello world</div>");
     let map = term_map();

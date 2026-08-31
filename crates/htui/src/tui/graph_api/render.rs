@@ -148,11 +148,11 @@ impl TermLayout {
                 i += 1;
             }
 
+            let batch_row = batch_start / cols;
             let x = (batch_start % cols) as u16;
-            let y = (batch_start / cols) as u16 - self.scroll_y as u16;
-
-            if y < self.rows {
-                if let Err(e) = crossterm::queue!(out, MoveTo(x, y)) {
+            let y = batch_row.saturating_sub(self.scroll_y as usize);
+            if batch_row >= self.scroll_y as usize && y < self.rows as usize {
+                if let Err(e) = crossterm::queue!(out, MoveTo(x, y as u16)) {
                     log::error!("Failed to queue cursor move to ({}, {}): {}", x, y, e);
                 }
                 if is_empty {
@@ -247,11 +247,14 @@ impl TermLayout {
                 i += 1;
             }
 
+            let batch_row = batch_start / cols;
             let x = (batch_start % cols) as u16;
-            let y = (batch_start / cols) as u16 - self.scroll_y as u16;
-
-            if any_changed && y < self.rows {
-                if let Err(e) = crossterm::queue!(out, MoveTo(x, y)) {
+            let y = batch_row.saturating_sub(self.scroll_y as usize);
+            if any_changed
+                && batch_row >= self.scroll_y as usize
+                && y < self.rows as usize
+            {
+                if let Err(e) = crossterm::queue!(out, MoveTo(x, y as u16)) {
                     log::error!("Failed to queue cursor move to ({}, {}): {}", x, y, e);
                 }
                 if is_empty {
