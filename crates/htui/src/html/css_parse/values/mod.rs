@@ -962,16 +962,13 @@ pub fn parse_flex_flow(s: &str) -> Option<(FlexDirection, Option<FlexWrap>)> {
     let mut wrap: Option<FlexWrap> = None;
     for tok in s.split_whitespace() {
         if let Some(d) = parse_flex_direction(tok) {
-            if dir.is_some() {
+            if dir.replace(d).is_some() {
                 return None;
             }
-            dir = Some(d);
-        } else if let Some(w) = parse_flex_wrap(tok) {
-            if wrap.is_some() {
-                return None;
-            }
-            wrap = Some(w);
-        } else {
+            continue;
+        }
+        let w = parse_flex_wrap(tok)?;
+        if wrap.replace(w).is_some() {
             return None;
         }
     }

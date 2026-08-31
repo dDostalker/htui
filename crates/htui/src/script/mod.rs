@@ -134,6 +134,14 @@ pub struct ScriptEngine {
 /// Bootstrap script: the GC-rooted listener / element / timer registries.
 const BOOTSTRAP: &str = include_str!("bootstrap.js");
 
+/// Engine pieces produced by a successful build: the Boa context and the
+/// script state it operates on.
+type EngineParts = (Context, Rc<RefCell<ScriptState>>);
+
+/// Build-failure payload: the error plus the host-function map so a failed
+/// reload can restore the previous session.
+type EngineBuildError = (JsError, HashMap<String, HostFn>);
+
 impl ScriptEngine {
     /// Create an engine from an HTML document and the application bindings.
     ///
@@ -190,7 +198,7 @@ impl ScriptEngine {
     fn build_engine(
         html: &str,
         host_fns: HashMap<String, HostFn>,
-    ) -> Result<(Context, Rc<RefCell<ScriptState>>), (JsError, HashMap<String, HostFn>)> {
+    ) -> Result<EngineParts, EngineBuildError> {
         let doc = Parser::new(html).parse_with_scripts();
         let (fetch_tx, fetch_rx) = ScriptState::fetch_channel();
         let state = Rc::new(RefCell::new(ScriptState {

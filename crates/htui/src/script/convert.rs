@@ -322,8 +322,13 @@ impl<T: FromJs> FromJs for Vec<T> {
 /// converted lazily when the object is assembled. This makes the builder
 /// [`IntoJs`], so host functions can return it directly — no engine type
 /// appears in user code.
+/// Lazily-converted object property: the boxed closure captures the raw
+/// Rust value and produces a `JsValue` only when the object is assembled
+/// inside a Boa [`Context`].
+type LazyProp = Box<dyn FnOnce(&mut Context) -> JsValue>;
+
 pub struct JsObjectBuilder {
-    props: Vec<(String, Box<dyn FnOnce(&mut Context) -> JsValue>)>,
+    props: Vec<(String, LazyProp)>,
 }
 
 impl JsObjectBuilder {

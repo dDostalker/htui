@@ -809,7 +809,7 @@ impl RenderState {
         let Some(region) = old_rects
             .into_iter()
             .chain(new_rects)
-            .reduce(|a, b| union_rect(a, b))
+            .reduce(union_rect)
         else {
             return;
         };
@@ -1175,6 +1175,17 @@ fn pseudo_affected_region(
     region
 }
 
+/// One coalesced `RenderCmd::RenderInput`: buffered keystroke state for a
+/// focused field. Several inputs arriving in one frame batch render
+/// together (see the merge logic at the top of `render_thread`).
+struct PendingInput {
+    node_id: NodeId,
+    value: String,
+    cursor: usize,
+    focused: bool,
+    selection: Option<(usize, usize)>,
+}
+
 fn render_thread(
     rx: mpsc::Receiver<RenderCmd>,
     html: Arc<str>,
@@ -1255,8 +1266,7 @@ fn render_thread(
         //   mutation — an animated widget under the pointer (e.g. the music
         //   demo's progress bar) would then update in irregular jumps. The
         //   deferred hover repaint re-applies the newer highlight on top.
-        let mut pending_inputs: Vec<(NodeId, String, usize, bool, Option<(usize, usize)>)> =
-            Vec::new();
+        let mut pending_inputs: Vec<PendingInput> = Vec::new();
         let mut pending_selects: Vec<RenderCmd> = Vec::new();
         let mut pending_text_sel: Option<RenderCmd> = None;
         let mut pending_hover: Option<RenderCmd> = None;
@@ -1268,7 +1278,13 @@ fn render_thread(
                 focused,
                 selection,
             } => {
-                pending_inputs.push((node_id, value, cursor, focused, selection));
+                pending_inputs.push(PendingInput {
+                    node_id,
+                    value,
+                    cursor,
+                    focused,
+                    selection,
+                });
                 None
             }
             sel @ (RenderCmd::SelectOpen { .. }
@@ -1291,7 +1307,13 @@ fn render_thread(
                     cursor,
                     focused,
                     selection,
-                } => pending_inputs.push((node_id, value, cursor, focused, selection)),
+                } => pending_inputs.push(PendingInput {
+                    node_id,
+                    value,
+                    cursor,
+                    focused,
+                    selection,
+                }),
                 sel @ (RenderCmd::SelectOpen { .. }
                 | RenderCmd::SelectClose { .. }
                 | RenderCmd::SelectMove { .. }) => pending_selects.push(sel),
@@ -1317,7 +1339,14 @@ fn render_thread(
                 }
             }
         }
-        for (node_id, value, cursor, focused, selection) in pending_inputs {
+        for PendingInput {
+            node_id,
+            value,
+            cursor,
+            focused,
+            selection,
+        } in pending_inputs
+        {
             state.handle_input(&mut out, node_id, value, cursor, focused, selection);
         }
         for sel_cmd in pending_selects {
