@@ -248,7 +248,14 @@ fn set_inner_html(
     let mut css_sources = Vec::new();
     crate::html::html_parse::parse_fragment_into(&mut st.arena, node_id, html, &mut css_sources);
     if !css_sources.is_empty() {
-        st.dirty.style_css.push_str(&css_sources.join("\n"));
+        // Host-keyed replacement semantics: rewriting a host's `innerHTML`
+        // replaces its injected styles (the browser drops the host's old
+        // `<style>` elements), so a timer that re-injects the same stylesheet
+        // every tick is idempotent instead of accumulating an unbounded
+        // history on the render side.
+        st.dirty
+            .injected_css
+            .insert(node_id, css_sources.join("\n"));
     }
     sweep_replaced_subtrees(st, &replaced, context)?;
     mark_dirty(st, node_id);
@@ -285,6 +292,9 @@ fn sweep_replaced_subtrees(
             }
         }
         for id in doomed {
+            // A swept host's injected styles stop applying — the browser
+            // drops the `<style>` elements removed together with it.
+            st.dirty.injected_css.remove(&id);
             st.arena.remove(id);
         }
     }

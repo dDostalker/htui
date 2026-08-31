@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use indexmap::IndexMap;
+
 use crate::html::css_parse::DynamicState;
 use crate::tdom::node::NodeId;
 
@@ -21,20 +23,23 @@ pub enum SelectionMode {
 /// repaint only the affected rectangles) instead of clearing and re-painting
 /// the whole canvas; the rect comparison against the cached layout decides
 /// whether that path is safe and falls back to a full repaint otherwise.
-/// `style_css` carries CSS injected via `innerHTML` `<style>` elements so the
-/// render thread can extend the session stylesheet before re-cascading.
+/// `injected_css` carries the live injected-CSS set (see the field docs) so
+/// the render thread can rebuild the session stylesheet before re-cascading.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DirtyInfo {
     pub nodes: Vec<crate::tdom::node::NodeId>,
-    /// CSS extracted from `<style>` / `<link rel=stylesheet>` elements inserted
-    /// through `innerHTML` since the last render.
-    pub style_css: String,
+    /// CSS extracted from `<style>` / `<link rel=stylesheet>` elements
+    /// inserted through `innerHTML`, keyed by the host element that received
+    /// the write. Rewriting a host *replaces* its entry — the browser drops
+    /// the host's old `<style>` elements — so this set tracks the document's
+    /// live injected styles instead of accumulating an unbounded history.
+    pub injected_css: IndexMap<crate::tdom::node::NodeId, String>,
 }
 
 impl DirtyInfo {
     /// True when no DOM mutation is pending (nothing to repaint).
     pub fn is_empty(&self) -> bool {
-        self.nodes.is_empty() && self.style_css.is_empty()
+        self.nodes.is_empty() && self.injected_css.is_empty()
     }
 }
 

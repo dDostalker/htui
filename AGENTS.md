@@ -565,7 +565,7 @@ let x = find(b).unwrap();
 | `Block`            | `tui::graph_api`        | 单个屏幕字符单元格（含 `style: FontStyle`） |
 | `FontStyle`        | `tui::graph_api`        | `Block` 的聚合样式位掩码（`BOLD` / `ITALIC` / `UNDERLINED` / `CROSSED_OUT`） |
 | `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举（Rerender / Redraw / RenderArena / RenderHtml / Hover / Quit） |
-| `DirtyInfo`        | `tui::graph_api`        | `RenderArena` 携带的脏节点集合（`nodes: Vec<NodeId>`，JS 本轮改动的节点） |
+| `DirtyInfo`        | `tui::graph_api`        | `RenderArena` 携带的脏节点集合（`nodes: Vec<NodeId>` + `injected_css: IndexMap<NodeId, String>`，后者按宿主键控、重写即替换，渲染端内容不变则跳过重解析） |
 | `InputState`       | `tui::graph_api::input` | 输入循环状态（scroll_y / zoom / pressed / 焦点输入框 / 编辑缓冲 / 选择 / open_select；hover 归脚本线程） |
 | `InputRenderState` | `tui::graph_api::canvas`| `<input>` 渲染状态（value / cursor / focused），`TermLayout.input_states` |
 | `EventType`        | `events`                | DOM 事件类型（Click / MouseOver / MouseOut）               |

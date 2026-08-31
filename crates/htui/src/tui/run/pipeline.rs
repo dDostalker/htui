@@ -7,6 +7,7 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 
 use crossterm::execute;
+use indexmap::IndexMap;
 
 use crate::events::Geometry;
 use crate::html::css_parse::{
@@ -282,9 +283,9 @@ impl RenderState {
         // `innerHTML`-injected `<style>` CSS must extend the session
         // stylesheet before the cascade. The added rules may restyle any node
         // in the tree, so the incremental repaint is disabled for this frame.
-        let css_changed = !dirty.style_css.is_empty();
+        let css_changed = !dirty.injected_css.is_empty();
         if css_changed {
-            self.append_style_css(&dirty.style_css);
+            self.apply_injected_css(&dirty.injected_css);
         }
         let mut arena = arena.clone();
         reset_css_attr(&mut arena, root_id);
@@ -297,16 +298,30 @@ impl RenderState {
         self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom, dirty);
     }
 
-    /// Extend the session stylesheet with `innerHTML`-injected CSS and
-    /// re-parse the combined rules (new rules may add `:hover` / `:focus`
-    /// selectors, so the pseudo-class rule set is recomputed).
-    fn append_style_css(&mut self, css: &str) {
-        if css.trim().is_empty() {
+    /// Replace the session's injected-CSS set with `injected` (host → css)
+    /// and re-parse the combined stylesheet — but only when the set actually
+    /// changed: a timer tick that re-injects identical styles rebuilds the
+    /// combined string and compares, without re-parsing.
+    ///
+    /// The host-keyed replacement tracks the document's *live* injected
+    /// styles. The previous append-only accumulation grew without bound and
+    /// re-parsed `base + full history` on every injected write (O(n²) under
+    /// refresh churn); now both the storage and each re-parse are bounded by
+    /// the page's actual style content.
+    fn apply_injected_css(&mut self, injected: &IndexMap<NodeId, String>) {
+        let mut extra = String::new();
+        for css in injected.values() {
+            if css.trim().is_empty() {
+                continue;
+            }
+            extra.push_str(css);
+            extra.push('\n');
+        }
+        if extra == self.extra_css {
             return;
         }
-        self.extra_css.push_str(css);
-        self.extra_css.push('\n');
-        let mut combined = String::with_capacity(self.base_css.len() + self.extra_css.len());
+        self.extra_css = extra;
+        let mut combined = String::with_capacity(self.base_css.len() + 1 + self.extra_css.len());
         combined.push_str(&self.base_css);
         combined.push('\n');
         combined.push_str(&self.extra_css);

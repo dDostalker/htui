@@ -248,9 +248,9 @@ fn inner_html_setter_extracts_style_css() {
     );
     let dirty = engine.take_dirty();
     assert!(
-        dirty.style_css.contains("color: red"),
+        dirty.injected_css.values().any(|c| c.contains("color: red")),
         "extracted <style> CSS must be carried to the render thread: {:?}",
-        dirty.style_css
+        dirty.injected_css
     );
     assert!(
         !dirty.nodes.is_empty(),
@@ -280,7 +280,8 @@ fn inner_html_style_css_applies_to_fragment() {
     let dirty = engine.take_dirty();
     let mut arena = engine.arena();
     let root_id = engine.root_id();
-    let rules = css_parse::Parser::new(&dirty.style_css).parse();
+    let injected = dirty.injected_css.values().cloned().collect::<Vec<_>>().join("\n");
+    let rules = css_parse::Parser::new(&injected).parse();
     css_parse::css_into_node(&mut arena, root_id, &rules);
     let x = find_node_by_id(&arena, "x");
     assert_eq!(
@@ -308,13 +309,15 @@ fn inner_html_setter_loads_link_stylesheet() {
         );
         let dirty = engine.take_dirty();
         assert!(
-            dirty.style_css.contains("color: blue"),
+            dirty.injected_css.values().any(|c| c.contains("color: blue")),
             "linked stylesheet CSS must be extracted: {:?}",
-            dirty.style_css
+            dirty.injected_css
         );
         let mut arena = engine.arena();
         let root_id = engine.root_id();
-        let rules = css_parse::Parser::new(&dirty.style_css).parse();
+        let injected =
+            dirty.injected_css.values().cloned().collect::<Vec<_>>().join("\n");
+        let rules = css_parse::Parser::new(&injected).parse();
         css_parse::css_into_node(&mut arena, root_id, &rules);
         let l = find_node_by_id(&arena, "l");
         assert_eq!(
@@ -392,14 +395,51 @@ fn inner_html_click_handler_mutation_carries_style_css() {
     engine.fire(&region, EventType::Click, 0, 0);
     let dirty = engine.take_dirty();
     assert!(
-        dirty.style_css.contains("color: green"),
+        dirty.injected_css.values().any(|c| c.contains("color: green")),
         "handler-injected CSS must be reported: {:?}",
-        dirty.style_css
+        dirty.injected_css
     );
     let arena = engine.arena();
     let q = find_node_by_id(&arena, "q");
     assert!(
         matches!(arena[q].node_type, NodeType::I),
         "fragment must be in the live DOM"
+    );
+}
+
+#[test]
+fn inner_html_rewrites_replace_host_styles_instead_of_accumulating() {
+    // Timer-refresh pattern: the same host rewrites its innerHTML every tick.
+    // The injected-CSS set is keyed by the host, so a rewrite *replaces* the
+    // entry (the browser drops the host's old `<style>` elements) instead of
+    // appending an unbounded history that the render side re-parses O(n²).
+    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
+        .expect("engine initializes");
+
+    eval_str(
+        &mut engine,
+        "document.getElementById('d').innerHTML = '<style>p { color: red; }</style><p id=\"x\">1</p>'",
+    );
+    let first = engine.take_dirty();
+    assert_eq!(
+        first.injected_css.len(),
+        1,
+        "one host write produces exactly one entry"
+    );
+
+    eval_str(
+        &mut engine,
+        "document.getElementById('d').innerHTML = '<style>p { color: blue; }</style><p id=\"x\">2</p>'",
+    );
+    let second = engine.take_dirty();
+    let combined = second
+        .injected_css
+        .values()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        combined.contains("color: blue") && !combined.contains("color: red"),
+        "the rewrite must replace the host's entry, got: {combined:?}"
     );
 }
