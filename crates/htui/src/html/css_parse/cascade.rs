@@ -1,48 +1,141 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use indexmap::IndexMap;
 
-use crate::tdom::node::{NodeArena, NodeId};
+use crate::tdom::node::{Node, NodeArena, NodeId, NodeType};
 
 use super::{
     matcher::selector_chain_matches_with_state,
     properties::CssAttr,
-    selector::CssSelector,
-    selector::{DynamicState, PseudoClassSet},
-    stylesheet::{CssRule, CssRuleEntry, parse_declaration_splits},
+    selector::{DynamicState, PseudoClassSet, Selector},
+    stylesheet::{CssRule, parse_declaration_splits},
 };
 
-fn apply_css_rule(
-    arena: &mut NodeArena,
-    node_id: NodeId,
-    selector: &CssSelector,
-    css: &CssAttr,
-    state: &DynamicState,
-) {
-    if selector_chain_matches_with_state(arena, node_id, selector, state) {
-        arena[node_id].css_attr.add(css.clone());
-    }
-    let children: Vec<NodeId> = arena[node_id].children.clone();
-    for child_id in children {
-        apply_css_rule(arena, child_id, selector, css, state);
-    }
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CascadeIndex {
+    /// Inverse permutation of the cascade order: `rank[rule]` is the rule's
+    /// position in `(specificity, source order)` — the browser author-origin
+    /// order. Candidates are sorted by it so later-ranked declarations
+    /// override earlier ones per property.
+    rank: Vec<u32>,
+    /// Rules whose rightmost compound contains a tag selector, keyed by tag.
+    by_tag: HashMap<NodeType, Vec<u32>>,
+    /// Rules whose rightmost compound contains a class selector, keyed by
+    /// class token.
+    by_class: HashMap<String, Vec<u32>>,
+    /// Rules whose rightmost compound contains an id selector, keyed by id.
+    by_id: HashMap<String, Vec<u32>>,
+    /// Rules whose rightmost compound carries no tag / class / id key (`*`,
+    /// `:hover`, `:nth-child(2)`, …) — they must be evaluated for every
+    /// element node.
+    wildcard: Vec<u32>,
 }
-/// Apply the `style` attribute of every node in the subtree, restricted to the
-/// `important` subset when `important` is true. Runs as two passes (normal then
-/// important) so inline normal declarations beat stylesheet normal ones while
-/// inline `!important` beats stylesheet `!important` — the browser cascade
-/// order within the author origin.
-fn apply_inline_styles(arena: &mut NodeArena, node_id: NodeId, important: bool) {
-    let inline_style = arena[node_id].attributes.get("style").cloned();
-    if let Some(style) = inline_style {
-        let (normal, imp) = parse_declaration_splits(&style);
-        let subset = if important { imp } else { normal };
-        if !subset.0.is_empty() {
-            arena[node_id].css_attr.add(subset);
+
+impl CascadeIndex {
+    /// Build the index for `css`: sort the rules once into cascade order,
+    /// then bucket each rule under every key its rightmost compound can
+    /// match (a rule with several keys lands in several buckets; the
+    /// per-node gather deduplicates).
+    pub(crate) fn build(css: &CssRule) -> Self {
+        let count = css.0.len();
+        // Stable sort keeps same-specificity rules in stylesheet order, so
+        // the last applied rule for a property wins, matching the browser
+        // cascade.
+        let mut order: Vec<u32> = (0..count as u32).collect();
+        order.sort_by_key(|&rule| css.0[rule as usize].selector.specificity());
+        let mut rank = vec![0u32; count];
+        for (position, &rule) in order.iter().enumerate() {
+            rank[rule as usize] = position as u32;
+        }
+
+        let mut by_tag: HashMap<NodeType, Vec<u32>> = HashMap::new();
+        let mut by_class: HashMap<String, Vec<u32>> = HashMap::new();
+        let mut by_id: HashMap<String, Vec<u32>> = HashMap::new();
+        let mut wildcard: Vec<u32> = Vec::new();
+        for rule in 0..count as u32 {
+            let Some(compound) = css.0[rule as usize].selector.compounds.last() else {
+                // An empty selector chain can never match; keep it out of
+                // every bucket so it is never evaluated.
+                continue;
+            };
+            let mut keyed = false;
+            for part in compound {
+                match part {
+                    Selector::Tag(tag) => {
+                        by_tag.entry(*tag).or_default().push(rule);
+                        keyed = true;
+                    }
+                    Selector::Class(class) => {
+                        by_class.entry(class.clone()).or_default().push(rule);
+                        keyed = true;
+                    }
+                    Selector::Id(id) => {
+                        by_id.entry(id.clone()).or_default().push(rule);
+                        keyed = true;
+                    }
+                    // Universal / `:nth-child` / pseudo-class parts restrict
+                    // nothing by themselves.
+                    _ => {}
+                }
+            }
+            if !keyed {
+                wildcard.push(rule);
+            }
+        }
+        CascadeIndex {
+            rank,
+            by_tag,
+            by_class,
+            by_id,
+            wildcard,
         }
     }
 
-    let children = arena[node_id].children.clone();
-    for child_id in children {
-        apply_inline_styles(arena, child_id, important);
+    /// Collect the cascade-ordered candidate rules for `node` into `out`
+    /// (cleared first): the wildcard bucket plus every tag / class / id
+    /// bucket the node's attributes name, sorted by cascade rank.
+    ///
+    /// `seen` / `stamp` deduplicate rules that land in several buckets across
+    /// one cascade pass: bump `stamp` per node; a rule is taken only when
+    /// `seen[rule] != stamp`.
+    fn candidates_for(&self, node: &Node, out: &mut Vec<u32>, seen: &mut [u32], stamp: u32) {
+        out.clear();
+        let empty: Vec<u32> = Vec::new();
+        let mut push_bucket = |bucket: &Vec<u32>| {
+            for &rule in bucket {
+                if seen[rule as usize] != stamp {
+                    seen[rule as usize] = stamp;
+                    out.push(rule);
+                }
+            }
+        };
+        push_bucket(&self.wildcard);
+        push_bucket(self.by_tag.get(&node.node_type).unwrap_or(&empty));
+        if let Some(classes) = node.attributes.get("class") {
+            for class in classes.split_whitespace() {
+                push_bucket(self.by_class.get(class).unwrap_or(&empty));
+            }
+        }
+        if let Some(id) = node.get_id() {
+            push_bucket(self.by_id.get(id).unwrap_or(&empty));
+        }
+        out.sort_unstable_by_key(|&rule| self.rank[rule as usize]);
+    }
+}
+
+/// Apply the `style` attribute of one node, restricted to the `important`
+/// subset when `important` is true the per-node form of the cascade's
+/// inline passes (inline normal beats stylesheet normal, inline `!important`
+/// beats everything).
+fn apply_inline_style_at(arena: &mut NodeArena, node_id: NodeId, important: bool) {
+    let Some(style) = arena[node_id].attributes.get("style").cloned() else {
+        return;
+    };
+    let (normal, imp) = parse_declaration_splits(&style);
+    let subset = if important { imp } else { normal };
+    if !subset.0.is_empty() {
+        arena[node_id].css_attr.add(subset);
     }
 }
 
@@ -67,32 +160,53 @@ pub fn css_into_node_with_state(
     css: &CssRule,
     state: &DynamicState,
 ) {
-    // Order every rule by (specificity, source order); the stable sort keeps
-    // same-specificity rules in stylesheet order so the last applied rule for
-    // a property wins, matching the browser cascade.
-    let mut rules: Vec<&CssRuleEntry> = css.0.iter().collect();
-    rules.sort_by_key(|entry| entry.selector.specificity());
+    let index = css.cascade_index();
+    // Per-node evaluation scratch, reused across the whole pass so neither
+    // the traversal nor the candidate gathering allocates per node / rule.
+    let mut seen = vec![0u32; css.0.len()];
+    let mut candidates: Vec<u32> = Vec::new();
+    let mut stack = vec![root_id];
+    let mut stamp: u32 = 0;
+    while let Some(node_id) = stack.pop() {
+        stamp = stamp.wrapping_add(1);
+        if stamp == 0 {
+            // The generation stamp wrapped around: re-zero the stamps and
+            // resume at 1 so stale marks can never suppress a candidate.
+            seen.fill(0);
+            stamp = 1;
+        }
+        index.candidates_for(&arena[node_id], &mut candidates, &mut seen, stamp);
+        // 1. Author stylesheet, normal declarations (lowest priority).
+        for &rule in &candidates {
+            let entry = &css.0[rule as usize];
+            if entry.normal.0.is_empty() {
+                continue;
+            }
+            if selector_chain_matches_with_state(arena, node_id, &entry.selector, state) {
+                arena[node_id].css_attr.add(entry.normal.clone());
+            }
+        }
+        // 2. Inline `style` attributes, normal declarations.
+        apply_inline_style_at(arena, node_id, false);
+        // 3. Author stylesheet, `!important` declarations.
+        for &rule in &candidates {
+            let entry = &css.0[rule as usize];
+            if entry.important.0.is_empty() {
+                continue;
+            }
+            if selector_chain_matches_with_state(arena, node_id, &entry.selector, state) {
+                arena[node_id].css_attr.add(entry.important.clone());
+            }
+        }
+        // 4. Inline `style` attributes, `!important` declarations (highest).
+        apply_inline_style_at(arena, node_id, true);
 
-    // 1. Author stylesheet, normal declarations (lowest priority).
-    for entry in &rules {
-        if !entry.normal.0.is_empty() {
-            apply_css_rule(arena, root_id, &entry.selector, &entry.normal, state);
-        }
+        stack.extend(arena[node_id].children.iter().copied());
     }
-    // 2. Inline `style` attributes, normal declarations.
-    apply_inline_styles(arena, root_id, false);
-    // 3. Author stylesheet, `!important` declarations.
-    for entry in &rules {
-        if !entry.important.0.is_empty() {
-            apply_css_rule(arena, root_id, &entry.selector, &entry.important, state);
-        }
-    }
-    // 4. Inline `style` attributes, `!important` declarations (highest).
-    apply_inline_styles(arena, root_id, true);
     // Propagate inheritable CSS properties (color, text-align, font-weight,
     // font-style, text-decoration, font-size, text-transform, line-height).
     // Inheritance copies final values; the importance flag does not propagate.
-    inherit_css(arena, root_id, &IndexMap::new());
+    inherit_css(arena, root_id, &Arc::new(IndexMap::new()));
 }
 
 /// Cascade styles with a hover context but no focus (no `:focus` rules match).
@@ -272,28 +386,51 @@ pub const INHERITED_PROPS: &[&str] = &[
     "visibility",
 ];
 
-fn inherit_css(arena: &mut NodeArena, node_id: NodeId, parent_attrs: &IndexMap<String, String>) {
+fn inherit_css(
+    arena: &mut NodeArena,
+    node_id: NodeId,
+    parent_attrs: &Arc<IndexMap<String, String>>,
+) {
     // Merge parent inheritable attrs into current node (if not already set)
-    let node = &mut arena[node_id];
-    for key in INHERITED_PROPS {
-        if let Some(value) = parent_attrs.get(*key) {
+    {
+        let node = &mut arena[node_id];
+        for key in INHERITED_PROPS {
+            if let Some(value) = parent_attrs.get(*key) {
+                node.css_attr
+                    .0
+                    .entry((*key).to_string())
+                    .or_insert_with(|| value.clone());
+            }
+        }
+    }
+
+    // The inherited map handed down to children: share the parent's unless
+    // this node declares an inherited property that differs from it
+    // (copy-on-write — most nodes change nothing, so whole subtrees share
+    // one map allocation instead of cloning it per node).
+    let merged = {
+        let node = &arena[node_id];
+        let diverges = INHERITED_PROPS.iter().any(|key| {
             node.css_attr
                 .0
-                .entry((*key).to_string())
-                .or_insert_with(|| value.clone());
+                .get(*key)
+                .is_some_and(|value| parent_attrs.get(*key) != Some(value))
+        });
+        if diverges {
+            let mut map = (**parent_attrs).clone();
+            for key in INHERITED_PROPS {
+                if let Some(value) = node.css_attr.0.get(*key) {
+                    map.insert((*key).to_string(), value.clone());
+                }
+            }
+            Arc::new(map)
+        } else {
+            Arc::clone(parent_attrs)
         }
-    }
-
-    // Collect inheritable attrs from this node to pass down
-    let mut merged = parent_attrs.clone();
-    for key in INHERITED_PROPS {
-        if let Some(value) = node.css_attr.0.get(*key) {
-            merged.insert((*key).to_string(), value.clone());
-        }
-    }
+    };
 
     // Recurse into children (clone to avoid borrow issues)
-    let children: Vec<NodeId> = node.children.clone();
+    let children: Vec<NodeId> = arena[node_id].children.clone();
     for child_id in children {
         inherit_css(arena, child_id, &merged);
     }

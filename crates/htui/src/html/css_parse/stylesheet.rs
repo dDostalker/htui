@@ -5,6 +5,10 @@ use cssparser::{
 use indexmap::IndexMap;
 use log::{debug, warn};
 
+use std::str::FromStr;
+use std::sync::OnceLock;
+
+use super::cascade::CascadeIndex;
 use super::{
     properties::CssAttr, selector::CssSelector,
     values::{
@@ -12,7 +16,6 @@ use super::{
         is_place_shorthand_name,
     },
 };
-use std::str::FromStr;
 
 /// One qualified rule, with declarations already split by the `!important`
 /// marker at parse time. Rules are kept separate (no same-selector merging) so
@@ -28,16 +31,34 @@ pub struct CssRuleEntry {
     pub important: CssAttr,
 }
 
+/// The parsed author stylesheet: every qualified rule, with the `!important`
+/// split already applied.
+///
+/// The second field is the lazily-built [`CascadeIndex`] — computed on the
+/// first cascade pass and dropped by [`push`](Self::push) /
+/// [`add`](Self::add) so the next pass rebuilds it against the extended rule
+/// set. Rules mutated by any other route leave the index stale; extend the
+/// rule set only through those two methods.
 #[derive(Debug, Clone)]
-pub struct CssRule(pub Vec<CssRuleEntry>);
+pub struct CssRule(
+    pub Vec<CssRuleEntry>,
+    /// Lazily-built cascade index; see [`CssRule::cascade_index`].
+    pub(crate) OnceLock<CascadeIndex>,
+);
 
 impl CssRule {
     pub fn new() -> Self {
-        CssRule(Vec::new())
+        CssRule(Vec::new(), OnceLock::new())
+    }
+
+    /// The cascade index for this rule set, built on first use.
+    pub(crate) fn cascade_index(&self) -> &CascadeIndex {
+        self.1.get_or_init(|| CascadeIndex::build(self))
     }
 
     /// Append a rule with explicit normal / important declaration splits.
     pub fn push(&mut self, selector: CssSelector, normal: CssAttr, important: CssAttr) {
+        self.1.take();
         self.0.push(CssRuleEntry {
             selector,
             normal,
@@ -47,6 +68,7 @@ impl CssRule {
 
     /// Append a rule whose declarations all have normal priority.
     pub fn add(&mut self, selector: CssSelector, attr: CssAttr) {
+        self.1.take();
         self.0.push(CssRuleEntry {
             selector,
             normal: attr,

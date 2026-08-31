@@ -1,10 +1,11 @@
 use crossterm::style::Color;
 use htui::html::css_parse::{
-    BorderStyle, BoxSizing, Combinator, CornerRadii, CssAttr, CssRule, CssSelector, EdgeAuto,
-    EdgeSizes, FontContext, FontWeight, INHERITED_PROPS, Length, LengthContext, LineHeight,
-    NthExpr, PX_PER_CELL, Parser, SUPPORTED_PROPERTIES, Selector, TextDecoration, TextTransform,
-    Viewport, css_into_node, parse_color_str, parse_declaration_text, resolve_line_height_cells,
-    selector_chain_matches,
+    BorderStyle, BoxSizing, Combinator, CornerRadii, CssAttr, CssRule, CssRuleEntry, CssSelector,
+    DynamicState, EdgeAuto, EdgeSizes, FontContext, FontWeight, INHERITED_PROPS, Length,
+    LengthContext, LineHeight, NthExpr, PX_PER_CELL, Parser, SUPPORTED_PROPERTIES, Selector,
+    TextDecoration, TextTransform, Viewport, css_into_node, css_into_node_with_state,
+    parse_color_str, parse_declaration_text, reset_css_attr, resolve_line_height_cells,
+    selector_chain_matches, selector_chain_matches_with_state,
 };
 use htui::html::html_parse;
 use htui::tdom::node::{Node, NodeArena, NodeId, NodeType};
@@ -115,7 +116,7 @@ fn test_matches_descendant() {
 #[test]
 fn test_nth_child_even_matches_second_child() {
     // `:nth-child(even)` (== `2n`) must match the 2nd, 4th, … siblings and
-    // skip the 1st, 3rd, … . Build a 4-row parent and verify each index.
+    // skip the 1st, 3rd, …. Build a 4-row parent and verify each index.
     init();
     let mut arena = NodeArena::default();
     let parent = arena.insert(Node::from(NodeType::Div));
@@ -260,7 +261,7 @@ fn test_nth_child_nth_expr_matches_predicate() {
     assert!(expr.matches(8));
     assert!(!expr.matches(1));
     assert!(!expr.matches(4));
-    // Degenerate a=0 → only the exact position matches.
+    // Degenerate a=0 — only the exact position matches.
     let single = NthExpr { a: 0, b: 3 };
     assert!(single.matches(3));
     assert!(!single.matches(2));
@@ -585,7 +586,7 @@ fn test_color_rgba_and_modern_syntax() {
     assert_eq!(
         parse_color_str("rgb(300, 0, 0)"),
         Some(Color::Rgb { r: 255, g: 0, b: 0 }),
-        "out-of-range components clamp to 0–255"
+        "out-of-range components clamp to 0…255"
     );
     assert_eq!(
         parse_color_str("rgb(20% 40% 60%)"),
@@ -613,7 +614,6 @@ fn test_color_hsl_parsing() {
         parse_color_str("hsl(120 100% 50% / 0.25)"),
         Some(Color::Rgb { r: 0, g: 255, b: 0 })
     );
-    // Hue wraps: 480° ≡ 120°.
     assert_eq!(
         parse_color_str("hsl(480, 100%, 50%)"),
         Some(Color::Rgb { r: 0, g: 255, b: 0 })
@@ -1086,8 +1086,6 @@ fn test_color_does_inherit() {
 
 #[test]
 fn test_full_parse_pipeline_handles_important_and_comments() {
-    // End-to-end: parse a real stylesheet through the CSS pipeline
-    // (QualifiedRuleParser → declaration parsing via cssparser tokens).
     // Pins !important stripping + comment removal at the call sites used
     // by the rest of the codebase (Parser::parse + apply_css_rule).
     init();
@@ -2306,4 +2304,276 @@ fn min_max_size_properties_are_supported_not_inherited() {
     // Sizes do not inherit in CSS.
     assert!(!INHERITED_PROPS.contains(&"min-width"));
     assert!(!INHERITED_PROPS.contains(&"max-height"));
+}
+
+
+/// Test-only oracle: the pre-optimization cascade (per-rule full-tree walks,
+/// per-call specificity sort, per-node inherited-map clones). `style`
+/// attributes are not modelled (the inline declaration parser is
+/// crate-private); documents compared against it must not use inline styles
+/// (`cascade_inline_style_precedence_unchanged` covers those separately).
+fn ref_apply_rule(
+    arena: &mut NodeArena,
+    node_id: NodeId,
+    selector: &CssSelector,
+    decls: &CssAttr,
+    state: &DynamicState,
+) {
+    if selector_chain_matches_with_state(arena, node_id, selector, state) {
+        arena[node_id].css_attr.add(decls.clone());
+    }
+    let children: Vec<NodeId> = arena[node_id].children.clone();
+    for child in children {
+        ref_apply_rule(arena, child, selector, decls, state);
+    }
+}
+
+fn ref_inherit(arena: &mut NodeArena, node_id: NodeId, parent: &IndexMap<String, String>) {
+    {
+        let node = &mut arena[node_id];
+        for key in INHERITED_PROPS {
+            if let Some(value) = parent.get(*key) {
+                node.css_attr
+                    .0
+                    .entry((*key).to_string())
+                    .or_insert_with(|| value.clone());
+            }
+        }
+    }
+    let node = &arena[node_id];
+    let mut merged = parent.clone();
+    for key in INHERITED_PROPS {
+        if let Some(value) = node.css_attr.0.get(*key) {
+            merged.insert((*key).to_string(), value.clone());
+        }
+    }
+    let children: Vec<NodeId> = node.children.clone();
+    for child in children {
+        ref_inherit(arena, child, &merged);
+    }
+}
+
+fn reference_cascade(arena: &mut NodeArena, root: NodeId, css: &CssRule, state: &DynamicState) {
+    reset_css_attr(arena, root);
+    let mut rules: Vec<&CssRuleEntry> = css.0.iter().collect();
+    rules.sort_by_key(|entry| entry.selector.specificity());
+    for entry in &rules {
+        if !entry.normal.0.is_empty() {
+            ref_apply_rule(arena, root, &entry.selector, &entry.normal, state);
+        }
+    }
+    for entry in &rules {
+        if !entry.important.0.is_empty() {
+            ref_apply_rule(arena, root, &entry.selector, &entry.important, state);
+        }
+    }
+    ref_inherit(arena, root, &IndexMap::new());
+}
+
+/// Assert every node's `css_attr` equals what the reference cascade computes
+/// for the same document + stylesheet + interaction state.
+fn assert_matches_reference(arena: &NodeArena, root: NodeId, css: &str, state: &DynamicState) {
+    let mut reference = arena.clone();
+    let mut parser = Parser::new(css);
+    let rules = parser.parse();
+    reference_cascade(&mut reference, root, &rules, state);
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        assert_eq!(
+            arena[id].css_attr.0,
+            reference[id].css_attr.0,
+            "css_attr mismatch at node {:?} (class {:?})",
+            arena[id].node_type,
+            arena[id].attributes.get("class")
+        );
+        stack.extend(arena[id].children.iter().copied());
+    }
+}
+
+/// `Document > div.menu#main > (p#lead, ul > li×3, a.nav, em)` — a tree that
+/// exercises every bucket key (tag / class / id / wildcard) and every
+/// combinator.
+fn build_cascade_tree(arena: &mut NodeArena) -> (NodeId, NodeId, NodeId, NodeId, NodeId) {
+    let root = arena.insert(Node::from(NodeType::Document));
+    let div = arena.insert(Node::from(NodeType::Div));
+    arena[div].attributes = IndexMap::from([
+        ("class".to_string(), "menu".to_string()),
+        ("id".to_string(), "main".to_string()),
+    ]);
+    let p = arena.insert(Node::from(NodeType::P));
+    arena[p]
+        .attributes
+        .insert("id".to_string(), "lead".to_string());
+    let ul = arena.insert(Node::from(NodeType::Ul));
+    let li1 = arena.insert(Node::from(NodeType::Li));
+    let li2 = arena.insert(Node::from(NodeType::Li));
+    let li3 = arena.insert(Node::from(NodeType::Li));
+    let a = arena.insert(Node::from(NodeType::A));
+    arena[a]
+        .attributes
+        .insert("class".to_string(), "nav".to_string());
+    let em = arena.insert(Node::from(NodeType::Em));
+    // `ul` children are exactly three `li` so `:nth-child` indices are
+    // unambiguous (no whitespace text nodes).
+    for (parent, children) in [
+        (root, vec![div]),
+        (div, vec![p, ul, a, em]),
+        (ul, vec![li1, li2, li3]),
+    ] {
+        for child in children {
+            Node::append_child(&mut *arena, parent, child);
+        }
+    }
+    (root, div, ul, li2, em)
+}
+
+/// One stylesheet touching tag / class / id / universal / pseudo-class keys
+/// and every combinator, with specificity ties resolved by source order and
+/// an `!important` override.
+const CASCADE_SHEET: &str = "
+div { padding-top: 1px; }
+div { color: purple; }
+.menu { color: red; }
+#lead { font-weight: bold; }
+* { line-height: 2px; }
+ul li { text-align: center; }
+div > a { text-decoration: underline; }
+li + li { color: green; }
+p ~ em { font-style: italic; }
+p:nth-child(odd) { font-style: italic; }
+li:hover { background-color: blue; }
+li:nth-child(even) { text-transform: uppercase; }
+a { color: yellow; }
+a { color: orange; }
+em { color: black !important; }
+";
+
+#[test]
+fn bucketed_cascade_matches_reference_cascade() {
+    init();
+    let mut arena = NodeArena::default();
+    let (root, div, _ul, li2, em) = build_cascade_tree(&mut arena);
+
+    // Static pass.
+    css_into_node_with_state(&mut arena, root, &parse_sheet(CASCADE_SHEET), &DynamicState::default());
+    assert_matches_reference(&arena, root, CASCADE_SHEET, &DynamicState::default());
+    // Spot-check the cascade semantics the buckets must preserve.
+    assert_eq!(arena[div].css_attr.0.get("color").map(String::as_str), Some("red"));
+    assert_eq!(arena[li2].css_attr.0.get("color").map(String::as_str), Some("green"));
+    assert_eq!(arena[em].css_attr.0.get("color").map(String::as_str), Some("black"));
+    assert_eq!(arena[em].css_attr.0.get("font-style").map(String::as_str), Some("italic"));
+    assert_eq!(
+        arena[div].css_attr.0.get("padding-top").map(String::as_str),
+        Some("1px")
+    );
+
+    // Hovered pass: `:hover` must restyle only the matching chain, and the
+    // rest of the tree must stay byte-identical to the reference.
+    let hovered = DynamicState {
+        hovered: Some(li2),
+        focused: None,
+    };
+    let mut arena = NodeArena::default();
+    let (root, _div, _ul, _li2, _em) = build_cascade_tree(&mut arena);
+    css_into_node_with_state(&mut arena, root, &parse_sheet(CASCADE_SHEET), &hovered);
+    assert_matches_reference(&arena, root, CASCADE_SHEET, &hovered);
+}
+
+fn parse_sheet(css: &str) -> CssRule {
+    let mut parser = Parser::new(css);
+    parser.parse()
+}
+
+#[test]
+fn cascade_index_is_rebuilt_after_push() {
+    init();
+    let mut arena = NodeArena::default();
+    let (root, div) = build_test(&mut arena);
+    let rules = parse_sheet("div { color: red; }");
+    let mut cascaded = arena.clone();
+    css_into_node_with_state(&mut cascaded, root, &rules, &DynamicState::default());
+    assert_eq!(
+        cascaded[div].css_attr.0.get("color").map(String::as_str),
+        Some("red")
+    );
+
+    // A rule appended after the first cascade must take part in the next
+    // one (same specificity → later source order wins).
+    let mut rules = rules;
+    let selector: CssSelector = "div".parse().unwrap();
+    let mut decls = IndexMap::new();
+    decls.insert("color".to_string(), "blue".to_string());
+    rules.push(selector, CssAttr(decls), CssAttr::new());
+    let mut recascaded = arena.clone();
+    css_into_node_with_state(&mut recascaded, root, &rules, &DynamicState::default());
+    assert_eq!(
+        recascaded[div].css_attr.0.get("color").map(String::as_str),
+        Some("blue")
+    );
+}
+
+#[test]
+fn cascade_inline_style_precedence_unchanged() {
+    init();
+    let mut arena = NodeArena::default();
+    let root = arena.insert(Node::from(NodeType::Document));
+    let div = arena.insert(Node::from(NodeType::Div));
+    arena[div].attributes = IndexMap::from([
+        (
+            "style".to_string(),
+            "color: green; background-color: white !important".to_string(),
+        ),
+    ]);
+    Node::append_child(&mut arena, root, div);
+    let rules = parse_sheet("div { color: red !important; }");
+    css_into_node_with_state(&mut arena, root, &rules, &DynamicState::default());
+    // Stylesheet `!important` beats inline normal (green loses)…
+    assert_eq!(
+        arena[div].css_attr.0.get("color").map(String::as_str),
+        Some("red")
+    );
+    // …while inline `!important` still lands (no competing declaration).
+    assert_eq!(
+        arena[div].css_attr.0.get("background-color").map(String::as_str),
+        Some("white")
+    );
+
+    // Inline normal beats stylesheet normal.
+    let mut arena = NodeArena::default();
+    let root = arena.insert(Node::from(NodeType::Document));
+    let div = arena.insert(Node::from(NodeType::Div));
+    arena[div]
+        .attributes
+        .insert("style".to_string(), "color: green".to_string());
+    Node::append_child(&mut arena, root, div);
+    let rules = parse_sheet("div { color: red; }");
+    css_into_node_with_state(&mut arena, root, &rules, &DynamicState::default());
+    assert_eq!(
+        arena[div].css_attr.0.get("color").map(String::as_str),
+        Some("green")
+    );
+}
+
+#[test]
+fn cascade_inheritance_values_survive_copy_on_write() {
+    init();
+    // div(red) > p(red, equal to inherited — shared-map path) >
+    // span(blue, diverging — cloned-map path) > em (inherits blue).
+    let mut arena = NodeArena::default();
+    let root = arena.insert(Node::from(NodeType::Document));
+    let div = arena.insert(Node::from(NodeType::Div));
+    let p = arena.insert(Node::from(NodeType::P));
+    let span = arena.insert(Node::from(NodeType::Span));
+    let em = arena.insert(Node::from(NodeType::Em));
+    for (parent, child) in [(root, div), (div, p), (p, span), (span, em)] {
+        Node::append_child(&mut arena, parent, child);
+    }
+    let rules = parse_sheet(
+        "div { color: red; } p { color: red; } span { color: blue; }",
+    );
+    css_into_node_with_state(&mut arena, root, &rules, &DynamicState::default());
+    assert_eq!(arena[div].css_attr.0.get("color").map(String::as_str), Some("red"));
+    assert_eq!(arena[p].css_attr.0.get("color").map(String::as_str), Some("red"));
+    assert_eq!(arena[span].css_attr.0.get("color").map(String::as_str), Some("blue"));
+    assert_eq!(arena[em].css_attr.0.get("color").map(String::as_str), Some("blue"));
 }
