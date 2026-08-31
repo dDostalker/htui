@@ -5,7 +5,7 @@ use boa_engine::{Context, JsResult, JsValue, js_string};
 
 use crate::tdom::node::{Node, NodeId, NodeType};
 
-use super::{ScriptState, collect_text, mark_dirty, this_node_id, with_state};
+use super::{ScriptState, collect_text, mark_dirty, this_node_id, with_state, wrapper_is_cached};
 
 /// `el.value` getter — the DOM `value` attribute (the field's committed
 /// content; the active edit buffer while focused is engine-side state).
@@ -213,14 +213,21 @@ pub(super) fn native_set_inner_html(
         return Ok(JsValue::undefined());
     };
     let mut st = rc.borrow_mut();
-    set_inner_html(&mut st, node_id, &html)
+    set_inner_html(&mut st, node_id, &html, context)
 }
 
 /// Shared `innerHTML` write: parse `html` as a fragment in the context of
 /// `node_id` and replace the node's children. `<style>` CSS is accumulated on
 /// the state so the next render applies it; `<script>` blocks are skipped
-/// (never executed, matching the browser's `innerHTML` semantics).
-fn set_inner_html(st: &mut ScriptState, node_id: NodeId, html: &str) -> JsResult<JsValue> {
+/// (never executed, matching the browser's `innerHTML` semantics). Replaced
+/// subtrees JS can no longer reach are freed from the arena (see
+/// [`sweep_replaced_subtrees`]).
+fn set_inner_html(
+    st: &mut ScriptState,
+    node_id: NodeId,
+    html: &str,
+    context: &mut Context,
+) -> JsResult<JsValue> {
     // `innerHTML` is an Element-only property; non-elements are left alone.
     let is_element = st
         .arena
@@ -229,13 +236,59 @@ fn set_inner_html(st: &mut ScriptState, node_id: NodeId, html: &str) -> JsResult
     if !is_element {
         return Ok(JsValue::undefined());
     }
+    // Capture the children about to be replaced so the unreachable ones can
+    // be freed after the new fragment is in place — without this, every
+    // timer-driven `innerHTML` refresh (clock / monitor pages) leaks the
+    // full replaced subtree into the slotmap.
+    let replaced = st
+        .arena
+        .get(node_id)
+        .map(|n| n.children.clone())
+        .unwrap_or_default();
     let mut css_sources = Vec::new();
     crate::html::html_parse::parse_fragment_into(&mut st.arena, node_id, html, &mut css_sources);
     if !css_sources.is_empty() {
         st.dirty.style_css.push_str(&css_sources.join("\n"));
     }
+    sweep_replaced_subtrees(st, &replaced, context)?;
     mark_dirty(st, node_id);
     Ok(JsValue::undefined())
+}
+
+/// Free the replaced subtrees that JS can no longer reach.
+///
+/// Browser semantics: nodes dropped by an `innerHTML` write stay alive while
+/// a script holds a reference to them, and are collected once unreachable.
+/// The wrapper cache (`__htuiElements`, GC-rooted) is the conservative
+/// reachability oracle: a wrapper exists exactly when JS has touched the
+/// node, so a wrapped node — and its whole subtree, which stays attached to
+/// it like a detached browser node — is kept, while unwrapped subtrees are
+/// removed from the arena. Listeners imply a wrapper (they are installed on
+/// one), so no listener registry cleanup is needed here.
+fn sweep_replaced_subtrees(
+    st: &mut ScriptState,
+    roots: &[NodeId],
+    context: &mut Context,
+) -> JsResult<()> {
+    for &root in roots {
+        // Collect top-down; a wrapped node stops the descent (its whole
+        // subtree stays attached to it).
+        let mut doomed: Vec<NodeId> = Vec::new();
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            if wrapper_is_cached(context, id)? {
+                continue;
+            }
+            doomed.push(id);
+            if let Some(node) = st.arena.get(id) {
+                stack.extend(node.children.iter().copied());
+            }
+        }
+        for id in doomed {
+            st.arena.remove(id);
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn native_get_node_value(

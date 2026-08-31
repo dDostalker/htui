@@ -118,6 +118,17 @@ fn registry_elements(context: &mut Context) -> JsResult<JsObject> {
     }
 }
 
+/// Whether a JS wrapper is cached for `node_id` in `__htuiElements`.
+///
+/// The cache is GC-rooted and written by every [`node_wrapper`] call, so
+/// this is the conservative "JS may still hold this node" oracle used by
+/// the `innerHTML` sweep (see `content::sweep_replaced_subtrees`).
+pub(super) fn wrapper_is_cached(context: &mut Context, node_id: NodeId) -> JsResult<bool> {
+    let key = node_id_to_f64(node_id);
+    let cached = registry_elements(context)?.get(key, context)?;
+    Ok(!cached.is_undefined())
+}
+
 // ============================================================
 // Helpers
 // ============================================================

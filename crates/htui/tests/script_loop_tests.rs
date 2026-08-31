@@ -1112,6 +1112,91 @@ fn eval_str(engine: &mut ScriptEngine, expr: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// innerHTML replaced-subtree sweep (arena does not grow under refresh churn)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn inner_html_churn_does_not_grow_the_arena() {
+    let mut engine = ScriptEngine::new(
+        r#"<div id="host"><p id="old">stale</p></div>"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
+
+    // Timer-refresh pattern: replace the generated content every tick. The
+    // generated nodes are never wrapped by JS, so each sweep frees the
+    // previous tick's subtree instead of leaking it into the slotmap.
+    for i in 0..5 {
+        engine
+            .eval_source(&format!(
+                "document.getElementById('host').innerHTML = '<b id=\"gen{i}\">{i}</b>'"
+            ))
+            .expect("innerHTML write evaluates");
+    }
+    let after_five = engine.arena().len();
+
+    for i in 5..10 {
+        engine
+            .eval_source(&format!(
+                "document.getElementById('host').innerHTML = '<b id=\"gen{i}\">{i}</b>'"
+            ))
+            .expect("innerHTML write evaluates");
+    }
+    let arena = engine.arena();
+
+    assert_eq!(
+        arena.len(),
+        after_five,
+        "repeated innerHTML refreshes must not grow the arena"
+    );
+    assert!(
+        !arena
+            .iter()
+            .any(|(_, n)| n.get_id().is_some_and(|id| id == "old")),
+        "the originally replaced subtree is freed"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('host').textContent"),
+        "9",
+        "the latest fragment is live and correct"
+    );
+}
+
+#[test]
+fn inner_html_keeps_a_script_held_node_usable() {
+    let mut engine = ScriptEngine::new(
+        r#"<div id="host"><p id="kid">keepme</p></div>"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
+
+    // JS holds the replaced child (browser: it stays alive as a detached
+    // node) — the wrapper cache keeps it in the arena and fully usable.
+    engine
+        .eval_source(
+            "globalThis.kid = document.getElementById('kid'); \
+             document.getElementById('host').innerHTML = '';",
+        )
+        .expect("hold + replace evaluates");
+
+    assert_eq!(eval_str(&mut engine, "kid.tagName"), "P");
+    assert_eq!(eval_str(&mut engine, "kid.textContent"), "keepme");
+
+    let arena = engine.arena();
+    assert!(
+        arena
+            .iter()
+            .any(|(_, n)| n.get_id().is_some_and(|id| id == "kid")),
+        "the held node stays in the arena (kept via its wrapper)"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "kid.childNodes.length"),
+        "1",
+        "the held node's subtree stays attached to it"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // DOM cycle rejection (browser `HierarchyRequestError` semantics)
 // ---------------------------------------------------------------------------
 

@@ -120,7 +120,11 @@ pub enum ScriptResponse {
 fn summary_details(arena: &NodeArena, node_id: NodeId) -> Option<NodeId> {
     let mut current = Some(node_id);
     while let Some(id) = current {
-        let node = &arena[id];
+        // `node_id` can be stale (a hit region referencing a node an
+        // `innerHTML` sweep already freed) — treat it as "no target".
+        let Some(node) = arena.get(id) else {
+            return None;
+        };
         if node.node_type == NodeType::Summary {
             return node
                 .parent
@@ -544,7 +548,12 @@ pub(crate) fn region_for(arena: &NodeArena, node_id: NodeId) -> HitRegion {
     let mut path = Vec::new();
     let mut current = Some(node_id);
     while let Some(id) = current {
-        let node = &arena[id];
+        // A stale id (the node was freed by an `innerHTML` sweep between the
+        // hit test and this call) yields a truncated/empty path, which fires
+        // no listeners — the same outcome as a removed browser node.
+        let Some(node) = arena.get(id) else {
+            break;
+        };
         path.push(ElementRef {
             id: node.get_id().cloned(),
             node_id: id,
