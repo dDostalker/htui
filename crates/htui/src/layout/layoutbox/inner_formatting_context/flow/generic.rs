@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crossterm::style::Color;
 
 use crate::{
@@ -125,7 +127,7 @@ pub fn layout_inline_blockify(
 fn apply_inline_ua_defaults(node: &mut Node) {
     for &(prop, value) in node.node_type.inline_ua_declarations() {
         if !node.css_attr.is_set(prop) {
-            node.css_attr.0.insert(prop.to_string(), value.to_string());
+            node.css_attr.0.insert(Arc::from(prop), Arc::from(value));
         }
     }
     // `<abbr>`'s underline is conditional on a `title` attribute.
@@ -135,7 +137,7 @@ fn apply_inline_ua_defaults(node: &mut Node) {
     {
         node.css_attr
             .0
-            .insert("text-decoration".to_string(), "underline".to_string());
+            .insert(Arc::from("text-decoration"), Arc::from("underline"));
     }
 }
 

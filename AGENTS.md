@@ -543,7 +543,7 @@ let x = find(b).unwrap();
 | `Node`             | `tdom::node`            | DOM 节点（含子节点/属性） |
 | `NodeType`         | `tdom::node`            | 节点类型枚举（95 个变体：90 种 HTML 标签 + Document/DocumentType/DocumentFragment/Text/Comment） |
 | `Attr`             | `tdom::attribute`      | HTML 属性存储与查询       |
-| `CssAttr`          | `html::css_parse::properties` | 解析后的 CSS 属性（`IndexMap<String, String>` + 30+ 个 getter） |
+| `CssAttr`          | `html::css_parse::properties` | 解析后的 CSS 属性（`IndexMap<Arc<str>, Arc<str>>` + 30+ 个 getter；键/值共享引用，级联逐属性 O(1) 拷贝） |
 | `CssRule`          | `html::css_parse`       | 完整 CSS 规则表           |
 | `CssSelector`      | `html::css_parse`       | CSS 选择器（含组合器）    |
 | `FontWeight`       | `html::css_parse::values` | `font-weight` 枚举（`Normal` / `Bold`） |

@@ -14,6 +14,8 @@
 //! [`layout_block`]; the inline path applies the same defaults through
 //! `collect_runs`' local `fg` / `style` variables without touching shared state.
 
+use std::sync::Arc;
+
 use crate::{
     html::css_parse::CssAttr,
     layout::{
@@ -75,7 +77,7 @@ pub fn layout_a(
 fn apply_a_ua_defaults(css_attr: &mut CssAttr) {
     for &(prop, value) in NodeType::A.inline_ua_declarations() {
         if !css_attr.is_set(prop) {
-            css_attr.0.insert(prop.to_string(), value.to_string());
+            css_attr.0.insert(Arc::from(prop), Arc::from(value));
         }
     }
 }

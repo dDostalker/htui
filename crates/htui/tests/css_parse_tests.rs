@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crossterm::style::Color;
 use htui::html::css_parse::{
     BorderStyle, BoxSizing, Combinator, CornerRadii, CssAttr, CssRule, CssRuleEntry, CssSelector,
@@ -290,7 +292,7 @@ fn test_css_into_node() {
     let sel: CssSelector = "div p".parse().unwrap();
     let mut m = IndexMap::new();
     m.insert("color".into(), "red".into());
-    css.add(sel, CssAttr(m));
+    css.add(sel, CssAttr::from(m));
     css_into_node(&mut arena, root, &css);
     let div_id = arena[root].children[0];
     let p_id = arena[div_id].children[0];
@@ -385,7 +387,7 @@ fn test_universal_selector_cascades_to_elements_not_text() {
     let sel: CssSelector = "*".parse().unwrap();
     let mut m = IndexMap::new();
     m.insert("background-color".into(), "red".into());
-    css.add(sel, CssAttr(m));
+    css.add(sel, CssAttr::from(m));
     css_into_node(&mut arena, root, &css);
 
     let div_id = arena[root].children[0];
@@ -463,7 +465,7 @@ fn test_is_set_distinguishes_unset_from_explicit_none() {
     assert!(!attr.is_set("color"));
 
     let declared = parse_declaration_text("text-decoration: none;");
-    attr.add(CssAttr(declared));
+    attr.add(&CssAttr::from(declared));
     assert!(
         attr.is_set("text-decoration"),
         "explicit `none` declaration must still count as set"
@@ -667,7 +669,7 @@ fn test_css_attr_full_color() {
     let mut attr = CssAttr::new();
     let css = "color: darkblue; background-color: #1e293b;";
     let m = parse_declaration_text(css);
-    attr.add(CssAttr(m));
+    attr.add(&CssAttr::from(m));
     assert_eq!(
         attr.get_color(),
         Some(Color::Rgb {
@@ -734,7 +736,7 @@ fn overflow_hidden_is_parsed_and_kept_by_the_cascade() {
     let css = Parser::new("div { overflow: hidden }").parse();
     css_into_node(&mut arena, root, &css);
     assert_eq!(
-        arena[div].css_attr.0.get("overflow").map(String::as_str),
+        arena[div].css_attr.0.get("overflow").map(|s| s.as_ref()),
         Some("hidden"),
         "overflow: hidden must survive the cascade"
     );
@@ -768,7 +770,7 @@ fn test_inherited_props_contains_visual_inheritable_set() {
 #[test]
 fn test_important_marker_is_stripped_from_value() {
     let m = parse_declaration_text("color: red !important;");
-    assert_eq!(m.get("color").map(String::as_str), Some("red"));
+    assert_eq!(m.get("color").map(|s| s.as_ref()), Some("red"));
 }
 
 #[test]
@@ -779,7 +781,7 @@ fn test_important_marker_with_space_is_not_recognised() {
     // level, drops it, and parses the rest as the value. We end up storing
     // `bold` (without a false !important signal). What we assert here is
     // that we do NOT silently accept it as important.
-    let val = m.get("font-weight").map(String::as_str);
+    let val = m.get("font-weight").map(|s| s.as_ref());
     assert_eq!(val, Some("bold"));
     assert!(
         !val.unwrap().contains("!important"),
@@ -790,13 +792,13 @@ fn test_important_marker_with_space_is_not_recognised() {
 #[test]
 fn test_important_marker_with_leading_space_is_kept_out_of_value() {
     let m = parse_declaration_text("font-style: italic  !important ;");
-    assert_eq!(m.get("font-style").map(String::as_str), Some("italic"));
+    assert_eq!(m.get("font-style").map(|s| s.as_ref()), Some("italic"));
 }
 
 #[test]
 fn test_block_comment_is_stripped() {
     let m = parse_declaration_text("/* color: ignored */ color: red;");
-    assert_eq!(m.get("color").map(String::as_str), Some("red"));
+    assert_eq!(m.get("color").map(|s| s.as_ref()), Some("red"));
     assert_eq!(m.len(), 1, "commented-out decl must not appear as a key");
 }
 
@@ -808,7 +810,7 @@ fn test_block_comment_inside_string_is_preserved() {
     // corrupting quoted strings.)
     let m = parse_declaration_text("content: \"a /* b */ c\";");
     assert_eq!(
-        m.get("content").map(String::as_str),
+        m.get("content").map(|s| s.as_ref()),
         Some("\"a /* b */ c\"")
     );
 }
@@ -818,13 +820,13 @@ fn test_unterminated_comment_truncates_input() {
     // Defensive: malformed CSS should not panic and should not leak the
     // comment text into a property key.
     let m = parse_declaration_text("color: red; /* oops");
-    assert_eq!(m.get("color").map(String::as_str), Some("red"));
+    assert_eq!(m.get("color").map(|s| s.as_ref()), Some("red"));
 }
 
 #[test]
 fn test_missing_trailing_semicolon_is_ok() {
     let m = parse_declaration_text("color: blue");
-    assert_eq!(m.get("color").map(String::as_str), Some("blue"));
+    assert_eq!(m.get("color").map(|s| s.as_ref()), Some("blue"));
 }
 
 // ============================================================
@@ -840,12 +842,12 @@ fn test_parse_splits_important_declarations() {
     assert_eq!(css.0.len(), 1);
     let entry = &css.0[0];
     assert_eq!(
-        entry.normal.0.get("width").map(String::as_str),
+        entry.normal.0.get("width").map(|s| s.as_ref()),
         Some("10px")
     );
     assert!(entry.normal.0.get("color").is_none());
     assert_eq!(
-        entry.important.0.get("color").map(String::as_str),
+        entry.important.0.get("color").map(|s| s.as_ref()),
         Some("red")
     );
     assert!(entry.important.0.get("width").is_none());
@@ -1028,7 +1030,7 @@ fn test_background_color_does_not_inherit() {
     let sel: CssSelector = "div".parse().unwrap();
     let mut m = IndexMap::new();
     m.insert("background-color".into(), "yellow".into());
-    css.add(sel, CssAttr(m));
+    css.add(sel, CssAttr::from(m));
     css_into_node(&mut arena, root, &css);
 
     let div_id = arena[root].children[0];
@@ -1060,7 +1062,7 @@ fn test_color_does_inherit() {
     let sel: CssSelector = "div".parse().unwrap();
     let mut m = IndexMap::new();
     m.insert("color".into(), "red".into());
-    css.add(sel, CssAttr(m));
+    css.add(sel, CssAttr::from(m));
     css_into_node(&mut arena, root, &css);
 
     let div_id = arena[root].children[0];
@@ -1106,7 +1108,7 @@ fn test_full_parse_pipeline_handles_important_and_comments() {
     let mut decls = IndexMap::new();
     decls.insert("color".into(), "red".into());
     decls.insert("font-weight".into(), "bold".into());
-    css.add(sel_h1, CssAttr(decls));
+    css.add(sel_h1, CssAttr::from(decls));
     css_into_node(&mut arena, root, &css);
 
     assert_eq!(
@@ -1443,7 +1445,7 @@ fn css_attr_get_width_end_to_end() {
     let mut attr = CssAttr::new();
     let mut decls = IndexMap::new();
     decls.insert("width".into(), "auto".into());
-    attr.add(CssAttr(decls));
+    attr.add(&CssAttr::from(decls));
     assert_eq!(
         attr.get_width(
             80,
@@ -1456,7 +1458,7 @@ fn css_attr_get_width_end_to_end() {
     let mut attr = CssAttr::new();
     let mut decls = IndexMap::new();
     decls.insert("width".into(), "40ch".into());
-    attr.add(CssAttr(decls));
+    attr.add(&CssAttr::from(decls));
     assert_eq!(
         attr.get_width(
             80,
@@ -1469,7 +1471,7 @@ fn css_attr_get_width_end_to_end() {
     let mut attr = CssAttr::new();
     let mut decls = IndexMap::new();
     decls.insert("width".into(), "50%".into());
-    attr.add(CssAttr(decls));
+    attr.add(&CssAttr::from(decls));
     assert_eq!(
         attr.get_width(
             80,
@@ -1482,7 +1484,7 @@ fn css_attr_get_width_end_to_end() {
     let mut attr = CssAttr::new();
     let mut decls = IndexMap::new();
     decls.insert("width".into(), "2em".into());
-    attr.add(CssAttr(decls));
+    attr.add(&CssAttr::from(decls));
     assert_eq!(
         attr.get_width(
             80,
@@ -1495,7 +1497,7 @@ fn css_attr_get_width_end_to_end() {
     let mut attr = CssAttr::new();
     let mut decls = IndexMap::new();
     decls.insert("width".into(), "1.5em".into());
-    attr.add(CssAttr(decls));
+    attr.add(&CssAttr::from(decls));
     assert_eq!(
         attr.get_width(
             80,
@@ -1508,7 +1510,7 @@ fn css_attr_get_width_end_to_end() {
     let mut attr = CssAttr::new();
     let mut decls = IndexMap::new();
     decls.insert("width".into(), "2rem".into());
-    attr.add(CssAttr(decls));
+    attr.add(&CssAttr::from(decls));
     assert_eq!(
         attr.get_width(
             80,
@@ -1522,7 +1524,7 @@ fn css_attr_get_width_end_to_end() {
     let mut attr = CssAttr::new();
     let mut decls = IndexMap::new();
     decls.insert("width".into(), "50vw".into());
-    attr.add(CssAttr(decls));
+    attr.add(&CssAttr::from(decls));
     assert_eq!(
         attr.get_width(
             80,
@@ -1536,7 +1538,7 @@ fn css_attr_get_width_end_to_end() {
     let mut attr = CssAttr::new();
     let mut decls = IndexMap::new();
     decls.insert("width".into(), "50vh".into());
-    attr.add(CssAttr(decls));
+    attr.add(&CssAttr::from(decls));
     assert_eq!(
         attr.get_width(
             80,
@@ -1565,7 +1567,7 @@ fn attr_from_decl(name: &str, value: &str) -> CssAttr {
     let mut decls = IndexMap::new();
     decls.insert(name.into(), value.into());
     let mut attr = CssAttr::new();
-    attr.add(CssAttr(decls));
+    attr.add(&CssAttr::from(decls));
     attr
 }
 
@@ -1629,7 +1631,7 @@ fn padding_longhands_override_shorthand() {
     decls.insert("padding".into(), "0".into());
     decls.insert("padding-top".into(), "7ch".into());
     let mut attr = CssAttr::new();
-    attr.add(CssAttr(decls));
+    attr.add(&CssAttr::from(decls));
     assert_eq!(
         attr.get_padding(
             80,
@@ -1778,7 +1780,7 @@ fn border_longhand_overrides_universal_shorthand() {
     decls.insert("border".into(), "1ch solid red".into());
     decls.insert("border-top".into(), "3ch solid blue".into());
     let mut attr = CssAttr::new();
-    attr.add(CssAttr(decls));
+    attr.add(&CssAttr::from(decls));
     let sides = attr.get_border(
         80,
         font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
@@ -1813,7 +1815,7 @@ fn border_universal_width_style_color_layers_correctly() {
     decls.insert("border-style".into(), "solid".into());
     decls.insert("border-color".into(), "green".into());
     let mut attr = CssAttr::new();
-    attr.add(CssAttr(decls));
+    attr.add(&CssAttr::from(decls));
     let sides = attr.get_border(
         80,
         font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
@@ -1867,7 +1869,7 @@ fn get_box_edges_returns_combined_padding_border_margin() {
     decls.insert("margin".into(), "4ch".into());
     decls.insert("border".into(), "1ch solid red".into());
     let mut attr = CssAttr::new();
-    attr.add(CssAttr(decls));
+    attr.add(&CssAttr::from(decls));
     let edges = attr.get_box_edges(
         80,
         font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
@@ -2119,7 +2121,7 @@ fn border_radius_corner_longhands_override_shorthand() {
     decls.insert("border-radius".into(), "2ch".into());
     decls.insert("border-top-left-radius".into(), "5ch".into());
     let mut attr = CssAttr::new();
-    attr.add(CssAttr(decls));
+    attr.add(&CssAttr::from(decls));
     assert_eq!(
         attr.get_border_radius(80, default_font_ctx(), viewport()),
         CornerRadii {
@@ -2174,7 +2176,7 @@ fn border_side_component_longhand_overrides_side_shorthand() {
     decls.insert("border-top".into(), "3ch solid blue".into());
     decls.insert("border-top-width".into(), "5ch".into());
     let mut attr = CssAttr::new();
-    attr.add(CssAttr(decls));
+    attr.add(&CssAttr::from(decls));
     let sides = attr.get_border(
         80,
         font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
@@ -2256,7 +2258,7 @@ fn margin_auto_flags_parse_from_shorthand_and_longhand() {
     decls.insert("margin".into(), "auto".into());
     decls.insert("margin-right".into(), "5px".into());
     let mut attr = CssAttr::new();
-    attr.add(CssAttr(decls));
+    attr.add(&CssAttr::from(decls));
     let auto = attr.get_margin_auto();
     assert!(auto.left, "shorthand left stays auto");
     assert!(!auto.right, "longhand clears the right auto");
@@ -2278,7 +2280,7 @@ fn min_max_size_getters_resolve_and_default_to_none() {
     decls.insert("min-height".into(), "3ch".into());
     decls.insert("max-height".into(), "none".into());
     let mut attr = CssAttr::new();
-    attr.add(CssAttr(decls));
+    attr.add(&CssAttr::from(decls));
     let f = default_font_ctx();
     assert_eq!(attr.get_min_width(80, f, viewport()), Some(10));
     assert_eq!(attr.get_max_width(80, f, viewport()), Some(40));
@@ -2320,7 +2322,7 @@ fn ref_apply_rule(
     state: &DynamicState,
 ) {
     if selector_chain_matches_with_state(arena, node_id, selector, state) {
-        arena[node_id].css_attr.add(decls.clone());
+        arena[node_id].css_attr.add(decls);
     }
     let children: Vec<NodeId> = arena[node_id].children.clone();
     for child in children {
@@ -2328,14 +2330,14 @@ fn ref_apply_rule(
     }
 }
 
-fn ref_inherit(arena: &mut NodeArena, node_id: NodeId, parent: &IndexMap<String, String>) {
+fn ref_inherit(arena: &mut NodeArena, node_id: NodeId, parent: &IndexMap<Arc<str>, Arc<str>>) {
     {
         let node = &mut arena[node_id];
         for key in INHERITED_PROPS {
             if let Some(value) = parent.get(*key) {
                 node.css_attr
                     .0
-                    .entry((*key).to_string())
+                    .entry(Arc::from(*key))
                     .or_insert_with(|| value.clone());
             }
         }
@@ -2344,7 +2346,7 @@ fn ref_inherit(arena: &mut NodeArena, node_id: NodeId, parent: &IndexMap<String,
     let mut merged = parent.clone();
     for key in INHERITED_PROPS {
         if let Some(value) = node.css_attr.0.get(*key) {
-            merged.insert((*key).to_string(), value.clone());
+            merged.insert(Arc::from(*key), value.clone());
         }
     }
     let children: Vec<NodeId> = node.children.clone();
@@ -2458,12 +2460,12 @@ fn bucketed_cascade_matches_reference_cascade() {
     css_into_node_with_state(&mut arena, root, &parse_sheet(CASCADE_SHEET), &DynamicState::default());
     assert_matches_reference(&arena, root, CASCADE_SHEET, &DynamicState::default());
     // Spot-check the cascade semantics the buckets must preserve.
-    assert_eq!(arena[div].css_attr.0.get("color").map(String::as_str), Some("red"));
-    assert_eq!(arena[li2].css_attr.0.get("color").map(String::as_str), Some("green"));
-    assert_eq!(arena[em].css_attr.0.get("color").map(String::as_str), Some("black"));
-    assert_eq!(arena[em].css_attr.0.get("font-style").map(String::as_str), Some("italic"));
+    assert_eq!(arena[div].css_attr.0.get("color").map(|s| s.as_ref()), Some("red"));
+    assert_eq!(arena[li2].css_attr.0.get("color").map(|s| s.as_ref()), Some("green"));
+    assert_eq!(arena[em].css_attr.0.get("color").map(|s| s.as_ref()), Some("black"));
+    assert_eq!(arena[em].css_attr.0.get("font-style").map(|s| s.as_ref()), Some("italic"));
     assert_eq!(
-        arena[div].css_attr.0.get("padding-top").map(String::as_str),
+        arena[div].css_attr.0.get("padding-top").map(|s| s.as_ref()),
         Some("1px")
     );
 
@@ -2493,7 +2495,7 @@ fn cascade_index_is_rebuilt_after_push() {
     let mut cascaded = arena.clone();
     css_into_node_with_state(&mut cascaded, root, &rules, &DynamicState::default());
     assert_eq!(
-        cascaded[div].css_attr.0.get("color").map(String::as_str),
+        cascaded[div].css_attr.0.get("color").map(|s| s.as_ref()),
         Some("red")
     );
 
@@ -2503,11 +2505,11 @@ fn cascade_index_is_rebuilt_after_push() {
     let selector: CssSelector = "div".parse().unwrap();
     let mut decls = IndexMap::new();
     decls.insert("color".to_string(), "blue".to_string());
-    rules.push(selector, CssAttr(decls), CssAttr::new());
+    rules.push(selector, CssAttr::from(decls), CssAttr::new());
     let mut recascaded = arena.clone();
     css_into_node_with_state(&mut recascaded, root, &rules, &DynamicState::default());
     assert_eq!(
-        recascaded[div].css_attr.0.get("color").map(String::as_str),
+        recascaded[div].css_attr.0.get("color").map(|s| s.as_ref()),
         Some("blue")
     );
 }
@@ -2529,12 +2531,12 @@ fn cascade_inline_style_precedence_unchanged() {
     css_into_node_with_state(&mut arena, root, &rules, &DynamicState::default());
     // Stylesheet `!important` beats inline normal (green loses)…
     assert_eq!(
-        arena[div].css_attr.0.get("color").map(String::as_str),
+        arena[div].css_attr.0.get("color").map(|s| s.as_ref()),
         Some("red")
     );
     // …while inline `!important` still lands (no competing declaration).
     assert_eq!(
-        arena[div].css_attr.0.get("background-color").map(String::as_str),
+        arena[div].css_attr.0.get("background-color").map(|s| s.as_ref()),
         Some("white")
     );
 
@@ -2549,7 +2551,7 @@ fn cascade_inline_style_precedence_unchanged() {
     let rules = parse_sheet("div { color: red; }");
     css_into_node_with_state(&mut arena, root, &rules, &DynamicState::default());
     assert_eq!(
-        arena[div].css_attr.0.get("color").map(String::as_str),
+        arena[div].css_attr.0.get("color").map(|s| s.as_ref()),
         Some("green")
     );
 }
@@ -2572,8 +2574,8 @@ fn cascade_inheritance_values_survive_copy_on_write() {
         "div { color: red; } p { color: red; } span { color: blue; }",
     );
     css_into_node_with_state(&mut arena, root, &rules, &DynamicState::default());
-    assert_eq!(arena[div].css_attr.0.get("color").map(String::as_str), Some("red"));
-    assert_eq!(arena[p].css_attr.0.get("color").map(String::as_str), Some("red"));
-    assert_eq!(arena[span].css_attr.0.get("color").map(String::as_str), Some("blue"));
-    assert_eq!(arena[em].css_attr.0.get("color").map(String::as_str), Some("blue"));
+    assert_eq!(arena[div].css_attr.0.get("color").map(|s| s.as_ref()), Some("red"));
+    assert_eq!(arena[p].css_attr.0.get("color").map(|s| s.as_ref()), Some("red"));
+    assert_eq!(arena[span].css_attr.0.get("color").map(|s| s.as_ref()), Some("blue"));
+    assert_eq!(arena[em].css_attr.0.get("color").map(|s| s.as_ref()), Some("blue"));
 }

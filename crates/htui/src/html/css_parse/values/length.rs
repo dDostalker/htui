@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crossterm::style::Color;
 use cssparser::{Parser as CssParser, ParserInput, Token};
 use indexmap::IndexMap;
@@ -39,7 +41,7 @@ fn compose_key<'k>(buf: &'k mut [u8; 32], parts: &[&str]) -> &'k str {
 /// Per-side longhands are layered on top of the shorthand so `padding: 1ch;
 /// padding-top: 2ch;` resolves to top=2, others=1.
 pub(crate) fn parse_edge_sizes(
-    decls: &IndexMap<String, String>,
+    decls: &IndexMap<Arc<str>, Arc<str>>,
     shorthand: &str,
     containing_width: usize,
     font_ctx: FontContext,
@@ -47,7 +49,7 @@ pub(crate) fn parse_edge_sizes(
 ) -> EdgeSizes {
     let shorthand_raw = decls.get(shorthand);
     let mut edges = parse_shorthand_lengths(
-        shorthand_raw.map(|s| s.as_str()),
+        shorthand_raw.map(|s| s.as_ref()),
         containing_width,
         font_ctx,
         viewport,
@@ -56,25 +58,25 @@ pub(crate) fn parse_edge_sizes(
     let mut key = [0u8; 32];
     let top_raw = decls
         .get(compose_key(&mut key, &[shorthand, "-top"]))
-        .map(|s| s.as_str());
+        .map(|s| s.as_ref());
     if let Some(v) = parse_length_token(top_raw, containing_width, font_ctx, viewport) {
         edges.top = v;
     }
     let right_raw = decls
         .get(compose_key(&mut key, &[shorthand, "-right"]))
-        .map(|s| s.as_str());
+        .map(|s| s.as_ref());
     if let Some(v) = parse_length_token(right_raw, containing_width, font_ctx, viewport) {
         edges.right = v;
     }
     let bottom_raw = decls
         .get(compose_key(&mut key, &[shorthand, "-bottom"]))
-        .map(|s| s.as_str());
+        .map(|s| s.as_ref());
     if let Some(v) = parse_length_token(bottom_raw, containing_width, font_ctx, viewport) {
         edges.bottom = v;
     }
     let left_raw = decls
         .get(compose_key(&mut key, &[shorthand, "-left"]))
-        .map(|s| s.as_str());
+        .map(|s| s.as_ref());
     if let Some(v) = parse_length_token(left_raw, containing_width, font_ctx, viewport) {
         edges.left = v;
     }
@@ -116,7 +118,7 @@ fn parse_shorthand_lengths(
 /// longhands override each edge. `auto` on the vertical axes is recorded but
 /// ignored by block-flow layout (CSS keeps vertical auto margins at 0); flex
 /// containers may consult it later.
-pub(crate) fn parse_edge_auto(decls: &IndexMap<String, String>, shorthand: &str) -> EdgeAuto {
+pub(crate) fn parse_edge_auto(decls: &IndexMap<Arc<str>, Arc<str>>, shorthand: &str) -> EdgeAuto {
     let mut out = EdgeAuto::default();
     if let Some(value) = decls.get(shorthand) {
         let autos: Vec<bool> = value
@@ -232,8 +234,8 @@ pub(crate) fn parse_border_style(value: Option<&str>) -> BorderStyle {
 /// the caller — passing it down means we don't re-parse the same map entries
 /// four times.
 pub(crate) fn parse_border_side(
-    side_raw: Option<&String>,
-    shorthand_raw: Option<&String>,
+    side_raw: Option<&Arc<str>>,
+    shorthand_raw: Option<&Arc<str>>,
     fallback: Border,
     containing_width: usize,
     font_ctx: FontContext,
@@ -263,7 +265,7 @@ pub(crate) fn parse_border_side(
 /// that property untouched, so a bad value never wipes a valid shorthand.
 pub(crate) fn merge_border_longhand(
     side: Border,
-    decls: &IndexMap<String, String>,
+    decls: &IndexMap<Arc<str>, Arc<str>>,
     side_name: &str,
     containing_width: usize,
     font_ctx: FontContext,
@@ -274,12 +276,12 @@ pub(crate) fn merge_border_longhand(
     if let Some(raw) =
         decls.get(compose_key(&mut key, &["border-", side_name, "-width"]))
             && let Some(w) =
-                parse_length_token(Some(raw.as_str()), containing_width, font_ctx, viewport)
+                parse_length_token(Some(raw.as_ref()), containing_width, font_ctx, viewport)
     {
         side.width = w;
     }
     if let Some(raw) = decls.get(compose_key(&mut key, &["border-", side_name, "-style"])) {
-        side.style = parse_border_style(Some(raw.as_str()));
+        side.style = parse_border_style(Some(raw.as_ref()));
     }
     if let Some(raw) = decls.get(compose_key(&mut key, &["border-", side_name, "-color"]))
         && let Some(c) = parse_color_str(raw)

@@ -1,9 +1,13 @@
 //! CSS attribute container and the typed values derived from it.
 //!
-//! [`CssAttr`] is the raw `IndexMap<String, String>` of declared properties
-//! stored on every DOM node; its methods resolve individual values into the
-//! typed [`Length`] / `TextAlign` / `FontWeight` / ... enums the layout
-//! consumes.
+//! [`CssAttr`] is the raw `IndexMap<Arc<str>, Arc<str>>` of declared
+//! properties stored on every DOM node; its methods resolve individual values
+//! into the typed [`Length`] / `TextAlign` / `FontWeight` / ... enums the
+//! layout consumes.
+//!
+//! Declaration keys and values are shared (`Arc<str>`) so the cascade can copy
+//! a rule's declarations into a node by bumping a reference count instead of
+//! deep-cloning every `String` on every frame.
 //!
 //! ## Module layout
 //!
@@ -27,6 +31,8 @@ use crate::html::css_parse::{
 use crate::layout::layoutbox::{FormattingContext, OuterDisplay};
 use crate::tdom::node::NodeType;
 
+use std::sync::Arc;
+
 use crossterm::style::Color;
 use indexmap::IndexMap;
 
@@ -47,14 +53,35 @@ use super::values::{
 };
 
 #[derive(Debug, Clone, Default)]
-pub struct CssAttr(pub IndexMap<String, String>);
+pub struct CssAttr(pub IndexMap<Arc<str>, Arc<str>>);
+
+/// Convert an owned `String`-keyed declaration map (e.g. the map returned by
+/// [`parse_declaration_text`](crate::html::css_parse::parse_declaration_text),
+/// which backs the JS `el.style` object) into a shared [`CssAttr`]. Each entry
+/// is moved into an `Arc<str>` so the value is referenced, not copied, on
+/// every later cascade pass.
+impl From<IndexMap<String, String>> for CssAttr {
+    fn from(map: IndexMap<String, String>) -> Self {
+        CssAttr(
+            map.into_iter()
+                .map(|(k, v)| (Arc::from(k), Arc::from(v)))
+                .collect(),
+        )
+    }
+}
 
 impl CssAttr {
     pub fn new() -> Self {
         CssAttr(IndexMap::new())
     }
-    pub fn add(&mut self, css: CssAttr) {
-        self.0.extend(css.0);
+    /// Merge `css`'s declarations into this attribute set, keeping whatever this
+    /// set already had when a property is absent from `css`. Because keys and
+    /// values are `Arc<str>`, each entry is copied by bumping a reference count —
+    /// no intermediate map allocation, unlike cloning the whole `CssAttr` first.
+    pub fn add(&mut self, css: &CssAttr) {
+        for (k, v) in &css.0 {
+            self.0.insert(Arc::clone(k), Arc::clone(v));
+        }
     }
     /// Whether `property` has been explicitly set on this node — either by a
     /// matching CSS rule or by inheritance from an ancestor that had it set.
@@ -71,7 +98,7 @@ impl CssAttr {
     fn parse_or<T>(&self, key: &str, parse: fn(&str) -> Option<T>, default: T) -> T {
         self.0
             .get(key)
-            .and_then(|s| parse(s.as_str()))
+            .and_then(|s| parse(s.as_ref()))
             .unwrap_or(default)
     }
     /// Foreground color (CSS `color`).
@@ -99,7 +126,7 @@ impl CssAttr {
     }
     /// Text alignment (CSS `text-align`).
     pub fn get_text_align(&self) -> TextAlign {
-        match self.0.get("text-align").map(|s| s.as_str()) {
+        match self.0.get("text-align").map(|s| s.as_ref()) {
             Some("center") => TextAlign::Center,
             Some("right") => TextAlign::Right,
             _ => TextAlign::Left,
@@ -107,7 +134,7 @@ impl CssAttr {
     }
     /// Font weight (CSS `font-weight`).
     pub fn get_font_weight(&self) -> FontWeight {
-        match self.0.get("font-weight").map(|s| s.as_str()) {
+        match self.0.get("font-weight").map(|s| s.as_ref()) {
             Some("bold") | Some("bolder") | Some("700") | Some("800") | Some("900") => {
                 FontWeight::Bold
             }
@@ -116,7 +143,7 @@ impl CssAttr {
     }
     /// Font style (CSS `font-style`).
     pub fn get_font_style_kind(&self) -> FontStyleKind {
-        match self.0.get("font-style").map(|s| s.as_str()) {
+        match self.0.get("font-style").map(|s| s.as_ref()) {
             Some("italic") => FontStyleKind::Italic,
             Some("oblique") => FontStyleKind::Oblique,
             _ => FontStyleKind::Normal,
@@ -131,7 +158,7 @@ impl CssAttr {
         let raw = self
             .0
             .get("text-decoration")
-            .map(|s| s.as_str())
+            .map(|s| s.as_ref())
             .unwrap_or("");
         let tokens: Vec<&str> = raw.split_whitespace().collect();
         let underline = tokens.iter().any(|t| t.eq_ignore_ascii_case("underline"));
@@ -157,7 +184,7 @@ impl CssAttr {
     pub fn get_white_space(&self, node_type: &NodeType) -> WhiteSpace {
         self.0
             .get("white-space")
-            .and_then(|s| parse_white_space(s.as_str()))
+            .and_then(|s| parse_white_space(s.as_ref()))
             .or_else(|| node_type.default_white_space())
             .unwrap_or_default()
     }
@@ -182,7 +209,7 @@ impl CssAttr {
         self.0
             .get("overflow-wrap")
             .or_else(|| self.0.get("word-wrap"))
-            .and_then(|s| parse_overflow_wrap(s.as_str()))
+            .and_then(|s| parse_overflow_wrap(s.as_ref()))
             .unwrap_or_default()
     }
     /// Element visibility (CSS `visibility`). Inherited, so a child without
@@ -192,7 +219,7 @@ impl CssAttr {
     pub fn get_visibility(&self) -> Visibility {
         self.0
             .get("visibility")
-            .and_then(|s| parse_visibility(s.as_str()))
+            .and_then(|s| parse_visibility(s.as_ref()))
             .unwrap_or_default()
     }
     /// Element width (CSS `width`).
@@ -324,12 +351,12 @@ impl CssAttr {
     ) -> BorderSides {
         // Step 1: collect universal values (lowest priority).
         let universal_width = parse_border_width(
-            self.0.get("border-width").map(|s| s.as_str()),
+            self.0.get("border-width").map(|s| s.as_ref()),
             containing_width,
             font_ctx,
             viewport,
         );
-        let universal_style = parse_border_style(self.0.get("border-style").map(|s| s.as_str()));
+        let universal_style = parse_border_style(self.0.get("border-style").map(|s| s.as_ref()));
         let universal_color = self.0.get("border-color").and_then(|s| parse_color_str(s));
 
         let universal = Border::new(universal_width, universal_style, universal_color);
@@ -421,7 +448,7 @@ impl CssAttr {
     pub fn display(&self) -> Option<CssDisplay> {
         self.0
             .get("display")
-            .map(String::as_str)
+            .map(|s| s.as_ref())
             .and_then(CssDisplay::parse)
     }
 
@@ -744,13 +771,13 @@ impl CssAttr {
         let mut width = self
             .0
             .get("column-rule-width")
-            .map(|v| parse_border_width(Some(v.as_str()), containing_width, font_ctx, viewport))
+            .map(|v| parse_border_width(Some(v.as_ref()), containing_width, font_ctx, viewport))
             .or_else(|| shorthand.map(|b| b.width))
             .unwrap_or(0);
         let style = self
             .0
             .get("column-rule-style")
-            .map(|v| parse_border_style(Some(v.as_str())))
+            .map(|v| parse_border_style(Some(v.as_ref())))
             .or_else(|| shorthand.map(|b| b.style))
             .unwrap_or(BorderStyle::None);
         let color = self

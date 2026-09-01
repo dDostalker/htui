@@ -525,7 +525,7 @@ fn natural_intrinsic_size(
             content_h = content_h.saturating_add(own_font_size_cells.max(1));
         }
 
-        let content_box_w = intrinsic_len(css.0.get("width").map(|s| s.as_str()), child_context)
+        let content_box_w = intrinsic_len(css.0.get("width").map(|s| s.as_ref()), child_context)
             .unwrap_or(content_w.max(FLEX_ITEM_MIN_CROSS))
             .max(FLEX_ITEM_MIN_CROSS);
         // Some elements reserve trailing blank rows after their border-box
@@ -538,7 +538,7 @@ fn natural_intrinsic_size(
             NodeType::Hr => 1,
             _ => 0,
         };
-        let content_box_h = intrinsic_len(css.0.get("height").map(|s| s.as_str()), child_context)
+        let content_box_h = intrinsic_len(css.0.get("height").map(|s| s.as_ref()), child_context)
             .unwrap_or(content_h.max(FLEX_ITEM_MIN_CROSS))
             .max(FLEX_ITEM_MIN_CROSS)
             .saturating_add(ua_spacing_after);

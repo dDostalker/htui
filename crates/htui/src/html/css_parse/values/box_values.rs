@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::length::parse_length_token;
 use super::length::{FontContext, Viewport};
 
@@ -149,7 +151,7 @@ impl CornerRadii {
 /// over the shorthand (mirroring CSS priority); an unparseable longhand
 /// leaves that corner untouched.
 pub(in crate::html::css_parse) fn parse_border_radius(
-    decls: &IndexMap<String, String>,
+    decls: &IndexMap<Arc<str>, Arc<str>>,
     containing_width: usize,
     font_ctx: FontContext,
     viewport: Viewport,
@@ -199,7 +201,7 @@ pub(in crate::html::css_parse) fn parse_border_radius(
     ] {
         if let Some(raw) = decls.get(name)
             && let Some(len) =
-                parse_length_token(Some(raw.as_str()), containing_width, font_ctx, viewport)
+                parse_length_token(Some(raw.as_ref()), containing_width, font_ctx, viewport)
         {
             *slot = len;
         }

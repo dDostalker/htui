@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 use log::{debug, warn};
 
 use std::str::FromStr;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use super::cascade::CascadeIndex;
 use super::{
@@ -206,13 +206,14 @@ impl<'i> AtRuleParser<'i> for CssParseState {
 }
 
 /// Trim a declaration value and strip any `!important` token that survived
-/// token-level parsing (defensive — the parser usually consumes it).
-fn clean_value_text(raw: &str) -> String {
+/// token-level parsing (defensive — the parser usually consumes it). Returns a
+/// shared `Arc<str>` so the value is stored without a second owned copy.
+fn clean_value_text(raw: &str) -> Arc<str> {
     let trimmed = raw.trim();
     if let Some(idx) = trimmed.find("!important") {
-        trimmed[..idx].trim_end().to_string()
+        Arc::from(trimmed[..idx].trim_end())
     } else {
-        trimmed.to_string()
+        Arc::from(trimmed)
     }
 }
 
@@ -269,7 +270,11 @@ pub fn parse_declaration_text(block: &str) -> IndexMap<String, String> {
     let mut important = CssAttr::new();
     parse_declarations_into(&mut input, &mut normal, &mut important, false);
     normal.0.extend(important.0);
-    normal.0
+    normal
+        .0
+        .into_iter()
+        .map(|(k, v)| (k.as_ref().to_string(), v.as_ref().to_string()))
+        .collect()
 }
 
 /// Parse a declaration block, splitting declarations by the `!important`
@@ -339,7 +344,7 @@ fn parse_declarations_into<'i, 't>(
                 // (a browser parse error emits no longhands).
                 if let Some(pairs) = expand_place_shorthand(&name, &cleaned) {
                     for (prop, value) in pairs {
-                        target.insert(prop.to_string(), value);
+                        target.insert(Arc::from(prop), Arc::from(value));
                     }
                 }
             } else if expand_place
@@ -350,7 +355,7 @@ fn parse_declarations_into<'i, 't>(
                 // stored, so it cannot override an earlier `place-*`
                 // expansion through the per-property cascade.
             } else {
-                target.insert(name.to_string(), cleaned);
+                target.insert(Arc::from(name.as_ref()), cleaned);
             }
         }
         // Consume the trailing `;` if present. A missing `;` is not an

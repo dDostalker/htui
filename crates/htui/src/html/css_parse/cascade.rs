@@ -7,7 +7,6 @@ use crate::tdom::node::{Node, NodeArena, NodeId, NodeType};
 
 use super::{
     matcher::selector_chain_matches_with_state,
-    properties::CssAttr,
     selector::{DynamicState, PseudoClassSet, Selector},
     stylesheet::{CssRule, parse_declaration_splits},
 };
@@ -135,7 +134,7 @@ fn apply_inline_style_at(arena: &mut NodeArena, node_id: NodeId, important: bool
     let (normal, imp) = parse_declaration_splits(&style);
     let subset = if important { imp } else { normal };
     if !subset.0.is_empty() {
-        arena[node_id].css_attr.add(subset);
+        arena[node_id].css_attr.add(&subset);
     }
 }
 
@@ -183,7 +182,7 @@ pub fn css_into_node_with_state(
                 continue;
             }
             if selector_chain_matches_with_state(arena, node_id, &entry.selector, state) {
-                arena[node_id].css_attr.add(entry.normal.clone());
+                arena[node_id].css_attr.add(&entry.normal);
             }
         }
         // 2. Inline `style` attributes, normal declarations.
@@ -195,7 +194,7 @@ pub fn css_into_node_with_state(
                 continue;
             }
             if selector_chain_matches_with_state(arena, node_id, &entry.selector, state) {
-                arena[node_id].css_attr.add(entry.important.clone());
+                arena[node_id].css_attr.add(&entry.important);
             }
         }
         // 4. Inline `style` attributes, `!important` declarations (highest).
@@ -206,7 +205,7 @@ pub fn css_into_node_with_state(
     // Propagate inheritable CSS properties (color, text-align, font-weight,
     // font-style, text-decoration, font-size, text-transform, line-height).
     // Inheritance copies final values; the importance flag does not propagate.
-    inherit_css(arena, root_id, &Arc::new(IndexMap::new()));
+    inherit_css(arena, root_id);
 }
 
 /// Cascade styles with a hover context but no focus (no `:focus` rules match).
@@ -248,7 +247,9 @@ pub fn css_pseudo_rule_set(css: &CssRule) -> PseudoClassSet {
 pub fn reset_css_attr(arena: &mut NodeArena, root_id: NodeId) {
     let mut stack = vec![root_id];
     while let Some(id) = stack.pop() {
-        arena[id].css_attr = CssAttr::new();
+        // Clear in place to reuse the map's capacity across passes instead of
+        // allocating a fresh `IndexMap` per node per frame.
+        arena[id].css_attr.0.clear();
         stack.extend(arena[id].children.iter().copied());
     }
 }
@@ -386,52 +387,56 @@ pub const INHERITED_PROPS: &[&str] = &[
     "visibility",
 ];
 
-fn inherit_css(
-    arena: &mut NodeArena,
-    node_id: NodeId,
-    parent_attrs: &Arc<IndexMap<String, String>>,
-) {
-    // Merge parent inheritable attrs into current node (if not already set)
-    {
-        let node = &mut arena[node_id];
-        for key in INHERITED_PROPS {
-            if let Some(value) = parent_attrs.get(*key) {
-                node.css_attr
-                    .0
-                    .entry((*key).to_string())
-                    .or_insert_with(|| value.clone());
-            }
-        }
-    }
-
-    // The inherited map handed down to children: share the parent's unless
-    // this node declares an inherited property that differs from it
-    // (copy-on-write — most nodes change nothing, so whole subtrees share
-    // one map allocation instead of cloning it per node).
-    let merged = {
-        let node = &arena[node_id];
-        let diverges = INHERITED_PROPS.iter().any(|key| {
-            node.css_attr
-                .0
-                .get(*key)
-                .is_some_and(|value| parent_attrs.get(*key) != Some(value))
-        });
-        if diverges {
-            let mut map = (**parent_attrs).clone();
+fn inherit_css(arena: &mut NodeArena, root_id: NodeId) {
+    type InheritedMap = IndexMap<Arc<str>, Arc<str>>;
+    // Iterative pre-order walk with an explicit stack. An implicit-recursive
+    // version would clone each node's `children` `Vec` on the way down
+    // (one allocation per node); the shared stack copies each child `NodeId`
+    // exactly once and keeps the inherited-view maps behind `Arc` so whole
+    // subtrees that don't diverge share one allocation.
+    let mut stack: Vec<(NodeId, Arc<InheritedMap>)> =
+        vec![(root_id, Arc::new(InheritedMap::new()))];
+    while let Some((node_id, parent_attrs)) = stack.pop() {
+        // Merge parent inheritable attrs into current node (if not already set)
+        {
+            let node = &mut arena[node_id];
             for key in INHERITED_PROPS {
-                if let Some(value) = node.css_attr.0.get(*key) {
-                    map.insert((*key).to_string(), value.clone());
+                if let Some(value) = parent_attrs.get(*key) {
+                    node.css_attr
+                        .0
+                        .entry(Arc::from(*key))
+                        .or_insert_with(|| value.clone());
                 }
             }
-            Arc::new(map)
-        } else {
-            Arc::clone(parent_attrs)
         }
-    };
 
-    // Recurse into children (clone to avoid borrow issues)
-    let children: Vec<NodeId> = arena[node_id].children.clone();
-    for child_id in children {
-        inherit_css(arena, child_id, &merged);
+        // The inherited map handed down to children: share the parent's unless
+        // this node declares an inherited property that differs from it
+        // (copy-on-write — most nodes change nothing, so whole subtrees share
+        // one map allocation instead of cloning it per node).
+        let merged = {
+            let node = &arena[node_id];
+            let diverges = INHERITED_PROPS.iter().any(|key| {
+                node.css_attr
+                    .0
+                    .get(*key)
+                    .is_some_and(|value| parent_attrs.get(*key) != Some(value))
+            });
+            if diverges {
+                let mut map = (*parent_attrs).clone();
+                for key in INHERITED_PROPS {
+                    if let Some(value) = node.css_attr.0.get(*key) {
+                        map.insert(Arc::from(*key), value.clone());
+                    }
+                }
+                Arc::new(map)
+            } else {
+                Arc::clone(&parent_attrs)
+            }
+        };
+
+        for child in arena[node_id].children.iter().rev() {
+            stack.push((*child, Arc::clone(&merged)));
+        }
     }
 }
