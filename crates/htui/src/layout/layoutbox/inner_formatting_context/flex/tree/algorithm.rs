@@ -68,7 +68,7 @@ pub(super) fn wrap_into_lines(
 ///
 /// Returns the final main-axis size of each item (in input order)
 /// plus the remaining free space to be distributed by `justify-content`
-/// during placement.
+/// (or absorbed by `margin: auto`) during placement.
 ///
 /// Algorithm:
 /// 1. If `sum(basis) + gaps < available` AND at least one item has
@@ -80,6 +80,12 @@ pub(super) fn wrap_into_lines(
 ///    `flex-shrink` (no free space for justify).
 /// 4. If the line exactly matches the available size, neither grow /
 ///    shrink nor justify has anything to do.
+///
+/// After the initial distribution every item is clamped to its explicit
+/// `min-*` / `max-*` constraint and the freed / required space is
+/// re-distributed among the items that can still absorb it (see
+/// [`fixup_min_max`]); the returned free space is computed from the final
+/// sizes.
 pub(super) fn distribute_main_axis(
     line: &[&FlexItemPrep],
     available: usize,
@@ -135,9 +141,6 @@ pub(super) fn distribute_main_axis(
                 leftover -= 1;
                 k += 1;
             }
-            (sizes, 0)
-        } else {
-            (sizes, free)
         }
     } else if used_after_basis > available {
         // Overflow: distribute the overflow via flex-shrink.
@@ -172,9 +175,138 @@ pub(super) fn distribute_main_axis(
             // beyond the container (visible overflow, like a browser).
             enforce_min_main_sizes(&mut sizes, line, available, column_gap);
         }
-        (sizes, 0)
-    } else {
-        (sizes, 0)
+    }
+    // Resolve explicit `min-*` / `max-*` constraints: clamping an item to
+    // its cap (or floor) frees / requires space that must be redistributed
+    // among the items that can still absorb it (CSS flexible-length
+    // resolution). The free space left over afterwards is what
+    // `justify-content` (or `margin: auto`) gets to distribute.
+    fixup_min_max(&mut sizes, line, available, column_gap);
+    let final_total: usize = sizes
+        .iter()
+        .sum::<usize>()
+        .saturating_add(gaps)
+        .saturating_add(total_margin);
+    let free_after_fixup = available.saturating_sub(final_total);
+    (sizes, free_after_fixup)
+}
+
+/// Clamp every size into `[min, max]` and redistribute the freed /
+/// required space among items that can still grow / shrink.
+///
+/// This is the CSS flexible-length resolution loop: an item that reaches
+/// its explicit cap (or floor) freezes there, and the remaining free space
+/// (or overflow) is re-split by `flex-grow` (or `flex-shrink`) weight among
+/// the unfrozen items. Iterates until the line matches `available` exactly
+/// or no item can move; residual space stays for `justify-content`, and
+/// residual overflow makes the line overflow (like a browser).
+fn fixup_min_max(
+    sizes: &mut [usize],
+    line: &[&FlexItemPrep],
+    available: usize,
+    column_gap: usize,
+) {
+    let n = sizes.len();
+    if n == 0 {
+        return;
+    }
+    let mins: Vec<usize> = line
+        .iter()
+        .map(|p| p.min_main.max(p.css_min_main.unwrap_or(0)).max(1))
+        .collect();
+    let maxs: Vec<Option<usize>> = line.iter().map(|p| p.css_max_main).collect();
+    // Initial clamp (min wins over max, CSS).
+    for i in 0..n {
+        let lo = mins[i];
+        let hi = maxs[i].unwrap_or(usize::MAX).max(lo);
+        sizes[i] = sizes[i].clamp(lo, hi);
+    }
+    let total_margin: usize = line
+        .iter()
+        .map(|p| p.margin_main_before.saturating_add(p.margin_main_after))
+        .sum();
+    let gaps = column_gap.saturating_mul(n.saturating_sub(1));
+    loop {
+        let total = sizes
+            .iter()
+            .sum::<usize>()
+            .saturating_add(gaps)
+            .saturating_add(total_margin);
+        if total == available {
+            break;
+        }
+        let growing = total < available;
+        // Items that can still absorb space in the needed direction. An
+        // item frozen at a bound this pass is excluded from further moves.
+        let candidates: Vec<usize> = (0..n)
+            .filter(|&i| {
+                if growing {
+                    line[i].grow > 0.0 && maxs[i].map_or(true, |m| sizes[i] < m)
+                } else {
+                    line[i].shrink > 0.0 && sizes[i] > mins[i]
+                }
+            })
+            .collect();
+        if candidates.is_empty() {
+            break;
+        }
+        let mut moved: usize = 0;
+        if growing {
+            let free = available - total;
+            let total_grow: f32 = candidates.iter().map(|&i| line[i].grow).sum();
+            for &i in &candidates {
+                let share = ((free as f32) * (line[i].grow / total_grow)).floor() as usize;
+                let target = sizes[i].saturating_add(share);
+                let clamped = maxs[i].map_or(target, |m| target.min(m));
+                moved += clamped - sizes[i];
+                sizes[i] = clamped;
+            }
+            // Fractional remainder, one cell at a time.
+            let mut leftover = free - moved;
+            for &i in &candidates {
+                if leftover == 0 {
+                    break;
+                }
+                let room = maxs[i].map_or(usize::MAX, |m| m.saturating_sub(sizes[i]));
+                if room > 0 {
+                    let step = room.min(leftover);
+                    sizes[i] += step;
+                    moved += step;
+                    leftover -= step;
+                }
+            }
+        } else {
+            let over = total - available;
+            let total_weight: f32 = candidates
+                .iter()
+                .map(|&i| line[i].shrink * sizes[i] as f32)
+                .sum();
+            if total_weight <= 0.0 {
+                break;
+            }
+            for &i in &candidates {
+                let share =
+                    ((over as f32) * (line[i].shrink * sizes[i] as f32) / total_weight).floor()
+                        as usize;
+                let target = sizes[i].saturating_sub(share).max(mins[i]);
+                moved += sizes[i] - target;
+                sizes[i] = target;
+            }
+            let mut leftover = over - moved;
+            for &i in &candidates {
+                if leftover == 0 {
+                    break;
+                }
+                if sizes[i] > mins[i] {
+                    sizes[i] -= 1;
+                    moved += 1;
+                    leftover -= 1;
+                }
+            }
+        }
+        if moved == 0 {
+            break; // no item could move; avoid an infinite loop.
+        }
     }
 }
 

@@ -23,9 +23,10 @@ pub struct InlineRun {
     /// in every `white-space` mode, where a plain newline would collapse.
     pub force_break: bool,
     /// The DOM element that produced this run — set for runs inside an
-    /// inline element like `<label>`, so the hit map can give that element
-    /// its own clickable region (its text spans a slice of a block box).
-    /// `None` for plain text / synthesized runs.
+    /// inline element with its own hit semantics like `<label>` or `<a>`, so
+    /// the hit map can give that element its own clickable region (its text
+    /// spans a slice of a block box). `None` for plain text / synthesized
+    /// runs.
     pub node_id: Option<NodeId>,
 }
 

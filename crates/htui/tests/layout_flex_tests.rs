@@ -2145,3 +2145,88 @@ fn tall_column_flex_keeps_items_within_container_width() {
         map.columns
     );
 }
+
+// ============================================================
+// Regression tests: browser-semantics fixes found by probe
+// review (stretch vs explicit height / auto margins /
+// max-width space redistribution).
+// ============================================================
+
+#[test]
+fn test_flex_stretch_respects_explicit_item_height() {
+    init();
+    // CSS Flexbox 9.4: `align-items: stretch` stretches only items whose
+    // cross size computes to `auto`. The sibling with an explicit
+    // `height: 2ch` keeps that height (aligned to flex-start) while the
+    // auto-sized sibling fills the 6-row line.
+    let html = r#"<div class="c"><div class="a">A</div><div class="b">B</div></div>"#;
+    let css = ".c { display: flex; height: 6ch; } .b { height: 2ch; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(
+        rows[0].starts_with("AB"),
+        "stretched and fixed-height texts share the first row: {:?}",
+        rows[0]
+    );
+    // The fixed-height item's text sits at the line top (flex-start);
+    // the rows below must stay empty in the items' columns.
+    for row in rows.iter().take(6).skip(1) {
+        assert!(
+            !row[..2.min(row.len())].contains('B'),
+            "fixed-height item must not stretch to the 6-row line: {:?}",
+            rows
+        );
+    }
+}
+
+#[test]
+fn test_flex_item_auto_margin_absorbs_free_space() {
+    init();
+    // CSS Flexbox 8.1: `margin-left: auto` on a flex item absorbs the
+    // line's free space, pushing the item to the main-end edge (and
+    // disabling justify-content for the line).
+    let html = r#"<div class="c"><div class="a">A</div></div>"#;
+    let css = ".c { display: flex; } .a { margin-left: auto; width: 4ch; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(
+        rows[0].trim_end().ends_with('A'),
+        "margin-left:auto must push the item to the line's end: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn test_flex_item_auto_margins_center_the_item() {
+    init();
+    // `margin: 0 auto` on a flex item centers it: both auto margins
+    // split the free space equally.
+    let html = r#"<div class="c"><div class="a">A</div></div>"#;
+    let css = ".c { display: flex; } .a { margin: 0 auto; width: 5ch; }";
+    let (rows, _) = render_rows(html, css);
+    let col = rows[0].find('A').expect("item text present");
+    // 5-cell item in 80 columns: free = 75, each auto margin gets 37 with
+    // the 1-cell remainder going to the leading margin → item starts at 38.
+    assert_eq!(
+        col, 38,
+        "5-cell item centered in 80 columns (integer auto-margin split): {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn test_flex_grow_redistributes_space_when_capped_by_max_width() {
+    init();
+    // CSS flexible-length resolution: an item clamped to its `max-width`
+    // freezes there and the freed space flows to the remaining growing
+    // item, so the line still fills the container edge-to-edge.
+    let html = r#"<div class="c"><div class="a">A</div><div class="b">B</div></div>"#;
+    let css = ".c { display: flex; width: 30ch; } .a { flex: 1; max-width: 10ch; } .b { flex: 1; }";
+    let (rows, _) = render_rows(html, css);
+    let a_col = rows[0].find('A').expect("A present");
+    let b_col = rows[0].find('B').expect("B present");
+    assert_eq!(a_col, 0, "first item at the line start: {:?}", rows[0]);
+    assert_eq!(
+        b_col, 10,
+        "A capped at 10 columns, B starts right after it: {:?}",
+        rows[0]
+    );
+}

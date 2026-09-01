@@ -20,7 +20,7 @@ use htui::layout::{BoxConstraint, Cursor, Rect, layout_tree};
 use htui::script::{ScriptEngine, ScriptMsg, apply_message};
 use htui::tdom::node::{NodeArena, NodeId};
 use htui::tui::graph_api::{
-    InputState, RenderCmd, SelectionMode, TermLayout, apply_input_key, coalesce_batch,
+    DirtyInfo, DrainedBatch, InputState, RenderCmd, SelectionMode, TermLayout, apply_input_key,
     handle_click, handle_mouse_down, handle_mouse_move, handle_mouse_up,
 };
 
@@ -183,6 +183,44 @@ fn click_input_focuses_and_click_elsewhere_blurs() {
             } if *node_id == input_region.node_id
         )),
         "blur must queue an unfocused repaint with the selection cleared"
+     );
+}
+
+#[test]
+fn click_on_inline_anchor_resolves_to_the_anchor() {
+    // An inline `<a>` owns no LayoutBox — its text folds into the parent
+    // block's inline runs. Its runs still carry the anchor's node id (same
+    // mechanism as `<label>`), so the hit map gives the link text its own
+    // region: the click target is the anchor itself, and listeners on the
+    // anchor fire.
+    let (mut engine, geo) = build_geometry(
+        r#"<p id="p">before <a id="link" href="https://www.baidu.com/s" onclick="globalThis.__clicked = (globalThis.__clicked || 0) + 1">Baidu</a> after</p>"#,
+        EventBindings::default(),
+    );
+    let arena = engine.arena();
+    let anchor = find_node_by_id(&arena, "link");
+
+    let map = HitMap::build(&geo);
+    assert!(
+        map.iter().any(|r| r.node_id == anchor),
+        "the inline anchor must own a hit region"
+    );
+
+    let region = map.resolve_by_id("link").expect("anchor region by id");
+    let (x, y) = center(region.rect);
+
+    // hit_test at the link text must resolve to the anchor, not the block.
+    let hit = map.hit_test(x, y).expect("hit under the link text");
+    assert_eq!(hit.node_id, anchor, "deepest hit must be the anchor");
+
+    // Full input-loop path: the click dispatches a Click event whose target
+    // is the anchor, so its listener runs.
+    let mut state = InputState::new();
+    click(&mut state, &mut engine, &map, x, y);
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.__clicked || 0)"),
+        "1",
+        "clicking the link text must fire the anchor's onclick"
     );
 }
 
@@ -523,64 +561,135 @@ fn disabled_block_copy_blocks_right_drag_selection() {
 }
 
 #[test]
-fn coalesce_keeps_a_newer_hover_after_a_pending_arena() {
-    // The run loop used to drop `Hover` commands queued behind a
-    // `RenderArena`; the render thread defers them and applies the freshest
-    // highlight on top of the arena render, so dropping them froze the stale
-    // highlight — a clicked button staying `:hover`-highlighted after the
-    // pointer left it.
-    let arena = Arc::new(NodeArena::default());
-    let root_id = NodeId::default();
-    let batch = vec![
-        RenderCmd::RenderArena {
-            arena: Arc::clone(&arena),
-            root_id,
-            scroll_y: 0,
-            zoom: 1.0,
-            dynamic: DynamicState {
-                hovered: Some(root_id),
-                focused: None,
-            },
-            dirty: htui::tui::graph_api::DirtyInfo::default(),
+fn focus_behind_a_pending_arena_merges_into_the_arena_dynamic() {
+    // The render thread used to let a `Focus` queued behind a pending
+    // `RenderArena` supersede it (dropping the DOM mutations the snapshot
+    // carries), while the input-side pre-filter dropped the `Focus` instead
+    // (freezing the `:focus` highlight). The drain now merges the focus into
+    // the arena's interaction state, so one pass paints both.
+    let new_focus = NodeId::default();
+    let mut batch = DrainedBatch::new();
+    batch.absorb(RenderCmd::RenderArena {
+        arena: Arc::new(NodeArena::default()),
+        root_id: NodeId::default(),
+        scroll_y: 0,
+        zoom: 1.0,
+        dynamic: DynamicState {
+            hovered: Some(NodeId::default()),
+            focused: None,
         },
-        RenderCmd::Hover { node_id: None },
-    ];
-    let merged = coalesce_batch(batch);
+        dirty: DirtyInfo::default(),
+    });
+    batch.absorb(RenderCmd::Focus {
+        node_id: Some(new_focus),
+    });
+    match batch.take_snapshot() {
+        Some(RenderCmd::RenderArena { dynamic, .. }) => {
+            assert_eq!(
+                dynamic.focused,
+                Some(new_focus),
+                "the focus delta must merge into the arena's dynamic state"
+            );
+        }
+        other => panic!("expected the arena snapshot to survive, got {other:?}"),
+    }
+    assert!(batch.take_hover().is_none(), "no hover was queued");
+}
+
+#[test]
+fn hover_behind_a_pending_arena_is_deferred_not_dropped() {
+    // A newer `Hover` behind a pending `RenderArena` must not supersede the
+    // DOM mutation; the drain defers it so the freshest highlight is applied
+    // on top of the arena render.
+    let mut batch = DrainedBatch::new();
+    batch.absorb(RenderCmd::RenderArena {
+        arena: Arc::new(NodeArena::default()),
+        root_id: NodeId::default(),
+        scroll_y: 0,
+        zoom: 1.0,
+        dynamic: DynamicState::default(),
+        dirty: DirtyInfo::default(),
+    });
+    batch.absorb(RenderCmd::Hover { node_id: None });
     assert!(
-        merged.iter().any(|c| matches!(c, RenderCmd::Hover { node_id: None })),
-        "a newer Hover behind a RenderArena must survive coalescing"
+        matches!(batch.take_snapshot(), Some(RenderCmd::RenderArena { .. })),
+        "the arena snapshot must survive the deferred hover"
     );
-    assert_eq!(
-        merged.len(),
-        2,
-        "both the arena render and the hover must be forwarded"
+    assert!(
+        matches!(batch.take_hover(), Some(RenderCmd::Hover { node_id: None })),
+        "the newer hover must be deferred, not dropped"
     );
 }
 
 #[test]
-fn coalesce_drops_a_focus_queued_behind_a_pending_arena() {
-    // Unlike `Hover`, the render thread has no deferred `Focus` pass: letting
-    // it supersede the arena render would drop the DOM mutation, so the
-    // coalescer must keep dropping it.
-    let batch = vec![
-        RenderCmd::RenderArena {
-            arena: Arc::new(NodeArena::default()),
-            root_id: NodeId::default(),
-            scroll_y: 0,
-            zoom: 1.0,
-            dynamic: DynamicState::default(),
-            dirty: htui::tui::graph_api::DirtyInfo::default(),
-        },
-        RenderCmd::Focus {
-            node_id: Some(NodeId::default()),
-        },
-    ];
-    let merged = coalesce_batch(batch);
-    assert!(
-        !merged.iter().any(|c| matches!(c, RenderCmd::Focus { .. })),
-        "a Focus behind a RenderArena must still be dropped"
-    );
-    assert_eq!(merged.len(), 1, "only the arena render survives");
+fn focus_without_a_pending_arena_supersedes_as_a_snapshot() {
+    // With no arena pending, a later `Focus` fully supersedes an earlier one
+    // (both are complete interaction-state deltas).
+    let mut batch = DrainedBatch::new();
+    batch.absorb(RenderCmd::Focus {
+        node_id: Some(NodeId::default()),
+    });
+    batch.absorb(RenderCmd::Focus { node_id: None });
+    match batch.take_snapshot() {
+        Some(RenderCmd::Focus { node_id }) => assert_eq!(node_id, None),
+        other => panic!("expected the latest focus, got {other:?}"),
+    }
+}
+
+#[test]
+fn stateful_commands_run_in_order_and_selection_keeps_the_latest() {
+    // `RenderInput` / `Select*` must survive in arrival order (a focus switch
+    // queues blur + focus; a `SelectClose` must not be swallowed), while the
+    // incremental `TextSelection` keeps only the latest of the batch.
+    let mut batch = DrainedBatch::new();
+    batch.absorb(RenderCmd::RenderInput {
+        node_id: NodeId::default(),
+        value: "a".into(),
+        cursor: 1,
+        focused: true,
+        selection: None,
+    });
+    batch.absorb(RenderCmd::SelectOpen {
+        node_id: NodeId::default(),
+        filter: None,
+    });
+    batch.absorb(RenderCmd::TextSelection {
+        anchor: Some((0, 0)),
+        end: Some((1, 0)),
+        mode: SelectionMode::Flow,
+    });
+    batch.absorb(RenderCmd::SelectClose {
+        node_id: NodeId::default(),
+    });
+    batch.absorb(RenderCmd::TextSelection {
+        anchor: None,
+        end: None,
+        mode: SelectionMode::Block,
+    });
+    assert_eq!(batch.drain_inputs().count(), 1);
+    let selects: Vec<RenderCmd> = batch.drain_selects().collect();
+    assert_eq!(selects.len(), 2, "both select commands must survive");
+    assert!(matches!(selects[0], RenderCmd::SelectOpen { .. }));
+    assert!(matches!(selects[1], RenderCmd::SelectClose { .. }));
+    match batch.take_text_selection() {
+        Some(RenderCmd::TextSelection { anchor, mode, .. }) => {
+            assert_eq!(anchor, None, "only the latest selection matters");
+            assert_eq!(mode, SelectionMode::Block);
+        }
+        other => panic!("expected the latest selection, got {other:?}"),
+    }
+}
+
+#[test]
+fn quit_supersedes_the_batch_and_flags_the_drain() {
+    let mut batch = DrainedBatch::new();
+    batch.absorb(RenderCmd::Redraw {
+        scroll_y: 0,
+        zoom: 1.0,
+    });
+    batch.absorb(RenderCmd::Quit);
+    assert!(batch.quit_requested(), "the drain must stop after a Quit");
+    assert!(matches!(batch.take_snapshot(), Some(RenderCmd::Quit)));
 }
 
 #[test]

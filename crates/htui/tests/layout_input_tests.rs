@@ -1040,3 +1040,76 @@ fn input_image_renders_as_button() {
         rows[2]
     );
 }
+
+#[test]
+fn input_honours_css_size_and_margin_auto() {
+    init();
+    // CSS `width` / `height` size the control (border-box, px → cells at
+    // 8 px per cell), and `margin: 0 auto` centres it in the containing
+    // block — the browser-replaced-element sizing chain a plain HTML
+    // `width` attribute could not express.
+    let (root_id, arena) = setup(
+        r#"<style>input { width: 16px; height: 24px; margin: 0 auto; }</style><input>"#,
+    );
+    let boxes = layout_boxes(&arena, root_id);
+    let input = find_input(&arena, root_id);
+    let r = find_box(&boxes, input).expect("input box");
+    assert_eq!(r.rect.width, 2, "16px resolves to 2 cells");
+    assert_eq!(r.rect.height, 3, "24px resolves to 3 rows");
+    assert_eq!(
+        r.rect.x,
+        (COLS as usize - 2) / 2,
+        "auto horizontal margins must centre the field"
+    );
+}
+
+#[test]
+fn textarea_css_size_overrides_cols_rows() {
+    init();
+    // A declared CSS `width` / `height` beats the `cols` / `rows`
+    // attributes (browser cascade: CSS beats presentational attributes).
+    let (root_id, arena) = setup(
+        r#"<style>textarea { width: 40px; height: 16px; }</style><textarea cols="60" rows="8"></textarea>"#,
+    );
+    let boxes = layout_boxes(&arena, root_id);
+    let textarea = find_textarea(&arena, root_id);
+    let r = find_box(&boxes, textarea).expect("textarea box");
+    assert_eq!(r.rect.width, 5, "40px resolves to 5 cells");
+    assert_eq!(r.rect.height, 2, "16px resolves to 2 rows");
+}
+
+#[test]
+fn input_min_width_beats_max_width_when_they_conflict() {
+    init();
+    // CSS: when min-width exceeds max-width, the minimum wins (the clamps
+    // apply max first, min last).
+    let (root_id, arena) = setup(
+        r#"<style>input { width: 8px; max-width: 8px; min-width: 24px; }</style><input>"#,
+    );
+    let boxes = layout_boxes(&arena, root_id);
+    let input = find_input(&arena, root_id);
+    let r = find_box(&boxes, input).expect("input box");
+    assert_eq!(r.rect.width, 3, "24px min-width must win over 8px max-width");
+}
+
+#[test]
+fn input_without_css_keeps_attribute_or_default_size() {
+    init();
+    // No CSS declared: the HTML `width` attribute (cells) still wins, and
+    // without either the historical 8-cell default applies — the control
+    // sits at the container's left edge (no auto margins to centre it).
+    let (root_id, arena) = setup(r#"<input width="12">"#);
+    let boxes = layout_boxes(&arena, root_id);
+    let input = find_input(&arena, root_id);
+    let r = find_box(&boxes, input).expect("input box");
+    assert_eq!(r.rect.width, 12);
+    assert_eq!(r.rect.height, 1);
+    assert_eq!(r.rect.x, 0);
+
+    let (root_id, arena) = setup(r#"<input>"#);
+    let boxes = layout_boxes(&arena, root_id);
+    let input = find_input(&arena, root_id);
+    let r = find_box(&boxes, input).expect("default input box");
+    assert_eq!(r.rect.width, 8);
+    assert_eq!(r.rect.x, 0);
+}

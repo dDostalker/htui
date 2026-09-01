@@ -197,7 +197,7 @@ fn walk_runs(
                     a_style,
                     a_transform,
                     a_ws,
-                    owner,
+                    Some(child_id),
                     runs,
                 );
             }

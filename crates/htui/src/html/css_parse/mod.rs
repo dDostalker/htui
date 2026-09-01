@@ -14,6 +14,7 @@ pub use matcher::{
     selector_chain_matches, selector_chain_matches_with_hover, selector_chain_matches_with_state,
 };
 pub use properties::{AlignSelf, CssAttr};
+pub(crate) use properties::clamp_min_max;
 pub use selector::{
     Combinator, CompoundSelector, CssSelector, DynamicState, NthExpr, PseudoClass, PseudoClassSet,
     Selector, SelectorError,

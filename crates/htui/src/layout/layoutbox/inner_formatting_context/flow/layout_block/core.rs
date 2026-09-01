@@ -244,7 +244,7 @@ pub fn layout_block(
     // `auto` as `balance`, so this is only consulted for the auto case.
     let fixed_content_height = columns.as_ref().and_then(|_| {
         node.css_attr
-            .get_height(available, child_context.font, child_context.viewport)
+            .get_height(None, child_context.font, child_context.viewport)
             .map(|h| {
                 let inner_v = edges.padding.vertical() + edges.border.vertical_thickness();
                 match sizing {
@@ -360,21 +360,21 @@ pub fn layout_block(
             // instead of the box silently growing past its declared size.
             if let Some(h) = node
                 .css_attr
-                .get_height(available, child_context.font, child_context.viewport)
+                .get_height(None, child_context.font, child_context.viewport)
                 .map(to_border)
             {
                 height = h.max(1);
             }
             if let Some(m) = node
                 .css_attr
-                .get_min_height(available, child_context.font, child_context.viewport)
+                .get_min_height(None, child_context.font, child_context.viewport)
                 .map(to_border)
             {
                 height = height.max(m);
             }
             if let Some(m) = node
                 .css_attr
-                .get_max_height(available, child_context.font, child_context.viewport)
+                .get_max_height(None, child_context.font, child_context.viewport)
                 .map(to_border)
             {
                 height = height.min(m).max(1);

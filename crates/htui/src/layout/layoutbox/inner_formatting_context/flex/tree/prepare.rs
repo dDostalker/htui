@@ -24,19 +24,34 @@ use super::container::{AnonymousTextItem, FLEX_ITEM_MIN_CROSS, FlexItemPrep, Fle
 /// Build a [`FlexItemPrep`] for one block child: resolve `flex-basis`,
 /// read `flex-grow` / `flex-shrink` / `align-self` / `order`, and capture
 /// the resolved main-axis size.
+///
+/// `containing_main` is the definite containing main-axis size (row: the
+/// container's content width; column: its definite content height, or the
+/// `usize::MAX` sentinel when the column's main size is indefinite).
+/// `containing_height` is the container's definite content *height* — the
+/// axis percentage heights resolve against — or `None` when indefinite.
 pub(super) fn prepare_flex_item(
     arena: &NodeArena,
     item_id: NodeId,
     direction: FlexDirection,
     containing_main: usize,
+    containing_height: Option<usize>,
     context: LayoutContext,
     align_items: AlignItems,
 ) -> FlexItemPrep {
     let node = &arena[item_id];
     let css = &node.css_attr;
     let natural = natural_intrinsic_size(arena, item_id, context);
+    // Percentage bases resolve against the axis they are declared on: the
+    // main axis — definite width for rows, definite height (when known) for
+    // columns.
+    let main_containing = if direction.is_row() {
+        Some(containing_main)
+    } else {
+        containing_height
+    };
     let basis_resolved = css
-        .get_flex_basis_resolved(containing_main, context.font, context.viewport)
+        .get_flex_basis_resolved(main_containing, context.font, context.viewport)
         .or_else(|| {
             // `auto` fallback chain depends on the direction:
             // - `row` direction: main axis is horizontal, so an explicit
@@ -56,7 +71,7 @@ pub(super) fn prepare_flex_item(
             // 1 cell.
             let explicit = match direction.is_row() {
                 true => css.get_width(containing_main, context.font, context.viewport),
-                false => css.get_height(containing_main, context.font, context.viewport),
+                false => css.get_height(containing_height, context.font, context.viewport),
             };
             match direction.is_row() {
                 true => explicit.or(Some(natural.width)),
@@ -83,11 +98,21 @@ pub(super) fn prepare_flex_item(
     // `align-items` this still ends up as `Stretch`).
     let css_min_main = match direction.is_row() {
         true => css.get_min_width(containing_main, context.font, context.viewport),
-        false => css.get_min_height(containing_main, context.font, context.viewport),
+        false => css.get_min_height(containing_height, context.font, context.viewport),
     };
     let css_max_main = match direction.is_row() {
         true => css.get_max_width(containing_main, context.font, context.viewport),
-        false => css.get_max_height(containing_main, context.font, context.viewport),
+        false => css.get_max_height(containing_height, context.font, context.viewport),
+    };
+    // Explicit cross-axis size (row: `height`; column: `width`). A definite
+    // cross size opts the item out of `align-items: stretch` (CSS Flexbox
+    // §9.4: only items whose cross size property computes to `auto`
+    // stretch). Percentages resolve along their own axis: against the
+    // container's definite height for `height`, its content width for
+    // `width`.
+    let css_cross = match direction.is_row() {
+        true => css.get_height(containing_height, context.font, context.viewport),
+        false => css.get_width(containing_main, context.font, context.viewport),
     };
     // Baseline (rows from the box top to the first text row), for
     // `align-items: baseline`: border-top + padding-top place the content
@@ -110,6 +135,14 @@ pub(super) fn prepare_flex_item(
             true => (margin.left, margin.right, margin.top, margin.bottom),
             false => (margin.top, margin.bottom, margin.left, margin.right),
         };
+    // Main-axis `margin: auto` flags (row: left/right; column: top/bottom).
+    // The resolved margins above already treat auto as 0; these flags let
+    // the line placement absorb the free space into the auto sides.
+    let margin_auto = css.get_margin_auto();
+    let margin_auto_main = match direction.is_row() {
+        true => (margin_auto.left, margin_auto.right),
+        false => (margin_auto.top, margin_auto.bottom),
+    };
     let baseline = edges
         .border
         .top
@@ -122,6 +155,7 @@ pub(super) fn prepare_flex_item(
         min_main,
         css_min_main,
         css_max_main,
+        css_cross,
         grow: css.get_flex_grow(),
         shrink: css.get_flex_shrink(),
         align_self: match css.get_align_self() {
@@ -132,6 +166,7 @@ pub(super) fn prepare_flex_item(
         margin_main_after,
         margin_cross_before,
         margin_cross_after,
+        margin_auto_main,
         baseline,
         order: css.get_order(),
         natural_width: natural.width,
@@ -163,6 +198,7 @@ pub(super) fn prepare_anonymous_text_item(
         min_main,
         css_min_main: None,
         css_max_main: None,
+        css_cross: None,
         grow: 0.0,
         shrink: 1.0,
         align_self: align_items,
@@ -170,6 +206,7 @@ pub(super) fn prepare_anonymous_text_item(
         margin_main_after: 0,
         margin_cross_before: 0,
         margin_cross_after: 0,
+        margin_auto_main: (false, false),
         baseline: 0,
         order: 0,
         // Mirrors the intrinsic semantics of the DOM-item path: a text row's
@@ -614,7 +651,9 @@ pub(super) fn natural_cross_axis_size_for_prep(
 /// `prepare_flex_item`). The natural cross-axis size of the item is
 /// the default; `align-self: stretch` upgrades it to the line's
 /// cross-axis size whenever the line's cross-axis size is already
-/// known.
+/// known — but never over an explicit cross size (`css_cross: Some`):
+/// CSS stretches only items whose cross size property computes to
+/// `auto` (CSS Flexbox §9.4 step 10).
 ///
 /// - `row` direction: cross axis is vertical. Stretching fills the
 ///   line height so a short sibling of a tall flex item grows to the
@@ -631,7 +670,11 @@ pub(super) fn resolve_item_cross_size(
     line_cross: usize,
     natural_cross: usize,
     margin_cross: (usize, usize),
+    explicit_cross: Option<usize>,
 ) -> usize {
+    if let Some(size) = explicit_cross {
+        return size.max(FLEX_ITEM_MIN_CROSS);
+    }
     if matches!(align_self, AlignItems::Stretch) {
         line_cross
             .saturating_sub(margin_cross.0)

@@ -598,10 +598,13 @@ impl CssAttr {
     /// Resolve `flex-basis` against the containing main-axis size.
     ///
     /// Returns `None` for `Auto` so the caller can apply its own fallback
-    /// chain (`width` / `height` → content measure → equal share).
+    /// chain (`width` / `height` → content measure → equal share). A
+    /// percentage basis against an indefinite containing main size is also
+    /// `None` (CSS: percentages against an indefinite axis compute to
+    /// `auto`).
     pub fn get_flex_basis_resolved(
         &self,
-        containing_main: usize,
+        containing_main: Option<usize>,
         font_ctx: FontContext,
         viewport: Viewport,
     ) -> Option<usize> {
@@ -797,17 +800,24 @@ impl CssAttr {
     /// by the flex layout to detect an explicit container height so
     /// `align-items: stretch` can take effect (stretch is otherwise a no-op
     /// in v1 — see `flex::tree` for the rationale).
+    ///
+    /// `containing_height` is the containing block's *height* when it is
+    /// definite, `None` when indefinite (normal flow). Percentages resolve
+    /// against that height — and with an indefinite containing height they
+    /// compute to `auto` (CSS 10.5), never against the width.
     pub fn get_height(
         &self,
-        containing_width: usize,
+        containing_height: Option<usize>,
         font_ctx: FontContext,
         viewport: Viewport,
     ) -> Option<usize> {
         let raw = self.0.get("height")?;
-        match Length::parse(raw)? {
-            Length::Auto => None,
-            len => Some(len.resolve(LengthContext {
-                containing: containing_width,
+        let len = Length::parse(raw)?;
+        match (len, containing_height) {
+            (Length::Auto, _) => None,
+            (Length::Pct(_), None) => None,
+            (len, containing) => Some(len.resolve(LengthContext {
+                containing: containing.unwrap_or(0),
                 font: font_ctx,
                 viewport,
             })),
@@ -864,7 +874,7 @@ impl CssAttr {
         font_ctx: FontContext,
         viewport: Viewport,
     ) -> Option<usize> {
-        self.resolve_min_max_len("min-width", containing_width, font_ctx, viewport)
+        self.resolve_min_max_len("min-width", Some(containing_width), font_ctx, viewport)
     }
 
     /// Maximum width (CSS `max-width`). `None` when unset / `none` / `auto`.
@@ -874,46 +884,53 @@ impl CssAttr {
         font_ctx: FontContext,
         viewport: Viewport,
     ) -> Option<usize> {
-        self.resolve_min_max_len("max-width", containing_width, font_ctx, viewport)
+        self.resolve_min_max_len("max-width", Some(containing_width), font_ctx, viewport)
     }
 
-    /// Minimum height (CSS `min-height`). `None` when unset / `auto`.
+    /// Minimum height (CSS `min-height`). `None` when unset / `auto`, or
+    /// when a percentage meets an indefinite containing height.
     pub fn get_min_height(
         &self,
-        containing_width: usize,
+        containing_height: Option<usize>,
         font_ctx: FontContext,
         viewport: Viewport,
     ) -> Option<usize> {
-        self.resolve_min_max_len("min-height", containing_width, font_ctx, viewport)
+        self.resolve_min_max_len("min-height", containing_height, font_ctx, viewport)
     }
 
-    /// Maximum height (CSS `max-height`). `None` when unset / `none` / `auto`.
+    /// Maximum height (CSS `max-height`). `None` when unset / `none` / `auto`,
+    /// or when a percentage meets an indefinite containing height.
     pub fn get_max_height(
         &self,
-        containing_width: usize,
+        containing_height: Option<usize>,
         font_ctx: FontContext,
         viewport: Viewport,
     ) -> Option<usize> {
-        self.resolve_min_max_len("max-height", containing_width, font_ctx, viewport)
+        self.resolve_min_max_len("max-height", containing_height, font_ctx, viewport)
     }
 
     /// Shared resolution for the four min/max size longhands.
     ///
     /// `auto` (or `none`, which fails [`Length::parse`]) means "no
     /// constraint" — the property's initial value — so both map to `None`
-    /// and the caller leaves the size unconstrained.
+    /// and the caller leaves the size unconstrained. `containing_size` is
+    /// the containing block's size **along the same axis as the property**
+    /// (width for `min/max-width`, height for `min/max-height`); a
+    /// percentage against an indefinite (`None`) axis computes to `None`.
     fn resolve_min_max_len(
         &self,
         key: &str,
-        containing_width: usize,
+        containing_size: Option<usize>,
         font_ctx: FontContext,
         viewport: Viewport,
     ) -> Option<usize> {
         let raw = self.0.get(key)?;
-        match Length::parse(raw)? {
-            Length::Auto => None,
-            len => Some(len.resolve(LengthContext {
-                containing: containing_width,
+        let len = Length::parse(raw)?;
+        match (len, containing_size) {
+            (Length::Auto, _) => None,
+            (Length::Pct(_), None) => None,
+            (len, containing) => Some(len.resolve(LengthContext {
+                containing: containing.unwrap_or(0),
                 font: font_ctx,
                 viewport,
             })),
@@ -962,4 +979,21 @@ impl CssAttr {
             z_index,
         }
     }
+}
+
+/// Clamp a resolved axis size into `[min, max]`.
+///
+/// The single canonical min/max clamp for the layout engine (blocks, flex
+/// items and replaced controls all funnel through here). When `min`
+/// exceeds `max`, the minimum wins — CSS resolves conflicting min/max
+/// constraints in favour of the minimum.
+pub(crate) fn clamp_min_max(value: usize, min: Option<usize>, max: Option<usize>) -> usize {
+    let mut clamped = value;
+    if let Some(max) = max {
+        clamped = clamped.min(max);
+    }
+    if let Some(min) = min {
+        clamped = clamped.max(min);
+    }
+    clamped
 }

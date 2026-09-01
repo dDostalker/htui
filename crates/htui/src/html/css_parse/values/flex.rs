@@ -298,17 +298,21 @@ pub fn parse_flex_basis(s: &str) -> Option<FlexBasis> {
 /// active font-size context.
 ///
 /// `Auto` / `Content` return `None` so callers can apply their own fallback
-/// chain (item's `width` → content size → distribute equally).
+/// chain (item's `width` → content size → distribute equally). A percentage
+/// basis against an indefinite (`None`) containing main size also resolves
+/// to `None` (CSS: percentages against an indefinite axis compute to
+/// `auto`).
 pub fn resolve_flex_basis(
     basis: FlexBasis,
-    containing_main: usize,
+    containing_main: Option<usize>,
     font_ctx: FontContext,
     viewport: Viewport,
 ) -> Option<usize> {
     match basis {
         FlexBasis::Auto | FlexBasis::Content => None,
+        FlexBasis::Length(Length::Pct(_)) if containing_main.is_none() => None,
         FlexBasis::Length(len) => Some(len.resolve(LengthContext {
-            containing: containing_main,
+            containing: containing_main.unwrap_or(0),
             font: font_ctx,
             viewport,
         })),

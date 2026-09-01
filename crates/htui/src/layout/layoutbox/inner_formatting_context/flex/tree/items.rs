@@ -3,7 +3,9 @@
 
 use crate::{
     html::box_edges::BoxEdges,
-    html::css_parse::{AlignContent, AlignItems, FlexDirection, FlexWrap, GapSizes, JustifyContent},
+    html::css_parse::{
+        AlignContent, AlignItems, FlexDirection, FlexWrap, GapSizes, JustifyContent, clamp_min_max,
+    },
     layout::{
         BoxConstraint, Cursor, LayoutBox, LayoutContext, OuterDisplay, PaintStyle, Rect,
         layoutbox::wrap_runs,
@@ -195,8 +197,43 @@ pub(super) fn layout_flex_items(
         };
 
         // 3d. Compute justify-content leading + between spacing.
-        let (justify_leading, justify_between) =
-            justify_spacing(justify, free_for_justify, line_preps.len());
+        //
+        // CSS Flexbox §8.1: `margin: auto` on a flex item absorbs the line's
+        // free space *before* `justify-content` applies — and any auto
+        // margin disables justify-content for that line entirely. Auto
+        // margins split the free space equally (integer cells; the earliest
+        // auto margins absorb the remainder).
+        let auto_count: usize = line_preps
+            .iter()
+            .map(|p| p.margin_auto_main.0 as usize + p.margin_auto_main.1 as usize)
+            .sum();
+        let (justify_leading, justify_between) = if auto_count > 0 {
+            (0, 0)
+        } else {
+            justify_spacing(justify, free_for_justify, line_preps.len())
+        };
+        let auto_shares: Vec<(usize, usize)> = if auto_count == 0 {
+            Vec::new()
+        } else {
+            let base = free_for_justify / auto_count;
+            let mut rem = free_for_justify % auto_count;
+            line_preps
+                .iter()
+                .map(|p| {
+                    let mut before = if p.margin_auto_main.0 { base } else { 0 };
+                    let mut after = if p.margin_auto_main.1 { base } else { 0 };
+                    if rem > 0 && p.margin_auto_main.0 {
+                        before += 1;
+                        rem -= 1;
+                    }
+                    if rem > 0 && p.margin_auto_main.1 {
+                        after += 1;
+                        rem -= 1;
+                    }
+                    (before, after)
+                })
+                .collect()
+        };
 
         // 3e. Per-line placement, factored so the line's cross size can be
         // measured first and the line re-placed at the final size. An item's
@@ -238,13 +275,14 @@ pub(super) fn layout_flex_items(
                 // CSS `min-width` / `max-width` (row) or `min-height` /
                 // `max-height` (column) clamp the final main-axis size. The
                 // automatic min-content floor (`min_main`) is already enforced
-                // by the shrink distribution; explicit constraints layer on top.
-                // When min > max, the minimum wins (CSS).
+                // by the shrink distribution; explicit constraints layer on top
+                // through the canonical clamp (min wins over max, CSS).
                 let lower = prep.min_main.max(prep.css_min_main.unwrap_or(0));
-                let main_size = match prep.css_max_main {
-                    Some(max) => main_sizes[prep_idx].clamp(lower, max.max(lower)),
-                    None => main_sizes[prep_idx].max(lower),
-                };
+                let main_size = clamp_min_max(
+                    main_sizes[prep_idx],
+                    Some(lower),
+                    prep.css_max_main,
+                );
                 // Natural cross-axis size of this item, measured once at prep
                 // time (used as the fallback for non-stretch alignments and
                 // for stretch when the container's cross-axis size is
@@ -255,10 +293,16 @@ pub(super) fn layout_flex_items(
                     line_cross,
                     item_natural_cross,
                     (prep.margin_cross_before, prep.margin_cross_after),
+                    prep.css_cross,
                 );
                 let align = effective_align(prep.align_self, align_items);
-                let margin_before = prep.margin_main_before;
-                let margin_after = prep.margin_main_after;
+                // `margin: auto` shares are folded into the effective
+                // margins: they occupy the line exactly like concrete
+                // margins, pushing the item (and its siblings) into place.
+                let (auto_before, auto_after) =
+                    auto_shares.get(prep_idx).copied().unwrap_or((0, 0));
+                let margin_before = prep.margin_main_before.saturating_add(auto_before);
+                let margin_after = prep.margin_main_after.saturating_add(auto_after);
                 // Cross-axis alignment operates on the item's *margin-box*
                 // (browsers align the margin box within the line). The
                 // leading margin then offsets the border-box from the

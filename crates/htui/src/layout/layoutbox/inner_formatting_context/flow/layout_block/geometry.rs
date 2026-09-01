@@ -46,14 +46,9 @@ pub fn constrained_block_width(
     let max_w = css_attr
         .get_max_width(containing_width, font_ctx, viewport)
         .map(to_border);
-    let mut width = resolve_block_width(declared, containing_width);
-    if let Some(m) = min_w {
-        width = width.max(m);
-    }
-    if let Some(m) = max_w {
-        width = width.min(m);
-    }
-    width.max(1)
+    let width = resolve_block_width(declared, containing_width);
+    // Single canonical clamp: when min exceeds max, the minimum wins (CSS).
+    crate::html::css_parse::clamp_min_max(width, min_w, max_w).max(1)
 }
 
 /// Compute the left offset for a block-level element inside its containing

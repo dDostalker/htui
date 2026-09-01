@@ -61,6 +61,11 @@ pub(super) struct FlexItemPrep {
     /// Explicit CSS `max-width` (row) / `max-height` (column) constraint on
     /// the main axis, in cells. `None` when unset / `none`.
     pub(super) css_max_main: Option<usize>,
+    /// Explicit CSS cross-axis size (row: `height`; column: `width`), in
+    /// cells. `None` when the property is `auto` / unset. A definite cross
+    /// size opts the item out of `align-items: stretch` (CSS Flexbox §9.4:
+    /// only `auto`-sized items stretch).
+    pub(super) css_cross: Option<usize>,
     pub(super) grow: f32,
     pub(super) shrink: f32,
     pub(super) align_self: crate::html::css_parse::AlignItems,
@@ -78,6 +83,12 @@ pub(super) struct FlexItemPrep {
     /// `margin-right`). Together with [`Self::margin_cross_before`] it forms
     /// the item's margin-box extent the line must cover.
     pub(super) margin_cross_after: usize,
+    /// Main-axis `margin: auto` flags `(before, after)` (row:
+    /// `margin-left: auto` / `margin-right: auto`; column:
+    /// `margin-top` / `margin-bottom`). Auto margins absorb the line's
+    /// free space before `justify-content` applies, and disable it (CSS
+    /// Flexbox §8.1).
+    pub(super) margin_auto_main: (bool, bool),
     /// Offset (rows) from the box top to its first text row — the terminal
     /// cell-grid analogue of the CSS text baseline. Used by
     /// `align-items: baseline` to align the items' first text rows.
@@ -187,8 +198,11 @@ pub(super) fn layout_flex_container(
     let container_css_height = preallocated_height
         .map(|height| height.saturating_sub(edges.inner_vertical()).max(1))
         .or_else(|| {
+            // Percentage heights resolve against the containing block's
+            // height; in block flow it is indefinite, so a percentage
+            // computes to `auto` (CSS 10.5) — never against the width.
             node.css_attr
-                .get_height(content_width, child_context.font, child_context.viewport)
+                .get_height(None, child_context.font, child_context.viewport)
         });
     let has_explicit_height = container_css_height.is_some();
 
@@ -280,6 +294,13 @@ pub(super) fn layout_flex_container(
                 child_id,
                 direction,
                 content_width,
+                // Percentage / explicit heights on a column item's main axis
+                // resolve against the container's definite content height.
+                if direction.is_column() {
+                    container_css_height
+                } else {
+                    None
+                },
                 child_context,
                 align_items,
             )),
@@ -363,14 +384,14 @@ pub(super) fn layout_flex_container(
         };
         if let Some(m) = node
             .css_attr
-            .get_min_height(content_width, child_context.font, child_context.viewport)
+            .get_min_height(None, child_context.font, child_context.viewport)
             .map(to_content)
         {
             outer_height = outer_height.max(m);
         }
         if let Some(m) = node
             .css_attr
-            .get_max_height(content_width, child_context.font, child_context.viewport)
+            .get_max_height(None, child_context.font, child_context.viewport)
             .map(to_content)
         {
             outer_height = outer_height.min(m).max(1);

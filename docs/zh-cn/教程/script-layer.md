@@ -471,9 +471,11 @@ JS 每 200ms 刷一次监控器，大部分帧只改几个 `<p>` 的文本。旧
 1. **值未变不触发渲染**：`el.textContent = v` 在 `v` 与当前文本相同时直接短路，
    不置 `dirty`。监控器每 200ms 刷新但值基本不变时，实际 `RenderArena`
    次数远少于刷新次数（监控器页面实测 200 次刷新只触发约 14 次渲染）。
-2. **命令合并**：输入循环发送前合并命令流。`RenderArena` 携带 `hovered` 字段，
-   重排时自动重新应用当前 `:hover` 高亮，因此同轮的 `Hover` 命令会被丢弃；
-   渲染线程的 `try_recv` 合并本就只保留最后一个命令，避免重复重绘。
+2. **命令合并**：合并语义由渲染线程的 `DrainedBatch` 单点实现。快照命令
+   （`Rerender`/`Redraw`/`RenderArena`/`RenderHtml`/`Quit`）只保留最后一个，
+   避免重复重绘；`RenderArena` 携带 `dynamic`（hover + focus 快照），重排时自动
+   重新应用当前高亮——落后于它的 `Hover` 命令延后叠加，`Focus` 命令合并进
+   `dynamic`，DOM 变更与高亮增量都不会丢失。
 3. **增量重绘的前提是 `:hover` 未变**：`RenderArena` 携带的 hover 目标一旦变化，
    整个树都可能换高亮，渲染线程检测到 `hovered` 变化即回退全量重绘（内容与高亮
    同帧变动时最安全）。**单独的 `Hover` 命令则有自己的增量**：只清空并重绘新旧

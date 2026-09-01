@@ -225,14 +225,15 @@ fn collect_box_lines<'a>(arena: &'a NodeArena, lb: &'a LayoutBox, out: &mut Vec<
     }
 }
 
-/// Rectangular hit regions for inline `<label>` elements, derived from the
-/// same geometry the paint phase draws (see [`collect_box_lines`]). Each
-/// label-owned run's visual slice becomes a region, so a click on label text
-/// resolves to the label itself — the delegation target for `<label for>` /
-/// wrapped controls.
+/// Rectangular hit regions for inline elements that own their runs
+/// (`<label>` / `<a>`), derived from the same geometry the paint phase draws
+/// (see [`collect_box_lines`]). Each owned run's visual slice becomes a
+/// region, so a click on the element's text resolves to that element — the
+/// delegation target for `<label for>` / wrapped controls, and the click
+/// target for inline links.
 ///
-/// The runs carry the label's node id (see `layoutbox::inline`); plain text
-/// runs have `node_id: None` and produce no region.
+/// The runs carry the owning element's node id (see `layoutbox::inline`);
+/// plain text runs have `node_id: None` and produce no region.
 pub fn label_regions(arena: &NodeArena, boxes: &[LayoutBox]) -> Vec<(NodeId, Rect)> {
     let mut out = Vec::new();
     collect_label_regions(arena, boxes, &mut out);

@@ -40,7 +40,7 @@ use crate::{
     script::{ScriptMsg, ScriptResponse, run_script_thread},
     tdom::node::{NodeArena, NodeId},
     tui::graph_api::{
-        DirtyInfo, InputState, KEY_GATE_TIMEOUT, RenderCmd, apply_focus_requests, coalesce_batch,
+        DirtyInfo, InputState, KEY_GATE_TIMEOUT, RenderCmd, apply_focus_requests,
         reapply_console_modes, trigger_refresh,
     },
 };
@@ -431,11 +431,11 @@ pub(crate) fn run(
             }
         }
 
-        // Coalesce the batch: a `Focus` queued behind a pending `RenderArena`
-        // is dropped (superseding would lose the DOM mutation — see
-        // [`coalesce_batch`]); newer `Hover` commands survive, so the render
-        // thread can apply the freshest highlight on top of the arena render.
-        let cmds = coalesce_batch(cmds);
+        // Command merging lives entirely on the render thread's drain
+        // ([`DrainedBatch`]): snapshot commands supersede, a `Focus` behind a
+        // pending `RenderArena` merges into its interaction state, a newer
+        // `Hover` is deferred on top — so neither a DOM mutation nor a
+        // highlight delta can be lost between batches.
 
         // JS `el.focus()` / `el.blur()` requests target input-loop state (the
         // edit session lives here) and route their `focus` / `blur` (+ `change`)
@@ -478,7 +478,7 @@ pub(crate) fn run(
             // With the script engine active, the engine's live arena is the
             // source of truth: convert parse-based `Redraw` (zoom / resize)
             // into a `RenderArena` so JS DOM mutations survive re-renders.
-            let cmd = match (cmd, events_active.then_some(())) {
+            let mut cmd = match (cmd, events_active.then_some(())) {
                 (RenderCmd::Redraw { scroll_y, zoom }, Some(())) => match &live_dom {
                     Some((arena, root_id)) => RenderCmd::RenderArena {
                         arena: Arc::clone(arena),
@@ -495,6 +495,14 @@ pub(crate) fn run(
                 },
                 (other, _) => other,
             };
+            // Stamp the batch-final focus state onto every outgoing arena:
+            // JS `el.focus()` / `el.blur()` requests are expanded *after* the
+            // fold, so an arena folded earlier in this batch can still carry
+            // the pre-focus `dynamic.focused`. The arena render must paint
+            // the state this batch ends with — otherwise the expanded `Focus`
+            // delta would be absorbed by a stale snapshot and the `:focus`
+            // highlight would freeze on the previous field.
+            cmd.refresh_dynamic_focus(state.focused_input);
             if was_redraw && let Ok(map) = TermMap::get_ter_map() {
                 rows = map.rows;
             }

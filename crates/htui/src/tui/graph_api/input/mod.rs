@@ -12,7 +12,7 @@ mod page;
 mod refresh;
 mod select;
 
-pub use cmd::{DirtyInfo, RenderCmd, SelectionMode, coalesce_batch};
+pub use cmd::{DirtyInfo, DrainedBatch, RenderCmd, SelectionMode};
 pub use edit::{
     apply_input_key, apply_input_word_key, is_input_field_key, next_word_boundary,
     paste_into_field, prev_word_boundary, selection_range,

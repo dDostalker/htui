@@ -144,33 +144,139 @@ pub enum RenderCmd {
     Quit,
 }
 
-/// Coalesce a command batch before forwarding it to the render thread.
-///
-/// A `RenderArena` carries the interaction state (`hovered` / `focused`)
-/// captured when its DOM snapshot was folded, so it supersedes any earlier
-/// `Hover` / `Focus` in the batch. A `Focus` queued *behind* it is still
-/// dropped: the render thread's batch merge keeps only the last command, and
-/// `Focus` is not deferred like `Hover`, so letting it supersede the arena
-/// would lose the DOM mutation. `Hover` commands behind a pending arena are
-/// kept — the render thread defers them and applies the newer highlight on
-/// top of the arena render, so dropping them here would freeze the stale
-/// highlight (a clicked button staying `:hover`-highlighted after the pointer
-/// leaves).
-pub fn coalesce_batch(cmds: Vec<RenderCmd>) -> Vec<RenderCmd> {
-    let mut merged: Vec<RenderCmd> = Vec::with_capacity(cmds.len());
-    let mut arena_pending = false;
-    for cmd in cmds {
-        match cmd {
-            RenderCmd::RenderArena { .. } => {
-                arena_pending = true;
-                merged.push(cmd);
-            }
-            RenderCmd::Focus { .. } if arena_pending => {
-                // Dropped: the arena render re-cascades with `focused`, and
-                // superseding would drop the arena's DOM mutations.
-            }
-            other => merged.push(other),
+impl RenderCmd {
+    /// Refresh the interaction state a `RenderArena` snapshot carries.
+    ///
+    /// The arena's `dynamic` is captured when its DOM snapshot is folded,
+    /// while the focus is owned by the input loop and can move later in the
+    /// same batch (`el.focus()` requests are expanded after the fold). Both
+    /// the input loop (before sending) and the render thread's drain (when a
+    /// `Focus` delta lands behind a pending arena) stamp the batch-final
+    /// value through this method so the arena render paints the state the
+    /// batch ends with. Non-arena commands are unaffected.
+    pub fn refresh_dynamic_focus(&mut self, focused: Option<NodeId>) {
+        if let RenderCmd::RenderArena { dynamic, .. } = self {
+            dynamic.focused = focused;
         }
     }
-    merged
+}
+
+/// One render thread's drained command batch, classified by merge semantics.
+///
+/// The channel accumulates commands across input-loop batches while the
+/// render thread finishes the previous frame, so the drain must decide per
+/// command class what survives:
+///
+/// - Stateful, must-run-in-order commands — [`RenderCmd::RenderInput`] (a
+///   focus switch queues blur + focus for two fields; dropping either leaves
+///   a stale caret) and the `Select*` family (they mutate the render
+///   thread's dropdown state, so a `SelectClose` must not be dropped in
+///   favour of the [`RenderCmd::RenderArena`] its `change` handler
+///   triggers) — are kept in arrival order and all run.
+/// - Snapshot commands (`Rerender` / `Redraw` / `RenderArena` /
+///   `RenderHtml` / `Quit`) each carry a complete final state, so a later
+///   one safely supersedes an earlier one; only the last of the batch is
+///   kept.
+/// - [`RenderCmd::TextSelection`] is *incremental*: its repaint region
+///   derives from the previously applied selection, so superseding it with
+///   a same-batch snapshot (a `RenderArena` triggered by a timer / hover
+///   mid-drag) would leave the render thread re-applying the stale
+///   highlight and make the next selection jump the edge forward — the
+///   visible flicker. It is deferred instead and applied after the snapshot
+///   command, on the fresh canvas.
+/// - A [`RenderCmd::Hover`] arriving behind a pending `RenderArena` is
+///   likewise deferred: superseding the arena render (whose
+///   `dynamic.hovered` was captured when the DOM change was folded) would
+///   drop the DOM mutations — an animated widget under the pointer (e.g.
+///   the music demo's progress bar) would then update in irregular jumps.
+///   The deferred hover repaint re-applies the newer highlight on top.
+/// - A [`RenderCmd::Focus`] arriving behind a pending `RenderArena`
+///   *merges into that arena's [`DynamicState`]*: superseding it would drop
+///   the DOM mutations, and dropping it would freeze the `:focus`
+///   highlight. The merged snapshot paints the DOM mutations and the
+///   newest focus in the same pass.
+#[derive(Debug, Default)]
+pub struct DrainedBatch {
+    inputs: Vec<RenderCmd>,
+    selects: Vec<RenderCmd>,
+    text_selection: Option<RenderCmd>,
+    hover: Option<RenderCmd>,
+    snapshot: Option<RenderCmd>,
+    quit: bool,
+}
+
+impl DrainedBatch {
+    /// Create an empty batch.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Classify and absorb one command — the batch's first (received with
+    /// `recv`) or one drained afterwards (`try_recv`).
+    pub fn absorb(&mut self, cmd: RenderCmd) {
+        match cmd {
+            RenderCmd::RenderInput { .. } => self.inputs.push(cmd),
+            sel @ (RenderCmd::SelectOpen { .. }
+            | RenderCmd::SelectClose { .. }
+            | RenderCmd::SelectMove { .. }) => self.selects.push(sel),
+            other @ RenderCmd::TextSelection { .. } => {
+                // Only the latest selection matters; earlier ones in the
+                // same batch are intermediates.
+                self.text_selection = Some(other);
+            }
+            other @ RenderCmd::Hover { .. }
+                if matches!(self.snapshot, Some(RenderCmd::RenderArena { .. })) =>
+            {
+                // The arena render re-cascades with the hover state it
+                // carried; the newer hover repaint must not swallow the
+                // DOM mutations, so defer it (see the type docs).
+                self.hover = Some(other);
+            }
+            RenderCmd::Focus { node_id }
+                if matches!(self.snapshot, Some(RenderCmd::RenderArena { .. })) =>
+            {
+                // Merge into the pending arena's interaction state: the
+                // same pass paints the DOM mutations and the newest focus
+                // (see the type docs).
+                if let Some(snapshot) = self.snapshot.as_mut() {
+                    snapshot.refresh_dynamic_focus(node_id);
+                }
+            }
+            other => {
+                self.quit |= matches!(other, RenderCmd::Quit);
+                self.snapshot = Some(other);
+            }
+        }
+    }
+
+    /// `true` when a `Quit` was absorbed — draining may stop early, and the
+    /// snapshot arm exits the render loop.
+    pub fn quit_requested(&self) -> bool {
+        self.quit
+    }
+
+    /// Drain the `RenderInput` commands in arrival order.
+    pub fn drain_inputs(&mut self) -> impl Iterator<Item = RenderCmd> {
+        std::mem::take(&mut self.inputs).into_iter()
+    }
+
+    /// Drain the `Select*` commands in arrival order.
+    pub fn drain_selects(&mut self) -> impl Iterator<Item = RenderCmd> {
+        std::mem::take(&mut self.selects).into_iter()
+    }
+
+    /// Take the deferred page text selection (the latest of the batch).
+    pub fn take_text_selection(&mut self) -> Option<RenderCmd> {
+        self.text_selection.take()
+    }
+
+    /// Take the snapshot command the batch ends with.
+    pub fn take_snapshot(&mut self) -> Option<RenderCmd> {
+        self.snapshot.take()
+    }
+
+    /// Take the deferred `Hover` (re-applied after the snapshot render).
+    pub fn take_hover(&mut self) -> Option<RenderCmd> {
+        self.hover.take()
+    }
 }

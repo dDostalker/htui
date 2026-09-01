@@ -2272,6 +2272,32 @@ fn margin_auto_flags_parse_from_shorthand_and_longhand() {
 // ============================================================
 
 #[test]
+fn percentage_height_resolves_against_definite_containing_height_only() {
+    init();
+    // CSS 10.5: percentage heights resolve against the containing block's
+    // *height*; with an indefinite containing height they compute to `auto`
+    // — never against the width.
+    let attr = attr_from_decl("height", "50%");
+    assert_eq!(
+        attr.get_height(Some(100), font_ctx(1, 1), viewport()),
+        Some(50),
+        "definite containing height: 50% of 100"
+    );
+    assert_eq!(
+        attr.get_height(None, font_ctx(1, 1), viewport()),
+        None,
+        "indefinite containing height: percentage height is auto"
+    );
+
+    let mh = attr_from_decl("min-height", "25%");
+    assert_eq!(
+        mh.get_min_height(Some(200), font_ctx(1, 1), viewport()),
+        Some(50)
+    );
+    assert_eq!(mh.get_min_height(None, font_ctx(1, 1), viewport()), None);
+}
+
+#[test]
 fn min_max_size_getters_resolve_and_default_to_none() {
     init();
     let mut decls = IndexMap::new();
@@ -2284,16 +2310,16 @@ fn min_max_size_getters_resolve_and_default_to_none() {
     let f = default_font_ctx();
     assert_eq!(attr.get_min_width(80, f, viewport()), Some(10));
     assert_eq!(attr.get_max_width(80, f, viewport()), Some(40));
-    assert_eq!(attr.get_min_height(80, f, viewport()), Some(3));
+    assert_eq!(attr.get_min_height(Some(80), f, viewport()), Some(3));
     // `none` (and `auto`) mean "no constraint".
-    assert_eq!(attr.get_max_height(80, f, viewport()), None);
+    assert_eq!(attr.get_max_height(Some(80), f, viewport()), None);
     let attr = attr_from_decl("min-width", "auto");
     assert_eq!(attr.get_min_width(80, f, viewport()), None);
     // Unset properties -> None.
     assert_eq!(CssAttr::new().get_min_width(80, f, viewport()), None);
     assert_eq!(CssAttr::new().get_max_width(80, f, viewport()), None);
-    assert_eq!(CssAttr::new().get_min_height(80, f, viewport()), None);
-    assert_eq!(CssAttr::new().get_max_height(80, f, viewport()), None);
+    assert_eq!(CssAttr::new().get_min_height(Some(80), f, viewport()), None);
+    assert_eq!(CssAttr::new().get_max_height(Some(80), f, viewport()), None);
 }
 
 #[test]

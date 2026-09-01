@@ -5,6 +5,10 @@ use crate::{
     graphics::{
         IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, char_width, image_intrinsic_size,
     },
+    html::{
+        box_edges::BoxEdges,
+        css_parse::{BoxSizing, clamp_min_max},
+    },
     layout::{
         BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, Rect, ReplacedContent,
         layoutbox::generation::{GeneratedBox, GeneratedPayload},
@@ -88,21 +92,28 @@ fn layout_input(
             } else {
                 (style.1, style.2)
             };
-            let content_w = if is_toggle {
-                2
+            let (natural_w, natural_h) = if is_toggle {
+                (2, 1)
             } else if let Some(label) = node.input_button_label() {
                 let text_w: usize = label.chars().map(|c| char_width(c).max(1)).sum();
-                (text_w.saturating_add(4)).min(containing.width).max(4)
+                ((text_w.saturating_add(4)).min(containing.width).max(4), 1)
             } else {
-                match node.get_width() {
-                    Some(w) => (w as usize).min(containing.width).max(1),
-                    None => 8usize.min(containing.width.max(1)),
-                }
+                let attr_w = node
+                    .get_width()
+                    .map(|w| (w as usize).min(containing.width).max(1))
+                    .unwrap_or_else(|| 8usize.min(containing.width.max(1)));
+                (attr_w, 1)
             };
-            let block_width = content_w.saturating_add(border_h);
-            let x = containing.x;
-            let y = cursor.allocate(1usize.saturating_add(border_v));
-            (x, y, block_width, 1usize.saturating_add(border_v))
+            control_placement(
+                arena,
+                generated,
+                containing,
+                context,
+                cursor,
+                &style.0.box_edges,
+                (border_h, border_v),
+                (natural_w, natural_h),
+            )
         }
     };
     Some(LayoutBox::new_replaced(
@@ -138,6 +149,86 @@ fn replaced_chrome(
     )
 }
 
+/// Shared sizing + placement for a replaced control in normal block flow.
+///
+/// The border-box is resolved from the CSS `width` / `height` chain — a
+/// declared CSS size wins, otherwise the control's natural (attribute- or
+/// label-derived) size is used — with `box-sizing` honoured, then clamped by
+/// `min-*` / `max-*`. The box is offset by its declared margins: horizontal
+/// `auto` margins centre the control in the containing block (a single
+/// `auto` pushes it to the opposite side), mirroring `layout_block`.
+///
+/// Returns `(x, y, block_width, block_height)` — the border-box rectangle.
+fn control_placement(
+    arena: &NodeArena,
+    generated: &GeneratedBox,
+    containing: BoxConstraint,
+    context: LayoutContext,
+    cursor: &mut Cursor,
+    edges: &BoxEdges,
+    border: (usize, usize),
+    natural: (usize, usize),
+) -> (usize, usize, usize, usize) {
+    let node = &arena[generated.node_id];
+    let css = &node.css_attr;
+    let sizing = css.get_box_sizing();
+    let (border_h, border_v) = border;
+    let (natural_w, natural_h) = natural;
+
+    // Width: declared / min / max all resolve into *border-box* space (the
+    // same convention as `layout_block`'s geometry), then clamp through the
+    // canonical helper — when min exceeds max, the minimum wins (CSS).
+    let to_border_w = |w: usize| match sizing {
+        BoxSizing::BorderBox => w,
+        BoxSizing::ContentBox => w.saturating_add(border_h),
+    };
+    let declared_w = css
+        .get_width(containing.width, context.font, context.viewport)
+        .map(to_border_w);
+    let min_w = css
+        .get_min_width(containing.width, context.font, context.viewport)
+        .map(to_border_w);
+    let max_w = css
+        .get_max_width(containing.width, context.font, context.viewport)
+        .map(to_border_w);
+    let block_width = clamp_min_max(
+        declared_w.unwrap_or_else(|| natural_w.saturating_add(border_h)),
+        min_w,
+        max_w,
+    )
+    .max(1);
+
+    // Height: a declared CSS `height` wins over the natural row count. The
+    // control sits in normal flow, where the containing block's *height* is
+    // indefinite — percentage heights compute to `auto` (CSS 10.5), which
+    // `get_height(None, …)` models directly.
+    let css_h = css.get_height(None, context.font, context.viewport);
+    let block_height = css_h.unwrap_or(natural_h.saturating_add(border_v)).max(1);
+
+    // Horizontal margins: an `auto` pair centres, a single `auto` pushes the
+    // control to the opposite side (CSS 10.3.3 for replaced elements).
+    let margin = edges.margin;
+    let auto = css.get_margin_auto();
+    let free = containing
+        .width
+        .saturating_sub(block_width)
+        .saturating_sub(margin.left)
+        .saturating_sub(margin.right);
+    let x = if auto.left && auto.right {
+        containing.x + margin.left + free / 2
+    } else if auto.left {
+        containing.x + margin.left + free
+    } else {
+        containing.x + margin.left
+    };
+
+    // Vertical margins advance the flow cursor; a replaced control is an
+    // atomic inline-level box, so adjacent margins do not collapse.
+    let y0 = cursor.allocate(margin.top + block_height + margin.bottom);
+    let y = y0 + margin.top;
+    (x, y, block_width, block_height)
+}
+
 /// Geometry for `<textarea>`: a fixed multi-line editable field.
 ///
 /// Width is `cols` (browser default 20) and height is `rows` (browser
@@ -167,15 +258,17 @@ fn layout_textarea(
                 .get("rows")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(2);
-            let block_width = cols
-                .max(1)
-                .saturating_add(style.1)
-                .min(containing.width)
-                .max(1);
-            let content_rows = rows.max(1);
-            let x = containing.x;
-            let y = cursor.allocate(content_rows.saturating_add(style.2));
-            (x, y, block_width, content_rows.saturating_add(style.2))
+            let natural_w = cols.max(1).min(containing.width);
+            control_placement(
+                arena,
+                generated,
+                containing,
+                context,
+                cursor,
+                &style.0.box_edges,
+                (style.1, style.2),
+                (natural_w, rows.max(1)),
+            )
         }
     };
     Some(LayoutBox::new_replaced(
@@ -207,12 +300,16 @@ fn layout_button(
                 .chars()
                 .map(|c| char_width(c).max(1))
                 .sum();
-            let block_width = (text_w.saturating_add(4).saturating_add(style.1))
-                .min(containing.width)
-                .max(4);
-            let x = containing.x;
-            let y = cursor.allocate(1usize.saturating_add(style.2));
-            (x, y, block_width, 1usize.saturating_add(style.2))
+            control_placement(
+                arena,
+                generated,
+                containing,
+                context,
+                cursor,
+                &style.0.box_edges,
+                (style.1, style.2),
+                (text_w.saturating_add(4), 1),
+            )
         }
     };
     Some(LayoutBox::new_replaced(
@@ -246,14 +343,20 @@ fn layout_select(
                 .map(|opt| opt.label.chars().map(char_width).sum::<usize>())
                 .max()
                 .unwrap_or(0);
-            let content_w = match node.get_width() {
-                Some(w) => (w as usize).min(containing.width).max(1),
-                None => (text_w.saturating_add(4)).min(containing.width).max(4),
-            };
-            let block_width = content_w.saturating_add(style.1);
-            let x = containing.x;
-            let y = cursor.allocate(1usize.saturating_add(style.2));
-            (x, y, block_width, 1usize.saturating_add(style.2))
+            let natural_w = node
+                .get_width()
+                .map(|w| (w as usize).min(containing.width).max(1))
+                .unwrap_or((text_w.saturating_add(4)).min(containing.width).max(4));
+            control_placement(
+                arena,
+                generated,
+                containing,
+                context,
+                cursor,
+                &style.0.box_edges,
+                (style.1, style.2),
+                (natural_w, 1),
+            )
         }
     };
     Some(LayoutBox::new_replaced(

@@ -13,21 +13,10 @@ use crate::events::{Geometry, HitMap};
 use crate::html::css_parse::{DynamicState, PseudoClass, css_pseudo_rule_set};
 use crate::layout::layout::TermMap;
 use crate::tdom::node::{NodeArena, NodeId};
-use crate::tui::graph_api::{InputState, RenderCmd};
+use crate::tui::graph_api::{DrainedBatch, InputState, RenderCmd};
 
 use super::pipeline::{flush_frame, parse_css_source};
 use super::state::RenderState;
-
-/// One coalesced `RenderCmd::RenderInput`: buffered keystroke state for a
-/// focused field. Several inputs arriving in one frame batch render
-/// together (see the merge logic at the top of `render_thread`).
-struct PendingInput {
-    node_id: NodeId,
-    value: String,
-    cursor: usize,
-    focused: bool,
-    selection: Option<(usize, usize)>,
-}
 
 pub(super) fn render_thread(
     rx: mpsc::Receiver<RenderCmd>,
@@ -84,115 +73,33 @@ pub(super) fn render_thread(
                 std::thread::sleep(config.frame_gap - since);
             }
         }
-        // Commands split into two classes with different merge semantics:
-        //
-        // - Stateful, must-run-in-order commands — `RenderInput` (a focus
-        //   switch queues blur + focus for two fields; dropping either leaves
-        //   a stale caret) and `Select*` (they mutate the render thread's
-        //   dropdown state, so a `SelectClose` must not be dropped in favour
-        //   of the `RenderArena` its `change` handler triggers). They are
-        //   collected in arrival order and all run.
-        // - Snapshot commands (`Rerender` / `Redraw` / `RenderArena` /
-        //   `RenderHtml` / `Hover` / `Quit`) — each carries a complete final
-        //   state, so a later one safely supersedes an earlier one; only the
-        //   last of the batch is kept.
-        // - `TextSelection` is *incremental*: its repaint region derives from
-        //   the previously applied selection, so superseding it with a
-        //   same-batch snapshot (a `RenderArena` triggered by a timer / hover
-        //   mid-drag) would leave the render thread re-applying the stale
-        //   highlight and make the next selection jump the edge forward — the
-        //   visible flicker. It is deferred instead and applied after the
-        //   snapshot command, on the fresh canvas.
-        // - A `Hover` arriving after a pending `RenderArena` is likewise
-        //   deferred: superseding the arena render (whose `dynamic.hovered`
-        //   was captured when the DOM change was folded) would drop the DOM
-        //   mutation — an animated widget under the pointer (e.g. the music
-        //   demo's progress bar) would then update in irregular jumps. The
-        //   deferred hover repaint re-applies the newer highlight on top.
-        let mut pending_inputs: Vec<PendingInput> = Vec::new();
-        let mut pending_selects: Vec<RenderCmd> = Vec::new();
-        let mut pending_text_sel: Option<RenderCmd> = None;
-        let mut pending_hover: Option<RenderCmd> = None;
-        let mut cmd = match first {
-            RenderCmd::RenderInput {
+        // Commands merge per class (see [`DrainedBatch`]): snapshot
+        // commands supersede, stateful ones run in order, incremental ones
+        // defer around the snapshot. A `Hover` behind a pending `RenderArena`
+        // is deferred on top of the arena render; a `Focus` behind one merges
+        // into the arena's interaction state — neither can drop the DOM
+        // mutations the snapshot carries.
+        let mut batch = DrainedBatch::new();
+        batch.absorb(first);
+        while !batch.quit_requested() {
+            match rx.try_recv() {
+                Ok(next) => batch.absorb(next),
+                Err(_) => break,
+            }
+        }
+        for cmd in batch.drain_inputs() {
+            if let RenderCmd::RenderInput {
                 node_id,
                 value,
                 cursor,
                 focused,
                 selection,
-            } => {
-                pending_inputs.push(PendingInput {
-                    node_id,
-                    value,
-                    cursor,
-                    focused,
-                    selection,
-                });
-                None
-            }
-            sel @ (RenderCmd::SelectOpen { .. }
-            | RenderCmd::SelectClose { .. }
-            | RenderCmd::SelectMove { .. }) => {
-                pending_selects.push(sel);
-                None
-            }
-            other @ RenderCmd::TextSelection { .. } => {
-                pending_text_sel = Some(other);
-                None
-            }
-            other => Some(other),
-        };
-        while let Ok(next) = rx.try_recv() {
-            match next {
-                RenderCmd::RenderInput {
-                    node_id,
-                    value,
-                    cursor,
-                    focused,
-                    selection,
-                } => pending_inputs.push(PendingInput {
-                    node_id,
-                    value,
-                    cursor,
-                    focused,
-                    selection,
-                }),
-                sel @ (RenderCmd::SelectOpen { .. }
-                | RenderCmd::SelectClose { .. }
-                | RenderCmd::SelectMove { .. }) => pending_selects.push(sel),
-                other @ RenderCmd::TextSelection { .. } => {
-                    // Only the latest selection matters; earlier ones in the
-                    // same batch are intermediates.
-                    pending_text_sel = Some(other);
-                }
-                other @ RenderCmd::Hover { .. }
-                    if matches!(cmd, Some(RenderCmd::RenderArena { .. })) =>
-                {
-                    // The arena render re-cascades with the hover state it
-                    // carried; the newer hover repaint must not swallow the
-                    // DOM mutations, so defer it (see the merge comment).
-                    pending_hover = Some(other);
-                }
-                other => {
-                    cmd = Some(other);
-                    // Quit supersedes anything still queued in the batch.
-                    if matches!(cmd, Some(RenderCmd::Quit)) {
-                        break;
-                    }
-                }
+            } = cmd
+            {
+                state.handle_input(&mut out, node_id, value, cursor, focused, selection);
             }
         }
-        for PendingInput {
-            node_id,
-            value,
-            cursor,
-            focused,
-            selection,
-        } in pending_inputs
-        {
-            state.handle_input(&mut out, node_id, value, cursor, focused, selection);
-        }
-        for sel_cmd in pending_selects {
+        for sel_cmd in batch.drain_selects() {
             state.handle_select(&mut out, sel_cmd);
         }
 
@@ -215,11 +122,11 @@ pub(super) fn render_thread(
         // bounds), and the snapshot re-applies it on the fresh canvas — so it
         // is never lost to a snapshot arm's early `continue` (see the merge
         // comment above).
-        if let Some(RenderCmd::TextSelection { anchor, end, mode }) = pending_text_sel {
+        if let Some(RenderCmd::TextSelection { anchor, end, mode }) = batch.take_text_selection() {
             state.apply_text_selection_cmd(&mut out, anchor, end, mode);
         }
 
-        if let Some(cmd) = cmd {
+        if let Some(cmd) = batch.take_snapshot() {
             let batch_t0 = Instant::now();
             match cmd {
                 RenderCmd::Quit => break,
@@ -345,7 +252,7 @@ pub(super) fn render_thread(
                 }
 
                 // Select dropdown commands share one handler so the pending pass
-                // can also run them (see `pending_selects` above).
+                // can also run them (see `DrainedBatch::drain_selects`).
                 RenderCmd::SelectOpen { .. }
                 | RenderCmd::SelectClose { .. }
                 | RenderCmd::SelectMove { .. } => {
@@ -385,7 +292,7 @@ pub(super) fn render_thread(
 
         // A deferred `Hover` runs last so its repaint re-applies the newer
         // hover highlight on top of both the arena render and the selection.
-        if let Some(RenderCmd::Hover { node_id }) = pending_hover {
+        if let Some(RenderCmd::Hover { node_id }) = batch.take_hover() {
             let prev = state.dynamic.hovered;
             state.dynamic.hovered = node_id;
             if state.pseudo_rules.contains_pseudo(PseudoClass::Hover) {
