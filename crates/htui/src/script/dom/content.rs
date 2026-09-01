@@ -292,9 +292,7 @@ fn sweep_replaced_subtrees(
             }
         }
         for id in doomed {
-            // A swept host's injected styles stop applying — the browser
-            // drops the `<style>` elements removed together with it.
-            st.dirty.injected_css.remove(&id);
+            st.dirty.injected_css.swap_remove(&id);
             st.arena.remove(id);
         }
     }
