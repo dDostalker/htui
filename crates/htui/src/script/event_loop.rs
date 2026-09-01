@@ -19,6 +19,18 @@ impl ScriptEngine {
             .min()
     }
 
+    /// Whether a `fetch` completion is already queued in the load channel.
+    ///
+    /// Loads resolve synchronously at `fetch()` call time (the in-memory
+    /// registry hands the bytes back immediately), so a non-empty
+    /// `active_fetches` set means the result is sitting in the channel and
+    /// the next [`poll_fetches`](Self::poll_fetches) will settle it. The
+    /// message loop uses this to wake immediately instead of waiting out a
+    /// poll interval.
+    pub fn has_pending_fetch(&self) -> bool {
+        !self.state.borrow().active_fetches.is_empty()
+    }
+
     /// Fire every timer whose deadline has passed, in registration order.
     ///
     /// Callbacks run in the calling thread — the script thread in production —

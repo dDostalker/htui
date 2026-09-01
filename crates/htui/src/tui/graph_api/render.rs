@@ -108,7 +108,6 @@ impl TermLayout {
         let mut batch = String::new();
 
         while i < scroll_end {
-            // 跳过宽字符的填充格（空字符串标记）
             if self.layout[i].word.is_empty() {
                 i += 1;
                 continue;
@@ -129,7 +128,6 @@ impl TermLayout {
 
             while i < scroll_end {
                 let c = &self.layout[i];
-                // 跳过宽字符的填充格
                 if c.word.is_empty() {
                     i += 1;
                     continue;
@@ -209,7 +207,6 @@ impl TermLayout {
         let mut batch = String::new();
 
         while i < scroll_end {
-            // 跳过宽字符的填充格（空字符串标记）
             if self.layout[i].word.is_empty() {
                 i += 1;
                 continue;

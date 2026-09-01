@@ -784,6 +784,35 @@ fn run_script_thread_ready_then_processes_messages() {
 }
 
 #[test]
+fn run_script_thread_stays_silent_when_idle() {
+    // An idle page (no timers, no fetches, no messages) must not tick the
+    // loop: the thread blocks until a message arrives instead of emitting
+    // empty `Event` responses on a poll interval.
+    let hit_map: Arc<Mutex<Arc<HitMap>>> = Arc::new(Mutex::new(Arc::new(HitMap::new())));
+
+    let (tx, out_rx, handle) = spawn_script(
+        r#"<div id="btn">plain</div>"#,
+        EventBindings::default(),
+        Arc::clone(&hit_map),
+    );
+
+    match out_rx.recv().expect("Ready must arrive") {
+        ScriptResponse::Ready { .. } => {}
+        other => panic!("expected Ready, got {other:?}"),
+    }
+
+    // The old 50 ms poll cap delivered an empty `Event` within this window;
+    // the event-driven loop must produce nothing at all.
+    assert!(
+        out_rx.recv_timeout(Duration::from_millis(150)).is_err(),
+        "idle script thread must not emit empty responses"
+    );
+
+    tx.send(ScriptMsg::Quit).expect("send quit");
+    handle.join().expect("script thread must exit cleanly");
+}
+
+#[test]
 fn blocking_host_fn_does_not_block_the_input_side_channel() {
     // The decoupling guarantee: while a host function sleeps inside the
     // script thread, sending further messages from the input side returns
