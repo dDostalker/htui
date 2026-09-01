@@ -1,6 +1,8 @@
 //! `style` object natives: camelCase accessors over the element's `style`
 //! attribute plus the raw `cssText` view.
 
+use std::sync::Arc;
+
 use boa_engine::{
     Context, JsResult, JsString, JsValue, NativeFunction, js_string,
     object::{ObjectInitializer, builtins::JsFunction},
@@ -90,7 +92,7 @@ fn kebab_to_camel(kebab: &str) -> String {
 }
 
 /// The element's style attribute as a declaration map.
-fn style_map(st: &ScriptState, node_id: NodeId) -> indexmap::IndexMap<String, String> {
+fn style_map(st: &ScriptState, node_id: NodeId) -> indexmap::IndexMap<Arc<str>, Arc<str>> {
     let raw = st
         .arena
         .get(node_id)
@@ -107,7 +109,7 @@ fn style_get(this: &JsValue, kebab: &&'static str, context: &mut Context) -> JsR
     let st = rc.borrow();
     let value = style_map(&st, node_id)
         .get(*kebab)
-        .cloned()
+        .map(|v| v.as_ref().to_string())
         .unwrap_or_default();
     Ok(js_string!(value).into())
 }
@@ -131,7 +133,7 @@ fn style_set(
     if value.is_empty() {
         map.shift_remove(*kebab);
     } else {
-        map.insert((*kebab).to_string(), value);
+        map.insert(Arc::from(*kebab), Arc::from(value));
     }
     let serialized: Vec<String> = map.iter().map(|(k, v)| format!("{k}: {v}")).collect();
     if let Some(node) = st.arena.get_mut(node_id) {

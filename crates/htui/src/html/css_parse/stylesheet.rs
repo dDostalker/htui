@@ -260,7 +260,7 @@ fn split_top_level_commas(s: &str) -> Vec<&str> {
 /// - escaped identifiers and unicode in property names
 /// - quoted string values with semicolons / colons inside
 #[doc(hidden)]
-pub fn parse_declaration_text(block: &str) -> IndexMap<String, String> {
+pub fn parse_declaration_text(block: &str) -> IndexMap<Arc<str>, Arc<str>> {
     // No `place-*` expansion: this map backs the JS `el.style` object, whose
     // shorthand properties read back the author-specified text (the cascade
     // expands separately via [`parse_declaration_splits`]).
@@ -270,11 +270,7 @@ pub fn parse_declaration_text(block: &str) -> IndexMap<String, String> {
     let mut important = CssAttr::new();
     parse_declarations_into(&mut input, &mut normal, &mut important, false);
     normal.0.extend(important.0);
-    normal
-        .0
-        .into_iter()
-        .map(|(k, v)| (k.as_ref().to_string(), v.as_ref().to_string()))
-        .collect()
+    normal.0
 }
 
 /// Parse a declaration block, splitting declarations by the `!important`
@@ -344,7 +340,7 @@ fn parse_declarations_into<'i, 't>(
                 // (a browser parse error emits no longhands).
                 if let Some(pairs) = expand_place_shorthand(&name, &cleaned) {
                     for (prop, value) in pairs {
-                        target.insert(Arc::from(prop), Arc::from(value));
+                        target.insert(Arc::from(prop), value);
                     }
                 }
             } else if expand_place

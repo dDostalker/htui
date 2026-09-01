@@ -55,11 +55,9 @@ use super::values::{
 #[derive(Debug, Clone, Default)]
 pub struct CssAttr(pub IndexMap<Arc<str>, Arc<str>>);
 
-/// Convert an owned `String`-keyed declaration map (e.g. the map returned by
-/// [`parse_declaration_text`](crate::html::css_parse::parse_declaration_text),
-/// which backs the JS `el.style` object) into a shared [`CssAttr`]. Each entry
-/// is moved into an `Arc<str>` so the value is referenced, not copied, on
-/// every later cascade pass.
+/// Convert an owned `String`-keyed declaration map into a shared [`CssAttr`].
+/// Each entry is moved into an `Arc<str>` so the value is referenced, not
+/// copied, on every later cascade pass.
 impl From<IndexMap<String, String>> for CssAttr {
     fn from(map: IndexMap<String, String>) -> Self {
         CssAttr(

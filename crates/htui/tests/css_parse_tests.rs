@@ -465,7 +465,7 @@ fn test_is_set_distinguishes_unset_from_explicit_none() {
     assert!(!attr.is_set("color"));
 
     let declared = parse_declaration_text("text-decoration: none;");
-    attr.add(&CssAttr::from(declared));
+    attr.add(&CssAttr(declared));
     assert!(
         attr.is_set("text-decoration"),
         "explicit `none` declaration must still count as set"
@@ -669,7 +669,7 @@ fn test_css_attr_full_color() {
     let mut attr = CssAttr::new();
     let css = "color: darkblue; background-color: #1e293b;";
     let m = parse_declaration_text(css);
-    attr.add(&CssAttr::from(m));
+    attr.add(&CssAttr(m));
     assert_eq!(
         attr.get_color(),
         Some(Color::Rgb {

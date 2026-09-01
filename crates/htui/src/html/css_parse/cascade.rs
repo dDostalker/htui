@@ -397,7 +397,10 @@ fn inherit_css(arena: &mut NodeArena, root_id: NodeId) {
     let mut stack: Vec<(NodeId, Arc<InheritedMap>)> =
         vec![(root_id, Arc::new(InheritedMap::new()))];
     while let Some((node_id, parent_attrs)) = stack.pop() {
-        // Merge parent inheritable attrs into current node (if not already set)
+        // Merge parent inheritable attrs into current node (if not already
+        // set). `entry` does a single hash probe for the find-or-insert; the
+        // eager key allocation is cheaper than a second `contains_key` probe
+        // on this hot per-node path.
         {
             let node = &mut arena[node_id];
             for key in INHERITED_PROPS {

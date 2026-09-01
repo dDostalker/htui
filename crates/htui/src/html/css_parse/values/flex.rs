@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::length::{FontContext, Length, LengthContext, Viewport};
 
 // ============================================================
@@ -192,7 +194,7 @@ pub(crate) fn is_place_shorthand_name(name: &str) -> bool {
 pub(crate) fn expand_place_shorthand(
     name: &str,
     value: &str,
-) -> Option<Vec<(&'static str, String)>> {
+) -> Option<Vec<(&'static str, Arc<str>)>> {
     let mut tokens = value.split_whitespace();
     let first = tokens.next()?;
     let second = tokens.next();
@@ -212,9 +214,9 @@ pub(crate) fn expand_place_shorthand(
                 // only sets `align-content`.
                 None => parse_justify_content(first).map(|_| first),
             };
-            let mut out = vec![("align-content", first.to_string())];
+            let mut out = vec![("align-content", Arc::from(first))];
             if let Some(token) = justify_token {
-                out.push(("justify-content", token.to_string()));
+                out.push(("justify-content", Arc::from(token)));
             }
             Some(out)
         }
@@ -223,7 +225,7 @@ pub(crate) fn expand_place_shorthand(
             if let Some(s) = second {
                 parse_align_items(s)?;
             }
-            Some(vec![("align-items", first.to_string())])
+            Some(vec![("align-items", Arc::from(first))])
         }
         "place-self" => {
             // `align-self` additionally accepts `auto` (defer to the
@@ -234,7 +236,7 @@ pub(crate) fn expand_place_shorthand(
             if let Some(s) = second {
                 parse_align_items(s)?;
             }
-            Some(vec![("align-self", first.to_string())])
+            Some(vec![("align-self", Arc::from(first))])
         }
         _ => None,
     }
