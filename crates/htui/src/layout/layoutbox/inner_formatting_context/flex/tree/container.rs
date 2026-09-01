@@ -83,6 +83,14 @@ pub(super) struct FlexItemPrep {
     /// `align-items: baseline` to align the items' first text rows.
     pub(super) baseline: usize,
     pub(super) order: i32,
+    /// Cached intrinsic border-box width measured once by
+    /// `natural_intrinsic_size` during prep. The wrap / placement passes
+    /// re-read it instead of re-running the recursive measurement (the
+    /// measurement is a pure function of the same arena + context, so the
+    /// cached value is exact).
+    pub(super) natural_width: usize,
+    /// Cached intrinsic border-box height — see [`Self::natural_width`].
+    pub(super) natural_height: usize,
 }
 
 /// Build a [`LayoutBox`] for a flex container at `node_id`.

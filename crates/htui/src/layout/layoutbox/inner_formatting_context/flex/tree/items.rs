@@ -90,7 +90,7 @@ pub(super) fn layout_flex_items(
             line_preps
                 .iter()
                 .map(|p| {
-                    natural_cross_axis_size_for_prep(arena, p, direction, context)
+                    natural_cross_axis_size_for_prep(p, direction)
                         .saturating_add(p.margin_cross_before)
                         .saturating_add(p.margin_cross_after)
                 })
@@ -245,11 +245,11 @@ pub(super) fn layout_flex_items(
                     Some(max) => main_sizes[prep_idx].clamp(lower, max.max(lower)),
                     None => main_sizes[prep_idx].max(lower),
                 };
-                // Natural cross-axis size of this item (used as the fallback
-                // for non-stretch alignments and for stretch when the
-                // container's cross-axis size is unknown).
-                let item_natural_cross =
-                    natural_cross_axis_size_for_prep(arena, prep, direction, context);
+                // Natural cross-axis size of this item, measured once at prep
+                // time (used as the fallback for non-stretch alignments and
+                // for stretch when the container's cross-axis size is
+                // unknown).
+                let item_natural_cross = natural_cross_axis_size_for_prep(prep, direction);
                 let item_cross_size = resolve_item_cross_size(
                     prep.align_self,
                     line_cross,

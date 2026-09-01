@@ -134,6 +134,8 @@ pub(super) fn prepare_flex_item(
         margin_cross_after,
         baseline,
         order: css.get_order(),
+        natural_width: natural.width,
+        natural_height: natural.height,
     }
 }
 
@@ -146,6 +148,8 @@ pub(super) fn prepare_anonymous_text_item(
     align_items: AlignItems,
 ) -> FlexItemPrep {
     let text_w = runs_total_width(&item.runs);
+    // Capture before `item` is moved into the prep's source below.
+    let natural_height = item.line_height_cells.max(FLEX_ITEM_MIN_CROSS);
     let (basis, min_main) = match direction.is_row() {
         true => (
             text_w.max(FLEX_ITEM_MIN_CROSS),
@@ -168,6 +172,11 @@ pub(super) fn prepare_anonymous_text_item(
         margin_cross_after: 0,
         baseline: 0,
         order: 0,
+        // Mirrors the intrinsic semantics of the DOM-item path: a text row's
+        // natural height is its line-height, its natural width the total run
+        // width (the direction-dependent selection happens at read time).
+        natural_width: text_w.max(FLEX_ITEM_MIN_CROSS),
+        natural_height,
     }
 }
 
@@ -576,54 +585,27 @@ struct NaturalIntrinsicSize {
     height: usize,
 }
 
-/// Natural cross-axis size of an item (its own height for `row`, its
-/// own width for `column`).
+/// Natural cross-axis size of a prepared flex item (its cached height for
+/// `row`, its cached width for `column`).
 ///
-/// The natural cross-axis size depends on the direction because the
-/// cross axis swaps between rows and columns:
+/// The cross axis swaps between rows and columns:
 ///
-/// - `row` direction: cross axis is vertical. The natural size is the
-///   item's own row count (`max(1, font_size_cells)`) — a single-row
-///   text block is 1 row; a heading with `font-size: 2` is 2 rows. A
-///   nested flex container reports its real inner height, so a flex
-///   column with N stacked rows adds N to the line height rather than
-///   collapsing to 1.
-/// - `column` direction: cross axis is horizontal. The natural size is
-///   the widest row of text — a single-line text block is 1 cell; a
-///   nested flex row reports its widest child's intrinsic width.
+/// - `row` direction: cross axis is vertical — the item's natural row count.
+/// - `column` direction: cross axis is horizontal — the item's widest
+///   intrinsic row.
 ///
-/// Used by the line-height calculation in [`super::items::layout_flex_items`].
-pub(super) fn natural_cross_axis_size(
-    arena: &NodeArena,
-    node_id: NodeId,
-    direction: FlexDirection,
-    context: LayoutContext,
-) -> usize {
-    let intrinsic = natural_intrinsic_size(arena, node_id, context);
-    match direction.is_row() {
-        true => intrinsic.height,
-        false => intrinsic.width,
-    }
-    .max(FLEX_ITEM_MIN_CROSS)
-}
-
-/// Natural cross-axis size of a prepared flex item, handling both DOM nodes
-/// and anonymous text items.
+/// Both values were measured once by `natural_intrinsic_size` when the prep
+/// was built; re-reading them here keeps the wrap and placement passes from
+/// re-running the recursive measurement with identical inputs.
 pub(super) fn natural_cross_axis_size_for_prep(
-    arena: &NodeArena,
     prep: &FlexItemPrep,
     direction: FlexDirection,
-    context: LayoutContext,
 ) -> usize {
-    match &prep.source {
-        FlexItemSource::Node(node_id) => {
-            natural_cross_axis_size(arena, *node_id, direction, context)
-        }
-        FlexItemSource::AnonymousText(text) => match direction.is_row() {
-            true => text.line_height_cells.max(FLEX_ITEM_MIN_CROSS),
-            false => runs_total_width(&text.runs).max(FLEX_ITEM_MIN_CROSS),
-        },
+    match direction.is_row() {
+        true => prep.natural_height,
+        false => prep.natural_width,
     }
+    .max(FLEX_ITEM_MIN_CROSS)
 }
 
 /// Resolve an item's cross-axis size in the current line.
