@@ -542,3 +542,28 @@ fn sticky_repin_uses_recorded_flow_row() {
     pin_sticky_boxes(&mut boxes, viewport);
     assert_eq!(s_y(&boxes), 40, "S clamps to the new viewport top");
 }
+
+#[test]
+fn absolute_child_with_negative_left_anchors_to_parent_offset() {
+    init();
+    // A negative inset on an absolutely-positioned child anchors to its
+    // containing block (the relative parent): the parent sits at x=8 via
+    // `margin-left`, so `left: -2ch` pulls the child to x=6 instead of
+    // clamming the whole subtree to the screen edge at x=0.
+    let html = r#"
+        <div class="parent">
+            <div class="child">X</div>
+        </div>
+    "#;
+    let css = r#"
+        .parent { position: relative; margin-left: 8ch; width: 10ch; }
+        .child { position: absolute; left: -2ch; top: 1ch; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    assert_eq!(
+        cell(&rows, 6, 1),
+        Some('X'),
+        "absolute child must sit at parent_x + (-2) = 6"
+    );
+}
+

@@ -316,6 +316,11 @@ fn parse_declarations_into<'i, 't>(
                 continue;
             }
         };
+        // CSS property names are ASCII case-insensitive; normalise to
+        // lowercase so `WIDTH: 10`, `BACKGROUND-COLOR: red` and `Text-Align`
+        // all reference the same canonical keys the `CssAttr` accessors (and
+        // the cascade's `SUPPORTED_PROPERTIES`) use.
+        let name = name.to_ascii_lowercase();
         if input.expect_colon().is_err() {
             // `name` without `:` — advance past the bogus declaration.
             let _: Result<(), ParseError<()>> =

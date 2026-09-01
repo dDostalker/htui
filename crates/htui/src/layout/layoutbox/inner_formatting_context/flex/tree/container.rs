@@ -148,7 +148,8 @@ pub(super) fn layout_flex_container(
             // bottom margin (CSS vertical margin collapsing: the larger wins).
             cursor.collapse_and_skip(edges.margin.top);
             let outer_y_top = cursor.y;
-            let available = containing.width.saturating_sub(edges.margin.horizontal());
+            let available = (containing.width as i64 - edges.margin.horizontal() as i64).max(0)
+                as usize;
             let block_width = constrained_block_width(
                 &node.css_attr,
                 available,
@@ -163,13 +164,13 @@ pub(super) fn layout_flex_container(
             if margin_auto.left || margin_auto.right {
                 let free = available.saturating_sub(block_width);
                 match (margin_auto.left, margin_auto.right) {
-                    (true, true) => edges.margin.left = free / 2,
-                    (true, false) => edges.margin.left = free,
+                    (true, true) => edges.margin.left = (free / 2) as isize,
+                    (true, false) => edges.margin.left = free as isize,
                     _ => {}
                 }
             }
             (
-                containing.x + edges.margin.left,
+                (containing.x as i64 + edges.margin.left as i64).max(0) as usize,
                 outer_y_top,
                 block_width,
                 None,

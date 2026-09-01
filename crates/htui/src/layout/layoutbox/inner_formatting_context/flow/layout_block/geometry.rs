@@ -95,7 +95,7 @@ pub fn compute_outer_geometry(
     edges: BoxEdges,
     cursor_y: usize,
 ) -> OuterGeometry {
-    let outer_x = containing.x + edges.margin.left;
+    let outer_x = (containing.x as i64 + edges.margin.left as i64).max(0) as usize;
     let outer_width = block_width;
     let outer_y = cursor_y;
 

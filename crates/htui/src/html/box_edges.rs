@@ -62,6 +62,46 @@ impl EdgeSizes {
     }
 }
 
+/// Per-side margin lengths in cells.
+///
+/// Unlike [`EdgeSizes`] (padding and border widths, which are always
+/// non-negative), margins may be **negative** — CSS allows a negative margin to
+/// pull a box toward or past its neighbour / its containing block. The
+/// horizontal fields are therefore signed cells (`left` / `right`), so
+/// `margin: 0 -4ch` widens the box beyond its content and shifts it left by
+/// four columns. The vertical fields stay `usize`: the terminal grid has no
+/// overlapping-row painting model, so a negative `top` / `bottom` margin is
+/// clamped to `0` when the layout hands it to the cursor.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MarginSizes {
+    pub top: usize,
+    pub right: isize,
+    pub bottom: usize,
+    pub left: isize,
+}
+
+impl MarginSizes {
+    pub const fn new(top: usize, right: isize, bottom: usize, left: isize) -> Self {
+        Self {
+            top,
+            right,
+            bottom,
+            left,
+        }
+    }
+
+    /// Horizontal total = left + right (signed, for column budgeting — a
+    /// negative pair widens the available width).
+    pub const fn horizontal(&self) -> isize {
+        self.left.saturating_add(self.right)
+    }
+
+    /// Vertical total = top + bottom (always non-negative).
+    pub const fn vertical(&self) -> usize {
+        self.top.saturating_add(self.bottom)
+    }
+}
+
 /// Per-edge flags recording which margin sides are `auto`.
 ///
 /// `margin: 0 auto` (or a single auto side) does not resolve to a concrete
@@ -190,7 +230,7 @@ impl BorderSides {
 pub struct BoxEdges {
     pub padding: EdgeSizes,
     pub border: BorderSides,
-    pub margin: EdgeSizes,
+    pub margin: MarginSizes,
 }
 
 impl BoxEdges {

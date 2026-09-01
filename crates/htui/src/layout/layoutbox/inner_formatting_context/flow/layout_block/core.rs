@@ -80,11 +80,12 @@ pub fn layout_block(
         child_context.viewport,
     );
     // The available width after margins / indent — shared by the width
-    // resolution and the min/max-height clamp below.
-    let available = containing
-        .width
-        .saturating_sub(opts.indent)
-        .saturating_sub(edges.margin.horizontal());
+    // resolution and the min/max-height clamp below. A negative horizontal
+    // margin *increases* the available width (CSS gutter pull-out).
+    let available = (containing.width as i64
+        - opts.indent as i64
+        - edges.margin.horizontal() as i64)
+        .max(0) as usize;
 
     let (geom, preallocated_height) = match pre_allocated_rect {
         Some(rect) => {
@@ -129,8 +130,8 @@ pub fn layout_block(
             if margin_auto.left || margin_auto.right {
                 let free = available.saturating_sub(block_width);
                 match (margin_auto.left, margin_auto.right) {
-                    (true, true) => edges.margin.left = free / 2,
-                    (true, false) => edges.margin.left = free,
+                    (true, true) => edges.margin.left = (free / 2) as isize,
+                    (true, false) => edges.margin.left = free as isize,
                     _ => {}
                 }
             }
@@ -502,13 +503,13 @@ fn merge_ua_margins(node: &Node, mut edges: BoxEdges, ua_margins: Option<EdgeSiz
         edges.margin.top = ua.top;
     }
     if !node.css_attr.is_set("margin") && !node.css_attr.is_set("margin-right") {
-        edges.margin.right = ua.right;
+        edges.margin.right = ua.right as isize;
     }
     if !node.css_attr.is_set("margin") && !node.css_attr.is_set("margin-bottom") {
         edges.margin.bottom = ua.bottom;
     }
     if !node.css_attr.is_set("margin") && !node.css_attr.is_set("margin-left") {
-        edges.margin.left = ua.left;
+        edges.margin.left = ua.left as isize;
     }
     edges
 }

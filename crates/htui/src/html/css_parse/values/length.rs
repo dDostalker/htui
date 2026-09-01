@@ -4,7 +4,7 @@ use crossterm::style::Color;
 use cssparser::{Parser as CssParser, ParserInput, Token};
 use indexmap::IndexMap;
 
-use crate::html::box_edges::{Border, BorderStyle, EdgeAuto, EdgeSizes};
+use crate::html::box_edges::{Border, BorderStyle, EdgeAuto, EdgeSizes, MarginSizes};
 
 use super::color::parse_color_str;
 
@@ -12,7 +12,7 @@ use super::color::parse_color_str;
 /// CSS defines 1px as 1/96 inch; terminals cannot query physical DPI, so
 /// px lengths are converted to cells at layout time via this ratio. A
 /// monospace glyph is 0.5em wide at the 16px default font-size, so one
-/// cell anchors at 8px — small values like `border: 1px` resolve to 0
+/// cell anchors at 8px small values like `border: 1px` resolve to 0
 /// cells (sub-cell, invisible), mirroring a browser rendered on a
 /// character grid. The constant is named so future changes (e.g. a 2x DPI
 /// mode) have one edit point. This constant only governs CSS px, not the
@@ -26,12 +26,12 @@ pub const PX_PER_CELL: f32 = 8.0;
 // ============================================================
 
 fn compose_key<'k>(buf: &'k mut [u8; 32], parts: &[&str]) -> &'k str {
-    let mut len = 0usize;
-    for part in parts {
-        buf[len..len + part.len()].copy_from_slice(part.as_bytes());
-        len += part.len();
-    }
-    std::str::from_utf8(&buf[..len]).expect("concatenation of &str parts is valid UTF-8")
+ let mut len = 0usize;
+ for part in parts {
+ buf[len..len + part.len()].copy_from_slice(part.as_bytes());
+ len += part.len();
+ }
+ std::str::from_utf8(&buf[..len]).expect("concatenation of &str parts is valid UTF-8")
 }
 
 /// Expand `padding` / `padding-{side}` (or `margin` / `margin-{side}`) into an
@@ -41,75 +41,75 @@ fn compose_key<'k>(buf: &'k mut [u8; 32], parts: &[&str]) -> &'k str {
 /// Per-side longhands are layered on top of the shorthand so `padding: 1ch;
 /// padding-top: 2ch;` resolves to top=2, others=1.
 pub(crate) fn parse_edge_sizes(
-    decls: &IndexMap<Arc<str>, Arc<str>>,
-    shorthand: &str,
-    containing_width: usize,
-    font_ctx: FontContext,
-    viewport: Viewport,
+ decls: &IndexMap<Arc<str>, Arc<str>>,
+ shorthand: &str,
+ containing_width: usize,
+ font_ctx: FontContext,
+ viewport: Viewport,
 ) -> EdgeSizes {
-    let shorthand_raw = decls.get(shorthand);
-    let mut edges = parse_shorthand_lengths(
-        shorthand_raw.map(|s| s.as_ref()),
-        containing_width,
-        font_ctx,
-        viewport,
-    );
+ let shorthand_raw = decls.get(shorthand);
+ let mut edges = parse_shorthand_lengths(
+ shorthand_raw.map(|s| s.as_ref()),
+ containing_width,
+ font_ctx,
+ viewport,
+ );
 
-    let mut key = [0u8; 32];
-    let top_raw = decls
-        .get(compose_key(&mut key, &[shorthand, "-top"]))
-        .map(|s| s.as_ref());
-    if let Some(v) = parse_length_token(top_raw, containing_width, font_ctx, viewport) {
-        edges.top = v;
-    }
-    let right_raw = decls
-        .get(compose_key(&mut key, &[shorthand, "-right"]))
-        .map(|s| s.as_ref());
-    if let Some(v) = parse_length_token(right_raw, containing_width, font_ctx, viewport) {
-        edges.right = v;
-    }
-    let bottom_raw = decls
-        .get(compose_key(&mut key, &[shorthand, "-bottom"]))
-        .map(|s| s.as_ref());
-    if let Some(v) = parse_length_token(bottom_raw, containing_width, font_ctx, viewport) {
-        edges.bottom = v;
-    }
-    let left_raw = decls
-        .get(compose_key(&mut key, &[shorthand, "-left"]))
-        .map(|s| s.as_ref());
-    if let Some(v) = parse_length_token(left_raw, containing_width, font_ctx, viewport) {
-        edges.left = v;
-    }
+ let mut key = [0u8; 32];
+ let top_raw = decls
+ .get(compose_key(&mut key, &[shorthand, "-top"]))
+ .map(|s| s.as_ref());
+ if let Some(v) = parse_length_token(top_raw, containing_width, font_ctx, viewport) {
+ edges.top = v;
+ }
+ let right_raw = decls
+ .get(compose_key(&mut key, &[shorthand, "-right"]))
+ .map(|s| s.as_ref());
+ if let Some(v) = parse_length_token(right_raw, containing_width, font_ctx, viewport) {
+ edges.right = v;
+ }
+ let bottom_raw = decls
+ .get(compose_key(&mut key, &[shorthand, "-bottom"]))
+ .map(|s| s.as_ref());
+ if let Some(v) = parse_length_token(bottom_raw, containing_width, font_ctx, viewport) {
+ edges.bottom = v;
+ }
+ let left_raw = decls
+ .get(compose_key(&mut key, &[shorthand, "-left"]))
+ .map(|s| s.as_ref());
+ if let Some(v) = parse_length_token(left_raw, containing_width, font_ctx, viewport) {
+ edges.left = v;
+ }
 
-    edges
+ edges
 }
 
 /// Expand a 1-/2-/3-/4-value CSS shorthand into [`EdgeSizes`].
 ///
-/// Tokenisation is whitespace-driven — we split on runs of whitespace and try
+/// Tokenisation is whitespace-driven we split on runs of whitespace and try
 /// to parse each chunk as a [`Length`]. Unparseable tokens are skipped (treated
 /// as `0`) so a stray `auto` or junk doesn't poison the whole rule.
 fn parse_shorthand_lengths(
-    value: Option<&str>,
-    containing_width: usize,
-    font_ctx: FontContext,
-    viewport: Viewport,
+ value: Option<&str>,
+ containing_width: usize,
+ font_ctx: FontContext,
+ viewport: Viewport,
 ) -> EdgeSizes {
-    let Some(value) = value else {
-        return EdgeSizes::default();
-    };
-    let tokens: Vec<&str> = value.split_whitespace().collect();
-    let parsed: Vec<usize> = tokens
-        .iter()
-        .filter_map(|t| parse_length_token(Some(t), containing_width, font_ctx, viewport))
-        .collect();
-    match parsed.len() {
-        0 => EdgeSizes::default(),
-        1 => EdgeSizes::new(parsed[0], parsed[0], parsed[0], parsed[0]),
-        2 => EdgeSizes::new(parsed[0], parsed[1], parsed[0], parsed[1]),
-        3 => EdgeSizes::new(parsed[0], parsed[1], parsed[2], parsed[1]),
-        _ => EdgeSizes::new(parsed[0], parsed[1], parsed[2], parsed[3]),
-    }
+ let Some(value) = value else {
+ return EdgeSizes::default();
+ };
+ let tokens: Vec<&str> = value.split_whitespace().collect();
+ let parsed: Vec<usize> = tokens
+ .iter()
+ .filter_map(|t| parse_length_token(Some(t), containing_width, font_ctx, viewport))
+ .collect();
+ match parsed.len() {
+ 0 => EdgeSizes::default(),
+ 1 => EdgeSizes::new(parsed[0], parsed[0], parsed[0], parsed[0]),
+ 2 => EdgeSizes::new(parsed[0], parsed[1], parsed[0], parsed[1]),
+ 3 => EdgeSizes::new(parsed[0], parsed[1], parsed[2], parsed[1]),
+ _ => EdgeSizes::new(parsed[0], parsed[1], parsed[2], parsed[3]),
+ }
 }
 
 /// Expand a `margin` shorthand / `margin-{side}` set into per-side `auto`
@@ -119,111 +119,212 @@ fn parse_shorthand_lengths(
 /// ignored by block-flow layout (CSS keeps vertical auto margins at 0); flex
 /// containers may consult it later.
 pub(crate) fn parse_edge_auto(decls: &IndexMap<Arc<str>, Arc<str>>, shorthand: &str) -> EdgeAuto {
-    let mut out = EdgeAuto::default();
-    if let Some(value) = decls.get(shorthand) {
-        let autos: Vec<bool> = value
-            .split_whitespace()
-            .map(|t| t.eq_ignore_ascii_case("auto"))
-            .collect();
-        match autos.as_slice() {
-            [a] => {
-                if *a {
-                    out = EdgeAuto::new(true, true, true, true);
-                }
-            }
-            [a, b] => {
-                if *a {
-                    out.top = true;
-                    out.bottom = true;
-                }
-                if *b {
-                    out.right = true;
-                    out.left = true;
-                }
-            }
-            [a, b, c] => {
-                if *a {
-                    out.top = true;
-                }
-                if *b {
-                    out.right = true;
-                    out.left = true;
-                }
-                if *c {
-                    out.bottom = true;
-                }
-            }
-            [a, b, c, d, ..] => {
-                out.top = *a;
-                out.right = *b;
-                out.bottom = *c;
-                out.left = *d;
-            }
-            [] => {}
-        }
-    }
-    // Per-side longhands win over the shorthand positions.
-    let mut key = [0u8; 32];
-    for (side_name, flag) in [
-        ("top", &mut out.top),
-        ("right", &mut out.right),
-        ("bottom", &mut out.bottom),
-        ("left", &mut out.left),
-    ] {
-        if let Some(raw) = decls.get(compose_key(&mut key, &[shorthand, "-", side_name])) {
-            *flag = raw.eq_ignore_ascii_case("auto");
-        }
-    }
-    out
+ let mut out = EdgeAuto::default();
+ if let Some(value) = decls.get(shorthand) {
+ let autos: Vec<bool> = value
+ .split_whitespace()
+ .map(|t| t.eq_ignore_ascii_case("auto"))
+ .collect();
+ match autos.as_slice() {
+ [a] => {
+ if *a {
+ out = EdgeAuto::new(true, true, true, true);
+ }
+ }
+ [a, b] => {
+ if *a {
+ out.top = true;
+ out.bottom = true;
+ }
+ if *b {
+ out.right = true;
+ out.left = true;
+ }
+ }
+ [a, b, c] => {
+ if *a {
+ out.top = true;
+ }
+ if *b {
+ out.right = true;
+ out.left = true;
+ }
+ if *c {
+ out.bottom = true;
+ }
+ }
+ [a, b, c, d, ..] => {
+ out.top = *a;
+ out.right = *b;
+ out.bottom = *c;
+ out.left = *d;
+ }
+ [] => {}
+ }
+ }
+ // Per-side longhands win over the shorthand positions.
+ let mut key = [0u8; 32];
+ for (side_name, flag) in [
+ ("top", &mut out.top),
+ ("right", &mut out.right),
+ ("bottom", &mut out.bottom),
+ ("left", &mut out.left),
+ ] {
+ if let Some(raw) = decls.get(compose_key(&mut key, &[shorthand, "-", side_name])) {
+ *flag = raw.eq_ignore_ascii_case("auto");
+ }
+ }
+ out
+}
+
+/// Resolve one signed length token to a (possibly negative) cell count.
+///
+/// Returns `None` for `auto` / unparseable input mirrors
+/// [`parse_length_token`] but keeps the sign so negative margins and insets
+/// survive resolution.
+fn parse_signed_length_token(
+ value: Option<&str>,
+ containing_width: usize,
+ font_ctx: FontContext,
+ viewport: Viewport,
+) -> Option<isize> {
+ let raw = value?;
+ match Length::parse_signed(raw)? {
+ Length::Auto => None,
+ len => Some(len.resolve_signed(LengthContext {
+ containing: containing_width,
+ font: font_ctx,
+ viewport,
+ })),
+ }
+}
+
+/// Expand a `margin` shorthand / `margin-{side}` into a signed [`MarginSizes`].
+///
+/// Mirrors [`parse_edge_sizes`] except the left / right edges are resolved
+/// **signed** (negative margins are legal and widen / shift the box), while
+/// the top / bottom edges are clamped to `0` when negative the cursor model
+/// has no overlapping-row painting, so a negative vertical margin can only
+/// reduce spacing to nothing. Per-side longhands (`margin-left`, ) win over
+/// the shorthand; `auto` tokens collapse to `0` (the auto flags are tracked
+/// separately by [`parse_edge_auto`]).
+pub(crate) fn parse_margin_sizes(
+ decls: &IndexMap<Arc<str>, Arc<str>>,
+ containing_width: usize,
+ font_ctx: FontContext,
+ viewport: Viewport,
+) -> MarginSizes {
+ let shorthand_raw = decls.get("margin");
+ let mut edges = parse_shorthand_margins(
+ shorthand_raw.map(|s| s.as_ref()),
+ containing_width,
+ font_ctx,
+ viewport,
+ );
+
+ let mut key = [0u8; 32];
+ // Per-side longhands override the shorthand. `margin-top` / `margin-bottom`
+ // clamp to 0 when negative (no overlapping rows); `margin-left` /
+ // `margin-right` keep their sign.
+ if let Some(raw) = decls.get(compose_key(&mut key, &["margin", "-top"]))
+ && let Some(v) =
+ parse_signed_length_token(Some(raw.as_ref()), containing_width, font_ctx, viewport)
+ {
+ edges.top = v.max(0) as usize;
+ }
+ if let Some(raw) = decls.get(compose_key(&mut key, &["margin", "-right"]))
+ && let Some(v) =
+ parse_signed_length_token(Some(raw.as_ref()), containing_width, font_ctx, viewport)
+ {
+ edges.right = v;
+ }
+ if let Some(raw) = decls.get(compose_key(&mut key, &["margin", "-bottom"]))
+ && let Some(v) =
+ parse_signed_length_token(Some(raw.as_ref()), containing_width, font_ctx, viewport)
+ {
+ edges.bottom = v.max(0) as usize;
+ }
+ if let Some(raw) = decls.get(compose_key(&mut key, &["margin", "-left"]))
+ && let Some(v) =
+ parse_signed_length_token(Some(raw.as_ref()), containing_width, font_ctx, viewport)
+ {
+ edges.left = v;
+ }
+ edges
+}
+
+/// Expand a 1-/2-/3-/4-value `margin` shorthand into a signed [`MarginSizes`],
+/// clamping the vertical (top / bottom) edges to `0` when negative.
+fn parse_shorthand_margins(
+ value: Option<&str>,
+ containing_width: usize,
+ font_ctx: FontContext,
+ viewport: Viewport,
+) -> MarginSizes {
+ let Some(value) = value else {
+ return MarginSizes::default();
+ };
+ let parsed: Vec<isize> = value
+ .split_whitespace()
+ .filter_map(|t| parse_signed_length_token(Some(t), containing_width, font_ctx, viewport))
+ .collect();
+ let v = |x: isize| x.max(0) as usize;
+ match parsed.len() {
+ 0 => MarginSizes::default(),
+ 1 => MarginSizes::new(v(parsed[0]), parsed[0], v(parsed[0]), parsed[0]),
+ 2 => MarginSizes::new(v(parsed[0]), parsed[1], v(parsed[0]), parsed[1]),
+ 3 => MarginSizes::new(v(parsed[0]), parsed[1], v(parsed[2]), parsed[1]),
+ _ => MarginSizes::new(v(parsed[0]), parsed[1], v(parsed[2]), parsed[3]),
+ }
 }
 
 fn resolve_length(
-    length: Length,
-    containing: usize,
-    font: FontContext,
-    viewport: Viewport,
+ length: Length,
+ containing: usize,
+ font: FontContext,
+ viewport: Viewport,
 ) -> usize {
-    length.resolve(LengthContext {
-        containing,
-        font,
-        viewport,
-    })
+ length.resolve(LengthContext {
+ containing,
+ font,
+ viewport,
+ })
 }
 ///
-/// `auto` / missing / unsupported unit → `None` (caller decides what default
+/// `auto` / missing / unsupported unit `None` (caller decides what default
 /// to apply).
 pub(super) fn parse_length_token(
-    value: Option<&str>,
-    containing_width: usize,
-    font_ctx: FontContext,
-    viewport: Viewport,
+ value: Option<&str>,
+ containing_width: usize,
+ font_ctx: FontContext,
+ viewport: Viewport,
 ) -> Option<usize> {
-    let raw = value?;
-    match Length::parse(raw)? {
-        Length::Auto => None,
-        len => Some(resolve_length(len, containing_width, font_ctx, viewport)),
-    }
+ let raw = value?;
+ match Length::parse(raw)? {
+ Length::Auto => None,
+ len => Some(resolve_length(len, containing_width, font_ctx, viewport)),
+ }
 }
 
 /// Parse a `border-width` value to cells. Mirrors [`parse_length_token`]; any
 /// value CSS accepts as a length works (including `thin` / `medium` / `thick`
 /// once added to [`Length::parse`]).
 pub(crate) fn parse_border_width(
-    value: Option<&str>,
-    containing_width: usize,
-    font_ctx: FontContext,
-    viewport: Viewport,
+ value: Option<&str>,
+ containing_width: usize,
+ font_ctx: FontContext,
+ viewport: Viewport,
 ) -> usize {
-    parse_length_token(value, containing_width, font_ctx, viewport).unwrap_or(0)
+ parse_length_token(value, containing_width, font_ctx, viewport).unwrap_or(0)
 }
 
 /// Map a `border-style` keyword to a [`BorderStyle`]. Unknown / missing
 /// defaults to [`BorderStyle::None`].
 pub(crate) fn parse_border_style(value: Option<&str>) -> BorderStyle {
-    let Some(value) = value else {
-        return BorderStyle::None;
-    };
-    BorderStyle::parse(value)
+ let Some(value) = value else {
+ return BorderStyle::None;
+ };
+ BorderStyle::parse(value)
 }
 
 /// Build one [`Border`] edge from `border-{side}` (priority), falling back to
@@ -231,30 +332,30 @@ pub(crate) fn parse_border_style(value: Option<&str>) -> BorderStyle {
 /// `border-width`/`-style`/`-color` defaults.
 ///
 /// The `fallback` argument already encodes the universal defaults resolved by
-/// the caller — passing it down means we don't re-parse the same map entries
+/// the caller passing it down means we don't re-parse the same map entries
 /// four times.
 pub(crate) fn parse_border_side(
-    side_raw: Option<&Arc<str>>,
-    shorthand_raw: Option<&Arc<str>>,
-    fallback: Border,
-    containing_width: usize,
-    font_ctx: FontContext,
-    viewport: Viewport,
+ side_raw: Option<&Arc<str>>,
+ shorthand_raw: Option<&Arc<str>>,
+ fallback: Border,
+ containing_width: usize,
+ font_ctx: FontContext,
+ viewport: Viewport,
 ) -> Border {
-    if let Some(value) = side_raw
-        && let Some(parsed) = parse_border_shorthand(value, containing_width, font_ctx, viewport)
-    {
-        return parsed;
+ if let Some(value) = side_raw
+ && let Some(parsed) = parse_border_shorthand(value, containing_width, font_ctx, viewport)
+ {
+ return parsed;
 
-        // `border-top` was present but unparseable — fall through to next
-        // priority rather than dropping the side entirely.
-    }
-    if let Some(value) = shorthand_raw
-        && let Some(parsed) = parse_border_shorthand(value, containing_width, font_ctx, viewport)
-    {
-        return parsed;
-    }
-    fallback
+ // `border-top` was present but unparseable fall through to next
+ // priority rather than dropping the side entirely.
+ }
+ if let Some(value) = shorthand_raw
+ && let Some(parsed) = parse_border_shorthand(value, containing_width, font_ctx, viewport)
+ {
+ return parsed;
+ }
+ fallback
 }
 
 /// Overlay the per-side `border-{side}-{prop}` longhands on top of an
@@ -264,31 +365,31 @@ pub(crate) fn parse_border_side(
 /// An unparseable longhand (or one absent from the declaration map) leaves
 /// that property untouched, so a bad value never wipes a valid shorthand.
 pub(crate) fn merge_border_longhand(
-    side: Border,
-    decls: &IndexMap<Arc<str>, Arc<str>>,
-    side_name: &str,
-    containing_width: usize,
-    font_ctx: FontContext,
-    viewport: Viewport,
+ side: Border,
+ decls: &IndexMap<Arc<str>, Arc<str>>,
+ side_name: &str,
+ containing_width: usize,
+ font_ctx: FontContext,
+ viewport: Viewport,
 ) -> Border {
-    let mut side = side;
-    let mut key = [0u8; 32];
-    if let Some(raw) =
-        decls.get(compose_key(&mut key, &["border-", side_name, "-width"]))
-            && let Some(w) =
-                parse_length_token(Some(raw.as_ref()), containing_width, font_ctx, viewport)
-    {
-        side.width = w;
-    }
-    if let Some(raw) = decls.get(compose_key(&mut key, &["border-", side_name, "-style"])) {
-        side.style = parse_border_style(Some(raw.as_ref()));
-    }
-    if let Some(raw) = decls.get(compose_key(&mut key, &["border-", side_name, "-color"]))
-        && let Some(c) = parse_color_str(raw)
-    {
-        side.color = Some(c);
-    }
-    side
+ let mut side = side;
+ let mut key = [0u8; 32];
+ if let Some(raw) =
+ decls.get(compose_key(&mut key, &["border-", side_name, "-width"]))
+ && let Some(w) =
+ parse_length_token(Some(raw.as_ref()), containing_width, font_ctx, viewport)
+ {
+ side.width = w;
+ }
+ if let Some(raw) = decls.get(compose_key(&mut key, &["border-", side_name, "-style"])) {
+ side.style = parse_border_style(Some(raw.as_ref()));
+ }
+ if let Some(raw) = decls.get(compose_key(&mut key, &["border-", side_name, "-color"]))
+ && let Some(c) = parse_color_str(raw)
+ {
+ side.color = Some(c);
+ }
+ side
 }
 
 /// Parse a `border` shorthand declaration.
@@ -297,91 +398,91 @@ pub(crate) fn merge_border_longhand(
 /// optional. We tokenise on whitespace and classify each token; tokens we
 /// can't classify fall through (treated as missing) so a typo in one piece
 /// doesn't drop the whole border. Functional colors (`rgb(255, 0, 0)`,
-/// `hsl(120 50% 50%)`, …) are kept intact as one token — splitting them on
+/// `hsl(120 50% 50%)`, are kept intact as one token splitting them on
 /// internal spaces / commas would break the color.
 pub(crate) fn parse_border_shorthand(
-    value: &str,
-    containing_width: usize,
-    font_ctx: FontContext,
-    viewport: Viewport,
+ value: &str,
+ containing_width: usize,
+ font_ctx: FontContext,
+ viewport: Viewport,
 ) -> Option<Border> {
-    let mut width: Option<usize> = None;
-    let mut style: Option<BorderStyle> = None;
-    let mut color: Option<Color> = None;
+ let mut width: Option<usize> = None;
+ let mut style: Option<BorderStyle> = None;
+ let mut color: Option<Color> = None;
 
-    for token in split_border_tokens(value) {
-        if let Some(w) =
-            parse_length_token(Some(token.as_str()), containing_width, font_ctx, viewport)
-        {
-            width = Some(w);
-            continue;
-        }
-        let lower = token.to_ascii_lowercase();
-        if matches!(
-            lower.as_str(),
-            "solid"
-                | "dashed"
-                | "dotted"
-                | "double"
-                | "none"
-                | "hidden"
-                | "groove"
-                | "ridge"
-                | "inset"
-                | "outset"
-        ) {
-            style = Some(BorderStyle::parse(&token));
-            continue;
-        }
-        if let Some(c) = parse_color_str(&token) {
-            color = Some(c);
-            continue;
-        }
-        // Unrecognised token — ignore (don't fail the whole rule).
-    }
+ for token in split_border_tokens(value) {
+ if let Some(w) =
+ parse_length_token(Some(token.as_str()), containing_width, font_ctx, viewport)
+ {
+ width = Some(w);
+ continue;
+ }
+ let lower = token.to_ascii_lowercase();
+ if matches!(
+ lower.as_str(),
+ "solid"
+ | "dashed"
+ | "dotted"
+ | "double"
+ | "none"
+ | "hidden"
+ | "groove"
+ | "ridge"
+ | "inset"
+ | "outset"
+ ) {
+ style = Some(BorderStyle::parse(&token));
+ continue;
+ }
+ if let Some(c) = parse_color_str(&token) {
+ color = Some(c);
+ continue;
+ }
+ // Unrecognised token ignore (don't fail the whole rule).
+ }
 
-    // At least width or style must be present; otherwise the value wasn't a
-    // border shorthand (e.g. someone wrote `border: inherit;`).
-    if width.is_none() && style.is_none() && color.is_none() {
-        return None;
-    }
+ // At least width or style must be present; otherwise the value wasn't a
+ // border shorthand (e.g. someone wrote `border: inherit;`).
+ if width.is_none() && style.is_none() && color.is_none() {
+ return None;
+ }
 
-    Some(Border {
-        width: width.unwrap_or(0),
-        style: style.unwrap_or(BorderStyle::None),
-        color,
-    })
+ Some(Border {
+ width: width.unwrap_or(0),
+ style: style.unwrap_or(BorderStyle::None),
+ color,
+ })
 }
 
 /// Split a border-shorthand value on whitespace, keeping any parenthesised
-/// functional colors (`rgb(…)` / `hsl(…)` / …) as single tokens so their
+/// functional colors (`rgb( ` / `hsl( ` / as single tokens so their
 /// internal spaces and commas survive.
 fn split_border_tokens(value: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let mut cur = String::new();
-    let mut depth = 0usize;
-    for c in value.chars() {
-        match c {
-            '(' => {
-                depth = depth.saturating_add(1);
-                cur.push(c);
-            }
-            ')' => {
-                depth = depth.saturating_sub(1);
-                cur.push(c);
-            }
-            c if c.is_whitespace() && depth == 0 => {
-                if !cur.is_empty() {
-                    out.push(std::mem::take(&mut cur));
-                }
-            }
-            c => cur.push(c),
-        }
-    }
-    if !cur.is_empty() {
-        out.push(cur);
-    }
-    out
+ let mut out: Vec<String> = Vec::new();
+ let mut cur = String::new();
+ let mut depth = 0usize;
+ for c in value.chars() {
+ match c {
+ '(' => {
+ depth = depth.saturating_add(1);
+ cur.push(c);
+ }
+ ')' => {
+ depth = depth.saturating_sub(1);
+ cur.push(c);
+ }
+ c if c.is_whitespace() && depth == 0 => {
+ if !cur.is_empty() {
+ out.push(std::mem::take(&mut cur));
+ }
+ }
+ c => cur.push(c),
+ }
+ }
+ if !cur.is_empty() {
+ out.push(cur);
+ }
+ out
 }
 
 /// Font-size context propagated through the layout tree.
@@ -394,8 +495,8 @@ fn split_border_tokens(value: &str) -> Vec<String> {
 /// [`Length::resolve`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FontContext {
-    pub font_size_cells: usize,
-    pub root_font_size_cells: usize,
+ pub font_size_cells: usize,
+ pub root_font_size_cells: usize,
 }
 
 /// Terminal viewport used by viewport-relative CSS lengths.
@@ -405,8 +506,8 @@ pub struct FontContext {
 /// the viewport separately makes that explicit at every call site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Viewport {
-    pub cols: usize,
-    pub rows: usize,
+ pub cols: usize,
+ pub rows: usize,
 }
 
 /// Inputs required to resolve one CSS length into terminal cells.
@@ -418,25 +519,25 @@ pub struct Viewport {
 /// em / rem base sizes; `viewport` supplies the `vw` / `vh` anchor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LengthContext {
-    pub containing: usize,
-    pub font: FontContext,
-    pub viewport: Viewport,
+ pub containing: usize,
+ pub font: FontContext,
+ pub viewport: Viewport,
 }
 
 impl FontContext {
-    pub fn root() -> Self {
-        Self {
-            font_size_cells: 1,
-            root_font_size_cells: 1,
-        }
-    }
+ pub fn root() -> Self {
+ Self {
+ font_size_cells: 1,
+ root_font_size_cells: 1,
+ }
+ }
 
-    pub fn child(self, child_cells: usize) -> Self {
-        Self {
-            font_size_cells: child_cells,
-            root_font_size_cells: self.root_font_size_cells,
-        }
-    }
+ pub fn child(self, child_cells: usize) -> Self {
+ Self {
+ font_size_cells: child_cells,
+ root_font_size_cells: self.root_font_size_cells,
+ }
+ }
 }
 
 /// A typed CSS length value resolved against the terminal's monospace grid.
@@ -452,60 +553,62 @@ impl FontContext {
 /// border / margin / inset / flex-basis / ...) shares the same scale.
 ///
 /// Accepted forms:
-/// - `auto`                         → [`Length::Auto`]   (caller decides what to fill)
-/// - `40px`, bare `40`              → [`Length::Px(n)`]   (÷ `PX_PER_CELL` at resolve)
-/// - `50%`                          → [`Length::Pct(p)`] (raw 0–100, divided at resolve)
-/// - `2em`, `1.5em`                 → [`Length::Em(n)`]
-/// - `2rem`, `1.5rem`               → [`Length::Rem(n)`]
-/// - `12ch`                         → [`Length::Ch(n)`] (1ch == one cell)
-/// - `50vw`                         → [`Length::Vw(n)`]  (1vw = viewport_cols / 100)
-/// - `50vh`                         → [`Length::Vh(n)`]  (1vh = viewport_rows / 100)
+/// - `auto` [`Length::Auto`] (caller decides what to fill)
+/// - `40px`, bare `40` [`Length::Px(n)`] ( `PX_PER_CELL` at resolve)
+/// - `50%` [`Length::Pct(p)`] (raw 0 00, divided at resolve)
+/// - `2em`, `1.5em` [`Length::Em(n)`]
+/// - `2rem`, `1.5rem` [`Length::Rem(n)`]
+/// - `12ch` [`Length::Ch(n)`] (1ch == one cell)
+/// - `50vw` [`Length::Vw(n)`] (1vw = viewport_cols / 100)
+/// - `50vh` [`Length::Vh(n)`] (1vh = viewport_rows / 100)
 ///
 /// Rejected (returns `None` from [`Length::parse`]):
-/// - `vmin`, `vmax` — derive from `vw` / `vh` after `Layout` has viewport info;
-///   not yet wired through.
-/// - `pt`, `cm`, `mm`, `in`, `pc` — no DPI. Use `px` (converted via
-///   [`PX_PER_CELL`]).
-/// - Negative or signed (`+`, `-`) values — CSS forbids these for `width`.
+/// - `vmin`, `vmax` derive from `vw` / `vh` after `Layout` has viewport info;
+/// not yet wired through.
+/// - `pt`, `cm`, `mm`, `in`, `pc` no DPI. Use `px` (converted via
+/// [`PX_PER_CELL`]).
+/// - Negative or signed (`+`, `-`) values CSS forbids these for `width` /
+/// `height`; the signed properties (`margin-*`, the positioning insets) use
+/// [`Length::parse_signed`], which accepts them.
 /// - Trailing junk after the value.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Length {
-    /// `auto` — defer to the containing block.
-    Auto,
-    /// Absolute CSS pixel length (including bare numbers, which CSS treats
-    /// as px). Converted to terminal cells at resolve time by dividing by
-    /// [`PX_PER_CELL`]. (The engine's own tests write `Nch` when they mean
-    /// "N cells".)
-    Px(f32),
-    /// Percentage 0..=100 of the containing block (CSS `50%`).
-    Pct(f32),
-    /// Em multiplier (CSS `2em`). 1em == 1 cell on the terminal grid.
-    Em(f32),
-    /// Root-em multiplier (CSS `2rem`). Resolves against the root's font-size
-    /// (`root_font_size_cells`), which is 1 cell by default and grows when the
-    /// document root sets an explicit `font-size` rule — unlike `em`, which
-    /// resolves against the element's own font-size.
-    Rem(f32),
-    /// Character-width multiplier (CSS `12ch`). In a browser `1ch` is the
-    /// advance width of the `0` glyph — exactly one cell on the terminal's
-    /// monospace grid, so `1ch == 1 cell`. Unlike `em`, this stays aligned
-    /// with character counts regardless of font-size, which makes it the
-    /// unit of choice for widths measured in characters (the default for
-    /// terminal layout).
-    Ch(f32),
-    /// Viewport-width multiplier (CSS `50vw`).
-    ///
-    /// Resolves to `round(n * viewport_cols / 100)` cells, min 1.
-    /// `vw` always anchors to the **viewport columns** (the terminal
-    /// width), regardless of which CSS property it appears in — so
-    /// `height: 50vw` mixes axes deliberately and is the caller's
-    /// choice; `Length::resolve` does not need to know the axis.
-    Vw(f32),
-    /// Viewport-height multiplier (CSS `50vh`).
-    ///
-    /// Resolves to `round(n * viewport_rows / 100)` cells, min 1.
-    /// Mirrors [`Length::Vw`] on the row axis.
-    Vh(f32),
+ /// `auto` defer to the containing block.
+ Auto,
+ /// Absolute CSS pixel length (including bare numbers, which CSS treats
+ /// as px). Converted to terminal cells at resolve time by dividing by
+ /// [`PX_PER_CELL`]. (The engine's own tests write `Nch` when they mean
+ /// "N cells".)
+ Px(f32),
+ /// Percentage 0..=100 of the containing block (CSS `50%`).
+ Pct(f32),
+ /// Em multiplier (CSS `2em`). 1em == 1 cell on the terminal grid.
+ Em(f32),
+ /// Root-em multiplier (CSS `2rem`). Resolves against the root's font-size
+ /// (`root_font_size_cells`), which is 1 cell by default and grows when the
+ /// document root sets an explicit `font-size` rule unlike `em`, which
+ /// resolves against the element's own font-size.
+ Rem(f32),
+ /// Character-width multiplier (CSS `12ch`). In a browser `1ch` is the
+ /// advance width of the `0` glyph exactly one cell on the terminal's
+ /// monospace grid, so `1ch == 1 cell`. Unlike `em`, this stays aligned
+ /// with character counts regardless of font-size, which makes it the
+ /// unit of choice for widths measured in characters (the default for
+ /// terminal layout).
+ Ch(f32),
+ /// Viewport-width multiplier (CSS `50vw`).
+ ///
+ /// Resolves to `round(n * viewport_cols / 100)` cells, min 1.
+ /// `vw` always anchors to the **viewport columns** (the terminal
+ /// width), regardless of which CSS property it appears in so
+ /// `height: 50vw` mixes axes deliberately and is the caller's
+ /// choice; `Length::resolve` does not need to know the axis.
+ Vw(f32),
+ /// Viewport-height multiplier (CSS `50vh`).
+ ///
+ /// Resolves to `round(n * viewport_rows / 100)` cells, min 1.
+ /// Mirrors [`Length::Vw`] on the row axis.
+ Vh(f32),
 }
 
 /// Owned mirror of the cssparser [`Token`] variants we accept. Lets
@@ -513,161 +616,214 @@ pub enum Length {
 /// trailing junk with `is_exhausted()`.
 #[derive(Debug, Clone, Copy)]
 enum PreLength {
-    Px(f32),
-    Pct(f32),
-    Em(f32),
-    Rem(f32),
-    Ch(f32),
-    Vw(f32),
-    Vh(f32),
+ Px(f32),
+ Pct(f32),
+ Em(f32),
+ Rem(f32),
+ Ch(f32),
+ Vw(f32),
+ Vh(f32),
 }
 
 impl Length {
-    /// Parse a CSS length token into a typed [`Length`].
-    ///
-    /// Returns `None` for unsupported units (`vw`/`vh`/`pt`/`cm`/...), signed
-    /// values, trailing garbage, or empty input. The literal `auto` (any case)
-    /// always returns [`Length::Auto`].
-    pub fn parse(s: &str) -> Option<Length> {
-        let s = s.trim();
-        if s.eq_ignore_ascii_case("auto") {
-            return Some(Length::Auto);
-        }
-        // cssparser's tokenizer handles `40`, `40.5`, `40px`, `1.5em`, `50%`,
-        // escapes, and unicode digits uniformly. We pin the lifetime with a
-        // named ParserInput binding — see the warning in cssparser's docs:
-        // a temporary `ParserInput::new(...)` would be dropped before the
-        // parser finished reading.
-        let mut input_buf = ParserInput::new(s);
-        let mut input = CssParser::new(&mut input_buf);
-        // Convert the borrowed `&Token` into an owned `PreLength` so we can
-        // later call `input.is_exhausted()` to check for trailing junk.
-        // Keeping the `&Token` alive would borrow `input` mutably and conflict
-        // with that second call.
-        let pre = match input.next().ok()? {
-            Token::Number {
-                value,
-                int_value,
-                has_sign: false,
-                ..
-            } => PreLength::Px(int_value.map(|i| i as f32).unwrap_or(*value)),
-            Token::Dimension {
-                value,
-                int_value,
-                has_sign: false,
-                unit,
-                ..
-            } => {
-                let n = int_value.map(|i| i as f32).unwrap_or(*value);
-                match unit.to_ascii_lowercase().as_str() {
-                    // CSS px: kept as a distinct `Px` variant and converted to
-                    // cells at resolve time by dividing by PX_PER_CELL (8px
-                    // per cell). parse only records the raw multiplier; the
-                    // ratio lives in one edit point.
-                    "px" => PreLength::Px(n),
-                    "em" => PreLength::Em(n),
-                    "rem" => PreLength::Rem(n),
-                    // `ch` is the CSS character-width unit: 1ch is the `0`
-                    // glyph's advance, exactly one cell on the monospace
-                    // grid. It resolves to the raw value (no font context).
-                    "ch" => PreLength::Ch(n),
-                    // 1vw = viewport_cols / 100, 1vh = viewport_rows / 100.
-                    // The actual viewport size is supplied at `Length::resolve`
-                    // time — the parser only carries the raw multiplier.
-                    "vw" => PreLength::Vw(n),
-                    "vh" => PreLength::Vh(n),
-                    // vmin / vmax / pt / cm / mm / in / pc / ...
-                    _ => return None,
-                }
-            }
-            Token::Percentage {
-                unit_value,
-                has_sign: false,
-                ..
-            } => {
-                // cssparser divides by 100 for us (`50%` → `0.5`). Multiply back
-                // so the stored value matches what the user wrote.
-                let percent = unit_value * 100.0;
-                let nearest_integer = percent.round();
-                let percent = if (percent - nearest_integer).abs() < 0.0001 {
-                    nearest_integer
-                } else {
-                    percent
-                };
-                PreLength::Pct(percent)
-            }
-            _ => return None,
-        };
-        // Reject any non-whitespace junk after the value token.
-        if !input.is_exhausted() {
-            return None;
-        }
-        Some(match pre {
-            PreLength::Px(n) => Length::Px(n),
-            PreLength::Pct(p) => Length::Pct(p),
-            PreLength::Em(n) => Length::Em(n),
-            PreLength::Rem(n) => Length::Rem(n),
-            PreLength::Ch(n) => Length::Ch(n),
-            PreLength::Vw(n) => Length::Vw(n),
-            PreLength::Vh(n) => Length::Vh(n),
-        })
-    }
+ /// Parse a CSS length token into a typed [`Length`].
+ ///
+ /// Returns `None` for unsupported units (`vw`/`vh`/`pt`/`cm`/...), signed
+ /// values, trailing garbage, or empty input. The literal `auto` (any case)
+ /// always returns [`Length::Auto`]. Use [`parse_signed`](Self::parse_signed)
+ /// for the properties where a sign is legal (`margin-*`, the positioning
+ /// insets `top`/`right`/`bottom`/`left`).
+ pub fn parse(s: &str) -> Option<Length> {
+ Self::parse_length_shared(s, false)
+ }
 
-    /// Resolve the length into a concrete column count given the containing
-    /// block's width in cells and the active length-resolution context.
-    ///
-    /// This is the single conversion layer every CSS length flows through:
-    /// absolute units (`px`, bare numbers, `em`, `rem`) convert to px and
-    /// divide by [`PX_PER_CELL`]; `ch` maps one-to-one to cells; relative
-    /// units keep their ratio. Layout code never re-implements this math, so
-    /// a change to the per-cell px ratio needs exactly one edit point.
-    ///
-    /// - `Auto`              → `containing` (fill the container)
-    /// - `Px(n)`             → round(n / PX_PER_CELL)
-    /// - `Pct(p)`            → round(containing * p / 100), min 1
-    /// - `Em(n)`             → round(n * context.font.font_size_cells), clamped at 0
-    /// - `Rem(n)`            → round(n * context.font.root_font_size_cells), clamped at 0
-    /// - `Vw(n)`             → round(n * context.viewport.cols / 100), min 1
-    /// - `Vh(n)`             → round(n * context.viewport.rows / 100), min 1
-    ///
-    /// `em` resolves against the **current element's** effective font-size
-    /// (in cells, itself derived from the same conversion layer — so
-    /// `font-size: 16px` yields a 2-cell font and `1em` == 2 cells, exactly
-    /// like a browser at 8px/cell); `rem` resolves against the **root's**
-    /// font-size. On a terminal the root font-size is 1 cell by default — it
-    /// grows when the document root sets an explicit `font-size` rule.
-    ///
-    /// `vw` / `vh` anchor to the terminal viewport (columns / rows), not to
-    /// the containing block. They are axis-independent: `vw` always uses
-    /// `viewport_cols`, `vh` always uses `viewport_rows`, regardless of
-    /// which CSS property they appear in.
-    ///
-    /// Floats round **away from zero** (Rust's `f32::round`), so `0.5em` at
-    /// font-size=2 yields 1 cell and `2.5em` at font-size=2 yields 5 cells —
-    /// never zero, never half.
-    pub fn resolve(&self, context: LengthContext) -> usize {
-        match self {
-            Length::Auto => context.containing,
-            &Length::Px(px) => (px / PX_PER_CELL).round().max(0.0) as usize,
-            &Length::Pct(p) => {
-                let raw = (context.containing as f32 * p / 100.0).round();
-                (raw as usize).max(1)
-            }
-            &Length::Em(n) => (n * context.font.font_size_cells as f32).round().max(0.0) as usize,
-            &Length::Rem(n) => (n * context.font.root_font_size_cells as f32)
-                .round()
-                .max(0.0) as usize,
-            // `ch` is font-size-independent by definition: one cell per `0`
-            // glyph, so the raw multiplier is the cell count.
-            &Length::Ch(n) => n.round().max(0.0) as usize,
-            &Length::Vw(n) => {
-                let raw = (n * context.viewport.cols as f32 / 100.0).round();
-                (raw as usize).max(1)
-            }
-            &Length::Vh(n) => {
-                let raw = (n * context.viewport.rows as f32 / 100.0).round();
-                (raw as usize).max(1)
-            }
-        }
-    }
+ /// Parse a CSS length token, allowing a leading sign (`-` / `+`).
+ ///
+ /// CSS forbids signed values for `width` / `height` (hence [`Length::parse`]
+ /// rejects them) but permits them for `margin-*` and the positioning
+ /// insets `top` / `right` / `bottom` / `left`. The sign is carried by the
+ /// stored magnitude (cssparser's `Token::Number` `value` is already
+ /// signed); resolve it with [`resolve_signed`](Self::resolve_signed) so a
+ /// negative length yields a negative cell count instead of clamping to 0.
+ pub fn parse_signed(s: &str) -> Option<Length> {
+ Self::parse_length_shared(s, true)
+ }
+
+ /// Resolve the length into an integer cell count that may be negative.
+ ///
+ /// Mirrors [`resolve`](Self::resolve) but returns `isize` (no non-negative
+ /// clamp) so negative margins / insets keep their sign: `-2ch`, `-10px`,
+ /// `-50%` and negative `em` / `rem` all resolve negative. `Auto` maps to
+ /// the containing size (callers filter it out before calling). Positive
+ /// values resolve to exactly the same cell count as [`resolve`](Self::resolve).
+ pub fn resolve_signed(&self, context: LengthContext) -> isize {
+ match self {
+ Length::Auto => context.containing as isize,
+ &Length::Px(px) => (px / PX_PER_CELL).round() as isize,
+ &Length::Pct(p) => (context.containing as f32 * p / 100.0).round() as isize,
+ &Length::Em(n) => (n * context.font.font_size_cells as f32).round() as isize,
+ &Length::Rem(n) => (n * context.font.root_font_size_cells as f32).round() as isize,
+ // `ch` is font-size-independent by definition: one cell per `0`
+ // glyph, so the raw multiplier is the cell count.
+ &Length::Ch(n) => n.round() as isize,
+ &Length::Vw(n) => (n * context.viewport.cols as f32 / 100.0).round() as isize,
+ &Length::Vh(n) => (n * context.viewport.rows as f32 / 100.0).round() as isize,
+ }
+ }
+
+ /// Shared parser behind [`parse`](Self::parse) /
+ /// [`parse_signed`](Self::parse_signed); `allow_signed` flips whether a
+ /// leading `-` / `+` on the value token is accepted.
+ fn parse_length_shared(s: &str, allow_signed: bool) -> Option<Length> {
+ let s = s.trim();
+ if s.eq_ignore_ascii_case("auto") {
+ return Some(Length::Auto);
+ }
+ // cssparser's tokenizer handles `40`, `40.5`, `40px`, `1.5em`, `50%`,
+ // escapes, and unicode digits uniformly. We pin the lifetime with a
+ // named ParserInput binding see the warning in cssparser's docs:
+ // a temporary `ParserInput::new(...)` would be dropped before the
+ // parser finished reading.
+ let mut input_buf = ParserInput::new(s);
+ let mut input = CssParser::new(&mut input_buf);
+ // Convert the borrowed `&Token` into an owned `PreLength` so we can
+ // later call `input.is_exhausted()` to check for trailing junk.
+ // Keeping the `&Token` alive would borrow `input` mutably and conflict
+ // with that second call.
+ let pre = match input.next().ok()? {
+ Token::Number {
+ value,
+ int_value,
+ has_sign,
+ ..
+ } => {
+ if *has_sign && !allow_signed {
+ return None;
+ }
+ PreLength::Px(int_value.map(|i| i as f32).unwrap_or(*value))
+ }
+ Token::Dimension {
+ value,
+ int_value,
+ has_sign,
+ unit,
+ ..
+ } => {
+ if *has_sign && !allow_signed {
+ return None;
+ }
+ let n = int_value.map(|i| i as f32).unwrap_or(*value);
+ match unit.to_ascii_lowercase().as_str() {
+ // CSS px: kept as a distinct `Px` variant and converted to
+ // cells at resolve time by dividing by PX_PER_CELL (8px
+ // per cell). parse only records the raw multiplier; the
+ // ratio lives in one edit point.
+ "px" => PreLength::Px(n),
+ "em" => PreLength::Em(n),
+ "rem" => PreLength::Rem(n),
+ // `ch` is the CSS character-width unit: 1ch is the `0`
+ // glyph's advance, exactly one cell on the monospace
+ // grid. It resolves to the raw value (no font context).
+ "ch" => PreLength::Ch(n),
+ // 1vw = viewport_cols / 100, 1vh = viewport_rows / 100.
+ // The actual viewport size is supplied at `Length::resolve`
+ // time the parser only carries the raw multiplier.
+ "vw" => PreLength::Vw(n),
+ "vh" => PreLength::Vh(n),
+ // vmin / vmax / pt / cm / mm / in / pc / ...
+ _ => return None,
+ }
+ }
+ Token::Percentage {
+ unit_value,
+ has_sign,
+ ..
+ } => {
+ if *has_sign && !allow_signed {
+ return None;
+ }
+ // cssparser divides by 100 for us (`50%` `0.5`). Multiply back
+ // so the stored value matches what the user wrote.
+ let percent = unit_value * 100.0;
+ let nearest_integer = percent.round();
+ let percent = if (percent - nearest_integer).abs() < 0.0001 {
+ nearest_integer
+ } else {
+ percent
+ };
+ PreLength::Pct(percent)
+ }
+ _ => return None,
+ };
+ // Reject any non-whitespace junk after the value token.
+ if !input.is_exhausted() {
+ return None;
+ }
+ Some(match pre {
+ PreLength::Px(n) => Length::Px(n),
+ PreLength::Pct(p) => Length::Pct(p),
+ PreLength::Em(n) => Length::Em(n),
+ PreLength::Rem(n) => Length::Rem(n),
+ PreLength::Ch(n) => Length::Ch(n),
+ PreLength::Vw(n) => Length::Vw(n),
+ PreLength::Vh(n) => Length::Vh(n),
+ })
+ }
+
+ /// Resolve the length into a concrete column count given the containing
+ /// block's width in cells and the active length-resolution context.
+ ///
+ /// This is the single conversion layer every CSS length flows through:
+ /// absolute units (`px`, bare numbers, `em`, `rem`) convert to px and
+ /// divide by [`PX_PER_CELL`]; `ch` maps one-to-one to cells; relative
+ /// units keep their ratio. Layout code never re-implements this math, so
+ /// a change to the per-cell px ratio needs exactly one edit point.
+ ///
+ /// - `Auto` `containing` (fill the container)
+ /// - `Px(n)` round(n / PX_PER_CELL)
+ /// - `Pct(p)` round(containing * p / 100), min 1
+ /// - `Em(n)` round(n * context.font.font_size_cells), clamped at 0
+ /// - `Rem(n)` round(n * context.font.root_font_size_cells), clamped at 0
+ /// - `Vw(n)` round(n * context.viewport.cols / 100), min 1
+ /// - `Vh(n)` round(n * context.viewport.rows / 100), min 1
+ ///
+ /// `em` resolves against the **current element's** effective font-size
+ /// (in cells, itself derived from the same conversion layer so
+ /// `font-size: 16px` yields a 2-cell font and `1em` == 2 cells, exactly
+ /// like a browser at 8px/cell); `rem` resolves against the **root's**
+ /// font-size. On a terminal the root font-size is 1 cell by default it
+ /// grows when the document root sets an explicit `font-size` rule.
+ ///
+ /// `vw` / `vh` anchor to the terminal viewport (columns / rows), not to
+ /// the containing block. They are axis-independent: `vw` always uses
+ /// `viewport_cols`, `vh` always uses `viewport_rows`, regardless of
+ /// which CSS property they appear in.
+ ///
+ /// Floats round **away from zero** (Rust's `f32::round`), so `0.5em` at
+ /// font-size=2 yields 1 cell and `2.5em` at font-size=2 yields 5 cells /// never zero, never half.
+ pub fn resolve(&self, context: LengthContext) -> usize {
+ match self {
+ Length::Auto => context.containing,
+ &Length::Px(px) => (px / PX_PER_CELL).round().max(0.0) as usize,
+ &Length::Pct(p) => {
+ let raw = (context.containing as f32 * p / 100.0).round();
+ (raw as usize).max(1)
+ }
+ &Length::Em(n) => (n * context.font.font_size_cells as f32).round().max(0.0) as usize,
+ &Length::Rem(n) => (n * context.font.root_font_size_cells as f32)
+ .round()
+ .max(0.0) as usize,
+ // `ch` is font-size-independent by definition: one cell per `0`
+ // glyph, so the raw multiplier is the cell count.
+ &Length::Ch(n) => n.round().max(0.0) as usize,
+ &Length::Vw(n) => {
+ let raw = (n * context.viewport.cols as f32 / 100.0).round();
+ (raw as usize).max(1)
+ }
+ &Length::Vh(n) => {
+ let raw = (n * context.viewport.rows as f32 / 100.0).round();
+ (raw as usize).max(1)
+ }
+ }
+ }
 }

@@ -145,23 +145,19 @@ fn resolve_positioned_box(b: &mut LayoutBox, pos_ancestor: Option<Rect>, viewpor
 fn reposition(b: &mut LayoutBox, cb: Rect) {
     let inset = b.positioning.inset;
     let new_x = match inset.left {
-        Some(l) => cb.x.saturating_add(l),
+        Some(l) => (cb.x as i64 + l as i64).max(0) as usize,
         None => match inset.right {
-            Some(r) => {
-                cb.x.saturating_add(cb.width)
-                    .saturating_sub(b.rect.width)
-                    .saturating_sub(r)
-            }
+            Some(r) => (cb.x as i64 + cb.width as i64 - b.rect.width as i64 - r as i64).max(0)
+                as usize,
             None => cb.x,
         },
     };
     let new_y = match inset.top {
-        Some(t) => cb.y.saturating_add(t),
+        Some(t) => (cb.y as i64 + t as i64).max(0) as usize,
         None => match inset.bottom {
-            Some(bot) => {
-                cb.y.saturating_add(cb.height)
-                    .saturating_sub(b.rect.height)
-                    .saturating_sub(bot)
+            Some(boot) => {
+                (cb.y as i64 + cb.height as i64 - b.rect.height as i64 - boot as i64).max(0)
+                    as usize
             }
             None => cb.y,
         },
@@ -187,12 +183,9 @@ fn stick(b: &mut LayoutBox, viewport: Rect) {
     let h = b.rect.height;
     let top_inset = b.positioning.inset.top.unwrap_or(0);
     let bottom_inset = b.positioning.inset.bottom.unwrap_or(0);
-    let min_y = viewport.y.saturating_add(top_inset);
-    let max_y = viewport
-        .y
-        .saturating_add(viewport.height)
-        .saturating_sub(bottom_inset)
-        .saturating_sub(h);
+    let min_y = (viewport.y as i64 + top_inset as i64).max(0) as usize;
+    let max_y = (viewport.y as i64 + viewport.height as i64 - bottom_inset as i64 - h as i64)
+        .max(0) as usize;
     let target_y = if max_y < min_y {
         // The box is taller than the available viewport — anchor at the top.
         min_y

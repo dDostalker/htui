@@ -209,17 +209,17 @@ fn control_placement(
     // control to the opposite side (CSS 10.3.3 for replaced elements).
     let margin = edges.margin;
     let auto = css.get_margin_auto();
-    let free = containing
-        .width
-        .saturating_sub(block_width)
-        .saturating_sub(margin.left)
-        .saturating_sub(margin.right);
+    let free = (containing.width as i64
+        - block_width as i64
+        - margin.left as i64
+        - margin.right as i64)
+        .max(0) as usize;
     let x = if auto.left && auto.right {
-        containing.x + margin.left + free / 2
+        (containing.x as i64 + margin.left as i64 + (free / 2) as i64).max(0) as usize
     } else if auto.left {
-        containing.x + margin.left + free
+        (containing.x as i64 + margin.left as i64 + free as i64).max(0) as usize
     } else {
-        containing.x + margin.left
+        (containing.x as i64 + margin.left as i64).max(0) as usize
     };
 
     // Vertical margins advance the flow cursor; a replaced control is an

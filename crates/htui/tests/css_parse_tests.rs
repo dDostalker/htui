@@ -3,14 +3,15 @@ use std::sync::Arc;
 use crossterm::style::Color;
 use htui::html::css_parse::{
     BorderStyle, BoxSizing, Combinator, CornerRadii, CssAttr, CssRule, CssRuleEntry, CssSelector,
-    DynamicState, EdgeAuto, EdgeSizes, FontContext, FontWeight, INHERITED_PROPS, Length,
-    LengthContext, LineHeight, NthExpr, PX_PER_CELL, Parser, SUPPORTED_PROPERTIES, Selector,
-    TextDecoration, TextTransform, Viewport, css_into_node, css_into_node_with_state,
-    parse_color_str, parse_declaration_text, reset_css_attr, resolve_line_height_cells,
-    selector_chain_matches, selector_chain_matches_with_state,
+    DynamicState, EdgeAuto, EdgeSizes, FontContext, FontStyleKind, FontWeight, INHERITED_PROPS,
+    Length, LengthContext, LineHeight, MarginSizes, NthExpr, PX_PER_CELL, Parser,
+    SUPPORTED_PROPERTIES, Selector, TextAlign, TextDecoration, TextTransform, Viewport, WhiteSpace,
+    css_into_node, css_into_node_with_state, parse_color_str, parse_declaration_text,
+    reset_css_attr, resolve_line_height_cells, selector_chain_matches,
+    selector_chain_matches_with_state,
 };
 use htui::html::html_parse;
-use htui::tdom::node::{Node, NodeArena, NodeId, NodeType};
+use htui::tdom::node::{Node, NodeArena, NodeId, NodeType, effective_font_size_cells};
 use indexmap::IndexMap;
 
 /// Default font-size (in cells) used by [`Length::resolve`] tests so the
@@ -1675,7 +1676,7 @@ fn margin_shorthand_mirrors_padding() {
             font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
             viewport()
         ),
-        EdgeSizes::new(2, 4, 2, 4)
+        MarginSizes::new(2, 4, 2, 4)
     );
     let attr = attr_from_decl("margin-left", "6ch");
     assert_eq!(
@@ -1684,7 +1685,7 @@ fn margin_shorthand_mirrors_padding() {
             font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
             viewport()
         ),
-        EdgeSizes::new(0, 0, 0, 6)
+        MarginSizes::new(0, 0, 0, 6)
     );
 }
 
@@ -1699,7 +1700,7 @@ fn margin_auto_collapses_to_zero() {
             font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
             viewport()
         ),
-        EdgeSizes::default()
+        MarginSizes::default()
     );
 }
 
@@ -2604,4 +2605,130 @@ fn cascade_inheritance_values_survive_copy_on_write() {
     assert_eq!(arena[p].css_attr.0.get("color").map(|s| s.as_ref()), Some("red"));
     assert_eq!(arena[span].css_attr.0.get("color").map(|s| s.as_ref()), Some("blue"));
     assert_eq!(arena[em].css_attr.0.get("color").map(|s| s.as_ref()), Some("blue"));
+}
+
+// ============================================================
+// B: CSS property-name and keyword case-insensitivity + logical keywords
+// ============================================================
+
+#[test]
+fn declaration_property_names_are_case_insensitive() {
+    init();
+    // `parse_declaration_text` backs the inline `style` attribute and `el.style`.
+    // Declaration names normalise to lowercase so the canonical keys the
+    // `CssAttr` accessors read are produced (`WIDTH` → `width`, …).
+    let m = parse_declaration_text("WIDTH: 10px; BACKGROUND-COLOR: red; Text-Transform: uppercase;");
+    assert_eq!(m.get("width").map(|s| s.as_ref()), Some("10px"));
+    assert_eq!(m.get("background-color").map(|s| s.as_ref()), Some("red"));
+    assert_eq!(m.get("text-transform").map(|s| s.as_ref()), Some("uppercase"));
+}
+
+#[test]
+fn text_align_keywords_are_case_insensitive_and_support_start_end() {
+    init();
+    assert_eq!(attr_from_decl("text-align", "CENTER").get_text_align(), TextAlign::Center);
+    assert_eq!(attr_from_decl("text-align", "Right").get_text_align(), TextAlign::Right);
+    assert_eq!(attr_from_decl("text-align", "end").get_text_align(), TextAlign::Right);
+    assert_eq!(attr_from_decl("text-align", "start").get_text_align(), TextAlign::Left);
+    // `justify` collapses to left (no inter-word justification).
+    assert_eq!(attr_from_decl("text-align", "justify").get_text_align(), TextAlign::Left);
+}
+
+#[test]
+fn font_weight_is_case_insensitive_and_600_is_bold() {
+    init();
+    assert_eq!(attr_from_decl("font-weight", "BOLD").get_font_weight(), FontWeight::Bold);
+    assert_eq!(attr_from_decl("font-weight", "bolder").get_font_weight(), FontWeight::Bold);
+    assert_eq!(attr_from_decl("font-weight", "600").get_font_weight(), FontWeight::Bold);
+    assert_eq!(attr_from_decl("font-weight", "500").get_font_weight(), FontWeight::Normal);
+}
+
+#[test]
+fn font_style_is_case_insensitive() {
+    init();
+    assert_eq!(attr_from_decl("font-style", "Italic").get_font_style_kind(), FontStyleKind::Italic);
+    assert_eq!(
+        attr_from_decl("font-style", "OBLIQUE").get_font_style_kind(),
+        FontStyleKind::Oblique
+    );
+    assert_eq!(
+        attr_from_decl("font-style", "normal").get_font_style_kind(),
+        FontStyleKind::Normal
+    );
+}
+
+// ============================================================
+// C: signed negative lengths — margins and positioning insets
+// ============================================================
+
+#[test]
+fn negative_margin_resolves_signed_horizontally() {
+    init();
+    // `margin: -4ch` applies to every side: vertical clamps to 0 (no
+    // overlapping rows), horizontal keeps the sign (gutter pull-out).
+    let attr = attr_from_decl("margin", "-4ch");
+    let m = attr.get_margin(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
+    assert_eq!(m, MarginSizes::new(0, -4, 0, -4));
+    // A per-side longhand overrides the shorthand.
+    let attr = attr_from_decl("margin-left", "-6ch");
+    let m = attr.get_margin(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
+    assert_eq!(m, MarginSizes::new(0, 0, 0, -6));
+}
+
+#[test]
+fn negative_inset_resolves_signed() {
+    init();
+    // `top: -2ch`, `left: -10ch` — negative absolute / relative offsets.
+    let mut attr = attr_from_decl("top", "-2ch");
+    attr.add(&attr_from_decl("left", "-10ch"));
+    let pos = attr.get_positioning(
+        80,
+        font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+        viewport(),
+    );
+    assert_eq!(pos.inset.top, Some(-2));
+    assert_eq!(pos.inset.left, Some(-10));
+}
+
+// ============================================================
+// C: font-size percentage resolves against the parent font-size
+// ============================================================
+
+#[test]
+fn font_size_percentage_resolves_against_parent() {
+    init();
+    let mut arena = NodeArena::default();
+    let root = arena.insert(Node::from(NodeType::Document));
+    let div_id = arena.insert(Node::from(NodeType::Div));
+    Node::append_child(&mut arena, root, div_id);
+    let rules = parse_sheet("div { font-size: 200%; }");
+    css_into_node(&mut arena, root, &rules);
+    // Parent font-size = 2 cells; `200%` → 4 cells (not the containing width).
+    let ctx = FontContext {
+        font_size_cells: 2,
+        root_font_size_cells: 1,
+    };
+    assert_eq!(effective_font_size_cells(&arena, div_id, ctx, viewport()), 4);
+}
+
+// ============================================================
+// D: white-space inherits to inline children
+// ============================================================
+
+#[test]
+fn white_space_inherits_to_inline_children() {
+    init();
+    let mut arena = NodeArena::default();
+    let root = arena.insert(Node::from(NodeType::Document));
+    let div_id = arena.insert(Node::from(NodeType::Div));
+    let span_id = arena.insert(Node::from(NodeType::Span));
+    Node::append_child(&mut arena, root, div_id);
+    Node::append_child(&mut arena, div_id, span_id);
+    let rules = parse_sheet("div { white-space: pre-wrap; }");
+    css_into_node(&mut arena, root, &rules);
+    // The (unstyled) span picks up the div's `pre-wrap` by inheritance.
+    assert_eq!(
+        arena[span_id].css_attr.get_white_space(&arena[span_id].node_type),
+        WhiteSpace::PreWrap
+    );
 }

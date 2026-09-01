@@ -249,8 +249,8 @@ fn layout_inline_row(
             measured.push(Measured {
                 width: b.rect.width,
                 height: b.rect.height,
-                margin_before: edges.margin.left,
-                margin_after: edges.margin.right,
+                margin_before: edges.margin.left.max(0) as usize,
+                margin_after: edges.margin.right.max(0) as usize,
                 leading_space: item.leading_space,
             });
         }

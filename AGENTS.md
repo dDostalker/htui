@@ -150,7 +150,7 @@ htui/
 │   │   │               ├── cell.rs     # Block / FontStyle
 │   │   │               ├── image.rs    # Img / 图像加载
 │   │   │               └── input/  # 输入层（mod.rs = InputState + 常量 + re-exports）
-│   │   │                   ├── cmd.rs       # RenderCmd（含 RenderArena）/ DirtyInfo / SelectionMode / coalesce_batch
+│   │   │                   ├── cmd.rs       # RenderCmd（含 RenderArena）/ DirtyInfo / SelectionMode / DrainedBatch（渲染线程命令合并）
 │   │   │                   ├── key_info.rs  # key_event_info / char_code / media·modifier_key
 │   │   │                   ├── edit.rs      # 纯编辑（apply_input_key/词边界/Ctrl·Shift 导航/paste）
 │   │   │                   ├── field.rs     # 字段分类（is_*_input/textarea 系列/KeyGate/collect_input_ids）
@@ -418,9 +418,12 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
 1. **值未变不触发渲染**：`el.textContent = v` 在 `v` 与当前文本相同时直接短路，
    不置 `dirty`——监控器每 200ms 刷新但值基本不变时，实际 `RenderArena`
    次数远少于刷新次数（监控器页面实测 200 次刷新只触发约 14 次渲染）。
-2. **命令合并**：输入循环发送前合并命令流。`RenderArena` 携带 `hovered` 字段，
-   重排时会重新应用当前 `:hover` 高亮，因此同轮的 `Hover` 命令会被丢弃
-   （渲染线程的 `try_recv` 合并本就只保留最后一个命令）。
+2. **命令合并**：合并语义由渲染线程的 `DrainedBatch` 单点实现（`graph_api/input/cmd.rs`）。
+   快照命令（`Rerender`/`Redraw`/`RenderArena`/`RenderHtml`/`Quit`）只保留最后一个；
+   `RenderInput`/`Select*` 保序全执行；`TextSelection` 延后到快照之后应用；落后于
+   pending `RenderArena` 的 `Hover` 延后叠加、`Focus` 合并进 arena 的 `dynamic`——
+   DOM 变更与高亮增量都不会丢失。发送前输入循环还会把 batch 最终焦点状态盖写进
+   arena 快照（`el.focus()` 在 fold 之后展开，fold 时捕获的 `focused` 可能过时）。
 3. **增量重绘（Region Repaint）**：引擎侧每个 DOM 写操作（`textContent` /
    `style` / `setAttribute` / `appendChild`…）把 `NodeId` 记入 `ScriptState.dirty`，
    随 `RenderArena` 携带。渲染线程对每个 dirty 节点沿 DOM 找到最近的"有盒子的

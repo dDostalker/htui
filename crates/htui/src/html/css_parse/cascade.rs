@@ -375,6 +375,15 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
 ///
 /// Kept as a separate list because Rust const-fn filtering isn't yet stable;
 /// appending a name here is what flips a property to inheritable.
+///
+/// This mirrors the CSS-inherited set for the properties we support, with one
+/// deliberate deviation: `text-decoration` is **not inherited** per CSS spec
+/// (it *propagates* visually down an inline box), but the terminal renderer
+/// collapses an inline chain into merged runs, so treating it as inherited
+/// reproduces the browser's visual propagation (an underlined `<a>` keeps its
+/// underline through nested inline elements). The whitespace / wrapping trio
+/// (`white-space`, `word-break`, `overflow-wrap`) is inherited exactly as in
+/// CSS Text, so `div { white-space: pre }` propagates to inline children.
 pub const INHERITED_PROPS: &[&str] = &[
     "color",
     "text-align",
@@ -385,6 +394,9 @@ pub const INHERITED_PROPS: &[&str] = &[
     "text-transform",
     "line-height",
     "visibility",
+    "white-space",
+    "word-break",
+    "overflow-wrap",
 ];
 
 fn inherit_css(arena: &mut NodeArena, root_id: NodeId) {

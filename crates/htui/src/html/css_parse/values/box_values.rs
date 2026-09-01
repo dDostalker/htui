@@ -80,13 +80,15 @@ pub fn parse_visibility(s: &str) -> Option<Visibility> {
 /// CSS `top` / `right` / `bottom` / `left`, resolved to cells.
 ///
 /// Each side is `None` when the property is unset / `auto`, in which case
-/// the positioning pass keeps the box's static position on that axis.
+/// the positioning pass keeps the box's static position on that axis. The
+/// values are signed cells — negative insets (common for tooltips/popups:
+/// `top: -2`, `left: -10`) shift the box opposite the axis.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InsetSides {
-    pub top: Option<usize>,
-    pub right: Option<usize>,
-    pub bottom: Option<usize>,
-    pub left: Option<usize>,
+    pub top: Option<isize>,
+    pub right: Option<isize>,
+    pub bottom: Option<isize>,
+    pub left: Option<isize>,
 }
 
 /// Resolved positioning for a layout box: `position` + insets + `z-index`.

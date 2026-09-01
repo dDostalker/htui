@@ -36,7 +36,7 @@ use std::sync::Arc;
 use crossterm::style::Color;
 use indexmap::IndexMap;
 
-use crate::html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeAuto, EdgeSizes};
+use crate::html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeAuto, EdgeSizes, MarginSizes};
 
 use super::values::{
     AlignContent, AlignItems, BoxSizing, ColumnFill, ColumnsResolved, CornerRadii, CssDisplay,
@@ -45,7 +45,7 @@ use super::values::{
     Visibility, WhiteSpace, WordBreak, merge_border_longhand, parse_align_content,
     parse_align_items, parse_border_radius, parse_border_side, parse_border_style,
     parse_border_width, parse_box_sizing, parse_color_str, parse_column_count, parse_column_fill,
-    parse_column_rule, parse_columns_shorthand, parse_edge_auto, parse_edge_sizes,
+    parse_column_rule, parse_columns_shorthand, parse_edge_auto, parse_edge_sizes, parse_margin_sizes,
     parse_flex_basis, parse_flex_direction, parse_flex_flow, parse_flex_shorthand,
     parse_flex_wrap, parse_gap_shorthand, parse_justify_content, parse_line_height,
     parse_non_negative_number, parse_order, parse_overflow_wrap, parse_text_transform,
@@ -123,28 +123,59 @@ impl CssAttr {
             .and_then(|c| parse_color_str(c))
     }
     /// Text alignment (CSS `text-align`).
+    ///
+    /// Handles the four logical keywords in addition to the physical ones.
+    /// `start` maps to `Left` and `end` maps to `Right` (the engine is LTR
+    /// only); `justify` collapses to `Left` (no inter-word justification in a
+    /// monospace grid). CSS keywords are ASCII case-insensitive, so the
+    /// comparison is case-insensitive.
     pub fn get_text_align(&self) -> TextAlign {
         match self.0.get("text-align").map(|s| s.as_ref()) {
-            Some("center") => TextAlign::Center,
-            Some("right") => TextAlign::Right,
+            Some(s) if s.trim().eq_ignore_ascii_case("center") => TextAlign::Center,
+            Some(s)
+                if s.trim().eq_ignore_ascii_case("right")
+                    || s.trim().eq_ignore_ascii_case("end") =>
+            {
+                TextAlign::Right
+            }
+            // `left`, `start`, `justify` (collapsed to left) and everything
+            // else fall through to the default.
             _ => TextAlign::Left,
         }
     }
     /// Font weight (CSS `font-weight`).
+    ///
+    /// Terminal output has two weights, so numeric weights map to the nearest
+    /// bucket: `600..=900` (and the `bold` / `bolder` keywords) are bold, the
+    /// rest are regular. CSS keywords and the `to_ascii_lowercase` comparison
+    /// are ASCII case-insensitive.
     pub fn get_font_weight(&self) -> FontWeight {
         match self.0.get("font-weight").map(|s| s.as_ref()) {
-            Some("bold") | Some("bolder") | Some("700") | Some("800") | Some("900") => {
-                FontWeight::Bold
+            Some(s) => {
+                let w = s.trim().to_ascii_lowercase();
+                match w.as_str() {
+                    "bold" | "bolder" | "600" | "700" | "800" | "900" => FontWeight::Bold,
+                    _ => FontWeight::Normal,
+                }
             }
-            _ => FontWeight::Normal,
+            None => FontWeight::Normal,
         }
     }
     /// Font style (CSS `font-style`).
+    ///
+    /// CSS keywords are ASCII case-insensitive; `italic` / `oblique` both
+    /// render as italic in the terminal.
     pub fn get_font_style_kind(&self) -> FontStyleKind {
         match self.0.get("font-style").map(|s| s.as_ref()) {
-            Some("italic") => FontStyleKind::Italic,
-            Some("oblique") => FontStyleKind::Oblique,
-            _ => FontStyleKind::Normal,
+            Some(s) => {
+                let v = s.trim().to_ascii_lowercase();
+                match v.as_str() {
+                    "italic" => FontStyleKind::Italic,
+                    "oblique" => FontStyleKind::Oblique,
+                    _ => FontStyleKind::Normal,
+                }
+            }
+            None => FontStyleKind::Normal,
         }
     }
     /// Text decoration (CSS `text-decoration`).
@@ -315,13 +346,19 @@ impl CssAttr {
     /// the containing block's free space — both horizontal auto margins
     /// center the block, a single one absorbs the remainder. Per-side
     /// longhands win over the shorthand.
+    ///
+    /// The horizontal edges (`left` / `right`) are **signed**: negative
+    /// margins pull the box toward (or past) its neighbours, and a negative
+    /// horizontal pair widens the available space. The vertical edges
+    /// (`top` / `bottom`) are clamped to `0` when negative — the cursor
+    /// model has no overlapping-row painting.
     pub fn get_margin(
         &self,
         containing_width: usize,
         font_ctx: FontContext,
         viewport: Viewport,
-    ) -> EdgeSizes {
-        parse_edge_sizes(&self.0, "margin", containing_width, font_ctx, viewport)
+    ) -> MarginSizes {
+        parse_margin_sizes(&self.0, containing_width, font_ctx, viewport)
     }
 
     /// Per-side `auto` flags for the margin edges (CSS `margin: 0 auto`).
@@ -955,9 +992,9 @@ impl CssAttr {
             .and_then(|v| parse_position(v))
             .unwrap_or_default();
         let resolve_inset = |key: &str| {
-            self.0.get(key).and_then(|raw| match Length::parse(raw)? {
+            self.0.get(key).and_then(|raw| match Length::parse_signed(raw)? {
                 Length::Auto => None,
-                len => Some(len.resolve(LengthContext {
+                len => Some(len.resolve_signed(LengthContext {
                     containing: containing_width,
                     font: font_ctx,
                     viewport,

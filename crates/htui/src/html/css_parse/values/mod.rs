@@ -25,7 +25,7 @@ pub(crate) use flex::{
 pub use length::{FontContext, Length, LengthContext, PX_PER_CELL, Viewport};
 pub(crate) use length::{
     parse_border_side, parse_border_shorthand, parse_border_style, parse_border_width,
-    parse_edge_auto, parse_edge_sizes,
+    parse_edge_auto, parse_edge_sizes, parse_margin_sizes,
 };
 pub(crate) use length::{merge_border_longhand};
 pub use multicol::{

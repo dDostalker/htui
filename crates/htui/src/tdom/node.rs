@@ -79,11 +79,13 @@ pub fn effective_font_size_cells(
     let node = &arena[node_id];
     let declared = node.css_attr.get_font_size();
     if let Some(len) = declared {
-        // `font-size` never resolves as a percentage, so `containing` is
-        // unused here — pass `0` rather than borrowing the parent's font-size
-        // to keep the placeholder obvious.
+        // A percentage `font-size` resolves against the parent's font-size
+        // (CSS: `%` is the size relative to the inherited font size), so
+        // `containing` is the active parent font-size — not 0 (which would
+        // silently collapse `font-size: 50%` to a single cell). `em` resolves
+        // against the same base via `LengthContext.font`.
         return len.resolve(LengthContext {
-            containing: 0,
+            containing: font_ctx.font_size_cells,
             font: font_ctx,
             viewport,
         });

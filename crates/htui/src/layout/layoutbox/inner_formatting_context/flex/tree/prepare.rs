@@ -130,10 +130,25 @@ pub(super) fn prepare_flex_item(
     let glyph_row = if line_h > font { (line_h - font) / 2 } else { (font - 1) / 2 };
     let edges = css.get_box_edges(usize::MAX, context.font, context.viewport);
     let margin = edges.margin;
+    // Flex-item margins are clamped to 0 when negative: the item-sizing /
+    // line-placement algorithm keeps its non-negative space model, so a
+    // negative margin on a flex item degenerates to 0 (the horizontal
+    // block / table / flex-*container* negative margin expansion above is
+    // where negative margins take effect).
     let (margin_main_before, margin_main_after, margin_cross_before, margin_cross_after) =
         match direction.is_row() {
-            true => (margin.left, margin.right, margin.top, margin.bottom),
-            false => (margin.top, margin.bottom, margin.left, margin.right),
+            true => (
+                margin.left.max(0) as usize,
+                margin.right.max(0) as usize,
+                margin.top,
+                margin.bottom,
+            ),
+            false => (
+                margin.top,
+                margin.bottom,
+                margin.left.max(0) as usize,
+                margin.right.max(0) as usize,
+            ),
         };
     // Main-axis `margin: auto` flags (row: left/right; column: top/bottom).
     // The resolved margins above already treat auto as 0; these flags let

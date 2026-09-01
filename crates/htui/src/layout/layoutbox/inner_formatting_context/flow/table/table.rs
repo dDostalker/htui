@@ -38,7 +38,7 @@ pub fn layout_table(
         node.css_attr
             .get_box_edges(containing.width, child_context.font, child_context.viewport);
 
-    let available = containing.width.saturating_sub(edges.margin.horizontal());
+    let available = (containing.width as i64 - edges.margin.horizontal() as i64).max(0) as usize;
     let (x, block_width, outer_y_top, preallocated_height) = match pre_allocated_rect {
         Some(rect) => (rect.x, rect.width.max(1), rect.y, Some(rect.height.max(1))),
         None => {
@@ -52,7 +52,7 @@ pub fn layout_table(
             // bottom margin (CSS vertical margin collapsing: the larger wins).
             cursor.collapse_and_skip(edges.margin.top);
             (
-                containing.x + edges.margin.left,
+                (containing.x as i64 + edges.margin.left as i64).max(0) as usize,
                 block_width,
                 cursor.y,
                 None,
