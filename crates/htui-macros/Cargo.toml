@@ -2,6 +2,11 @@
 name = "htui-macros"
 version = "0.1.0"
 edition = "2024"
+description = "Procedural macros for the htui terminal HTML renderer: #[command] / #[commands] host bindings and IntoJs / FromJs derives"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dDostalker/htui"
+homepage = "https://github.com/dDostalker/htui"
+documentation = "https://docs.rs/htui-macros"
 
 [lib]
 proc-macro = true

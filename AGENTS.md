@@ -14,6 +14,9 @@
 ```
 htui/
 ├── Cargo.toml              # workspace 根（members: crates/htui, crates/htui-macros, visual_test）
+├── README.md               # 双语 README（与 crates/htui/README.md 保持同步；后者随 crate 发布）
+├── LICENSE-MIT             # MIT 许可证文本（cargo package 自动打入 .crate）
+├── LICENSE-APACHE          # Apache-2.0 许可证文本（cargo package 自动打入 .crate）
 ├── crates/
 │   ├── htui/               # 主库 crate：终端 HTML/CSS 渲染引擎（独立发布单元）
 │   │   ├── Cargo.toml
@@ -222,14 +225,15 @@ htui/
 │   ├── TODO.md            # 待办（B：mousedown/mouseup、[attr] 选择器、getComputedStyle；C：img change）
 │   └── zh-cn/
 │       ├── 边界文档.md           # 边界文档（目标 / 核心承诺 / 拒绝清单 / 能力地图）
+│       ├── 架构.md               # 渲染管线与线程模型（generation/geometry 分层、四线程职责、合并与安全模型）
 │       ├── 能力差异清单.md       # 浏览器能力对比及差异清单（HTML / CSS / JS 全矩阵）
 │       └── 教程/
-│           ├── 1.HelloWorld.md              # 入门：第一个 htui 程序（占位，待编写）
-│           ├── 2.实现静态终端.md             # 静态渲染（占位，待编写）
-│           ├── 3.0资源.md                   # 资源层概念（占位，待编写）
-│           ├── 3.1资源的注册和读取.md        # mem:// 注册与读取（占位，待编写）
-│           ├── 4.0动态终端.md               # 事件与动态渲染（占位，待编写）
-│           ├── 4.1JS和Rust绑定.md           # 宿主函数绑定（占位，待编写）
+│           ├── 1.HelloWorld.md              # 入门：第一个 htui 程序
+│           ├── 2.实现静态终端.md             # 静态渲染（events=false + Config 全字段 + 会话级 CSS）
+│           ├── 3.0资源.md                   # 资源层概念（mem:// 注册表、会话隔离、错误语义）
+│           ├── 3.1资源的注册和读取.md        # mem:// 注册与读取操作手册（register/load/unregister + fetch）
+│           ├── 4.0动态终端.md               # 事件与动态渲染（事件表、内置按键、门控、定时器、脏节点重绘）
+│           ├── 4.1JS和Rust绑定.md           # 宿主函数绑定（command/commands/host_fn/derive + 线程模型）
 │           ├── 5.日志.md                    # 日志使用说明
 │           ├── 6.0示例-实现性能监控器.md      # 示例：性能监控器（占位，待编写）
 │           ├── 6.1-示例-实现贪吃蛇.md        # 示例：贪吃蛇（占位，待编写）
