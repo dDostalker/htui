@@ -4,8 +4,8 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{
-    Expr, ExprLit, FnArg, Ident, ItemFn, Lit, Meta, Pat, ReturnType, Type, parse_macro_input,
-    parse::Parser, punctuated::Punctuated,
+    Expr, ExprLit, FnArg, Ident, ItemFn, Lit, Meta, Pat, ReturnType, Type, parse::Parser,
+    parse_macro_input, punctuated::Punctuated,
 };
 
 /// `#[htui::command]` expansion — wrap a plain function into a `HostFn`, or
@@ -55,13 +55,13 @@ pub(crate) fn expand_command(attr: TokenStream, item: TokenStream) -> TokenStrea
                         "command args must be plain `name: Type` parameters",
                     )
                     .to_compile_error()
-                    .into()
+                    .into();
                 }
             },
             FnArg::Receiver(_) => {
                 return syn::Error::new_spanned(&func.sig, "command cannot be a method")
                     .to_compile_error()
-                    .into()
+                    .into();
             }
         }
     }
@@ -114,11 +114,7 @@ pub(crate) fn expand_command(attr: TokenStream, item: TokenStream) -> TokenStrea
 pub(crate) fn returns_host_fn(output: &ReturnType) -> bool {
     match output {
         ReturnType::Type(_, ty) => match &**ty {
-            Type::Path(tp) => tp
-                .path
-                .segments
-                .last()
-                .is_some_and(|s| s.ident == "HostFn"),
+            Type::Path(tp) => tp.path.segments.last().is_some_and(|s| s.ident == "HostFn"),
             _ => false,
         },
         ReturnType::Default => false,
@@ -134,7 +130,9 @@ fn command_attr(attr: TokenStream) -> syn::Result<()> {
     for meta in metas {
         match meta {
             Meta::NameValue(nv) if nv.path.is_ident("name") => match &nv.value {
-                Expr::Lit(ExprLit { lit: Lit::Str(_), .. }) => {}
+                Expr::Lit(ExprLit {
+                    lit: Lit::Str(_), ..
+                }) => {}
                 _ => {
                     return Err(syn::Error::new_spanned(
                         nv,

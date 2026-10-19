@@ -105,7 +105,10 @@ fn command_registrations(module: &ItemMod) -> syn::Result<Vec<TokenStream2>> {
         // The attribute is written `#[htui::command]` (or a bare `#[command]`
         // after `use htui::command;`), so match on the last path segment.
         let is_command = |a: &&Attribute| {
-            a.path().segments.last().is_some_and(|s| s.ident == "command")
+            a.path()
+                .segments
+                .last()
+                .is_some_and(|s| s.ident == "command")
         };
         let Some(command_attr) = func.attrs.iter().find(|a| is_command(a)) else {
             continue;
@@ -158,8 +161,8 @@ fn js_type(ty: &Type) -> String {
     };
     match seg.ident.to_string().as_str() {
         "String" | "str" => "string".to_string(),
-        "f64" | "f32" | "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64"
-        | "isize" | "usize" => "number".to_string(),
+        "f64" | "f32" | "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64" | "isize"
+        | "usize" => "number".to_string(),
         "bool" => "boolean".to_string(),
         "Option" => format!("{} | undefined", inner(0)),
         "Vec" => format!("{}[]", inner(0)),
@@ -199,7 +202,10 @@ fn command_js_bindings(module: &ItemMod) -> syn::Result<String> {
         let fn_name = &func.sig.ident;
 
         let is_command = |a: &&Attribute| {
-            a.path().segments.last().is_some_and(|s| s.ident == "command")
+            a.path()
+                .segments
+                .last()
+                .is_some_and(|s| s.ident == "command")
         };
         let Some(command_attr) = func.attrs.iter().find(|a| is_command(a)) else {
             continue;
@@ -211,7 +217,9 @@ fn command_js_bindings(module: &ItemMod) -> syn::Result<String> {
 
         let mut args = Vec::new();
         for (i, input) in func.sig.inputs.iter().enumerate() {
-            let FnArg::Typed(pat_ty) = input else { continue };
+            let FnArg::Typed(pat_ty) = input else {
+                continue;
+            };
             let name = match &*pat_ty.pat {
                 Pat::Ident(pi) => pi.ident.to_string(),
                 _ => format!("arg{i}"),
@@ -263,24 +271,26 @@ fn command_js_name(attr: &Attribute, fallback: &Ident) -> syn::Result<String> {
     }
     let metas = attr.parse_args_with(Punctuated::<Meta, syn::token::Comma>::parse_terminated)?;
 
-        if let Some(meta) = metas.into_iter().next() {
-                match meta{
-                Meta::NameValue(nv) if nv.path.is_ident("name") => match &nv.value {
-                    Expr::Lit(ExprLit { lit: Lit::Str(s), .. }) => return Ok(s.value()),
-                    _ => {
-                        return Err(syn::Error::new_spanned(
-                            nv,
-                            "`name` must be a string literal, e.g. #[htui::command(name = \"jsName\")]",
-                        ));
-                    }
-                },
-                other => {
+    if let Some(meta) = metas.into_iter().next() {
+        match meta {
+            Meta::NameValue(nv) if nv.path.is_ident("name") => match &nv.value {
+                Expr::Lit(ExprLit {
+                    lit: Lit::Str(s), ..
+                }) => return Ok(s.value()),
+                _ => {
                     return Err(syn::Error::new_spanned(
-                        other,
-                        "unsupported `#[htui::command]` attribute; expected `name = \"...\"`",
+                        nv,
+                        "`name` must be a string literal, e.g. #[htui::command(name = \"jsName\")]",
                     ));
                 }
+            },
+            other => {
+                return Err(syn::Error::new_spanned(
+                    other,
+                    "unsupported `#[htui::command]` attribute; expected `name = \"...\"`",
+                ));
             }
         }
+    }
     Ok(fallback.to_string())
 }

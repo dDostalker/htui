@@ -15,10 +15,10 @@ use unicode_segmentation::UnicodeSegmentation;
 use crossterm::style::Color;
 
 use crate::{
+    graphics::{FontStyle, grapheme_width},
     html::css_parse::{OverflowWrap, WhiteSpace, WordBreak},
     layout::InlineRun,
     tdom::node::NodeId,
-    graphics::{FontStyle, grapheme_width},
 };
 
 /// One token extracted from the input run list.

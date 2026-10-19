@@ -1,5 +1,5 @@
-//! Session / config tests &#8212; the `Session` entry point and its `Config`
-//! settings (zoom, events, frame gap). Pure in-memory &#8212; no terminal required.
+//! Session / config tests — the `Session` entry point and its `Config`
+//! settings (zoom, events, frame gap). Pure in-memory — no terminal required.
 
 use std::time::Duration;
 

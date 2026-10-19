@@ -6,7 +6,7 @@
 //! terminal required.
 
 use htui::events::EventBindings;
-use htui::layout::{generate_box_tree};
+use htui::layout::generate_box_tree;
 use htui::script::ScriptEngine;
 use htui::tdom::node::{NodeArena, NodeId, NodeType};
 
@@ -39,7 +39,11 @@ fn data_attr(engine: &ScriptEngine, id: &str, name: &str) -> Option<String> {
 }
 
 /// Whether any rendered text node in the box tree equals `needle`.
-fn flatten_text_contains(boxes: &[htui::layout::GeneratedBox], arena: &NodeArena, needle: &str) -> bool {
+fn flatten_text_contains(
+    boxes: &[htui::layout::GeneratedBox],
+    arena: &NodeArena,
+    needle: &str,
+) -> bool {
     fn walk(
         boxes: &[htui::layout::GeneratedBox],
         arena: &NodeArena,
@@ -107,7 +111,10 @@ fn dataset_empty_when_no_data_attributes() {
     let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
         .expect("engine initializes");
     assert_eq!(
-        eval_str(&mut engine, "Object.keys(document.getElementById('d').dataset).length"),
+        eval_str(
+            &mut engine,
+            "Object.keys(document.getElementById('d').dataset).length"
+        ),
         "0"
     );
     assert_eq!(
@@ -143,7 +150,10 @@ fn dataset_write_sets_the_kebab_cased_attribute() {
         EventBindings::default(),
     )
     .expect("engine initializes");
-    eval_str(&mut engine, "document.getElementById('e').dataset.src = 'b'");
+    eval_str(
+        &mut engine,
+        "document.getElementById('e').dataset.src = 'b'",
+    );
     assert_eq!(data_attr(&engine, "e", "data-src"), Some("b".into()));
 }
 
@@ -213,7 +223,10 @@ fn dataset_unchanged_write_does_not_mark_dirty() {
         EventBindings::default(),
     )
     .expect("engine initializes");
-    eval_str(&mut engine, "document.getElementById('d').dataset.foo = 'bar'");
+    eval_str(
+        &mut engine,
+        "document.getElementById('d').dataset.foo = 'bar'",
+    );
     let dirty = engine.take_dirty();
     assert!(
         dirty.is_empty(),
@@ -223,11 +236,9 @@ fn dataset_unchanged_write_does_not_mark_dirty() {
 
 #[test]
 fn dataset_is_live_across_mutations() {
-    let mut engine = ScriptEngine::new(
-        r#"<div id="d" data-a="1"></div>"#,
-        EventBindings::default(),
-    )
-    .expect("engine initializes");
+    let mut engine =
+        ScriptEngine::new(r#"<div id="d" data-a="1"></div>"#, EventBindings::default())
+            .expect("engine initializes");
     // A held dataset reference reflects later DOM mutations.
     eval_str(
         &mut engine,
@@ -308,11 +319,8 @@ fn hidden_js_property_toggles_rendering() {
 
 #[test]
 fn hidden_unchanged_write_does_not_mark_dirty() {
-    let mut engine = ScriptEngine::new(
-        r#"<div id="d" hidden></div>"#,
-        EventBindings::default(),
-    )
-    .expect("engine initializes");
+    let mut engine = ScriptEngine::new(r#"<div id="d" hidden></div>"#, EventBindings::default())
+        .expect("engine initializes");
     eval_str(&mut engine, "document.getElementById('d').hidden = true");
     assert!(
         engine.take_dirty().is_empty(),

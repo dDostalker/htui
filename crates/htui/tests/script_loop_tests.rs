@@ -947,7 +947,8 @@ fn fetch_mem_resource_resolves_through_poll() {
     // through the job queue.
     let reg = Arc::new(ResourceRegistry::new());
     let key = format!("mem://fetch/file_{}.txt", std::process::id());
-    reg.register(&key, b"file body".to_vec()).expect("register mem file");
+    reg.register(&key, b"file body".to_vec())
+        .expect("register mem file");
 
     let html = format!(
         r#"<script>
@@ -980,7 +981,8 @@ fn fetch_relative_url_resolves_against_document_base() {
     let reg = Arc::new(ResourceRegistry::new());
     let pid = std::process::id();
     let key = format!("mem://api/data_{pid}.json");
-    reg.register(&key, br#"{"ok":true}"#.to_vec()).expect("register mem file");
+    reg.register(&key, br#"{"ok":true}"#.to_vec())
+        .expect("register mem file");
 
     let html = format!(
         r#"<base href="mem://api/">
@@ -1231,9 +1233,7 @@ fn inner_html_keeps_a_script_held_node_usable() {
 
 /// Eval `expr` and return `"ok"` on success or `"error:…"` on a JS throw.
 fn eval_catch(engine: &mut ScriptEngine, expr: &str) -> String {
-    let src = format!(
-        "try {{ {expr} ; 'ok' }} catch (e) {{ 'error:' + String(e) }}"
-    );
+    let src = format!("try {{ {expr} ; 'ok' }} catch (e) {{ 'error:' + String(e) }}");
     let v = engine.eval_source(&src).expect("eval runs");
     v.as_string()
         .map(|s| s.to_std_string_lossy())
@@ -1268,7 +1268,10 @@ fn append_child_rejects_inserting_a_node_into_itself() {
         "the tree shape is unchanged"
     );
     assert_eq!(
-        eval_str(&mut engine, "document.getElementById('outer').childNodes.length"),
+        eval_str(
+            &mut engine,
+            "document.getElementById('outer').childNodes.length"
+        ),
         "1",
         "the failed append must not push a duplicate child"
     );
@@ -1302,7 +1305,10 @@ fn append_child_rejects_inserting_a_node_into_its_own_descendant() {
         "descendant append must throw, got: {result}"
     );
     assert_eq!(
-        eval_str(&mut engine, "document.getElementById('inner').childNodes.length"),
+        eval_str(
+            &mut engine,
+            "document.getElementById('inner').childNodes.length"
+        ),
         "0",
         "no child may be attached on the rejected path"
     );
@@ -1321,8 +1327,11 @@ fn insert_before_and_replace_child_reject_cycles() {
 
     // insertBefore with the node itself as both target and reference.
     assert!(
-        eval_catch(&mut engine, &format!("{outer}.insertBefore({outer}, {inner})"))
-            .starts_with("error:"),
+        eval_catch(
+            &mut engine,
+            &format!("{outer}.insertBefore({outer}, {inner})")
+        )
+        .starts_with("error:"),
         "insertBefore(self, …) must throw"
     );
     // insertBefore into an own descendant (reference `null` = append).
@@ -1333,8 +1342,11 @@ fn insert_before_and_replace_child_reject_cycles() {
     );
     // replaceChild with the node itself.
     assert!(
-        eval_catch(&mut engine, &format!("{outer}.replaceChild({outer}, {inner})"))
-            .starts_with("error:"),
+        eval_catch(
+            &mut engine,
+            &format!("{outer}.replaceChild({outer}, {inner})")
+        )
+        .starts_with("error:"),
         "replaceChild(self, …) must throw"
     );
 

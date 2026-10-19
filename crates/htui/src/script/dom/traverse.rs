@@ -1,9 +1,7 @@
 //! Node-tree traversal natives: parent / sibling / child accessors, live
 //! NodeList, containment / equality checks and `querySelector` search.
 
-use boa_engine::{
-    Context, JsNativeError, JsResult, JsValue, NativeFunction, js_string,
-};
+use boa_engine::{Context, JsNativeError, JsResult, JsValue, NativeFunction, js_string};
 
 use crate::{
     html::css_parse::{CssSelector, selector_chain_matches},

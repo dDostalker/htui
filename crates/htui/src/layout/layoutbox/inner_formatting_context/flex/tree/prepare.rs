@@ -4,6 +4,7 @@
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
+    graphics::{FontStyle, char_width, grapheme_width},
     html::css_parse::{
         AlignItems, AlignSelf, CssDisplay, FlexDirection, Length, LengthContext, WhiteSpace,
     },
@@ -16,7 +17,6 @@ use crate::{
     tdom::node::{
         NodeArena, NodeId, NodeType, effective_font_size_cells, is_collapsible_whitespace,
     },
-    graphics::{FontStyle, char_width, grapheme_width},
 };
 
 use super::container::{AnonymousTextItem, FLEX_ITEM_MIN_CROSS, FlexItemPrep, FlexItemSource};
@@ -127,7 +127,11 @@ pub(super) fn prepare_flex_item(
     );
     let font = own_font_size_cells.max(1);
     let line_h = line_height_cells.max(1);
-    let glyph_row = if line_h > font { (line_h - font) / 2 } else { (font - 1) / 2 };
+    let glyph_row = if line_h > font {
+        (line_h - font) / 2
+    } else {
+        (font - 1) / 2
+    };
     let edges = css.get_box_edges(usize::MAX, context.font, context.viewport);
     let margin = edges.margin;
     // Flex-item margins are clamped to 0 when negative: the item-sizing /

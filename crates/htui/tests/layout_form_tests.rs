@@ -632,7 +632,10 @@ fn test_button_renders_centred_label() {
         .filter(|b| !b.word.is_empty() && b.word != " ")
         .map(|b| b.word.clone())
         .collect();
-    assert_eq!(glyphs, "Save", "button paints its label on the filled background");
+    assert_eq!(
+        glyphs, "Save",
+        "button paints its label on the filled background"
+    );
 }
 
 #[test]
@@ -1043,9 +1046,9 @@ fn test_control_without_border_paints_no_frame() {
     // rectangle — no box-drawing glyphs.
     let (term_map, tl) = draw(r#"<input id="b" value="plain">"#, "");
     assert!(
-        !tl.layout.iter().any(|b| {
-            matches!(b.word.as_str(), "┌" | "┐" | "└" | "┘" | "─" | "│")
-        }),
+        !tl.layout
+            .iter()
+            .any(|b| { matches!(b.word.as_str(), "┌" | "┐" | "└" | "┘" | "─" | "│") }),
         "no frame glyphs without a CSS border"
     );
     let cols = term_map.columns as usize;

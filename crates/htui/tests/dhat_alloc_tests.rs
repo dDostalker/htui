@@ -70,7 +70,11 @@ fn print_stage(name: &str, iters: usize, d: &Delta) {
         per_iter_blocks = d.blocks as f64 / iters as f64,
         bytes = d.bytes / iters,
         per_iter_bytes = d.bytes as f64 / iters as f64,
-        avg = if d.blocks > 0 { d.bytes as f64 / d.blocks as f64 } else { 0.0 },
+        avg = if d.blocks > 0 {
+            d.bytes as f64 / d.blocks as f64
+        } else {
+            0.0
+        },
     );
 }
 

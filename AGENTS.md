@@ -20,7 +20,7 @@ htui/
 ├── LICENSE-APACHE          # Apache-2.0 许可证文本（cargo package 自动打入 .crate）
 ├── .github/
 │   └── workflows/
-│       └── ci.yml          # GitHub Actions：test 矩阵（Linux/Windows/macOS）+ MSRV 1.89 + clippy + ast-grep
+│       └── ci.yml          # GitHub Actions：test 矩阵（Linux/Windows/macOS）+ MSRV 1.89 + clippy + fmt + ast-grep
 ├── crates/
 │   ├── htui/               # 主库 crate：终端 HTML/CSS 渲染引擎（独立发布单元）
 │   │   ├── Cargo.toml
@@ -519,7 +519,8 @@ ast-grep run -p 'PATTERN' --lang rust crates  # 一次性查询（不需规则�
 
 CI（`.github/workflows/ci.yml`）在 push / PR 上执行：`cargo test --workspace`（Linux /
 Windows / macOS 三平台矩阵）、MSRV 1.89.0 编译检查、`cargo clippy --all-targets
--D warnings`、以及 `ast-grep scan`。本地提交前应至少跑一遍 clippy 与 ast-grep。
+-D warnings`、`cargo fmt --all -- --check`、以及 `ast-grep scan`。本地提交前应至少跑
+一遍 `cargo fmt`、clippy 与 ast-grep。
 
 ### 跳过规则（仅限正当理由）
 在违规行**上一行**加注释：

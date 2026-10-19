@@ -561,7 +561,10 @@ fn render_to_bytes_includes_bg_sgr_on_pad_cells_for_padded_em_block() {
 #[test]
 fn text_transform_uppercase_renders() {
     init();
-    let (term_map, tl) = draw("<div>hello world</div>", "div { text-transform: uppercase; }");
+    let (term_map, tl) = draw(
+        "<div>hello world</div>",
+        "div { text-transform: uppercase; }",
+    );
     let cols = term_map.columns as usize;
     let row0: String = tl.layout[0..cols]
         .iter()
@@ -575,7 +578,10 @@ fn text_transform_uppercase_renders() {
 #[test]
 fn text_transform_lowercase_and_capitalize_render() {
     init();
-    let (term_map, tl) = draw("<div>Hello WORLD</div>", "div { text-transform: lowercase; }");
+    let (term_map, tl) = draw(
+        "<div>Hello WORLD</div>",
+        "div { text-transform: lowercase; }",
+    );
     let cols = term_map.columns as usize;
     let row0: String = tl.layout[0..cols]
         .iter()
@@ -585,7 +591,10 @@ fn text_transform_lowercase_and_capitalize_render() {
         .to_string();
     assert_eq!(row0, "hello world");
 
-    let (_, tl) = draw("<div>hello world</div>", "div { text-transform: capitalize; }");
+    let (_, tl) = draw(
+        "<div>hello world</div>",
+        "div { text-transform: capitalize; }",
+    );
     let row0: String = tl.layout[0..cols]
         .iter()
         .map(|b| b.word.as_str())

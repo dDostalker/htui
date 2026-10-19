@@ -14,7 +14,9 @@ fn init() {
 fn register_rejects_empty_paths() {
     init();
     let reg = ResourceRegistry::new();
-    let err = reg.register("", b"x".to_vec()).expect_err("empty path must error");
+    let err = reg
+        .register("", b"x".to_vec())
+        .expect_err("empty path must error");
     assert!(
         err.to_string().contains("must not be empty"),
         "error should explain the empty-path rule, got {err}"
@@ -26,7 +28,8 @@ fn register_then_load_roundtrips_bytes() {
     init();
     let reg = ResourceRegistry::new();
     let key = format!("mem://test/roundtrip_{}", std::process::id());
-    reg.register(&key, b"hello resource".to_vec()).expect("register mem resource");
+    reg.register(&key, b"hello resource".to_vec())
+        .expect("register mem resource");
     let loaded = reg.load(&key).expect("mem load succeeds");
     assert_eq!(&*loaded, b"hello resource");
     reg.unregister(&key);
@@ -40,13 +43,15 @@ fn bare_paths_and_prefixed_paths_are_equivalent() {
     let reg = ResourceRegistry::new();
     let tag = std::process::id();
     let bare = format!("assets/{tag}.txt");
-    reg.register(&bare, b"prefixed".to_vec()).expect("register bare path");
+    reg.register(&bare, b"prefixed".to_vec())
+        .expect("register bare path");
     let prefixed = format!("mem://{bare}");
     let loaded = reg.load(&prefixed).expect("load with prefix");
     assert_eq!(&*loaded, b"prefixed");
 
     let prefixed2 = format!("mem://other/{tag}.txt");
-    reg.register(&prefixed2, b"bare".to_vec()).expect("register prefixed path");
+    reg.register(&prefixed2, b"bare".to_vec())
+        .expect("register prefixed path");
     let bare2 = format!("other/{tag}.txt");
     let loaded2 = reg.load(&bare2).expect("load bare path");
     assert_eq!(&*loaded2, b"bare");
@@ -60,8 +65,10 @@ fn register_replaces_existing_bytes() {
     init();
     let reg = ResourceRegistry::new();
     let key = format!("mem://test/replace_{}", std::process::id());
-    reg.register(&key, b"first".to_vec()).expect("register once");
-    reg.register(&key, b"second".to_vec()).expect("register again");
+    reg.register(&key, b"first".to_vec())
+        .expect("register once");
+    reg.register(&key, b"second".to_vec())
+        .expect("register again");
     let loaded = reg.load(&key).expect("mem load succeeds");
     assert_eq!(&*loaded, b"second", "re-registration must replace");
     reg.unregister(&key);
@@ -72,7 +79,8 @@ fn unregister_returns_whether_key_existed() {
     init();
     let reg = ResourceRegistry::new();
     let key = format!("mem://test/unregister_{}", std::process::id());
-    reg.register(&key, b"x".to_vec()).expect("register mem resource");
+    reg.register(&key, b"x".to_vec())
+        .expect("register mem resource");
     // Before unregistering, loading succeeds.
     assert!(reg.load(&key).is_ok());
     assert!(reg.unregister(&key), "existing key unregisters");
@@ -80,18 +88,16 @@ fn unregister_returns_whether_key_existed() {
         reg.load(&key).is_err(),
         "after unregistering, loading must fail"
     );
-    assert!(
-        !reg.unregister(&key),
-        "missing key unregisters nothing"
-    );
+    assert!(!reg.unregister(&key), "missing key unregisters nothing");
 }
 
 #[test]
 fn load_missing_mem_key_errors() {
     init();
     let reg = ResourceRegistry::new();
-    let err =
-        reg.load("mem://does/not/exist").expect_err("unregistered mem:// key must error");
+    let err = reg
+        .load("mem://does/not/exist")
+        .expect_err("unregistered mem:// key must error");
     assert!(
         err.to_string().contains("not registered"),
         "error should mention the missing registration, got {err}"
@@ -102,7 +108,8 @@ fn load_missing_mem_key_errors() {
 fn with_registry_installs_the_registry_for_the_scope() {
     init();
     let reg = Arc::new(ResourceRegistry::new());
-    reg.register("scoped.css", b"p { color: red; }".to_vec()).expect("register");
+    reg.register("scoped.css", b"p { color: red; }".to_vec())
+        .expect("register");
 
     // Outside the scope the internal bridge has nothing installed: a `<link
     // href>` resource fails to load (the parser keeps the css source empty).
@@ -117,10 +124,8 @@ fn with_registry_installs_the_registry_for_the_scope() {
 
     // Inside the scope the resource resolves.
     let (_, _, css_inside) = with_registry(Arc::clone(&reg), || {
-        htui::html::html_parse::Parser::new(
-            "<link rel=\"stylesheet\" href=\"scoped.css\"><p>x</p>",
-        )
-        .parse()
+        htui::html::html_parse::Parser::new("<link rel=\"stylesheet\" href=\"scoped.css\"><p>x</p>")
+            .parse()
     });
     assert!(
         css_inside.contains("color: red"),
@@ -132,14 +137,16 @@ fn with_registry_installs_the_registry_for_the_scope() {
 fn with_registry_scopes_restore_the_previous_registry() {
     init();
     let outer = Arc::new(ResourceRegistry::new());
-    outer.register("outer.css", b"a { color: blue; }".to_vec()).expect("register");
+    outer
+        .register("outer.css", b"a { color: blue; }".to_vec())
+        .expect("register");
     let inner = Arc::new(ResourceRegistry::new());
-    inner.register("inner.css", b"b { color: green; }".to_vec()).expect("register");
+    inner
+        .register("inner.css", b"b { color: green; }".to_vec())
+        .expect("register");
 
     let parse = |href: &str| {
-        let html = format!(
-            "<link rel=\"stylesheet\" href=\"{href}\"><p>x</p>"
-        );
+        let html = format!("<link rel=\"stylesheet\" href=\"{href}\"><p>x</p>");
         let (_, _, css) = htui::html::html_parse::Parser::new(&html).parse();
         css
     };

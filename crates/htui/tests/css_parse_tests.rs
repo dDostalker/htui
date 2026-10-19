@@ -1406,7 +1406,10 @@ fn length_resolve_ch_is_font_size_independent() {
     // 1ch == 1 cell no matter the effective font-size — unlike `em`, `ch`
     // counts characters, and a terminal cell *is* a character. Rounding
     // follows the same away-from-zero rule as the other multipliers.
-    assert_eq!(Length::Ch(12.0).resolve(length_ctx(80, default_font_ctx())), 12);
+    assert_eq!(
+        Length::Ch(12.0).resolve(length_ctx(80, default_font_ctx())),
+        12
+    );
     assert_eq!(Length::Ch(1.5).resolve(length_ctx(80, font_ctx(2, 1))), 2); // 1.5 rounds away
     assert_eq!(Length::Ch(0.4).resolve(length_ctx(80, font_ctx(3, 2))), 0);
 }
@@ -2187,11 +2190,7 @@ fn border_side_component_longhand_overrides_side_shorthand() {
     assert_eq!(sides.top.style, BorderStyle::Solid);
     assert_eq!(
         sides.top.color,
-        Some(Color::Rgb {
-            r: 0,
-            g: 0,
-            b: 255
-        }),
+        Some(Color::Rgb { r: 0, g: 0, b: 255 }),
         "style/color come from the side shorthand"
     );
     // The other sides are untouched by the top longhand.
@@ -2210,14 +2209,7 @@ fn border_side_component_longhand_alone() {
     );
     assert_eq!(sides.left.width, 0);
     assert_eq!(sides.left.style, BorderStyle::None);
-    assert_eq!(
-        sides.left.color,
-        Some(Color::Rgb {
-            r: 0,
-            g: 128,
-            b: 0
-        })
-    );
+    assert_eq!(sides.left.color, Some(Color::Rgb { r: 0, g: 128, b: 0 }));
     assert_eq!(sides.top.color, None, "other sides unaffected");
 }
 
@@ -2334,7 +2326,6 @@ fn min_max_size_properties_are_supported_not_inherited() {
     assert!(!INHERITED_PROPS.contains(&"min-width"));
     assert!(!INHERITED_PROPS.contains(&"max-height"));
 }
-
 
 /// Test-only oracle: the pre-optimization cascade (per-rule full-tree walks,
 /// per-call specificity sort, per-node inherited-map clones). `style`
@@ -2484,13 +2475,30 @@ fn bucketed_cascade_matches_reference_cascade() {
     let (root, div, _ul, li2, em) = build_cascade_tree(&mut arena);
 
     // Static pass.
-    css_into_node_with_state(&mut arena, root, &parse_sheet(CASCADE_SHEET), &DynamicState::default());
+    css_into_node_with_state(
+        &mut arena,
+        root,
+        &parse_sheet(CASCADE_SHEET),
+        &DynamicState::default(),
+    );
     assert_matches_reference(&arena, root, CASCADE_SHEET, &DynamicState::default());
     // Spot-check the cascade semantics the buckets must preserve.
-    assert_eq!(arena[div].css_attr.0.get("color").map(|s| s.as_ref()), Some("red"));
-    assert_eq!(arena[li2].css_attr.0.get("color").map(|s| s.as_ref()), Some("green"));
-    assert_eq!(arena[em].css_attr.0.get("color").map(|s| s.as_ref()), Some("black"));
-    assert_eq!(arena[em].css_attr.0.get("font-style").map(|s| s.as_ref()), Some("italic"));
+    assert_eq!(
+        arena[div].css_attr.0.get("color").map(|s| s.as_ref()),
+        Some("red")
+    );
+    assert_eq!(
+        arena[li2].css_attr.0.get("color").map(|s| s.as_ref()),
+        Some("green")
+    );
+    assert_eq!(
+        arena[em].css_attr.0.get("color").map(|s| s.as_ref()),
+        Some("black")
+    );
+    assert_eq!(
+        arena[em].css_attr.0.get("font-style").map(|s| s.as_ref()),
+        Some("italic")
+    );
     assert_eq!(
         arena[div].css_attr.0.get("padding-top").map(|s| s.as_ref()),
         Some("1px")
@@ -2547,12 +2555,10 @@ fn cascade_inline_style_precedence_unchanged() {
     let mut arena = NodeArena::default();
     let root = arena.insert(Node::from(NodeType::Document));
     let div = arena.insert(Node::from(NodeType::Div));
-    arena[div].attributes = IndexMap::from([
-        (
-            "style".to_string(),
-            "color: green; background-color: white !important".to_string(),
-        ),
-    ]);
+    arena[div].attributes = IndexMap::from([(
+        "style".to_string(),
+        "color: green; background-color: white !important".to_string(),
+    )]);
     Node::append_child(&mut arena, root, div);
     let rules = parse_sheet("div { color: red !important; }");
     css_into_node_with_state(&mut arena, root, &rules, &DynamicState::default());
@@ -2563,7 +2569,11 @@ fn cascade_inline_style_precedence_unchanged() {
     );
     // …while inline `!important` still lands (no competing declaration).
     assert_eq!(
-        arena[div].css_attr.0.get("background-color").map(|s| s.as_ref()),
+        arena[div]
+            .css_attr
+            .0
+            .get("background-color")
+            .map(|s| s.as_ref()),
         Some("white")
     );
 
@@ -2597,14 +2607,24 @@ fn cascade_inheritance_values_survive_copy_on_write() {
     for (parent, child) in [(root, div), (div, p), (p, span), (span, em)] {
         Node::append_child(&mut arena, parent, child);
     }
-    let rules = parse_sheet(
-        "div { color: red; } p { color: red; } span { color: blue; }",
-    );
+    let rules = parse_sheet("div { color: red; } p { color: red; } span { color: blue; }");
     css_into_node_with_state(&mut arena, root, &rules, &DynamicState::default());
-    assert_eq!(arena[div].css_attr.0.get("color").map(|s| s.as_ref()), Some("red"));
-    assert_eq!(arena[p].css_attr.0.get("color").map(|s| s.as_ref()), Some("red"));
-    assert_eq!(arena[span].css_attr.0.get("color").map(|s| s.as_ref()), Some("blue"));
-    assert_eq!(arena[em].css_attr.0.get("color").map(|s| s.as_ref()), Some("blue"));
+    assert_eq!(
+        arena[div].css_attr.0.get("color").map(|s| s.as_ref()),
+        Some("red")
+    );
+    assert_eq!(
+        arena[p].css_attr.0.get("color").map(|s| s.as_ref()),
+        Some("red")
+    );
+    assert_eq!(
+        arena[span].css_attr.0.get("color").map(|s| s.as_ref()),
+        Some("blue")
+    );
+    assert_eq!(
+        arena[em].css_attr.0.get("color").map(|s| s.as_ref()),
+        Some("blue")
+    );
 }
 
 // ============================================================
@@ -2617,36 +2637,70 @@ fn declaration_property_names_are_case_insensitive() {
     // `parse_declaration_text` backs the inline `style` attribute and `el.style`.
     // Declaration names normalise to lowercase so the canonical keys the
     // `CssAttr` accessors read are produced (`WIDTH` → `width`, …).
-    let m = parse_declaration_text("WIDTH: 10px; BACKGROUND-COLOR: red; Text-Transform: uppercase;");
+    let m =
+        parse_declaration_text("WIDTH: 10px; BACKGROUND-COLOR: red; Text-Transform: uppercase;");
     assert_eq!(m.get("width").map(|s| s.as_ref()), Some("10px"));
     assert_eq!(m.get("background-color").map(|s| s.as_ref()), Some("red"));
-    assert_eq!(m.get("text-transform").map(|s| s.as_ref()), Some("uppercase"));
+    assert_eq!(
+        m.get("text-transform").map(|s| s.as_ref()),
+        Some("uppercase")
+    );
 }
 
 #[test]
 fn text_align_keywords_are_case_insensitive_and_support_start_end() {
     init();
-    assert_eq!(attr_from_decl("text-align", "CENTER").get_text_align(), TextAlign::Center);
-    assert_eq!(attr_from_decl("text-align", "Right").get_text_align(), TextAlign::Right);
-    assert_eq!(attr_from_decl("text-align", "end").get_text_align(), TextAlign::Right);
-    assert_eq!(attr_from_decl("text-align", "start").get_text_align(), TextAlign::Left);
+    assert_eq!(
+        attr_from_decl("text-align", "CENTER").get_text_align(),
+        TextAlign::Center
+    );
+    assert_eq!(
+        attr_from_decl("text-align", "Right").get_text_align(),
+        TextAlign::Right
+    );
+    assert_eq!(
+        attr_from_decl("text-align", "end").get_text_align(),
+        TextAlign::Right
+    );
+    assert_eq!(
+        attr_from_decl("text-align", "start").get_text_align(),
+        TextAlign::Left
+    );
     // `justify` collapses to left (no inter-word justification).
-    assert_eq!(attr_from_decl("text-align", "justify").get_text_align(), TextAlign::Left);
+    assert_eq!(
+        attr_from_decl("text-align", "justify").get_text_align(),
+        TextAlign::Left
+    );
 }
 
 #[test]
 fn font_weight_is_case_insensitive_and_600_is_bold() {
     init();
-    assert_eq!(attr_from_decl("font-weight", "BOLD").get_font_weight(), FontWeight::Bold);
-    assert_eq!(attr_from_decl("font-weight", "bolder").get_font_weight(), FontWeight::Bold);
-    assert_eq!(attr_from_decl("font-weight", "600").get_font_weight(), FontWeight::Bold);
-    assert_eq!(attr_from_decl("font-weight", "500").get_font_weight(), FontWeight::Normal);
+    assert_eq!(
+        attr_from_decl("font-weight", "BOLD").get_font_weight(),
+        FontWeight::Bold
+    );
+    assert_eq!(
+        attr_from_decl("font-weight", "bolder").get_font_weight(),
+        FontWeight::Bold
+    );
+    assert_eq!(
+        attr_from_decl("font-weight", "600").get_font_weight(),
+        FontWeight::Bold
+    );
+    assert_eq!(
+        attr_from_decl("font-weight", "500").get_font_weight(),
+        FontWeight::Normal
+    );
 }
 
 #[test]
 fn font_style_is_case_insensitive() {
     init();
-    assert_eq!(attr_from_decl("font-style", "Italic").get_font_style_kind(), FontStyleKind::Italic);
+    assert_eq!(
+        attr_from_decl("font-style", "Italic").get_font_style_kind(),
+        FontStyleKind::Italic
+    );
     assert_eq!(
         attr_from_decl("font-style", "OBLIQUE").get_font_style_kind(),
         FontStyleKind::Oblique
@@ -2667,11 +2721,19 @@ fn negative_margin_resolves_signed_horizontally() {
     // `margin: -4ch` applies to every side: vertical clamps to 0 (no
     // overlapping rows), horizontal keeps the sign (gutter pull-out).
     let attr = attr_from_decl("margin", "-4ch");
-    let m = attr.get_margin(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
+    let m = attr.get_margin(
+        80,
+        font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+        viewport(),
+    );
     assert_eq!(m, MarginSizes::new(0, -4, 0, -4));
     // A per-side longhand overrides the shorthand.
     let attr = attr_from_decl("margin-left", "-6ch");
-    let m = attr.get_margin(80, font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE), viewport());
+    let m = attr.get_margin(
+        80,
+        font_ctx(DEFAULT_FONT_SIZE, DEFAULT_ROOT_FONT_SIZE),
+        viewport(),
+    );
     assert_eq!(m, MarginSizes::new(0, 0, 0, -6));
 }
 
@@ -2708,7 +2770,10 @@ fn font_size_percentage_resolves_against_parent() {
         font_size_cells: 2,
         root_font_size_cells: 1,
     };
-    assert_eq!(effective_font_size_cells(&arena, div_id, ctx, viewport()), 4);
+    assert_eq!(
+        effective_font_size_cells(&arena, div_id, ctx, viewport()),
+        4
+    );
 }
 
 // ============================================================
@@ -2728,7 +2793,9 @@ fn white_space_inherits_to_inline_children() {
     css_into_node(&mut arena, root, &rules);
     // The (unstyled) span picks up the div's `pre-wrap` by inheritance.
     assert_eq!(
-        arena[span_id].css_attr.get_white_space(&arena[span_id].node_type),
+        arena[span_id]
+            .css_attr
+            .get_white_space(&arena[span_id].node_type),
         WhiteSpace::PreWrap
     );
 }

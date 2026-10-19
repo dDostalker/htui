@@ -18,7 +18,7 @@ use super::bindings::{
 };
 use super::dom::{get_listeners, install_builtins, node_wrapper};
 use super::host::HostFn;
-use super::state::{ScriptState, ENGINE_STATE};
+use super::state::{ENGINE_STATE, ScriptState};
 use super::{EngineBuildError, EngineParts};
 
 /// Browser-aligned JS engine attached to a live DOM.

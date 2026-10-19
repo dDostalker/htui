@@ -10,7 +10,8 @@ use std::sync::{Arc, OnceLock};
 
 use super::cascade::CascadeIndex;
 use super::{
-    properties::CssAttr, selector::CssSelector,
+    properties::CssAttr,
+    selector::CssSelector,
     values::{
         alignment_longhand_valid, expand_place_shorthand, is_alignment_longhand,
         is_place_shorthand_name,

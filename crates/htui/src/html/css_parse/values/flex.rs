@@ -37,7 +37,10 @@ impl FlexDirection {
     }
     /// Whether the main axis runs backwards (`row-reverse` / `column-reverse`).
     pub fn is_reverse(&self) -> bool {
-        matches!(self, FlexDirection::RowReverse | FlexDirection::ColumnReverse)
+        matches!(
+            self,
+            FlexDirection::RowReverse | FlexDirection::ColumnReverse
+        )
     }
 }
 

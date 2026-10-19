@@ -1,6 +1,6 @@
 use crate::events::HitMap;
 use crate::layout::layoutbox::geometry::{
-    SelectRow, overlay_options, select_rows, select_overlay_rect,
+    SelectRow, overlay_options, select_overlay_rect, select_rows,
 };
 use crate::script::ScriptMsg;
 use crate::tdom::node::{NodeArena, NodeId, NodeType};

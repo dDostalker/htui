@@ -200,12 +200,7 @@ pub(super) fn distribute_main_axis(
 /// the unfrozen items. Iterates until the line matches `available` exactly
 /// or no item can move; residual space stays for `justify-content`, and
 /// residual overflow makes the line overflow (like a browser).
-fn fixup_min_max(
-    sizes: &mut [usize],
-    line: &[&FlexItemPrep],
-    available: usize,
-    column_gap: usize,
-) {
+fn fixup_min_max(sizes: &mut [usize], line: &[&FlexItemPrep], available: usize, column_gap: usize) {
     let n = sizes.len();
     if n == 0 {
         return;
@@ -285,9 +280,8 @@ fn fixup_min_max(
                 break;
             }
             for &i in &candidates {
-                let share =
-                    ((over as f32) * (line[i].shrink * sizes[i] as f32) / total_weight).floor()
-                        as usize;
+                let share = ((over as f32) * (line[i].shrink * sizes[i] as f32) / total_weight)
+                    .floor() as usize;
                 let target = sizes[i].saturating_sub(share).max(mins[i]);
                 moved += sizes[i] - target;
                 sizes[i] = target;

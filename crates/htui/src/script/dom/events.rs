@@ -2,8 +2,7 @@
 //! element focus requests and the JS-side listener registry helpers.
 
 use boa_engine::{
-    Context, JsNativeError, JsResult, JsValue, js_string,
-    object::ObjectInitializer,
+    Context, JsNativeError, JsResult, JsValue, js_string, object::ObjectInitializer,
     property::Attribute,
 };
 

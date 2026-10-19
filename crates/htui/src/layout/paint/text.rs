@@ -2,9 +2,9 @@ use crossterm::style::Color;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
+    graphics::{FontStyle, grapheme_width},
     html::css_parse::TextAlign,
     layout::{InlineRun, Rect},
-    graphics::{FontStyle, grapheme_width},
 };
 
 use super::PaintCanvas;

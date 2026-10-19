@@ -2,6 +2,7 @@
 //! the container's [`LayoutBox`].
 
 use crate::{
+    graphics::block_style,
     html::css_parse::{BoxSizing, OverflowWrap, WhiteSpace, WordBreak},
     layout::{
         BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext, PaintStyle, Rect,
@@ -12,7 +13,6 @@ use crate::{
         },
     },
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
-    graphics::block_style,
 };
 
 use crate::html::css_parse::Position;
@@ -148,8 +148,8 @@ pub(super) fn layout_flex_container(
             // bottom margin (CSS vertical margin collapsing: the larger wins).
             cursor.collapse_and_skip(edges.margin.top);
             let outer_y_top = cursor.y;
-            let available = (containing.width as i64 - edges.margin.horizontal() as i64).max(0)
-                as usize;
+            let available =
+                (containing.width as i64 - edges.margin.horizontal() as i64).max(0) as usize;
             let block_width = constrained_block_width(
                 &node.css_attr,
                 available,

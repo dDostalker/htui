@@ -110,7 +110,8 @@ fn nested_paragraph_shares_aside_row_with_bg() {
         .map(|i| i / cols)
         .expect("nested paragraph should still render yellow text");
     assert_eq!(
-        paragraph_row, aside_row + 1,
+        paragraph_row,
+        aside_row + 1,
         "nested <p> sits one row below the aside's top (its 1-row UA margin-top), got rows {aside_row}/{paragraph_row}"
     );
     // The aside rect is 3 rows tall (UA margins + text); the row after must

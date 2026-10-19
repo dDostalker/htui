@@ -248,7 +248,10 @@ fn inner_html_setter_extracts_style_css() {
     );
     let dirty = engine.take_dirty();
     assert!(
-        dirty.injected_css.values().any(|c| c.contains("color: red")),
+        dirty
+            .injected_css
+            .values()
+            .any(|c| c.contains("color: red")),
         "extracted <style> CSS must be carried to the render thread: {:?}",
         dirty.injected_css
     );
@@ -280,7 +283,12 @@ fn inner_html_style_css_applies_to_fragment() {
     let dirty = engine.take_dirty();
     let mut arena = engine.arena();
     let root_id = engine.root_id();
-    let injected = dirty.injected_css.values().cloned().collect::<Vec<_>>().join("\n");
+    let injected = dirty
+        .injected_css
+        .values()
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
     let rules = css_parse::Parser::new(&injected).parse();
     css_parse::css_into_node(&mut arena, root_id, &rules);
     let x = find_node_by_id(&arena, "x");
@@ -309,14 +317,21 @@ fn inner_html_setter_loads_link_stylesheet() {
         );
         let dirty = engine.take_dirty();
         assert!(
-            dirty.injected_css.values().any(|c| c.contains("color: blue")),
+            dirty
+                .injected_css
+                .values()
+                .any(|c| c.contains("color: blue")),
             "linked stylesheet CSS must be extracted: {:?}",
             dirty.injected_css
         );
         let mut arena = engine.arena();
         let root_id = engine.root_id();
-        let injected =
-            dirty.injected_css.values().cloned().collect::<Vec<_>>().join("\n");
+        let injected = dirty
+            .injected_css
+            .values()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n");
         let rules = css_parse::Parser::new(&injected).parse();
         css_parse::css_into_node(&mut arena, root_id, &rules);
         let l = find_node_by_id(&arena, "l");
@@ -395,7 +410,10 @@ fn inner_html_click_handler_mutation_carries_style_css() {
     engine.fire(&region, EventType::Click, 0, 0);
     let dirty = engine.take_dirty();
     assert!(
-        dirty.injected_css.values().any(|c| c.contains("color: green")),
+        dirty
+            .injected_css
+            .values()
+            .any(|c| c.contains("color: green")),
         "handler-injected CSS must be reported: {:?}",
         dirty.injected_css
     );

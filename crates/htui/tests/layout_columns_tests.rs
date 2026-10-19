@@ -74,8 +74,14 @@ fn test_multicol_count_fragments_block_children() {
     let css = ".cols { width: 60ch; column-count: 2; column-gap: 0ch; }";
     let tl = setup(html, css);
     // Column 0 holds A1/A2 stacked at x 0; column 1 holds B1/B2 at x 30.
-    assert_eq!(row(&tl, 0), format!("A1{}B1{}", " ".repeat(28), " ".repeat(48)));
-    assert_eq!(row(&tl, 1), format!("A2{}B2{}", " ".repeat(28), " ".repeat(48)));
+    assert_eq!(
+        row(&tl, 0),
+        format!("A1{}B1{}", " ".repeat(28), " ".repeat(48))
+    );
+    assert_eq!(
+        row(&tl, 1),
+        format!("A2{}B2{}", " ".repeat(28), " ".repeat(48))
+    );
     assert_eq!(row(&tl, 2), " ".repeat(80), "content fits in two rows");
 }
 
@@ -148,7 +154,11 @@ fn test_multicol_column_width_derives_count() {
     assert_eq!(cell_word(&tl, 20, 0), "B");
     assert_eq!(cell_word(&tl, 40, 0), "C");
     assert_eq!(cell_word(&tl, 60, 0), "D");
-    assert_eq!(cell_word(&tl, 20, 1), " ", "each column holds exactly one item");
+    assert_eq!(
+        cell_word(&tl, 20, 1),
+        " ",
+        "each column holds exactly one item"
+    );
 }
 
 #[test]
@@ -227,7 +237,10 @@ fn test_multicol_fill_auto_stacks_first_column() {
     let css = ".cols { column-count: 2; column-gap: 0ch; column-fill: auto; height: 4ch; }";
     let tl = setup(html, css);
     for y in 0..4 {
-        assert_eq!(cell_word(&tl, 0, y), "ABCD".chars().nth(y).unwrap().to_string());
+        assert_eq!(
+            cell_word(&tl, 0, y),
+            "ABCD".chars().nth(y).unwrap().to_string()
+        );
         assert_eq!(
             cell_word(&tl, 40, y),
             " ",

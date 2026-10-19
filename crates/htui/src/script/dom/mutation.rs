@@ -3,10 +3,7 @@
 
 use boa_engine::{Context, JsNativeError, JsResult, JsValue};
 
-use crate::{
-    script::ScriptState,
-    tdom::node::NodeId,
-};
+use crate::{script::ScriptState, tdom::node::NodeId};
 
 use super::{mark_dirty, node_wrapper, this_node_id, with_state};
 

@@ -6,13 +6,15 @@
 use crossterm::style::Color;
 
 use crate::{
+    graphics::{FontStyle, char_width},
     layout::{LayoutBox, Rect},
     tdom::node::NodeArena,
-    graphics::{FontStyle, char_width},
 };
 
 use super::button::paint_button;
-use super::{PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put};
+use super::{
+    PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put,
+};
 
 /// Highlight colour for the selected character range (Tokyo Night selection).
 const SELECTION_BG: Color = Color::Rgb {
@@ -95,9 +97,9 @@ pub(crate) fn paint_input(
         let checked = node.attributes.contains_key("checked");
         let disabled = node.attributes.contains_key("disabled");
         let glyph = match (input_type.as_str(), checked) {
-            ("checkbox", true) => '\u{25A0}', // ■
+            ("checkbox", true) => '\u{25A0}',  // ■
             ("checkbox", false) => '\u{25A1}', // □
-            ("radio", true) => '\u{25CF}',    // ●
+            ("radio", true) => '\u{25CF}',     // ●
             _ => '\u{25CB}',                   // ○
         };
         let toggle_fg = if disabled {
@@ -124,7 +126,10 @@ pub(crate) fn paint_input(
     }
 
     let content = paint_control_chrome(lb, arena, canvas, r, fg);
-    let bg = node.css_attr.get_bg_color().or(Some(super::CONTROL_DEFAULT_BG));
+    let bg = node
+        .css_attr
+        .get_bg_color()
+        .or(Some(super::CONTROL_DEFAULT_BG));
 
     // Live edit state wins while focused, and an unfocused entry covers only
     // the single repaint right after a blur (so the committed text doesn't
@@ -161,7 +166,10 @@ pub(crate) fn paint_input(
     let caret_color = node.css_attr.get_caret_color();
     let caret_cell = |fg: Option<Color>, bg: Option<Color>| match caret_color {
         Some(cc) => (Some(bg.unwrap_or(Color::Black)), Some(cc)),
-        None => (Some(bg.unwrap_or(Color::Black)), Some(fg.unwrap_or(Color::White))),
+        None => (
+            Some(bg.unwrap_or(Color::Black)),
+            Some(fg.unwrap_or(Color::White)),
+        ),
     };
 
     // The value fills the whole content area.

@@ -45,7 +45,10 @@ fn dump(html: &str, css: &str, cols: u16, rows: u16, bg_map: bool) {
         css_parse::css_into_node(&mut arena, root_id, &rules);
     }
 
-    let term_map = TermMap { columns: cols, rows };
+    let term_map = TermMap {
+        columns: cols,
+        rows,
+    };
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map);
 
@@ -327,9 +330,10 @@ fn main() {
         if dump_mode {
             dump(html, css, cols, rows, bg_map);
         } else {
-            session.register(
-                "mem://demo/app.js",
-                r#"
+            session
+                .register(
+                    "mem://demo/app.js",
+                    r#"
                   function boot() {
                     document.querySelector('#status').textContent = 'fetching...';
                     fetch('mem://demo/hello.txt')
@@ -344,15 +348,16 @@ fn main() {
                   }
                   boot();
                 "#
-                .as_bytes()
-                .to_vec(),
-            )
-            .expect("register mem demo script");
-            session.register(
-                "mem://demo/hello.txt",
-                b"hello from the mem:// registry".to_vec(),
-            )
-            .expect("register mem demo data");
+                    .as_bytes()
+                    .to_vec(),
+                )
+                .expect("register mem demo script");
+            session
+                .register(
+                    "mem://demo/hello.txt",
+                    b"hello from the mem:// registry".to_vec(),
+                )
+                .expect("register mem demo data");
             session.render(html, css);
         }
         info!("Test '{test_name}' completed");
@@ -364,16 +369,18 @@ fn main() {
     // `mem://` registry (no file system), so register the bundled PNG bytes
     // before rendering — for both the interactive and `--dump` paths.
     if test_name == "image" || test_name == "all_in_one" {
-        session.register(
-            "mem://image/pic.png",
-            include_bytes!("image/pic.png").to_vec(),
-        )
-        .expect("register bundled pic.png");
-        session.register(
-            "mem://image/pic.svg",
-            include_bytes!("image/pic.svg").to_vec(),
-        )
-        .expect("register bundled pic.svg");
+        session
+            .register(
+                "mem://image/pic.png",
+                include_bytes!("image/pic.png").to_vec(),
+            )
+            .expect("register bundled pic.png");
+        session
+            .register(
+                "mem://image/pic.svg",
+                include_bytes!("image/pic.svg").to_vec(),
+            )
+            .expect("register bundled pic.svg");
     }
 
     if dump_mode {

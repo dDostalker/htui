@@ -145,7 +145,11 @@ fn padding_shrinks_inner_containing_block() {
         .iter()
         .position(|b| b.word == "I")
         .expect("'Inner' should render");
-    assert_eq!(text_idx / cols, 3, "p starts after padding-top=2 + its UA margin-top=1");
+    assert_eq!(
+        text_idx / cols,
+        3,
+        "p starts after padding-top=2 + its UA margin-top=1"
+    );
     assert_eq!(text_idx % cols, 5, "p must start after padding-left=5");
 }
 
@@ -240,7 +244,11 @@ fn margin_right_auto_pushes_box_to_the_left() {
     let (term_map, tl) = draw("<div>X</div>", "div { width: 20ch; margin-right: auto; }");
     let cols = term_map.columns as usize;
     let text_idx = tl.layout.iter().position(|b| b.word == "X").unwrap();
-    assert_eq!(text_idx % cols, 0, "left margin stays 0, auto right absorbs");
+    assert_eq!(
+        text_idx % cols,
+        0,
+        "left margin stays 0, auto right absorbs"
+    );
 }
 
 #[test]
@@ -254,11 +262,7 @@ fn margin_left_auto_pushes_box_to_the_right() {
     );
     let cols = term_map.columns as usize;
     let text_idx = tl.layout.iter().position(|b| b.word == "X").unwrap();
-    assert_eq!(
-        text_idx % cols,
-        60,
-        "auto left margin = 80 - 20 = 60"
-    );
+    assert_eq!(text_idx % cols, 60, "auto left margin = 80 - 20 = 60");
 }
 
 #[test]
@@ -282,11 +286,7 @@ fn border_side_component_longhand_renders() {
     assert_eq!(edge.word, BOX_V, "left edge renders a vertical bar");
     assert_eq!(
         edge.fcolor,
-        Some(Color::Rgb {
-            r: 0,
-            g: 128,
-            b: 0
-        }),
+        Some(Color::Rgb { r: 0, g: 128, b: 0 }),
         "longhand color applies"
     );
 }
@@ -315,20 +315,12 @@ fn border_component_longhand_overrides_side_shorthand_in_layout() {
     assert_eq!(left_edge.word, BOX_V);
     assert_eq!(
         left_edge.fcolor,
-        Some(Color::Rgb {
-            r: 0,
-            g: 0,
-            b: 255
-        }),
+        Some(Color::Rgb { r: 0, g: 0, b: 255 }),
         "component longhand wins"
     );
     assert_eq!(
         top_edge.fcolor,
-        Some(Color::Rgb {
-            r: 255,
-            g: 0,
-            b: 0
-        }),
+        Some(Color::Rgb { r: 255, g: 0, b: 0 }),
         "other sides keep shorthand"
     );
 }

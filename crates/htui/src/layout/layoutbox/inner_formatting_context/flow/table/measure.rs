@@ -4,8 +4,8 @@
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    tdom::node::{NodeArena, NodeId, NodeType},
     graphics::grapheme_width,
+    tdom::node::{NodeArena, NodeId, NodeType},
 };
 
 use super::cell::CellInfo;

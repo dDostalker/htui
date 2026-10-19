@@ -15,12 +15,12 @@ mod style;
 mod text;
 
 pub use canvas::{InputRenderState, TermLayout};
-pub use cell::{Block, FontStyle};
 pub(crate) use cell::styled_string;
+pub use cell::{Block, FontStyle};
+pub(crate) use image::image_intrinsic_size;
 pub use image::{
     ClipRect, IMAGE_PIXELS_PER_CELL_COL, IMAGE_PIXELS_PER_CELL_ROW, ImageCache, ImageError, Img,
     render_image_at, render_image_at_slice,
 };
-pub(crate) use image::image_intrinsic_size;
 pub use style::block_style;
 pub use text::{char_width, grapheme_width};

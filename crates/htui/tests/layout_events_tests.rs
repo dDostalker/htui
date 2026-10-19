@@ -183,7 +183,7 @@ fn click_input_focuses_and_click_elsewhere_blurs() {
             } if *node_id == input_region.node_id
         )),
         "blur must queue an unfocused repaint with the selection cleared"
-     );
+    );
 }
 
 #[test]
@@ -371,7 +371,8 @@ fn drag_on_page_text_emits_text_selection() {
     state.pressed = Some((0, 0));
     let cmds = mouse_move(&mut state, &mut engine, &map, 4, 0);
     assert_eq!(
-        state.text_sel_anchor, Some((0, 0)),
+        state.text_sel_anchor,
+        Some((0, 0)),
         "the anchor is the press point"
     );
     assert_eq!(state.text_sel_end, Some((4, 0)));
@@ -443,7 +444,8 @@ fn right_drag_emits_a_block_selection() {
     state.pressed = Some((2, 0));
     let cmds = mouse_move(&mut state, &mut engine, &map, 5, 2);
     assert_eq!(
-        state.text_sel_anchor, Some((2, 0)),
+        state.text_sel_anchor,
+        Some((2, 0)),
         "the anchor is the press point"
     );
     assert!(
@@ -479,17 +481,16 @@ fn jittery_click_on_a_button_leaves_no_selection() {
 
     let mut state = InputState::new();
     mouse_down(&mut state, &mut engine, &map, bx, by, MouseButton::Left);
-    assert_eq!(
-        state.text_sel_anchor, None,
-        "press alone: no selection yet"
-    );
+    assert_eq!(state.text_sel_anchor, None, "press alone: no selection yet");
 
     // The input loop tracks the press position; the pointer wiggles one cell
     // right while the button is held (still a click, not a drag).
     state.pressed = Some((bx as u16, by as u16));
     let cmds = mouse_move(&mut state, &mut engine, &map, bx + 1, by);
     assert!(
-        !cmds.iter().any(|c| matches!(c, RenderCmd::TextSelection { .. })),
+        !cmds
+            .iter()
+            .any(|c| matches!(c, RenderCmd::TextSelection { .. })),
         "a sub-threshold wiggle must not queue a TextSelection"
     );
     assert_eq!(state.text_sel_anchor, None);
@@ -525,7 +526,9 @@ fn disabled_flow_copy_blocks_left_drag_selection() {
     );
     assert_eq!(state.text_sel_end, None);
     assert!(
-        !cmds.iter().any(|c| matches!(c, RenderCmd::TextSelection { .. })),
+        !cmds
+            .iter()
+            .any(|c| matches!(c, RenderCmd::TextSelection { .. })),
         "a disabled flow copy must queue no TextSelection"
     );
 }
@@ -555,7 +558,9 @@ fn disabled_block_copy_blocks_right_drag_selection() {
     );
     assert_eq!(state.text_sel_end, None);
     assert!(
-        !cmds.iter().any(|c| matches!(c, RenderCmd::TextSelection { .. })),
+        !cmds
+            .iter()
+            .any(|c| matches!(c, RenderCmd::TextSelection { .. })),
         "a disabled block copy must queue no TextSelection"
     );
 }

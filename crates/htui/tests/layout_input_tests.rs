@@ -484,9 +484,8 @@ fn input_caret_color_paints_the_caret_cell() {
     init();
     // `caret-color: red` paints the focused field's caret block red instead
     // of the default inverted cell.
-    let (root_id, arena) = setup(
-        r#"<div><input value="initial"></div><style>input { caret-color: red; }</style>"#,
-    );
+    let (root_id, arena) =
+        setup(r#"<div><input value="initial"></div><style>input { caret-color: red; }</style>"#);
     let input_id = find_input(&arena, root_id);
 
     let term_map = mock_term_map();
@@ -879,7 +878,10 @@ fn input_button_geometry_sizes_from_label() {
             .expect(id)
     };
     let submit = find_box(&boxes, id_of("sub")).expect("submit box");
-    assert_eq!(submit.rect.width, 6, "`Go` button is 6 columns (label + padding)");
+    assert_eq!(
+        submit.rect.width, 6,
+        "`Go` button is 6 columns (label + padding)"
+    );
     let text = find_box(&boxes, id_of("txt")).expect("text box");
     assert_eq!(text.rect.width, 20, "text field keeps the width attribute");
 }
@@ -920,11 +922,7 @@ fn input_placeholder_shows_dimmed_hint_when_empty() {
     // An empty field with a `placeholder` attribute shows the hint text in
     // grey (the field is unfocused, so no value/caret either).
     let (_, tl) = render_rows(r#"<div><input placeholder="Type here" width="20"></div>"#);
-    let hint_cells: Vec<&Block> = tl
-        .layout
-        .iter()
-        .filter(|b| !b.word.is_empty())
-        .collect();
+    let hint_cells: Vec<&Block> = tl.layout.iter().filter(|b| !b.word.is_empty()).collect();
     let text: String = hint_cells.iter().map(|b| b.word.as_str()).collect();
     let text = text.trim();
     assert_eq!(
@@ -1048,9 +1046,8 @@ fn input_honours_css_size_and_margin_auto() {
     // 8 px per cell), and `margin: 0 auto` centres it in the containing
     // block — the browser-replaced-element sizing chain a plain HTML
     // `width` attribute could not express.
-    let (root_id, arena) = setup(
-        r#"<style>input { width: 16px; height: 24px; margin: 0 auto; }</style><input>"#,
-    );
+    let (root_id, arena) =
+        setup(r#"<style>input { width: 16px; height: 24px; margin: 0 auto; }</style><input>"#);
     let boxes = layout_boxes(&arena, root_id);
     let input = find_input(&arena, root_id);
     let r = find_box(&boxes, input).expect("input box");
@@ -1083,13 +1080,15 @@ fn input_min_width_beats_max_width_when_they_conflict() {
     init();
     // CSS: when min-width exceeds max-width, the minimum wins (the clamps
     // apply max first, min last).
-    let (root_id, arena) = setup(
-        r#"<style>input { width: 8px; max-width: 8px; min-width: 24px; }</style><input>"#,
-    );
+    let (root_id, arena) =
+        setup(r#"<style>input { width: 8px; max-width: 8px; min-width: 24px; }</style><input>"#);
     let boxes = layout_boxes(&arena, root_id);
     let input = find_input(&arena, root_id);
     let r = find_box(&boxes, input).expect("input box");
-    assert_eq!(r.rect.width, 3, "24px min-width must win over 8px max-width");
+    assert_eq!(
+        r.rect.width, 3,
+        "24px min-width must win over 8px max-width"
+    );
 }
 
 #[test]

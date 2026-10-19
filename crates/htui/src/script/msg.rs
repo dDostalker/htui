@@ -523,9 +523,7 @@ pub fn run_script_thread(
                     d.dirty.nodes.extend(snapshot.dirty.nodes);
                     // Later writes win per host (IndexMap keeps the first
                     // insertion position, matching document order).
-                    d.dirty
-                        .injected_css
-                        .extend(snapshot.dirty.injected_css);
+                    d.dirty.injected_css.extend(snapshot.dirty.injected_css);
                     d.arena = snapshot.arena;
                     d.root_id = snapshot.root_id;
                     Some(d)
@@ -538,11 +536,7 @@ pub fn run_script_thread(
         // effect, or a fetch settled nothing) stays silent: the empty event
         // carries no information for the input loop, and sending it would
         // wake that loop for nothing.
-        if !has_msg
-            && event.cmds.is_empty()
-            && event.dirty.is_none()
-            && event.key_gate.is_none()
-        {
+        if !has_msg && event.cmds.is_empty() && event.dirty.is_none() && event.key_gate.is_none() {
             continue;
         }
         if tx.send(ScriptResponse::Event(event)).is_err() {

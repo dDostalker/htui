@@ -282,7 +282,8 @@ fn visibility_hidden_keeps_layout_space_but_paints_nothing() {
     let row_a = rows.iter().position(|r| r.contains('a')).expect("a row");
     let row_c = rows.iter().position(|r| r.contains('c')).expect("c row");
     assert_eq!(
-        row_c, row_a + 4,
+        row_c,
+        row_a + 4,
         "the hidden <p> keeps its layout space; a and c are 4 rows apart (text + margin + hidden text + margin)"
     );
 }
@@ -526,7 +527,11 @@ fn inline_block_whitespace_separates_and_collapses() {
     let idx_a = tl.layout.iter().position(|b| b.word == "A").unwrap();
     let idx_b = tl.layout.iter().position(|b| b.word == "B").unwrap();
     let idx_c = tl.layout.iter().position(|b| b.word == "C").unwrap();
-    assert_eq!(idx_b, idx_a + 13, "whitespace run collapses to one cell: 10 + 2 + 1");
+    assert_eq!(
+        idx_b,
+        idx_a + 13,
+        "whitespace run collapses to one cell: 10 + 2 + 1"
+    );
     assert_eq!(idx_c, idx_b + 12, "no whitespace: margin only (10 + 2)");
 }
 
@@ -548,8 +553,16 @@ fn inline_block_line_start_space_is_removed() {
     let idx_a = tl.layout.iter().position(|b| b.word == "A").unwrap();
     let idx_b = tl.layout.iter().position(|b| b.word == "B").unwrap();
     assert_eq!(idx_a % 11, 0, "first card at column 0");
-    assert_eq!(idx_b / 11, idx_a / 11 + 1, "second card wrapped to the next row");
-    assert_eq!(idx_b % 11, 0, "wrapped card starts at column 0 (leading space removed)");
+    assert_eq!(
+        idx_b / 11,
+        idx_a / 11 + 1,
+        "second card wrapped to the next row"
+    );
+    assert_eq!(
+        idx_b % 11,
+        0,
+        "wrapped card starts at column 0 (leading space removed)"
+    );
 }
 
 #[test]
@@ -594,7 +607,11 @@ fn inline_block_wraps_at_line_width() {
     assert_eq!(idx_a / 80, 0);
     assert_eq!(idx_b / 80, 0, "second card stays on row 1");
     assert_eq!(idx_c / 80, 1, "third card wraps to row 2");
-    assert_eq!(idx_b, idx_a + 40, "second card follows by 39 + 1 collapsed space");
+    assert_eq!(
+        idx_b,
+        idx_a + 40,
+        "second card follows by 39 + 1 collapsed space"
+    );
 }
 
 // ============================================================

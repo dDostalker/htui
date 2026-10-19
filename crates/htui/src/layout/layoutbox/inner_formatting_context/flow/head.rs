@@ -1,10 +1,10 @@
 use crate::{
+    graphics::block_style,
     layout::{
         BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext,
         inner_formatting_context::flow::{LayoutBlockOptions, layout_block},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
-    graphics::block_style,
 };
 
 /// Markdown-style prefix prepended to every heading level.
