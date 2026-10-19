@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/dDostalker/htui/main/logo.svg" alt="htui logo" width="140">
+</p>
+
 # htui
 
 **An HTML/CSS/JS engine for the terminal — build interactive TUIs the way you build web pages.**

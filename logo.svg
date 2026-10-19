@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="title desc">
+  <title id="title">htui logo</title>
+  <desc id="desc">A rusted terminal window containing a pixel-art globe, representing the web rendered inside the terminal.</desc>
+
+  <defs>
+    <linearGradient id="frame" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c2433"/>
+      <stop offset="1" stop-color="#0b0f17"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#67e8f9"/>
+      <stop offset="0.55" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#a3e635"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#34d399" flood-opacity="0.45"/>
+    </filter>
+    <linearGradient id="rust" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#d97706"/>
+      <stop offset="0.35" stop-color="#b45309"/>
+      <stop offset="0.7" stop-color="#7c2d12"/>
+      <stop offset="1" stop-color="#c2410c"/>
+    </linearGradient>
+    <filter id="corrode" x="-15%" y="-15%" width="130%" height="130%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.06" numOctaves="4" seed="9" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="6" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <filter id="soften" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8"/>
+    </filter>
+    <mask id="edgeMask" maskUnits="userSpaceOnUse" x="0" y="0" width="256" height="256">
+      <rect x="16" y="16" width="224" height="224" rx="34" fill="black"/>
+      <rect x="16" y="16" width="224" height="224" rx="34" fill="none" stroke="white" stroke-width="16" filter="url(#soften)"/>
+    </mask>
+    <filter id="rustTexture" x="0" y="0" width="256" height="256">
+      <feTurbulence type="fractalNoise" baseFrequency="0.075" numOctaves="5" seed="7" result="noise"/>
+      <feColorMatrix in="noise" type="matrix" values="
+        0 0 0 0 0.90
+        0 0 0 0 0.45
+        0 0 0 0 0.10
+        0.4 0.4 0.2 0 0" result="rustColor"/>
+      <feComponentTransfer in="rustColor" result="patches">
+        <feFuncA type="discrete" tableValues="0 0 0.2 0.45 0.7 0.95"/>
+      </feComponentTransfer>
+      <feComposite in="patches" in2="SourceGraphic" operator="in"/>
+    </filter>
+    <clipPath id="window">
+      <rect x="16" y="16" width="224" height="224" rx="34"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#window)">
+    <rect x="16" y="16" width="224" height="224" rx="34" fill="url(#frame)"/>
+    <rect x="16" y="16" width="224" height="46" fill="#111826"/>
+    <path d="M16 62 H240" stroke="#263144" stroke-width="2"/>
+    <circle cx="42" cy="39" r="5.5" fill="#ff5f57"/>
+    <circle cx="62" cy="39" r="5.5" fill="#febc2e"/>
+    <circle cx="82" cy="39" r="5.5" fill="#28c840"/>
+  </g>
+
+  <rect x="16" y="16" width="224" height="224" rx="34" fill="none" stroke="#3b4a63" stroke-width="2"/>
+
+  <rect x="16" y="16" width="224" height="224" rx="34" fill="#9a4a16" filter="url(#rustTexture)" mask="url(#edgeMask)" opacity="0.55"/>
+  <rect x="18" y="18" width="220" height="220" rx="32" fill="none" stroke="url(#rust)" stroke-width="10" filter="url(#corrode)" opacity="0.95"/>
+
+  <g clip-path="url(#window)">
+    <circle cx="54" cy="21" r="2.4" fill="#3b1d0c" opacity="0.55"/>
+    <circle cx="150" cy="23" r="1.8" fill="#3b1d0c" opacity="0.5"/>
+    <circle cx="204" cy="28" r="2.6" fill="#3b1d0c" opacity="0.5"/>
+    <circle cx="21" cy="86" r="2.2" fill="#3b1d0c" opacity="0.5"/>
+    <circle cx="19" cy="160" r="2.6" fill="#3b1d0c" opacity="0.55"/>
+    <circle cx="237" cy="112" r="2.4" fill="#3b1d0c" opacity="0.5"/>
+    <circle cx="235" cy="200" r="2" fill="#3b1d0c" opacity="0.5"/>
+    <circle cx="96" cy="236" r="2.6" fill="#3b1d0c" opacity="0.5"/>
+    <circle cx="168" cy="235" r="2.2" fill="#3b1d0c" opacity="0.55"/>
+    <circle cx="64" cy="24" r="1.4" fill="#fbbf24" opacity="0.8"/>
+    <circle cx="196" cy="21" r="1.2" fill="#fbbf24" opacity="0.7"/>
+    <circle cx="20" cy="120" r="1.3" fill="#fbbf24" opacity="0.7"/>
+    <circle cx="234" cy="168" r="1.2" fill="#fbbf24" opacity="0.65"/>
+    <circle cx="140" cy="236" r="1.4" fill="#fbbf24" opacity="0.7"/>
+    <path d="M46 19 q2 14 0 22" stroke="#f59e0b" stroke-width="1.2" fill="none" opacity="0.5"/>
+    <path d="M228 38 q4 10 3 20" stroke="#ea580c" stroke-width="1.2" fill="none" opacity="0.4"/>
+  </g>
+
+  <g clip-path="url(#window)">
+    <path d="M30 18 q10 -1 14 5 q3 6 -4 9 q-7 3 -11 -2 q-4 -5 1 -12 Z" fill="#7c2d12" opacity="0.75"/>
+    <path d="M226 60 q-9 6 -8 15 q1 8 9 8 q8 0 9 -9 q1 -9 -10 -14 Z" fill="#8a3b12" opacity="0.7"/>
+    <path d="M190 232 q-4 -12 5 -16 q10 -4 15 5 q4 8 -2 13 q-8 6 -18 -2 Z" fill="#6d2e0a" opacity="0.75"/>
+    <path d="M18 196 q-1 -9 7 -11 q7 -2 9 5 q2 6 -3 9 q-6 3 -13 -3 Z" fill="#a34a0f" opacity="0.6"/>
+    <path d="M70 18 q3 14 -1 24 q-1 4 2 5 q3 0 3 -5 q0 -14 -1 -24 Z" fill="#7c2d12" opacity="0.55"/>
+    <path d="M212 18 q2 10 0 17 q-1 3 2 3 q2 0 2 -3 q0 -10 -1 -17 Z" fill="#7c2d12" opacity="0.5"/>
+    <rect x="26" y="118" width="4" height="3" rx="1" fill="#c2621b" opacity="0.7"/>
+    <rect x="34" y="124" width="3" height="3" rx="1" fill="#d97706" opacity="0.6"/>
+    <rect x="226" y="150" width="4" height="3" rx="1" fill="#c2621b" opacity="0.65"/>
+    <rect x="232" y="142" width="3" height="2" rx="1" fill="#d97706" opacity="0.6"/>
+    <rect x="108" y="230" width="4" height="3" rx="1" fill="#b45309" opacity="0.6"/>
+    <rect x="120" y="234" width="3" height="2" rx="1" fill="#c2621b" opacity="0.55"/>
+    <path d="M150 20 q14 2 22 0" stroke="#d97706" stroke-width="1.5" fill="none" opacity="0.5"/>
+    <path d="M32 78 q0 12 -2 20" stroke="#a34a0f" stroke-width="1.5" fill="none" opacity="0.45"/>
+  </g>
+
+  <path transform="translate(69.2,92.2)" d="M 28 0 h 61.6 v 5.6 h -61.6 Z M 22.4 5.6 h 28 v 5.6 h -28 Z M 56 5.6 h 5.6 v 5.6 h -5.6 Z M 67.2 5.6 h 28 v 5.6 h -28 Z M 16.8 11.2 h 28 v 5.6 h -28 Z M 56 11.2 h 5.6 v 5.6 h -5.6 Z M 72.8 11.2 h 28 v 5.6 h -28 Z M 11.2 16.8 h 28 v 5.6 h -28 Z M 56 16.8 h 5.6 v 5.6 h -5.6 Z M 78.4 16.8 h 28 v 5.6 h -28 Z M 5.6 22.4 h 16.8 v 5.6 h -16.8 Z M 28 22.4 h 11.2 v 5.6 h -11.2 Z M 56 22.4 h 5.6 v 5.6 h -5.6 Z M 78.4 22.4 h 11.2 v 5.6 h -11.2 Z M 95.2 22.4 h 16.8 v 5.6 h -16.8 Z M 0 28 h 117.6 v 5.6 h -117.6 Z M 0 33.6 h 11.2 v 5.6 h -11.2 Z M 22.4 33.6 h 11.2 v 5.6 h -11.2 Z M 56 33.6 h 5.6 v 5.6 h -5.6 Z M 84 33.6 h 11.2 v 5.6 h -11.2 Z M 106.4 33.6 h 11.2 v 5.6 h -11.2 Z M 0 39.2 h 11.2 v 5.6 h -11.2 Z M 22.4 39.2 h 11.2 v 5.6 h -11.2 Z M 56 39.2 h 5.6 v 5.6 h -5.6 Z M 84 39.2 h 11.2 v 5.6 h -11.2 Z M 106.4 39.2 h 11.2 v 5.6 h -11.2 Z M 0 44.8 h 11.2 v 5.6 h -11.2 Z M 22.4 44.8 h 11.2 v 5.6 h -11.2 Z M 56 44.8 h 5.6 v 5.6 h -5.6 Z M 84 44.8 h 11.2 v 5.6 h -11.2 Z M 106.4 44.8 h 11.2 v 5.6 h -11.2 Z M 0 50.4 h 5.6 v 5.6 h -5.6 Z M 22.4 50.4 h 5.6 v 5.6 h -5.6 Z M 56 50.4 h 5.6 v 5.6 h -5.6 Z M 89.6 50.4 h 5.6 v 5.6 h -5.6 Z M 112 50.4 h 5.6 v 5.6 h -5.6 Z M 0 56 h 117.6 v 5.6 h -117.6 Z M 0 61.6 h 5.6 v 5.6 h -5.6 Z M 22.4 61.6 h 5.6 v 5.6 h -5.6 Z M 56 61.6 h 5.6 v 5.6 h -5.6 Z M 89.6 61.6 h 5.6 v 5.6 h -5.6 Z M 112 61.6 h 5.6 v 5.6 h -5.6 Z M 0 67.2 h 11.2 v 5.6 h -11.2 Z M 22.4 67.2 h 11.2 v 5.6 h -11.2 Z M 56 67.2 h 5.6 v 5.6 h -5.6 Z M 84 67.2 h 11.2 v 5.6 h -11.2 Z M 106.4 67.2 h 11.2 v 5.6 h -11.2 Z M 0 72.8 h 11.2 v 5.6 h -11.2 Z M 22.4 72.8 h 11.2 v 5.6 h -11.2 Z M 56 72.8 h 5.6 v 5.6 h -5.6 Z M 84 72.8 h 11.2 v 5.6 h -11.2 Z M 106.4 72.8 h 11.2 v 5.6 h -11.2 Z M 0 78.4 h 11.2 v 5.6 h -11.2 Z M 22.4 78.4 h 11.2 v 5.6 h -11.2 Z M 56 78.4 h 5.6 v 5.6 h -5.6 Z M 84 78.4 h 11.2 v 5.6 h -11.2 Z M 106.4 78.4 h 11.2 v 5.6 h -11.2 Z M 0 84 h 117.6 v 5.6 h -117.6 Z M 5.6 89.6 h 16.8 v 5.6 h -16.8 Z M 28 89.6 h 11.2 v 5.6 h -11.2 Z M 56 89.6 h 5.6 v 5.6 h -5.6 Z M 78.4 89.6 h 11.2 v 5.6 h -11.2 Z M 95.2 89.6 h 16.8 v 5.6 h -16.8 Z M 11.2 95.2 h 28 v 5.6 h -28 Z M 56 95.2 h 5.6 v 5.6 h -5.6 Z M 78.4 95.2 h 28 v 5.6 h -28 Z M 16.8 100.8 h 28 v 5.6 h -28 Z M 56 100.8 h 5.6 v 5.6 h -5.6 Z M 72.8 100.8 h 28 v 5.6 h -28 Z M 22.4 106.4 h 28 v 5.6 h -28 Z M 56 106.4 h 5.6 v 5.6 h -5.6 Z M 67.2 106.4 h 28 v 5.6 h -28 Z M 28 112 h 61.6 v 5.6 h -61.6 Z" fill="url(#accent)" shape-rendering="crispEdges" filter="url(#glow)"/>
+</svg>
+
+
+

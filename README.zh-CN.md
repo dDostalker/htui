@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/dDostalker/htui/main/logo.svg" alt="htui logo" width="140">
+</p>
+
 # htui
 
 **用 HTML、CSS 和 JavaScript 编写终端交互界面——终端界的 Tauri。**
