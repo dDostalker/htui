@@ -18,9 +18,9 @@
 
 use crossterm::style::Color;
 use htui::html::{css_parse, html_parse};
+use htui::layout::Rect;
 use htui::layout::layout::TermMap;
 use htui::layout::layoutbox::pin_sticky_boxes;
-use htui::layout::Rect;
 use htui::tdom::node::NodeArena;
 use htui::tdom::node::NodeId;
 use htui::tui::graph_api::TermLayout;
@@ -222,7 +222,8 @@ fn fixed_stays_pinned_to_the_screen_when_scrolled() {
     tl.scroll_y = 10;
     tl.draw(&arena, root_id, &term_map);
     assert_eq!(
-        tl.layout[11 * cols + 5].word, "F",
+        tl.layout[11 * cols + 5].word,
+        "F",
         "fixed box must sit at document row scroll_y + top"
     );
 }
@@ -252,7 +253,8 @@ fn fixed_right_bottom_anchors_follow_the_scrolled_viewport() {
     let x = cols - 4;
     let y = 10 + rows - 2;
     assert_eq!(
-        tl.layout[y * cols + x].word, "F",
+        tl.layout[y * cols + x].word,
+        "F",
         "fixed right/bottom anchors must follow the scrolled viewport"
     );
 }
@@ -453,14 +455,16 @@ fn sticky_clamps_to_viewport_top_when_scrolled() {
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map);
     assert_eq!(
-        tl.layout[0 * cols].word, "S",
+        tl.layout[0 * cols].word,
+        "S",
         "at scroll 0 the sticky box stays at its flow row"
     );
 
     tl.scroll_y = 10;
     tl.draw(&arena, root_id, &term_map);
     assert_eq!(
-        tl.layout[10 * cols].word, "S",
+        tl.layout[10 * cols].word,
+        "S",
         "sticky box must sit at document row scroll_y + top"
     );
 }
@@ -485,7 +489,8 @@ fn sticky_bottom_clamps_deep_box_to_viewport_bottom() {
     let mut tl = TermLayout::new(&term_map, 1.0);
     tl.draw(&arena, root_id, &term_map);
     assert_eq!(
-        tl.layout[(rows - 2) * cols].word, "S",
+        tl.layout[(rows - 2) * cols].word,
+        "S",
         "sticky bottom clamps the box to the viewport bottom"
     );
 }
@@ -517,7 +522,10 @@ fn sticky_repin_uses_recorded_flow_row() {
     let s_y = |b: &[htui::layout::LayoutBox]| -> usize {
         fn find(boxes: &[htui::layout::LayoutBox]) -> Option<usize> {
             for b in boxes {
-                if matches!(b.positioning.position, htui::html::css_parse::Position::Sticky) {
+                if matches!(
+                    b.positioning.position,
+                    htui::html::css_parse::Position::Sticky
+                ) {
                     return Some(b.rect.y);
                 }
                 if let Some(y) = find(&b.children) {
@@ -566,4 +574,3 @@ fn absolute_child_with_negative_left_anchors_to_parent_offset() {
         "absolute child must sit at parent_x + (-2) = 6"
     );
 }
-

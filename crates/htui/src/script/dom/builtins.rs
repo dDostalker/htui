@@ -15,11 +15,12 @@ use super::{
         native_get_document_element, native_get_document_head, native_get_element_by_id,
     },
     fetch::native_fetch,
-    js_fn, node_wrapper, with_state,
+    js_fn, node_wrapper,
     timers::{
         native_clear_interval, native_clear_timeout, native_set_interval, native_set_timeout,
     },
     traverse::{native_query_selector, native_query_selector_all},
+    with_state,
 };
 
 // ============================================================

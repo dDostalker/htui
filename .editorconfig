@@ -1,0 +1,17 @@
+root = true
+
+# All files in this repository are UTF-8 (no BOM). Pin the charset so editors
+# on non-UTF-8 systems (e.g. a Chinese Windows GBK default) never open them as
+# ANSI and show mojibake.
+[*]
+charset = utf-8
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{yml,yaml,json}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false

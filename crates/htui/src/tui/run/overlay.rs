@@ -3,7 +3,7 @@
 use crate::layout::layoutbox::geometry::SelectRow;
 use crate::tui::graph_api::{Block, FontStyle, TermLayout, char_width};
 
-use super::state::{GROUP_FG, OpenSelect, OVERLAY_BG, OVERLAY_FG, SELECTION_BG};
+use super::state::{GROUP_FG, OVERLAY_BG, OVERLAY_FG, OpenSelect, SELECTION_BG};
 
 /// Paint an open `<select>` dropdown overlay onto the canvas: clear every
 /// row of the overlay rectangle, then write each option label with the

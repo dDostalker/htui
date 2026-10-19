@@ -122,9 +122,7 @@ fn summary_details(arena: &NodeArena, node_id: NodeId) -> Option<NodeId> {
     while let Some(id) = current {
         // `node_id` can be stale (a hit region referencing a node an
         // `innerHTML` sweep already freed) — treat it as "no target".
-        let Some(node) = arena.get(id) else {
-            return None;
-        };
+        let node = arena.get(id)?;
         if node.node_type == NodeType::Summary {
             return node
                 .parent
@@ -525,9 +523,7 @@ pub fn run_script_thread(
                     d.dirty.nodes.extend(snapshot.dirty.nodes);
                     // Later writes win per host (IndexMap keeps the first
                     // insertion position, matching document order).
-                    d.dirty
-                        .injected_css
-                        .extend(snapshot.dirty.injected_css);
+                    d.dirty.injected_css.extend(snapshot.dirty.injected_css);
                     d.arena = snapshot.arena;
                     d.root_id = snapshot.root_id;
                     Some(d)
@@ -540,11 +536,7 @@ pub fn run_script_thread(
         // effect, or a fetch settled nothing) stays silent: the empty event
         // carries no information for the input loop, and sending it would
         // wake that loop for nothing.
-        if !has_msg
-            && event.cmds.is_empty()
-            && event.dirty.is_none()
-            && event.key_gate.is_none()
-        {
+        if !has_msg && event.cmds.is_empty() && event.dirty.is_none() && event.key_gate.is_none() {
             continue;
         }
         if tx.send(ScriptResponse::Event(event)).is_err() {

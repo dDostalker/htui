@@ -184,7 +184,8 @@ fn test_output_renders_inline_text() {
         .expect("output text renders");
     assert_eq!(idx % cols, 8, "output flows inline right after the label");
     assert_eq!(
-        idx / cols, 1,
+        idx / cols,
+        1,
         "output shares the paragraph's text row (UA margin-top=1)"
     );
 }

@@ -475,7 +475,8 @@ fn register_test_svg(reg: &ResourceRegistry, tag: &str) -> String {
     let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">
       <rect x="0" y="0" width="200" height="100" fill="#ff8800"/>
     </svg>"##;
-    reg.register(&key, svg.as_bytes().to_vec()).expect("register mem svg");
+    reg.register(&key, svg.as_bytes().to_vec())
+        .expect("register mem svg");
     key
 }
 
@@ -490,8 +491,7 @@ fn svg_image_decodes_through_resvg() {
         let mut tl = TermLayout::new(&term_map, 1.0);
         // 200×100 source rendered into a 40×20-cell area (80×40 source pixels
         // after the half-block vertical doubling).
-        render_image_at(&mut tl, &key, (0, 0), (40, 20))
-            .expect("svg should decode and render");
+        render_image_at(&mut tl, &key, (0, 0), (40, 20)).expect("svg should decode and render");
 
         // The solid fill survives the resize: every cell carries the half-block
         // glyph with the source color in both fcolor and bcolor.
@@ -575,7 +575,8 @@ fn layout_img_resolves_src_against_document_base() {
     with_registry(Arc::clone(&reg), || {
         let pid = std::process::id();
         let key = format!("mem://dir/pic_{pid}.png");
-        reg.register(&key, vec![0u8; 16]).expect("register mem image");
+        reg.register(&key, vec![0u8; 16])
+            .expect("register mem image");
 
         let html = format!(
             "<base href=\"mem://dir/\"><img src=\"pic_{pid}.png\" width=\"20\" height=\"10\">"

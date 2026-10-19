@@ -36,7 +36,9 @@ use std::sync::Arc;
 use crossterm::style::Color;
 use indexmap::IndexMap;
 
-use crate::html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeAuto, EdgeSizes, MarginSizes};
+use crate::html::box_edges::{
+    Border, BorderSides, BorderStyle, BoxEdges, EdgeAuto, EdgeSizes, MarginSizes,
+};
 
 use super::values::{
     AlignContent, AlignItems, BoxSizing, ColumnFill, ColumnsResolved, CornerRadii, CssDisplay,
@@ -45,9 +47,9 @@ use super::values::{
     Visibility, WhiteSpace, WordBreak, merge_border_longhand, parse_align_content,
     parse_align_items, parse_border_radius, parse_border_side, parse_border_style,
     parse_border_width, parse_box_sizing, parse_color_str, parse_column_count, parse_column_fill,
-    parse_column_rule, parse_columns_shorthand, parse_edge_auto, parse_edge_sizes, parse_margin_sizes,
-    parse_flex_basis, parse_flex_direction, parse_flex_flow, parse_flex_shorthand,
-    parse_flex_wrap, parse_gap_shorthand, parse_justify_content, parse_line_height,
+    parse_column_rule, parse_columns_shorthand, parse_edge_auto, parse_edge_sizes,
+    parse_flex_basis, parse_flex_direction, parse_flex_flow, parse_flex_shorthand, parse_flex_wrap,
+    parse_gap_shorthand, parse_justify_content, parse_line_height, parse_margin_sizes,
     parse_non_negative_number, parse_order, parse_overflow_wrap, parse_text_transform,
     parse_visibility, parse_white_space, parse_word_break, resolve_flex_basis,
 };
@@ -597,9 +599,7 @@ impl CssAttr {
 
     /// Parse the `flex` shorthand once (when present) into its components.
     fn flex_shorthand(&self) -> Option<FlexShorthand> {
-        self.0
-            .get("flex")
-            .and_then(|v| parse_flex_shorthand(v))
+        self.0.get("flex").and_then(|v| parse_flex_shorthand(v))
     }
 
     /// `flex-grow` (defaults to `0`). Falls back to the `flex` shorthand's
@@ -732,7 +732,10 @@ impl CssAttr {
             })
             .unwrap_or(font_ctx.font_size_cells);
 
-        let shorthand = self.0.get("columns").and_then(|v| parse_columns_shorthand(v));
+        let shorthand = self
+            .0
+            .get("columns")
+            .and_then(|v| parse_columns_shorthand(v));
         let count_decl = self
             .0
             .get("column-count")
@@ -775,13 +778,20 @@ impl CssAttr {
         // very narrow container an eager `column-count` would otherwise leave
         // zero-width columns.
         let mut count = count;
-        while count > 1 && available < count.saturating_sub(1).saturating_mul(gap).saturating_add(count) {
+        while count > 1
+            && available
+                < count
+                    .saturating_sub(1)
+                    .saturating_mul(gap)
+                    .saturating_add(count)
+        {
             count -= 1;
         }
         if count <= 1 {
             return None;
         }
-        let col_width = available.saturating_sub(count.saturating_sub(1).saturating_mul(gap)) / count;
+        let col_width =
+            available.saturating_sub(count.saturating_sub(1).saturating_mul(gap)) / count;
 
         Some(ColumnsResolved {
             count,
@@ -802,9 +812,10 @@ impl CssAttr {
         font_ctx: FontContext,
         viewport: Viewport,
     ) -> Option<Border> {
-        let shorthand = self.0.get("column-rule").and_then(|v| {
-            parse_column_rule(v, containing_width, font_ctx, viewport)
-        });
+        let shorthand = self
+            .0
+            .get("column-rule")
+            .and_then(|v| parse_column_rule(v, containing_width, font_ctx, viewport));
         let width_declared = self.0.contains_key("column-rule-width");
         let mut width = self
             .0
@@ -992,14 +1003,16 @@ impl CssAttr {
             .and_then(|v| parse_position(v))
             .unwrap_or_default();
         let resolve_inset = |key: &str| {
-            self.0.get(key).and_then(|raw| match Length::parse_signed(raw)? {
-                Length::Auto => None,
-                len => Some(len.resolve_signed(LengthContext {
-                    containing: containing_width,
-                    font: font_ctx,
-                    viewport,
-                })),
-            })
+            self.0
+                .get(key)
+                .and_then(|raw| match Length::parse_signed(raw)? {
+                    Length::Auto => None,
+                    len => Some(len.resolve_signed(LengthContext {
+                        containing: containing_width,
+                        font: font_ctx,
+                        viewport,
+                    })),
+                })
         };
         let z_index = self
             .0

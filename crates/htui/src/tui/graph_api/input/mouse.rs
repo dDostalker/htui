@@ -4,8 +4,8 @@ use crate::events::HitMap;
 use crate::script::ScriptMsg;
 use crate::tdom::node::{NodeArena, NodeId, NodeType};
 
-use super::TEXT_SEL_DRAG_THRESHOLD;
 use super::InputState;
+use super::TEXT_SEL_DRAG_THRESHOLD;
 use super::cmd::{RenderCmd, SelectionMode};
 use super::field::{
     char_index_at_x, clear_text_selection, is_button_input, is_text_field, is_textarea_node,

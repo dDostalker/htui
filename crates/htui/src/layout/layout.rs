@@ -1,6 +1,7 @@
 use crossterm::terminal;
 
 use crate::{
+    graphics::{Block, FontStyle, ImageCache, TermLayout},
     layout::{
         BoxConstraint, Cursor, LayoutBox, Rect,
         inner_formatting_context::flow::layout_tree,
@@ -8,7 +9,6 @@ use crate::{
         paint::{paint_layout_tree, paint_layout_tree_region},
     },
     tdom::node::{NodeArena, NodeId, NodeType},
-    graphics::{Block, FontStyle, ImageCache, TermLayout},
 };
 
 /// Upper bound for the terminal viewport width.

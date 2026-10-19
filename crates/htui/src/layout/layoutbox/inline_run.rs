@@ -3,8 +3,8 @@
 use crossterm::style::Color;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::tdom::node::NodeId;
 use crate::graphics::FontStyle;
+use crate::tdom::node::NodeId;
 
 /// One inline segment of a block-level element.
 ///

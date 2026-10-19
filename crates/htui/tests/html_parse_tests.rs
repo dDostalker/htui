@@ -322,7 +322,8 @@ fn test_link_href_loads_mem_stylesheet() {
     init();
     let reg = Arc::new(ResourceRegistry::new());
     let key = format!("mem://css/{}.css", std::process::id());
-    reg.register(&key, b"p { color: red; }".to_vec()).expect("register mem css");
+    reg.register(&key, b"p { color: red; }".to_vec())
+        .expect("register mem css");
     let html = format!("<link rel=\"stylesheet\" href=\"{key}\"><p>x</p>");
     let (_root, _arena, css) = with_registry(Arc::clone(&reg), || Parser::new(&html).parse());
     assert!(
@@ -382,7 +383,8 @@ fn test_base_resolves_link_stylesheet_href() {
     let reg = Arc::new(ResourceRegistry::new());
     let pid = std::process::id();
     let key = format!("mem://assets/style_{pid}.css");
-    reg.register(&key, b"p { color: green; }".to_vec()).expect("register mem css");
+    reg.register(&key, b"p { color: green; }".to_vec())
+        .expect("register mem css");
     let html = format!(
         "<base href=\"mem://assets/\"><link rel=\"stylesheet\" href=\"style_{pid}.css\"><p>x</p>"
     );

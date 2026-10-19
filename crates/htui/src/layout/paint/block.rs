@@ -1,10 +1,10 @@
 use crossterm::style::Color;
 
 use crate::{
+    graphics::{FontStyle, block_style},
     html::css_parse::TextAlign,
     layout::{LayoutBox, Rect},
     tdom::node::NodeArena,
-    graphics::{FontStyle, block_style},
 };
 
 use super::{PaintCanvas, border::paint_borders, intersect_rects, text::paint_runs};

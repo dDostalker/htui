@@ -19,10 +19,10 @@
 //!   the registry of layout functions consulted by the flow orchestrator.
 
 use crate::{
+    graphics::grapheme_width,
     html::css_parse::TextAlign,
     layout::layout::TermMap,
     tdom::node::{NodeArena, NodeId},
-    graphics::grapheme_width,
 };
 use unicode_segmentation::UnicodeSegmentation;
 

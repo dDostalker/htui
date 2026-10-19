@@ -9,7 +9,7 @@
 [![crates.io](https://img.shields.io/crates/v/htui.svg)](https://crates.io/crates/htui)
 [![docs.rs](https://img.shields.io/docsrs/htui)](https://docs.rs/htui)
 [![license](https://img.shields.io/crates/l/htui.svg)](https://github.com/dDostalker/htui)
-[![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.89%2B-orange.svg)](https://www.rust-lang.org)
 
 [中文说明](https://github.com/dDostalker/htui/blob/main/README.zh-CN.md)
 
@@ -62,6 +62,19 @@ fn main() {
 Interactivity is one attribute away — `<button onclick="greet()">` with a
 `#[htui::command]` Rust function behind it. See the tutorials below.
 
+## Visual test gallery
+
+The repository also contains `visual_test`, an interactive gallery covering
+every supported HTML/CSS/JS feature. It is a workspace member, not part of this
+crate — clone the [repository](https://github.com/dDostalker/htui) and run from
+its root:
+
+```bash
+cargo run -p visual_test                          # interactive (Esc to quit)
+cargo run -p visual_test -- flex                  # a specific demo
+cargo run -p visual_test -- --dump showcase --cols 68   # headless preview
+```
+
 ## Documentation
 
 | Document | Content |
@@ -77,7 +90,7 @@ Interactivity is one attribute away — `<button onclick="greet()">` with a
 
 ## Platform
 
-Rust **1.88+** (edition 2024). Windows console and POSIX terminals via
+Rust **1.89+** (edition 2024). Windows console and POSIX terminals via
 [crossterm](https://github.com/crossterm-rs/crossterm); truecolor recommended.
 
 ## License

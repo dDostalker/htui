@@ -12,9 +12,9 @@ use crossterm::style::Color;
 use super::InlineRun;
 use super::generation::visible_children;
 use crate::{
+    graphics::{FontStyle, block_style},
     html::css_parse::{TextTransform, WhiteSpace},
     tdom::node::{Node, NodeArena, NodeId, NodeType},
-    graphics::{FontStyle, block_style},
 };
 
 /// Collect inline runs from a block's inline tree, preserving `<span>` style

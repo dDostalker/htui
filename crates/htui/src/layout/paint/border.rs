@@ -1,8 +1,8 @@
 use crossterm::style::Color;
 
 use crate::{
-    layout::{BorderStyle, LayoutBox, Rect},
     graphics::FontStyle,
+    layout::{BorderStyle, LayoutBox, Rect},
 };
 
 use super::PaintCanvas;

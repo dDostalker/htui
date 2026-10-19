@@ -1,8 +1,7 @@
 //! Element wrapper construction: one builder serves every node kind.
 
 use boa_engine::{
-    Context, JsResult, JsValue, NativeFunction, js_string,
-    object::ObjectInitializer,
+    Context, JsResult, JsValue, NativeFunction, js_string, object::ObjectInitializer,
     property::Attribute,
 };
 
@@ -18,17 +17,17 @@ use super::{
         native_get_value, native_set_data, native_set_inner_html, native_set_node_value,
         native_set_text, native_set_value,
     },
-    events::{
-        native_add_event_listener, native_blur, native_focus, native_remove_event_listener,
-    },
+    events::{native_add_event_listener, native_blur, native_focus, native_remove_event_listener},
     global_attrs::{
         native_get_class, native_get_class_list, native_get_dataset, native_get_hidden,
         native_set_class, native_set_hidden,
     },
+    js_fn,
     mutation::{
         native_append_child, native_clone_node, native_insert_before, native_remove_child,
         native_replace_child,
     },
+    node_id_to_f64,
     style::native_get_style,
     traverse::{
         native_contains, native_get_base_uri, native_get_child_nodes, native_get_first_child,
@@ -37,7 +36,7 @@ use super::{
         native_get_prev_sibling, native_get_tag_name, native_has_child_nodes, native_is_equal_node,
         native_is_same_node, native_query_selector, native_query_selector_all,
     },
-    js_fn, node_id_to_f64, with_state,
+    with_state,
 };
 
 /// Build a fresh wrapper object for `node_id`. The surface depends on the

@@ -212,27 +212,27 @@ pub(super) fn layout_flex_items(
         } else {
             justify_spacing(justify, free_for_justify, line_preps.len())
         };
-        let auto_shares: Vec<(usize, usize)> = if auto_count == 0 {
-            Vec::new()
-        } else {
-            let base = free_for_justify / auto_count;
-            let mut rem = free_for_justify % auto_count;
-            line_preps
-                .iter()
-                .map(|p| {
-                    let mut before = if p.margin_auto_main.0 { base } else { 0 };
-                    let mut after = if p.margin_auto_main.1 { base } else { 0 };
-                    if rem > 0 && p.margin_auto_main.0 {
-                        before += 1;
-                        rem -= 1;
-                    }
-                    if rem > 0 && p.margin_auto_main.1 {
-                        after += 1;
-                        rem -= 1;
-                    }
-                    (before, after)
-                })
-                .collect()
+        let auto_shares: Vec<(usize, usize)> = match free_for_justify.checked_div(auto_count) {
+            None => Vec::new(),
+            Some(base) => {
+                let mut rem = free_for_justify % auto_count;
+                line_preps
+                    .iter()
+                    .map(|p| {
+                        let mut before = if p.margin_auto_main.0 { base } else { 0 };
+                        let mut after = if p.margin_auto_main.1 { base } else { 0 };
+                        if rem > 0 && p.margin_auto_main.0 {
+                            before += 1;
+                            rem -= 1;
+                        }
+                        if rem > 0 && p.margin_auto_main.1 {
+                            after += 1;
+                            rem -= 1;
+                        }
+                        (before, after)
+                    })
+                    .collect()
+            }
         };
 
         // 3e. Per-line placement, factored so the line's cross size can be
@@ -278,11 +278,7 @@ pub(super) fn layout_flex_items(
                 // by the shrink distribution; explicit constraints layer on top
                 // through the canonical clamp (min wins over max, CSS).
                 let lower = prep.min_main.max(prep.css_min_main.unwrap_or(0));
-                let main_size = clamp_min_max(
-                    main_sizes[prep_idx],
-                    Some(lower),
-                    prep.css_max_main,
-                );
+                let main_size = clamp_min_max(main_sizes[prep_idx], Some(lower), prep.css_max_main);
                 // Natural cross-axis size of this item, measured once at prep
                 // time (used as the fallback for non-stretch alignments and
                 // for stretch when the container's cross-axis size is
@@ -410,7 +406,9 @@ pub(super) fn layout_flex_items(
                 };
                 // The item's margins occupy the line on both sides of its
                 // border-box and advance the next item.
-                let step = step.saturating_add(margin_before).saturating_add(margin_after);
+                let step = step
+                    .saturating_add(margin_before)
+                    .saturating_add(margin_after);
                 cursor_main = cursor_main.saturating_add(step);
                 placed_main = placed_main.saturating_add(step);
                 if prep_idx + 1 < line_preps.len() {

@@ -335,9 +335,7 @@ fn test_cluster_over_inline_capacity_lands_intact_in_one_cell() {
         .layout
         .iter()
         .position(|b| b.word == family)
-        .unwrap_or_else(|| {
-            panic!("25-byte cluster must land intact in one cell (heap fallback)")
-        });
+        .unwrap_or_else(|| panic!("25-byte cluster must land intact in one cell (heap fallback)"));
     assert!(
         tl.layout[idx + 1].word.is_empty(),
         "over-capacity cluster must still reserve its trailing empty cell"
@@ -352,7 +350,11 @@ fn test_skin_tone_family_cluster_lands_intact_in_one_cell() {
     // is the longest cluster class we expect in real documents; the cell
     // must render it byte-for-byte (no truncation).
     let tones = [
-        '\u{1F3FB}', '\u{1F3FC}', '\u{1F3FD}', '\u{1F3FE}', '\u{1F3FF}',
+        '\u{1F3FB}',
+        '\u{1F3FC}',
+        '\u{1F3FD}',
+        '\u{1F3FE}',
+        '\u{1F3FF}',
     ];
     let family: String = [
         '\u{1F468}',

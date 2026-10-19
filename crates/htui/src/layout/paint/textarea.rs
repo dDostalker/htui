@@ -11,12 +11,14 @@
 use crossterm::style::Color;
 
 use crate::{
+    graphics::char_width,
     layout::{LayoutBox, Rect},
     tdom::node::NodeArena,
-    graphics::char_width,
 };
 
-use super::{PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put};
+use super::{
+    PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put,
+};
 
 /// Highlight colour for the selected character range (Tokyo Night selection).
 const SELECTION_BG: Color = Color::Rgb {
@@ -164,13 +166,19 @@ pub(crate) fn paint_textarea(
 
     let fg = node.css_attr.get_color();
     let content = paint_control_chrome(lb, arena, canvas, r, fg);
-    let bg = node.css_attr.get_bg_color().or(Some(super::CONTROL_DEFAULT_BG));
+    let bg = node
+        .css_attr
+        .get_bg_color()
+        .or(Some(super::CONTROL_DEFAULT_BG));
     // `caret-color` paints the caret block with the declared colour; the
     // default is the inverted cell (field background <-> text colour swap).
     let caret_color = node.css_attr.get_caret_color();
     let caret_cell = |fg: Option<Color>, bg: Option<Color>| match caret_color {
         Some(cc) => (Some(bg.unwrap_or(Color::Black)), Some(cc)),
-        None => (Some(bg.unwrap_or(Color::Black)), Some(fg.unwrap_or(Color::White))),
+        None => (
+            Some(bg.unwrap_or(Color::Black)),
+            Some(fg.unwrap_or(Color::White)),
+        ),
     };
 
     let content_width = content.width.max(1);
@@ -226,13 +234,7 @@ pub(crate) fn paint_textarea(
             let abs_col = content.x.saturating_add(caret_col);
             if abs_col < content.x.saturating_add(content_width) {
                 let (cf, cb) = caret_cell(fg, bg);
-                put(
-                    canvas,
-                    cell_index(canvas, abs_col, y),
-                    Some(' '),
-                    cf,
-                    cb,
-                );
+                put(canvas, cell_index(canvas, abs_col, y), Some(' '), cf, cb);
             }
         }
     }

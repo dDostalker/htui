@@ -9,10 +9,10 @@ use crossterm::style::Color;
 
 use crate::events::Geometry;
 use crate::html::css_parse::{self, CssRule, DynamicState, PseudoClassSet};
+use crate::layout::Rect;
 use crate::layout::layoutbox::geometry::{
     SelectRow, overlay_options, select_item_indices, select_overlay_rect, select_rows,
 };
-use crate::layout::Rect;
 use crate::tdom::node::{NodeArena, NodeId};
 use crate::tui::graph_api::{InputRenderState, RenderCmd, SelectionMode, TermLayout};
 
@@ -208,8 +208,7 @@ impl RenderState {
                     && let Some(tl) = self.term_layout.as_mut()
                 {
                     tl.open_select = None;
-                    let prev_select = find_box_rect(&geo.boxes, prev.node_id)
-                        .unwrap_or(prev.rect);
+                    let prev_select = find_box_rect(&geo.boxes, prev.node_id).unwrap_or(prev.rect);
                     tl.repaint_region(&geo.arena, &geo.boxes, union_rect(prev_select, prev.rect));
                 }
                 let options = overlay_options(&geo.arena, node_id, filter.as_deref());

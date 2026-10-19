@@ -187,8 +187,7 @@ fn test_blockquote_nested_p_child_shares_row() {
     assert_eq!(bq.rect.width, 72);
     assert_eq!(p.rect.x, 4, "p inherits the blockquote content box");
     assert_eq!(
-        p.rect.y,
-        2,
+        p.rect.y, 2,
         "p sits one row below the blockquote top (its 1-row UA margin-top)"
     );
 }

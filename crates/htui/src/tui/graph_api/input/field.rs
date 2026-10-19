@@ -244,12 +244,7 @@ pub fn collect_input_ids(arena: &NodeArena) -> Vec<NodeId> {
 /// window the painter draws. Pointer positions outside the visible window
 /// clamp to the nearest reachable character so the caret never leaves the
 /// visible slice.
-pub(super) fn char_index_at_x(
-    value: &str,
-    cursor: usize,
-    inner_width: usize,
-    x: usize,
-) -> usize {
+pub(super) fn char_index_at_x(value: &str, cursor: usize, inner_width: usize, x: usize) -> usize {
     let (start, end) = value_window(value, cursor, inner_width);
     let v: Vec<char> = value.chars().collect();
     let mut col = 0usize;

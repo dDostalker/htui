@@ -8,6 +8,7 @@
 //! right [`LayoutBlockOptions`].
 
 use crate::{
+    graphics::{FontStyle, block_style},
     html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeSizes},
     html::css_parse::{
         BoxSizing, ColumnFill, ColumnsResolved, OverflowWrap, Position, WhiteSpace, WordBreak,
@@ -18,7 +19,6 @@ use crate::{
         layoutbox::{collect_runs, visible_children, wrap_runs},
     },
     tdom::node::{Node, NodeArena, NodeId, effective_font_size_cells},
-    graphics::{FontStyle, block_style},
 };
 
 use crossterm::style::Color;
@@ -82,10 +82,9 @@ pub fn layout_block(
     // The available width after margins / indent — shared by the width
     // resolution and the min/max-height clamp below. A negative horizontal
     // margin *increases* the available width (CSS gutter pull-out).
-    let available = (containing.width as i64
-        - opts.indent as i64
-        - edges.margin.horizontal() as i64)
-        .max(0) as usize;
+    let available =
+        (containing.width as i64 - opts.indent as i64 - edges.margin.horizontal() as i64).max(0)
+            as usize;
 
     let (geom, preallocated_height) = match pre_allocated_rect {
         Some(rect) => {
@@ -655,8 +654,7 @@ fn layout_multicol(
     // The container's content height is the tallest column.
     let mut col_heights = vec![0usize; count];
     for (i, frag) in fragments.iter().enumerate() {
-        col_heights[col_of[i]] =
-            col_heights[col_of[i]].max(col_off[i].saturating_add(frag.height));
+        col_heights[col_of[i]] = col_heights[col_of[i]].max(col_off[i].saturating_add(frag.height));
     }
     let content_height = col_heights.iter().copied().max().unwrap_or(0);
 
@@ -669,9 +667,8 @@ fn layout_multicol(
             continue;
         };
         let child = &mut children[child_idx];
-        let col_x = content_left.saturating_add(
-            col_of[i].saturating_mul(col_w.saturating_add(gap)),
-        );
+        let col_x =
+            content_left.saturating_add(col_of[i].saturating_mul(col_w.saturating_add(gap)));
         child.rect.x = col_x.saturating_add(child.rect.x.saturating_sub(content_left));
         child.rect.y = content_top.saturating_add(col_off[i]);
     }
@@ -686,9 +683,7 @@ fn layout_multicol(
 
     let mut col_xs: Vec<usize> = Vec::with_capacity(count);
     for c in 0..count {
-        col_xs.push(
-            content_left.saturating_add(c.saturating_mul(col_w.saturating_add(gap))),
-        );
+        col_xs.push(content_left.saturating_add(c.saturating_mul(col_w.saturating_add(gap))));
     }
 
     // Column rules sit centred in each gap; a zero-width gap leaves no room.
@@ -696,10 +691,9 @@ fn layout_multicol(
     let rule_visible = spec.rule.is_some_and(|r| r.style != BorderStyle::None) && gap > 0;
     if rule_visible {
         for c in 0..count.saturating_sub(1) {
-            let boundary =
-                content_left.saturating_add((c + 1).saturating_mul(col_w)).saturating_add(
-                    c.saturating_mul(gap),
-                );
+            let boundary = content_left
+                .saturating_add((c + 1).saturating_mul(col_w))
+                .saturating_add(c.saturating_mul(gap));
             rule_xs.push(boundary.saturating_add(gap / 2));
         }
     }

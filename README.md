@@ -9,7 +9,7 @@
 [![crates.io](https://img.shields.io/crates/v/htui.svg)](https://crates.io/crates/htui)
 [![docs.rs](https://img.shields.io/docsrs/htui)](https://docs.rs/htui)
 [![license](https://img.shields.io/crates/l/htui.svg)](https://github.com/dDostalker/htui)
-[![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.89%2B-orange.svg)](https://www.rust-lang.org)
 
 [中文说明](README.zh-CN.md)
 
@@ -62,6 +62,34 @@ fn main() {
 Interactivity is one attribute away — `<button onclick="greet()">` with a
 `#[htui::command]` Rust function behind it. See the tutorials below.
 
+## Visual test gallery
+
+The repository ships an interactive gallery (`visual_test`) covering every
+supported HTML/CSS/JS feature — layout, flexbox, tables, forms, images, events
+and scripting. From the repository root:
+
+```bash
+# Interactive gallery (default page: showcase; Esc to quit)
+cargo run -p visual_test
+
+# A specific demo
+cargo run -p visual_test -- flex
+cargo run -p visual_test -- events
+
+# Headless preview: plain-text rows, no raw mode / alternate screen
+cargo run -p visual_test -- --dump showcase --cols 68
+cargo run -p visual_test -- --dump bg showcase   # background-fill map (█)
+```
+
+Each demo is a folder under `visual_test/src/` (`index.html` + optional
+`style.css`). Available demos: `all_in_one`, `aside`, `blockquote`, `box_model`,
+`colors`, `columns`, `configurator`, `css`, `css_props`, `details`,
+`dialog_template`, `events`, `fetch_demo`, `flex`, `flex_advanced`,
+`flex_align_content`, `flex_align_self`, `flex_nested`, `font_size`,
+`font_styles`, `form`, `form_elements`, `header_footer`, `headings`,
+`helloworld`, `image`, `input`, `list`, `menu_dl`, `nested`, `place`,
+`position`, `pre`, `q_abbr`, `showcase`, `table`, `text`, `viewport_units`.
+
 ## Documentation
 
 | Document | Content |
@@ -77,7 +105,7 @@ Interactivity is one attribute away — `<button onclick="greet()">` with a
 
 ## Platform
 
-Rust **1.88+** (edition 2024). Windows console and POSIX terminals via
+Rust **1.89+** (edition 2024). Windows console and POSIX terminals via
 [crossterm](https://github.com/crossterm-rs/crossterm); truecolor recommended.
 
 ## License

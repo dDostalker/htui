@@ -3,14 +3,16 @@
 //! `border:` declaration opts into a CSS frame via the shared control chrome.
 
 use crate::{
+    graphics::char_width,
     html::css_parse::parse_color_str,
     layout::layoutbox::geometry::select_options,
     layout::{LayoutBox, Rect},
     tdom::node::NodeArena,
-    graphics::char_width,
 };
 
-use super::{PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put};
+use super::{
+    PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put,
+};
 
 /// Frame colour for an open (focused) dropdown (Tokyo Night accent cyan).
 const OPEN_FRAME: &str = "#2ac3de";
@@ -38,7 +40,10 @@ pub(crate) fn paint_select(
     let open = canvas.open_select == Some(lb.node_id);
 
     let content = paint_control_chrome(lb, arena, canvas, r, fg);
-    let bg = node.css_attr.get_bg_color().or(Some(super::CONTROL_DEFAULT_BG));
+    let bg = node
+        .css_attr
+        .get_bg_color()
+        .or(Some(super::CONTROL_DEFAULT_BG));
     // While the dropdown is open the label is drawn with the accent colour
     // (a border, when declared, keeps its own colour from the chrome).
     let label_fg = if open {

@@ -32,18 +32,38 @@ pub(super) fn layout_replaced(
     pre_allocated_rect: Option<Rect>,
 ) -> Option<LayoutBox> {
     match &generated.payload {
-        GeneratedPayload::Input => {
-            layout_input(arena, generated, containing, cursor, context, pre_allocated_rect)
-        }
-        GeneratedPayload::Textarea => {
-            layout_textarea(arena, generated, containing, cursor, context, pre_allocated_rect)
-        }
-        GeneratedPayload::Button => {
-            layout_button(arena, generated, containing, cursor, context, pre_allocated_rect)
-        }
-        GeneratedPayload::Select => {
-            layout_select(arena, generated, containing, cursor, context, pre_allocated_rect)
-        }
+        GeneratedPayload::Input => layout_input(
+            arena,
+            generated,
+            containing,
+            cursor,
+            context,
+            pre_allocated_rect,
+        ),
+        GeneratedPayload::Textarea => layout_textarea(
+            arena,
+            generated,
+            containing,
+            cursor,
+            context,
+            pre_allocated_rect,
+        ),
+        GeneratedPayload::Button => layout_button(
+            arena,
+            generated,
+            containing,
+            cursor,
+            context,
+            pre_allocated_rect,
+        ),
+        GeneratedPayload::Select => layout_select(
+            arena,
+            generated,
+            containing,
+            cursor,
+            context,
+            pre_allocated_rect,
+        ),
         GeneratedPayload::Image { src } if !src.is_empty() => layout_image(
             arena,
             generated,
@@ -209,11 +229,9 @@ fn control_placement(
     // control to the opposite side (CSS 10.3.3 for replaced elements).
     let margin = edges.margin;
     let auto = css.get_margin_auto();
-    let free = (containing.width as i64
-        - block_width as i64
-        - margin.left as i64
-        - margin.right as i64)
-        .max(0) as usize;
+    let free =
+        (containing.width as i64 - block_width as i64 - margin.left as i64 - margin.right as i64)
+            .max(0) as usize;
     let x = if auto.left && auto.right {
         (containing.x as i64 + margin.left as i64 + (free / 2) as i64).max(0) as usize
     } else if auto.left {

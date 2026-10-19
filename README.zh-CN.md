@@ -9,7 +9,7 @@
 [![crates.io](https://img.shields.io/crates/v/htui.svg)](https://crates.io/crates/htui)
 [![docs.rs](https://img.shields.io/docsrs/htui)](https://docs.rs/htui)
 [![license](https://img.shields.io/crates/l/htui.svg)](https://github.com/dDostalker/htui)
-[![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.89%2B-orange.svg)](https://www.rust-lang.org)
 
 [English](README.md)
 
@@ -61,6 +61,33 @@ fn main() {
 交互只需一个属性——`<button onclick="greet()">`，背后是一个
 `#[htui::command]` 的 Rust 函数。见下方教程。
 
+## 可视化测试库
+
+仓库自带交互式示例库（`visual_test`），覆盖全部支持的 HTML/CSS/JS 能力——
+布局、flexbox、表格、表单、图片、事件与脚本。在仓库根目录运行：
+
+```bash
+# 交互式浏览（默认 showcase；按 Esc 退出）
+cargo run -p visual_test
+
+# 指定示例
+cargo run -p visual_test -- flex
+cargo run -p visual_test -- events
+
+# headless 预览：输出纯文本行（不进入 raw mode / 备用屏）
+cargo run -p visual_test -- --dump showcase --cols 68
+cargo run -p visual_test -- --dump bg showcase   # 背景填充图（█）
+```
+
+每个示例是 `visual_test/src/` 下的一个文件夹（`index.html` + 可选
+`style.css`）。可用示例：`all_in_one`、`aside`、`blockquote`、`box_model`、
+`colors`、`columns`、`configurator`、`css`、`css_props`、`details`、
+`dialog_template`、`events`、`fetch_demo`、`flex`、`flex_advanced`、
+`flex_align_content`、`flex_align_self`、`flex_nested`、`font_size`、
+`font_styles`、`form`、`form_elements`、`header_footer`、`headings`、
+`helloworld`、`image`、`input`、`list`、`menu_dl`、`nested`、`place`、
+`position`、`pre`、`q_abbr`、`showcase`、`table`、`text`、`viewport_units`。
+
 ## 文档
 
 | 文档 | 内容 |
@@ -75,11 +102,11 @@ fn main() {
 | [架构](docs/zh-cn/架构.md) | 渲染管线与线程模型 |
 | [边界文档](docs/zh-cn/边界文档.md) | 目标、承诺与拒绝清单 |
 | [能力差异清单](docs/zh-cn/能力差异清单.md) | 与浏览器的全矩阵对比 |
-| [脚本层完整文档](docs/zh-cn/script-layer.md) | 脚本层深度参考 |
+| [脚本层完整文档](docs/zh-cn/教程/script-layer.md) | 脚本层深度参考 |
 
 ## 平台
 
-Rust **1.88+**（edition 2024）。经
+Rust **1.89+**（edition 2024）。经
 [crossterm](https://github.com/crossterm-rs/crossterm) 支持 Windows 控制台与
 POSIX 终端；建议开启真彩色。
 

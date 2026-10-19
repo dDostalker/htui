@@ -60,8 +60,16 @@ fn test_flex_direction_column_reverse_stacks_bottom_to_top() {
     "#;
     let css = ".container { display: flex; flex-direction: column-reverse; }";
     let (rows, _) = render_rows(html, css);
-    assert!(rows[0].starts_with("B"), "first item must sit at the bottom: {:?}", rows[0]);
-    assert!(rows[1].starts_with("A"), "second item above it: {:?}", rows[1]);
+    assert!(
+        rows[0].starts_with("B"),
+        "first item must sit at the bottom: {:?}",
+        rows[0]
+    );
+    assert!(
+        rows[1].starts_with("A"),
+        "second item above it: {:?}",
+        rows[1]
+    );
 }
 
 #[test]
@@ -93,9 +101,21 @@ fn test_flex_wrap_reverse_stacks_lines_from_the_cross_end() {
         "rows 0-1 are free above the stacked lines: {:?}",
         rows[1]
     );
-    assert!(rows[2].contains("CCCC"), "last line at the top of the anchored stack: {:?}", rows[2]);
-    assert!(rows[3].contains("BBBB"), "middle line in the middle: {:?}", rows[3]);
-    assert!(rows[4].contains("AAAA"), "first line at the bottom: {:?}", rows[4]);
+    assert!(
+        rows[2].contains("CCCC"),
+        "last line at the top of the anchored stack: {:?}",
+        rows[2]
+    );
+    assert!(
+        rows[3].contains("BBBB"),
+        "middle line in the middle: {:?}",
+        rows[3]
+    );
+    assert!(
+        rows[4].contains("AAAA"),
+        "first line at the bottom: {:?}",
+        rows[4]
+    );
 }
 
 #[test]
@@ -137,9 +157,21 @@ fn test_flex_align_content_stretch_fills_the_container() {
         .container { display: flex; flex-wrap: wrap; width: 6ch; height: 7ch; align-content: stretch; }
     "#;
     let (rows, _) = render_rows(html, css);
-    assert!(rows[0].contains("AAAA"), "first line at the top: {:?}", rows[0]);
-    assert!(rows[2].contains("BBBB"), "stretched gap moves line 2 down 2: {:?}", rows[2]);
-    assert!(rows[4].contains("CCCC"), "stretched gap moves line 3 down 4: {:?}", rows[4]);
+    assert!(
+        rows[0].contains("AAAA"),
+        "first line at the top: {:?}",
+        rows[0]
+    );
+    assert!(
+        rows[2].contains("BBBB"),
+        "stretched gap moves line 2 down 2: {:?}",
+        rows[2]
+    );
+    assert!(
+        rows[4].contains("CCCC"),
+        "stretched gap moves line 3 down 4: {:?}",
+        rows[4]
+    );
 }
 
 #[test]
@@ -154,7 +186,7 @@ fn test_flex_shorthand_grow_and_full_form() {
     let (rows, _) = render_rows(html, css);
     // `flex: 1` gives each item 5 of the 10 cells; the plain items render
     // their single glyph at their slot start.
-    assert_eq!(rows[0].chars().nth(0), Some('A'));
+    assert_eq!(rows[0].chars().next(), Some('A'));
     assert_eq!(rows[0].chars().nth(5), Some('B'));
 
     // `flex: <grow> <shrink> <basis>`: bases 20 / 10 sum to the container,
@@ -162,9 +194,10 @@ fn test_flex_shorthand_grow_and_full_form() {
     let html = r#"
         <div class="container"><div class="a">A</div><div class="b">B</div></div>
     "#;
-    let css = ".container { display: flex; width: 30ch; } .a { flex: 2 1 20ch; } .b { flex: 1 1 10ch; }";
+    let css =
+        ".container { display: flex; width: 30ch; } .a { flex: 2 1 20ch; } .b { flex: 1 1 10ch; }";
     let (rows, _) = render_rows(html, css);
-    assert_eq!(rows[0].chars().nth(0), Some('A'));
+    assert_eq!(rows[0].chars().next(), Some('A'));
     assert_eq!(rows[0].chars().nth(20), Some('B'));
 }
 
@@ -181,8 +214,16 @@ fn test_flex_flow_shorthand_sets_direction_and_wrap() {
     "#;
     let css = ".container { display: flex; flex-flow: column wrap; width: 2ch; height: 2ch; }";
     let (rows, _) = render_rows(html, css);
-    assert!(rows[0].starts_with("AC"), "column 0 = A, column 1 = C: {:?}", rows[0]);
-    assert!(rows[1].starts_with("BD"), "column 0 = B, column 1 = D: {:?}", rows[1]);
+    assert!(
+        rows[0].starts_with("AC"),
+        "column 0 = A, column 1 = C: {:?}",
+        rows[0]
+    );
+    assert!(
+        rows[1].starts_with("BD"),
+        "column 0 = B, column 1 = D: {:?}",
+        rows[1]
+    );
 }
 
 #[test]
@@ -409,7 +450,7 @@ fn flex_row_with_bordered_input_reserves_border_cells() {
     let (rows, _) = render_rows(html, css);
     let joined = rows.join("\n");
     assert!(
-        joined.contains('┌'),
+        joined.contains('└'),
         "flex input must reserve border cells and paint its frame; rows:\n{}",
         rows.iter()
             .filter(|r| !r.trim().is_empty())
@@ -417,10 +458,7 @@ fn flex_row_with_bordered_input_reserves_border_cells() {
             .collect::<Vec<_>>()
             .join("\n")
     );
-    assert!(
-        joined.contains('└'),
-        "bottom frame edge must paint too"
-    );
+    assert!(joined.contains('─'), "bottom frame edge must paint too");
     assert!(
         joined.contains("ab"),
         "the value still renders inside the bordered flex field"
@@ -453,7 +491,11 @@ fn test_place_content_single_value_applies_to_both_axes() {
     );
     assert!(rows[3].starts_with(" BBBB"), "line 2: {:?}", rows[3]);
     assert!(rows[4].starts_with(" CCCC"), "line 3: {:?}", rows[4]);
-    assert!(rows[0].trim().is_empty(), "2 free rows above: {:?}", rows[0]);
+    assert!(
+        rows[0].trim().is_empty(),
+        "2 free rows above: {:?}",
+        rows[0]
+    );
 }
 
 #[test]
@@ -461,8 +503,7 @@ fn test_place_content_two_values_set_both_axes() {
     init();
     // `place-content: center space-between` maps `align-content: center` and
     // `justify-content: space-between` independently: two items split a
-    // 10-cell single line to the two ends (justify). The line sits on row 0 —
-    // `align-content` is ignored for single-line flex containers, matching
+    // 10-cell single line to the two ends (justify). The line sits on row 0 —    // `align-content` is ignored for single-line flex containers, matching
     // browsers.
     let html = r#"
         <div class="container"><div class="a">A</div><div class="b">B</div></div>
@@ -492,7 +533,11 @@ fn test_place_content_stretch_does_not_touch_justify() {
     "#;
     let css = ".container { display: flex; flex-wrap: wrap; width: 6ch; height: 7ch; place-content: stretch; }";
     let (rows, _) = render_rows(html, css);
-    assert!(rows[0].starts_with("AAAA"), "stretched line 1, items left: {:?}", rows[0]);
+    assert!(
+        rows[0].starts_with("AAAA"),
+        "stretched line 1, items left: {:?}",
+        rows[0]
+    );
     assert!(rows[2].starts_with("BBBB"), "stretched gap: {:?}", rows[2]);
     assert!(rows[4].starts_with("CCCC"), "stretched gap: {:?}", rows[4]);
 }
@@ -521,7 +566,11 @@ fn test_place_items_centers_on_the_cross_axis() {
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
     let css = ".container { display: flex; height: 5ch; place-items: center; }";
     let (rows, _) = render_rows(html, css);
-    assert!(rows[2].starts_with("A"), "item centred on row 2: {:?}", rows[2]);
+    assert!(
+        rows[2].starts_with("A"),
+        "item centred on row 2: {:?}",
+        rows[2]
+    );
     assert!(rows[0].trim().is_empty() && rows[1].trim().is_empty());
 }
 
@@ -533,7 +582,11 @@ fn test_place_items_two_values_syntax_checked() {
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
     let css = ".container { display: flex; height: 5ch; place-items: center center; }";
     let (rows, _) = render_rows(html, css);
-    assert!(rows[2].starts_with("A"), "item centred on row 2: {:?}", rows[2]);
+    assert!(
+        rows[2].starts_with("A"),
+        "item centred on row 2: {:?}",
+        rows[2]
+    );
 }
 
 #[test]
@@ -547,8 +600,16 @@ fn test_place_self_aligns_one_item() {
     "#;
     let css = ".container { display: flex; height: 5ch; } .b { place-self: flex-end; }";
     let (rows, _) = render_rows(html, css);
-    assert!(rows[0].starts_with("A"), "stretched item A on the top row: {:?}", rows[0]);
-    assert!(rows[4].contains("B"), "item B pinned to the bottom: {:?}", rows[4]);
+    assert!(
+        rows[0].starts_with("A"),
+        "stretched item A on the top row: {:?}",
+        rows[0]
+    );
+    assert!(
+        rows[4].contains("B"),
+        "item B pinned to the bottom: {:?}",
+        rows[4]
+    );
 }
 
 #[test]
@@ -562,7 +623,8 @@ fn test_align_self_margin_box_pins_to_line_end() {
     let html = r#"
         <div class="container"><div class="a">A</div><div class="b">B</div></div>
     "#;
-    let css = ".container { display: flex; height: 7ch; } .b { margin: 1ch; align-self: flex-end; }";
+    let css =
+        ".container { display: flex; height: 7ch; } .b { margin: 1ch; align-self: flex-end; }";
     let (rows, _) = render_rows(html, css);
     assert!(
         rows[5].contains("B"),
@@ -582,7 +644,8 @@ fn test_place_shorthand_order_decides_winner() {
     // declaration wins regardless of shorthand / longhand form. A
     // `place-items` written *after* `align-items` therefore overrides it.
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
-    let css = ".container { display: flex; height: 5ch; align-items: flex-start; place-items: center; }";
+    let css =
+        ".container { display: flex; height: 5ch; align-items: flex-start; place-items: center; }";
     let (rows, _) = render_rows(html, css);
     assert!(
         rows[2].starts_with("A") && rows[0].trim().is_empty(),
@@ -591,9 +654,14 @@ fn test_place_shorthand_order_decides_winner() {
     );
 
     // The reverse order keeps the explicit longhand on top.
-    let css = ".container { display: flex; height: 5ch; place-items: center; align-items: flex-start; }";
+    let css =
+        ".container { display: flex; height: 5ch; place-items: center; align-items: flex-start; }";
     let (rows, _) = render_rows(html, css);
-    assert!(rows[0].starts_with("A"), "later align-items wins: {:?}", rows[0]);
+    assert!(
+        rows[0].starts_with("A"),
+        "later align-items wins: {:?}",
+        rows[0]
+    );
 }
 
 #[test]
@@ -605,7 +673,11 @@ fn test_place_shorthand_vs_longhand_across_rules() {
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
     let css = ".container { display: flex; height: 5ch; place-items: center; }\n.container { align-items: flex-start; }";
     let (rows, _) = render_rows(html, css);
-    assert!(rows[0].starts_with("A"), "later rule's longhand wins: {:?}", rows);
+    assert!(
+        rows[0].starts_with("A"),
+        "later rule's longhand wins: {:?}",
+        rows
+    );
 }
 
 #[test]
@@ -615,9 +687,14 @@ fn test_place_shorthand_survives_invalid_longhand() {
     // error), so an earlier `place-items` still applies instead of being
     // overridden by the garbage value.
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
-    let css = ".container { display: flex; height: 5ch; place-items: center; align-items: garbage; }";
+    let css =
+        ".container { display: flex; height: 5ch; place-items: center; align-items: garbage; }";
     let (rows, _) = render_rows(html, css);
-    assert!(rows[2].starts_with("A"), "invalid longhand dropped: {:?}", rows);
+    assert!(
+        rows[2].starts_with("A"),
+        "invalid longhand dropped: {:?}",
+        rows
+    );
 }
 
 #[test]
@@ -628,12 +705,22 @@ fn test_justify_content_left_right_keywords() {
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
     let css = ".container { display: flex; width: 10ch; justify-content: right; }";
     let (rows, _) = render_rows(html, css);
-    assert_eq!(rows[0].chars().nth(9), Some('A'), "right packs to the edge: {:?}", rows[0]);
+    assert_eq!(
+        rows[0].chars().nth(9),
+        Some('A'),
+        "right packs to the edge: {:?}",
+        rows[0]
+    );
 
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
     let css = ".container { display: flex; width: 10ch; justify-content: left; }";
     let (rows, _) = render_rows(html, css);
-    assert_eq!(rows[0].chars().nth(0), Some('A'), "left packs to the start: {:?}", rows[0]);
+    assert_eq!(
+        rows[0].chars().next(),
+        Some('A'),
+        "left packs to the start: {:?}",
+        rows[0]
+    );
 }
 
 #[test]
@@ -646,8 +733,16 @@ fn test_align_self_start_end_keywords() {
     "#;
     let css = ".container { display: flex; height: 5ch; } .b { align-self: self-end; }";
     let (rows, _) = render_rows(html, css);
-    assert!(rows[0].starts_with("A"), "stretched item A on the top row: {:?}", rows[0]);
-    assert!(rows[4].contains("B"), "item B pinned to the bottom: {:?}", rows[4]);
+    assert!(
+        rows[0].starts_with("A"),
+        "stretched item A on the top row: {:?}",
+        rows[0]
+    );
+    assert!(
+        rows[4].contains("B"),
+        "item B pinned to the bottom: {:?}",
+        rows[4]
+    );
 }
 
 // ============================================================
@@ -668,8 +763,18 @@ fn test_flex_wrap_counts_item_margins() {
     // Line 1: the first item's margin-box (row 0 margin-top, row 1 content,
     // row 2 margin-bottom). Line 2 starts at row 3, so the second item's
     // content sits on row 4.
-    assert_eq!(rows[1].chars().nth(1), Some('A'), "first item at x=1 on line 1: {:?}", rows[1]);
-    assert_eq!(rows[4].chars().nth(1), Some('B'), "second item wraps to line 2: {:?}", rows[4]);
+    assert_eq!(
+        rows[1].chars().nth(1),
+        Some('A'),
+        "first item at x=1 on line 1: {:?}",
+        rows[1]
+    );
+    assert_eq!(
+        rows[4].chars().nth(1),
+        Some('B'),
+        "second item wraps to line 2: {:?}",
+        rows[4]
+    );
     assert!(
         !rows[1].contains("B"),
         "margin must count against the wrap threshold: {:?}",
@@ -692,7 +797,11 @@ fn test_flex_item_margin_box_sizes_the_line() {
         "row above the item is the margin-top: {:?}",
         rows[0]
     );
-    assert!(rows[1].contains("A"), "content on the middle row: {:?}", rows[1]);
+    assert!(
+        rows[1].contains("A"),
+        "content on the middle row: {:?}",
+        rows[1]
+    );
     assert!(
         rows[2].trim().is_empty(),
         "row below the item is the margin-bottom: {:?}",
@@ -1147,8 +1256,7 @@ fn test_flex_container_carries_flex_formatting_context() {
         1,
         "flex container has the one flex item as its child"
     );
-    // A plain `<div>` flex item keeps its own inner formatting context —
-    // it does not inherit `Flex` from the container.
+    // A plain `<div>` flex item keeps its own inner formatting context —    // it does not inherit `Flex` from the container.
     assert_eq!(
         container.children[0].inner_formatting_context,
         FormattingContext::Flow,

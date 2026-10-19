@@ -14,7 +14,7 @@ fn config_defaults_are_interactive() {
     init();
     let cfg = Config::default();
     assert_eq!(cfg.zoom, 1.0);
-    assert_eq!(cfg.events, true, "events default to on");
+    assert!(cfg.events, "events default to on");
     assert_eq!(cfg.frame_gap, Duration::from_millis(16));
 }
 
@@ -23,7 +23,7 @@ fn session_config_setters_and_mutators_roundtrip() {
     init();
     let mut session = Session::new();
     assert_eq!(session.zoom(), 1.0, "default zoom");
-    assert_eq!(session.config().events, true, "default events on");
+    assert!(session.config().events, "default events on");
 
     session.set_zoom(2.5);
     assert_eq!(session.zoom(), 2.5);
@@ -33,10 +33,10 @@ fn session_config_setters_and_mutators_roundtrip() {
     session.config_mut().frame_gap = Duration::from_millis(8);
     assert_eq!(session.config().frame_gap, Duration::from_millis(8));
     session.config_mut().events = false;
-    assert_eq!(session.config().events, false);
+    assert!(!session.config().events);
 
     // `set_config` replaces the whole settings object.
     session.set_config(Config::default());
-    assert_eq!(session.config().events, true, "set_config restores defaults");
+    assert!(session.config().events, "set_config restores defaults");
     assert_eq!(session.config().zoom, 1.0);
 }

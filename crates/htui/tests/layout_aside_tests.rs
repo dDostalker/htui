@@ -376,7 +376,8 @@ fn test_aside_bg_covers_nested_p_row() {
     // Row 2 = the <p>'s margin-bottom row — fully aside bg.
     let row2 = &tl.layout[2 * cols..3 * cols];
     assert!(
-        row2.iter().all(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 0, b: 139 })),
+        row2.iter()
+            .all(|b| b.bcolor == Some(Color::Rgb { r: 0, g: 0, b: 139 })),
         "row 2 = <p> margin-bottom, fully aside bg"
     );
 

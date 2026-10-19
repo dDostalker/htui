@@ -111,10 +111,7 @@ pub(super) fn find_box_rect(boxes: &[LayoutBox], node_id: NodeId) -> Option<Rect
 pub(super) fn pinned_boxes_rects(boxes: &[LayoutBox]) -> Vec<Rect> {
     fn walk(boxes: &[LayoutBox], out: &mut Vec<Rect>) {
         for b in boxes {
-            if matches!(
-                b.positioning.position,
-                Position::Fixed | Position::Sticky
-            ) {
+            if matches!(b.positioning.position, Position::Fixed | Position::Sticky) {
                 out.push(b.rect);
             }
             walk(&b.children, out);

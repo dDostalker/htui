@@ -114,10 +114,7 @@ fn hidden_attribute_excludes_box_from_tree() {
     // The UA rule `[hidden] { display: none }`: an element carrying the
     // `hidden` global attribute produces no box (matching the browser, where
     // `hidden` behaves like `display: none` unless an author `display` wins).
-    let (root_id, arena) = setup(
-        "<div><p>visible</p><p hidden>gone</p></div>",
-        "",
-    );
+    let (root_id, arena) = setup("<div><p>visible</p><p hidden>gone</p></div>", "");
     let boxes = generate_box_tree(&arena, root_id);
     let div =
         find(&boxes, &arena, |nt| matches!(nt, NodeType::Div)).expect("div should generate a box");
@@ -139,10 +136,7 @@ fn hidden_attribute_excludes_box_from_tree() {
 
 #[test]
 fn hidden_attribute_drops_the_subtree() {
-    let (root_id, arena) = setup(
-        "<div hidden><p>never</p><span>shown</span></div>",
-        "",
-    );
+    let (root_id, arena) = setup("<div hidden><p>never</p><span>shown</span></div>", "");
     let boxes = generate_box_tree(&arena, root_id);
     assert!(
         !boxes

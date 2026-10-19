@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crossterm::style::Color;
 
 use crate::{
+    graphics::block_style,
     layout::{
         BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext,
         inner_formatting_context::flow::{LayoutBlockOptions, layout_block},
@@ -12,7 +13,6 @@ use crate::{
         },
     },
     tdom::node::{Node, NodeArena, NodeId, NodeType},
-    graphics::block_style,
 };
 
 /// Build a plain block box for block-level elements without specialised

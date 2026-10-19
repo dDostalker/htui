@@ -1,6 +1,6 @@
 use crate::{
-    layout::{LayoutBox, Rect, ReplacedContent},
     graphics::{ClipRect, render_image_at_slice},
+    layout::{LayoutBox, Rect, ReplacedContent},
 };
 
 use super::{PaintCanvas, intersect_rects};

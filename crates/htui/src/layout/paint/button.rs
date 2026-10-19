@@ -5,12 +5,14 @@
 use crossterm::style::Color;
 
 use crate::{
+    graphics::char_width,
     layout::{LayoutBox, Rect},
     tdom::node::{Node, NodeArena, NodeType},
-    graphics::char_width,
 };
 
-use super::{PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put};
+use super::{
+    PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put,
+};
 
 pub(crate) fn paint_button(
     lb: &LayoutBox,

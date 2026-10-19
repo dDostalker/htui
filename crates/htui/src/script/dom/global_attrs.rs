@@ -3,9 +3,7 @@
 
 use boa_engine::{Context, JsResult, JsValue, NativeFunction, js_string};
 
-use super::{
-    f64_to_node_id, js_fn, mark_dirty, node_id_to_f64, this_node_id, with_state,
-};
+use super::{f64_to_node_id, js_fn, mark_dirty, node_id_to_f64, this_node_id, with_state};
 
 pub(super) fn native_get_class(
     this: &JsValue,

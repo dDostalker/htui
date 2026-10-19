@@ -30,10 +30,10 @@ use std::collections::HashMap;
 use crossterm::style::Color;
 
 use crate::{
+    graphics::{Block, FontStyle, ImageCache, InputRenderState, TermLayout},
     html::css_parse::{Position, Visibility},
     layout::{BoxKind, LayoutBox, Rect, ReplacedContent},
     tdom::node::{NodeArena, NodeId, NodeType},
-    graphics::{Block, FontStyle, ImageCache, InputRenderState, TermLayout},
 };
 
 use self::block::paint_block;
@@ -87,12 +87,10 @@ pub(super) fn paint_control_chrome(
     Rect::new(
         rect.x.saturating_add(sides.left.thickness()),
         rect.y.saturating_add(sides.top.thickness()),
-        rect
-            .width
+        rect.width
             .saturating_sub(sides.left.thickness())
             .saturating_sub(sides.right.thickness()),
-        rect
-            .height
+        rect.height
             .saturating_sub(sides.top.thickness())
             .saturating_sub(sides.bottom.thickness()),
     )
@@ -459,8 +457,10 @@ fn paint_box(
     // the box keeps its layout space but paints nothing of its own chrome /
     // inline content. Children still descend — each node checks its own
     // resolved visibility, exactly like the browser.
-    let visibility_hidden =
-        matches!(arena[lb.node_id].css_attr.get_visibility(), Visibility::Hidden);
+    let visibility_hidden = matches!(
+        arena[lb.node_id].css_attr.get_visibility(),
+        Visibility::Hidden
+    );
     if !visibility_hidden {
         match &lb.kind {
             BoxKind::Normal => {

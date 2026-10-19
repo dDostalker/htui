@@ -1,4 +1,4 @@
-﻿# htui — 终端 HTML/CSS 渲染引擎
+# htui — 终端 HTML/CSS 渲染引擎
 
 > 本文档是 对LLM Agent的**提示与约束文档**。*本文档是 LLM 操作本项目的行为契约。任何时候应当以本文件为最高优先级参考。*
 > 在LLM与本项目交互时，必须严格遵循以下规范。
@@ -13,10 +13,15 @@
 以下是项目的结构，如果不是特殊要求不得修改项目结构，仅当提示词要求需要时修改，修改前进行询问，并**必须**对项目结构进行同步
 ```
 htui/
-├── Cargo.toml              # workspace 根（members: crates/htui, crates/htui-macros, visual_test）
-├── README.md               # 双语 README（与 crates/htui/README.md 保持同步；后者随 crate 发布）
+├── Cargo.toml              # workspace 根（members: crates/htui, crates/htui-macros, visual_test）+ workspace lints
+├── .editorconfig           # 全库 UTF-8（无 BOM）声明，防止编辑器按 ANSI/GBK 打开产生乱码
+├── README.md               # 英文 README（GitHub 首页；与 crates/htui/README.md 内容同步）
+├── README.zh-CN.md         # 中文 README
 ├── LICENSE-MIT             # MIT 许可证文本（cargo package 自动打入 .crate）
 ├── LICENSE-APACHE          # Apache-2.0 许可证文本（cargo package 自动打入 .crate）
+├── .github/
+│   └── workflows/
+│       └── ci.yml          # GitHub Actions：test 矩阵（Linux/Windows/macOS）+ MSRV 1.89 + clippy + fmt + ast-grep
 ├── crates/
 │   ├── htui/               # 主库 crate：终端 HTML/CSS 渲染引擎（独立发布单元）
 │   │   ├── Cargo.toml
@@ -512,6 +517,12 @@ ast-grep scan crates/htui/src           # 只扫指定路径
 ast-grep scan -r sg/rules/no-unwrap.yml # 只跑某条规则
 ast-grep run -p 'PATTERN' --lang rust crates  # 一次性查询（不需规则文件）
 ```
+
+CI（`.github/workflows/ci.yml`）在 push / PR 上执行：`cargo test --workspace`（Linux /
+Windows / macOS 三平台矩阵）、MSRV 1.89.0 编译检查、`cargo clippy --all-targets
+-D warnings`、`cargo fmt --all -- --check`、全库 UTF-8 编码检查（无 BOM / 非法字节 /
+U+FFFD）、以及 `ast-grep scan`。本地提交前应至少跑一遍 `cargo fmt`、clippy 与
+ast-grep。
 
 ### 跳过规则（仅限正当理由）
 在违规行**上一行**加注释：

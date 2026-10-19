@@ -170,8 +170,10 @@ pub fn layout_children(
                 if generated.kind == GeneratedBoxKind::Text
                     || generated.kind == GeneratedBoxKind::Anonymous
                 {
-                    pending_space = pending_space
-                        .max(collapsed_interitem_space(&arena[child_id], parent_white_space));
+                    pending_space = pending_space.max(collapsed_interitem_space(
+                        &arena[child_id],
+                        parent_white_space,
+                    ));
                     continue;
                 }
                 if !inline_row.is_empty() {
@@ -297,17 +299,10 @@ fn layout_inline_row(
             ) {
                 out.push(b);
             }
-            x = start
-                .saturating_add(m.width)
-                .saturating_add(m.margin_after);
+            x = start.saturating_add(m.width).saturating_add(m.margin_after);
             continue;
         }
-        let rect = Rect::new(
-            start,
-            y,
-            m.width.max(1),
-            m.height.max(1),
-        );
+        let rect = Rect::new(start, y, m.width.max(1), m.height.max(1));
         let Some(generated) = generate_node(arena, item.id) else {
             continue;
         };
@@ -324,9 +319,7 @@ fn layout_inline_row(
         ) {
             out.push(b);
         }
-        x = start
-            .saturating_add(m.width)
-            .saturating_add(m.margin_after);
+        x = start.saturating_add(m.width).saturating_add(m.margin_after);
     }
     cursor.y = y.saturating_add(max_h);
     out

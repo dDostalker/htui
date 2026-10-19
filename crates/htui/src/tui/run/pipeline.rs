@@ -22,7 +22,7 @@ use crate::tui::graph_api::{DirtyInfo, TermLayout};
 use super::overlay::apply_select_overlay;
 use super::region::{incremental_region, pinned_boxes_rects, pseudo_affected_region, union_rect};
 use super::selection::{highlight_lines, lines_bounds};
-use super::state::{SELECTION_BG, RenderState};
+use super::state::{RenderState, SELECTION_BG};
 
 /// Flush one rendered frame from the session's `BufWriter`, skipping the
 /// syscall entirely when the frame wrote nothing (an unchanged viewport).
@@ -416,8 +416,12 @@ impl RenderState {
         };
         let old_rects = pinned_boxes_rects(&geo.boxes);
         let mut boxes = geo.boxes.clone();
-        let viewport =
-            Rect::new(0, tl.scroll_y as usize, tl.columns as usize, tl.rows as usize);
+        let viewport = Rect::new(
+            0,
+            tl.scroll_y as usize,
+            tl.columns as usize,
+            tl.rows as usize,
+        );
         pin_fixed_boxes(&mut boxes, viewport);
         pin_sticky_boxes(&mut boxes, viewport);
         let new_rects = pinned_boxes_rects(&boxes);
@@ -432,11 +436,7 @@ impl RenderState {
         {
             log::debug!("Hit-test channel closed: {}", e);
         }
-        let Some(region) = old_rects
-            .into_iter()
-            .chain(new_rects)
-            .reduce(union_rect)
-        else {
+        let Some(region) = old_rects.into_iter().chain(new_rects).reduce(union_rect) else {
             return;
         };
         tl.repaint_region(&fresh.arena, &fresh.boxes, region);
