@@ -82,6 +82,26 @@ pub(super) fn collect_box_rects(boxes: &[LayoutBox]) -> Vec<(NodeId, Rect)> {
     out
 }
 
+/// First box rect belonging to `node_id`, in tree order.
+///
+/// Single-target lookup used by the input-repaint paths (keystroke / select
+/// open / close): walking the tree with an early return avoids materializing
+/// the full `(NodeId, Rect)` flat list just to `find` one entry.
+pub(super) fn find_box_rect(boxes: &[LayoutBox], node_id: NodeId) -> Option<Rect> {
+    fn walk(boxes: &[LayoutBox], node_id: NodeId) -> Option<Rect> {
+        for b in boxes {
+            if b.node_id == node_id {
+                return Some(b.rect);
+            }
+            if let Some(found) = walk(&b.children, node_id) {
+                return Some(found);
+            }
+        }
+        None
+    }
+    walk(boxes, node_id)
+}
+
 /// Every `position: fixed` / `sticky` box's rect (document coordinates), in
 /// tree order.
 ///

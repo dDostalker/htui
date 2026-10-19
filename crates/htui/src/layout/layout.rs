@@ -200,12 +200,14 @@ impl TermLayout {
 
     /// Grow the canvas on demand so it can hold every box in `boxes`.
     ///
-    /// The buffer starts at one viewport ([`new`](Self::new)) and only grows
-    /// here, to exactly the height the layout needs — a short document never
-    /// pays for the full scroll capacity. The buffer never shrinks (content
-    /// height is monotonic within a session). Freshly added cells are blank,
-    /// so the subsequent paint pass fills them exactly like the rest of the
-    /// buffer.
+    /// The buffer starts at one viewport ([`new`](Self::new)) and grows here
+    /// to exactly the height the layout needs — a short document never pays
+    /// for the full scroll capacity. Content height is monotonic within one
+    /// document, but not across one: an in-engine document reload
+    /// (`ScriptEngine::reload`) can shrink it drastically, so a buffer more
+    /// than 4× the needed size is truncated back down (bounded below by the
+    /// viewport) and released. Freshly added cells are blank, so the
+    /// subsequent paint pass fills them exactly like the rest of the buffer.
     fn ensure_capacity(&mut self, boxes: &[LayoutBox]) {
         fn walk(boxes: &[LayoutBox], bottom: &mut usize) {
             for b in boxes {
@@ -217,11 +219,13 @@ impl TermLayout {
         walk(boxes, &mut bottom);
 
         let cols = self.columns as usize;
-        let needed = bottom
-            .saturating_mul(cols)
-            .max(cols.saturating_mul(self.rows as usize));
+        let viewport = cols.saturating_mul(self.rows as usize);
+        let needed = bottom.saturating_mul(cols).max(viewport);
         if needed > self.layout.len() {
             self.layout.resize(needed, Block::default());
+        } else if needed < self.layout.len() / 4 {
+            self.layout.truncate(needed);
+            self.layout.shrink_to_fit();
         }
     }
 

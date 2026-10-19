@@ -13,7 +13,7 @@
 以下是项目的结构，如果不是特殊要求不得修改项目结构，仅当提示词要求需要时修改，修改前进行询问，并**必须**对项目结构进行同步
 ```
 htui/
-├── Cargo.toml              # workspace 根（members: crates/htui, crates/htui-macros, visual_test, example）
+├── Cargo.toml              # workspace 根（members: crates/htui, crates/htui-macros, visual_test）
 ├── crates/
 │   ├── htui/               # 主库 crate：终端 HTML/CSS 渲染引擎（独立发布单元）
 │   │   ├── Cargo.toml
@@ -137,7 +137,7 @@ htui/
 │   │   │   └── tui/
 │   │   │       ├── mod.rs
 │   │   │       └── run/          # 引擎驱动：run() 输入循环 + panic hook（mod.rs）+ 渲染/命中/脚本线程 + 增量重绘辅助
-│   │   │           ├── mod.rs     # run() 输入主循环 + install_debug_panic_hook
+│   │   │           ├── mod.rs     # run() 输入主循环 + install_panic_hook
 │   │   │           ├── state.rs     # RenderState + handle_input/handle_select/TextSel/OpenSelect + 配色常量
 │   │   │           ├── pipeline.rs  # redraw/layout_and_paint/render_arena/render_html/repaint_dynamic/pin_fixed_and_repaint
 │   │   │           ├── thread.rs    # render_thread / hit_test_thread / fold_script_event / PendingInput
@@ -276,10 +276,6 @@ htui/
 │       ├── place/        # place-content/place-items/place-self 简写演示（单值双轴/双值/声明顺序优先：后声明胜出，与浏览器一致）
 │       ├── fetch_demo/   # fetch 演示：<script src="mem://…"> 加载 + fetch 经 Promise 微任务事件循环写 DOM
 │       └── viewport_units/
-└── example/              # 完整交互示例（workspace 成员；cargo run -p example 交互运行，-- --dump 为 headless 预览）
-    └── src/
-        ├── main.rs      # btm 风格系统监控器：mock 数据 + host commands + setInterval 刷新
-        └── btm/          # index.html + style.css
 sg/                       # ast-grep 配套目录（sgconfig.yml 在仓库根）
 └── rules/                # ast-grep 规则定义（每个 .yml 一条规则）
 ```

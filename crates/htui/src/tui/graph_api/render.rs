@@ -87,7 +87,15 @@ impl TermLayout {
     /// writes the cells that changed since the last frame) — useful for unit
     /// tests that want to inspect the actual ANSI SGR sequence.
     pub fn render_to_bytes(&self) -> Vec<u8> {
-        let mut out: Vec<u8> = Vec::new();
+        // Pre-size for roughly one ANSI byte-quartet per visible cell: the
+        // incremental run batching makes the exact size unknowable up front,
+        // but starting from zero would re-grow the buffer several times on
+        // every call (the buffer is dropped after the frame).
+        let mut out: Vec<u8> = Vec::with_capacity(
+            (self.rows as usize)
+                .saturating_mul(self.columns as usize)
+                .saturating_mul(4),
+        );
         let cols = self.columns as usize;
         let rows = self.rows as usize;
         // The scroll position is normally clamped to the canvas, but guard the
@@ -175,7 +183,13 @@ impl TermLayout {
     /// starts with an empty snapshot, so it emits a full-screen clear plus
     /// every content cell.
     pub fn render_diff_to_bytes(&mut self) -> Vec<u8> {
-        let mut out: Vec<u8> = Vec::new();
+        // Pre-sized like `render_to_bytes`; unchanged frames emit nothing, so
+        // the capacity is only a growth hint.
+        let mut out: Vec<u8> = Vec::with_capacity(
+            (self.rows as usize)
+                .saturating_mul(self.columns as usize)
+                .saturating_mul(4),
+        );
         let cols = self.columns as usize;
         let rows = self.rows as usize;
         // Guarded the same way as `render_to_bytes`: a scroll position past

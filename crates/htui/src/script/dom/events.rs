@@ -227,6 +227,13 @@ pub(crate) fn get_listeners(
     node_id: NodeId,
     event_type: EventType,
 ) -> JsResult<Vec<JsValue>> {
+    /// Capacity hint ceiling for the pre-allocation below. `length` is read
+    /// from a JS-owned array object (page JS can reach the helper and tamper
+    /// with its registries), so a fabricated huge length must not translate
+    /// into a huge `with_capacity` allocation — the push loop below grows the
+    /// vector normally for whatever elements actually exist.
+    const CAPACITY_HINT_CEILING: u32 = 4096;
+
     let global = context.global_object();
     let helper = global
         .get(js_string!("__htuiGetListeners"), context)?
@@ -243,7 +250,7 @@ pub(crate) fn get_listeners(
     let len = arr_obj
         .get(js_string!("length"), context)?
         .to_u32(context)?;
-    let mut out = Vec::with_capacity(len as usize);
+    let mut out = Vec::with_capacity(len.min(CAPACITY_HINT_CEILING) as usize);
     for i in 0..len {
         out.push(arr_obj.get(i, context)?);
     }

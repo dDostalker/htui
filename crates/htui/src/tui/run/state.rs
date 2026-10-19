@@ -18,7 +18,7 @@ use crate::tui::graph_api::{InputRenderState, RenderCmd, SelectionMode, TermLayo
 
 use super::overlay::apply_select_overlay;
 use super::pipeline::flush_frame;
-use super::region::{collect_box_rects, union_rect};
+use super::region::{find_box_rect, union_rect};
 use super::selection::{extract_selection, highlight_lines, lines_bounds, selection_lines};
 
 fn parse_and_apply(html: &str, css_rules: &CssRule) -> (NodeId, NodeArena) {
@@ -179,10 +179,7 @@ impl RenderState {
                 selection,
             },
         );
-        let rect = collect_box_rects(&geo.boxes)
-            .into_iter()
-            .find(|(id, _)| *id == node_id)
-            .map(|(_, r)| r);
+        let rect = find_box_rect(&geo.boxes, node_id);
         match rect {
             Some(r) => tl.repaint_region(&geo.arena, &geo.boxes, r),
             None => tl.repaint_from(&geo.arena, &geo.boxes),
@@ -211,10 +208,7 @@ impl RenderState {
                     && let Some(tl) = self.term_layout.as_mut()
                 {
                     tl.open_select = None;
-                    let prev_select = collect_box_rects(&geo.boxes)
-                        .into_iter()
-                        .find(|(id, _)| *id == prev.node_id)
-                        .map(|(_, r)| r)
+                    let prev_select = find_box_rect(&geo.boxes, prev.node_id)
                         .unwrap_or(prev.rect);
                     tl.repaint_region(&geo.arena, &geo.boxes, union_rect(prev_select, prev.rect));
                 }
@@ -233,11 +227,7 @@ impl RenderState {
                         options.iter().position(|o| o.value == value).unwrap_or(0)
                     }
                 };
-                let Some(select_rect) = collect_box_rects(&geo.boxes)
-                    .into_iter()
-                    .find(|(id, _)| *id == node_id)
-                    .map(|(_, r)| r)
-                else {
+                let Some(select_rect) = find_box_rect(&geo.boxes, node_id) else {
                     return;
                 };
                 let rect = select_overlay_rect(&options, &rows, select_rect);
@@ -271,11 +261,7 @@ impl RenderState {
                 let Some(geo) = self.geometry.as_ref() else {
                     return;
                 };
-                let select_rect = collect_box_rects(&geo.boxes)
-                    .into_iter()
-                    .find(|(id, _)| *id == open.node_id)
-                    .map(|(_, r)| r)
-                    .unwrap_or(open.rect);
+                let select_rect = find_box_rect(&geo.boxes, open.node_id).unwrap_or(open.rect);
                 tl.repaint_region(&geo.arena, &geo.boxes, union_rect(select_rect, open.rect));
                 tl.render(out);
                 flush_frame(out);

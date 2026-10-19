@@ -1,11 +1,12 @@
 use std::{
-    collections::HashMap,
+    hash::{Hash, Hasher},
     path::PathBuf,
     sync::{Mutex, OnceLock},
 };
 
 use crossterm::style::Color;
 use image::imageops::FilterType;
+use indexmap::IndexMap;
 
 use super::{
     canvas::TermLayout,
@@ -202,8 +203,31 @@ impl Img {
 /// rasterized through `resvg` instead. The reported error is the raster
 /// decoder's when the source is not an SVG, and the SVG rasterizer's when it
 /// is — a corrupt PNG reports a PNG decode error, not an SVG one.
+///
+/// Decoding runs under explicit limits (dimension + allocation caps), so a
+/// decompression bomb registered under a `mem://` key fails with a decode
+/// error instead of aborting the process on a multi-gigabyte allocation.
 fn decode_rgba(path: &str, resource: &[u8]) -> Result<(u32, u32, Vec<u8>), ImageError> {
-    match image::load_from_memory(resource) {
+    /// Largest image dimension (either axis) the decoder will accept.
+    const MAX_IMAGE_DIM: u32 = 16384;
+    /// Largest intermediate allocation the decoder may make while decoding.
+    const MAX_IMAGE_ALLOC: u64 = 256 * 1024 * 1024;
+
+    let decode_err = |source: image::ImageError| ImageError::Decode {
+        path: path.to_string(),
+        source,
+    };
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(resource))
+        .with_guessed_format()
+        .map_err(|e| decode_err(image::ImageError::IoError(e)))?;
+    // `Limits` is `#[non_exhaustive]`, so it is built from `Default` plus
+    // field assignment instead of a struct literal.
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_IMAGE_DIM);
+    limits.max_image_height = Some(MAX_IMAGE_DIM);
+    limits.max_alloc = Some(MAX_IMAGE_ALLOC);
+    reader.limits(limits);
+    match reader.decode() {
         Ok(img) => {
             let rgba = img.to_rgba8();
             Ok((rgba.width(), rgba.height(), rgba.into_raw()))
@@ -217,10 +241,7 @@ fn decode_rgba(path: &str, resource: &[u8]) -> Result<(u32, u32, Vec<u8>), Image
                         source: svg_err,
                     })
                 } else {
-                    Err(ImageError::Decode {
-                        path: path.to_string(),
-                        source: raster_err,
-                    })
+                    Err(decode_err(raster_err))
                 }
             }
         },
@@ -294,25 +315,39 @@ pub struct ClipRect {
     pub height: usize,
 }
 
-/// Cache of intrinsic image dimensions keyed by path, so layout-time size
-/// probing reads the file header at most once per image.
-static INTRINSIC_SIZES: OnceLock<Mutex<HashMap<String, (u32, u32)>>> = OnceLock::new();
+/// Cache of intrinsic image dimensions, so layout-time size probing parses
+/// the image header at most once per source.
+///
+/// Entries are keyed by a hash of the *resource bytes*, not the path: the
+/// registry is session-scoped and two sessions in one process may register
+/// different bytes under the same path, so a path key would leak a stale
+/// size across sessions (contradicting the resource layer's session
+/// isolation). The map is FIFO-capped — the process-static cache can never
+/// grow with the number of sessions / images.
+static INTRINSIC_SIZES: OnceLock<Mutex<IndexMap<u64, (u32, u32)>>> = OnceLock::new();
+
+/// Maximum number of cached intrinsic-size entries (see [`INTRINSIC_SIZES`]).
+const MAX_INTRINSIC_SIZE_ENTRIES: usize = 64;
 
 /// Return the intrinsic `(width, height)` in source pixels for `path`.
 ///
 /// Resolves the source through [`resources::load`] (a `mem://` virtual key),
 /// reads only the image header
 /// (`image::ImageReader::into_dimensions`) — no pixel decode — and caches the
-/// result per path. SVG sources have no raster header, so their intrinsic
-/// size is taken from the parsed document instead. `None` when the source
-/// cannot be resolved or carries no decodable dimensions.
+/// result per source content. SVG sources have no raster header, so their
+/// intrinsic size is taken from the parsed document instead. `None` when the
+/// source cannot be resolved or carries no decodable dimensions.
 pub(crate) fn image_intrinsic_size(path: &str) -> Option<(u32, u32)> {
-    let cache = INTRINSIC_SIZES.get_or_init(|| Mutex::new(HashMap::new()));
+    let resource = resources::load(path).ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    resource.as_ref().hash(&mut hasher);
+    let key = hasher.finish();
+
+    let cache = INTRINSIC_SIZES.get_or_init(|| Mutex::new(IndexMap::new()));
     let mut map = cache.lock().ok()?;
-    if let Some(&size) = map.get(path) {
+    if let Some(&size) = map.get(&key) {
         return Some(size);
     }
-    let resource = resources::load(path).ok()?;
     let size = image::ImageReader::new(std::io::Cursor::new(resource.as_ref()))
         .with_guessed_format()
         .ok()?
@@ -322,7 +357,10 @@ pub(crate) fn image_intrinsic_size(path: &str) -> Option<(u32, u32)> {
         // intrinsic size.
         .or_else(|| svg_intrinsic_size(&resource));
     if let Some(size) = size {
-        map.insert(path.to_string(), size);
+        if map.len() >= MAX_INTRINSIC_SIZE_ENTRIES {
+            map.shift_remove_index(0);
+        }
+        map.insert(key, size);
     }
     size
 }
@@ -333,10 +371,14 @@ pub(crate) fn image_intrinsic_size(path: &str) -> Option<(u32, u32)> {
 /// The paint phase runs once per frame, and every `<img>` used to be
 /// re-decoded from disk on each pass. `TermLayout` owns one of these and the
 /// paint pipeline shares it across frames, so each image is decoded once per
-/// size and reused for the rest of the session.
+/// size and reused for the rest of the session. When the cap is hit the
+/// oldest entry is evicted (FIFO): clearing the whole cache would force every
+/// visible image to re-decode on the next frame (a visible stall whenever
+/// more distinct `(path, size)` combinations than the cap appear over a
+/// session, e.g. terminal resizes minting new size keys).
 #[derive(Debug)]
 pub struct ImageCache {
-    entries: HashMap<(String, u32, u32), Img>,
+    entries: IndexMap<(String, u32, u32), Img>,
 }
 
 impl Default for ImageCache {
@@ -349,7 +391,7 @@ impl ImageCache {
     /// Create an empty image cache.
     pub fn new() -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: IndexMap::new(),
         }
     }
 
@@ -362,7 +404,7 @@ impl ImageCache {
         let key = (path.to_string(), size.0, size.1);
         if !self.entries.contains_key(&key) {
             if self.entries.len() >= MAX_CACHED_IMAGES {
-                self.entries.clear();
+                self.entries.shift_remove_index(0);
             }
             let mut img = Img::new(PathBuf::from(path), size);
             img._create_img()?;

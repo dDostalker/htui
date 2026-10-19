@@ -17,7 +17,7 @@ use self::pipeline::combined_css_source;
 use self::thread::{fold_script_event, hit_test_thread, render_thread};
 
 use std::io::stdout;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -54,9 +54,10 @@ pub(crate) fn run(
     registry: Arc<ResourceRegistry>,
     config: Config,
 ) {
-    // install debug hook
-    #[cfg(debug_assertions)]
-    install_debug_panic_hook();
+    // Panic hook: restores the terminal on any panic in any thread, then
+    // logs (with a backtrace in debug builds). Must be installed before the
+    // terminal setup so a panic during setup is covered too.
+    install_panic_hook();
 
     if let Err(e) = enable_raw_mode() {
         log::error!("Failed to enable raw mode: {}", e);
@@ -75,6 +76,7 @@ pub(crate) fn run(
         }
         return;
     }
+    TERMINAL_ACTIVE.store(true, Ordering::SeqCst);
 
     let css_source = Arc::<str>::from(combined_css_source(html, css));
 
@@ -210,6 +212,11 @@ pub(crate) fn run(
     let mut hovered: Option<NodeId> = None;
 
     let mut quit = false;
+    // Un-acked `ScriptMsg::Move` count (see `MAX_IN_FLIGHT_MOVES`). Every
+    // script-thread response folds exactly one message batch, so each folded
+    // event decrements this; timer-driven responses also decrement, which can
+    // only loosen the bound (timer rate is user-visible, not pointer-rate).
+    let mut moves_in_flight: usize = 0;
     // Render-stall watchdog state: `(heartbeat at last command send, when it
     // was sent)`. The render thread bumps its heartbeat after each processed
     // batch, so a send followed by no heartbeat for a while means the render
@@ -359,8 +366,18 @@ pub(crate) fn run(
         }
 
         // Hand the actions that need the engine to the script thread (the
-        // channel is unbounded, so a busy script thread never blocks us).
+        // channel is unbounded, so a busy script thread never blocks us —
+        // but Move messages are capped, see `MAX_IN_FLIGHT_MOVES`).
         for msg in msgs {
+            if let ScriptMsg::Move { .. } = msg {
+                if moves_in_flight >= MAX_IN_FLIGHT_MOVES {
+                    log::debug!(
+                        "Script thread busy: dropping pointer move ({moves_in_flight} in flight)"
+                    );
+                    continue;
+                }
+                moves_in_flight += 1;
+            }
             if let Err(e) = script_tx.send(msg) {
                 log::error!("Failed to send script message: {}", e);
                 quit = true;
@@ -384,6 +401,7 @@ pub(crate) fn run(
                     Ok(ScriptResponse::Event(ev)) => {
                         let verdict = ev.key_gate.filter(|(id, _)| *id == gate.id);
                         fold_script_event(&state, &mut cmds, &mut hovered, &mut live_dom, ev);
+                        moves_in_flight = moves_in_flight.saturating_sub(1);
                         if let Some((_, prevented)) = verdict {
                             if !prevented {
                                 log::debug!(
@@ -424,6 +442,7 @@ pub(crate) fn run(
             match resp {
                 ScriptResponse::Event(ev) => {
                     fold_script_event(&state, &mut cmds, &mut hovered, &mut live_dom, ev);
+                    moves_in_flight = moves_in_flight.saturating_sub(1);
                 }
                 ScriptResponse::Ready { .. } | ScriptResponse::Failed(_) => {
                     log::error!("Unexpected one-shot script response in the input loop");
@@ -536,6 +555,9 @@ pub(crate) fn run(
         );
     }
 
+    // The engine no longer owns the terminal: a panic from here on (e.g.
+    // inside the logging below) must not re-run the restore.
+    TERMINAL_ACTIVE.store(false, Ordering::SeqCst);
     if let Err(e) = execute!(
         stdout(),
         LeaveAlternateScreen,
@@ -549,20 +571,55 @@ pub(crate) fn run(
         log::error!("Failed to disable raw mode: {}", e);
     }
 }
-#[cfg(debug_assertions)]
-use std::backtrace::Backtrace;
-#[cfg(debug_assertions)]
-use std::panic;
-#[cfg(debug_assertions)]
-use std::sync::Once;
+/// Whether the terminal is currently in raw mode / alternate screen (i.e.
+/// `run` completed its setup and has not yet restored). The panic hook reads
+/// this so it only touches the terminal when the engine actually owns it.
+static TERMINAL_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Maximum number of un-acked `ScriptMsg::Move` messages allowed on the
+/// script channel before the input loop starts dropping new ones.
+///
+/// The channel is unbounded by design (a busy script thread must never block
+/// the input loop), which also means a busy / blocked script thread accumulates
+/// every pointer move. Pointer moves are *state transitions*, not queued
+/// events — only the latest position determines hover enter / leave, so a
+/// browser-style drop of the excess is semantically invisible: the next
+/// accepted move (or the backlog drain) re-syncs the hover state. The bound
+/// caps both the channel backlog and the hover-dispatch work a stall can
+/// amass.
+const MAX_IN_FLIGHT_MOVES: usize = 8;
 
 #[cfg(debug_assertions)]
-fn install_debug_panic_hook() {
+use std::backtrace::Backtrace;
+use std::panic;
+use std::sync::Once;
+
+fn install_panic_hook() {
     static INSTALL_HOOK: Once = Once::new();
 
     INSTALL_HOOK.call_once(|| {
         let default_hook = panic::take_hook();
         panic::set_hook(Box::new(move |info| {
+            // A panic on any thread must not leave the user's terminal in
+            // raw mode / alternate screen: the normal cleanup below `run`'s
+            // main loop only executes on the regular exit path, and a panic
+            // on the input-loop (main) thread unwinds past it. The flag is
+            // swapped first so the normal-path cleanup never double-restores.
+            if TERMINAL_ACTIVE.swap(false, Ordering::SeqCst) {
+                if let Err(e) = disable_raw_mode() {
+                    log::error!("Panic-hook raw-mode restore failed: {}", e);
+                }
+                if let Err(e) = execute!(
+                    stdout(),
+                    LeaveAlternateScreen,
+                    DisableMouseCapture,
+                    DisableBracketedPaste,
+                    Show
+                ) {
+                    log::error!("Panic-hook screen restore failed: {}", e);
+                }
+            }
+
             default_hook(info);
 
             let message = if let Some(message) = info.payload().downcast_ref::<&str>() {
@@ -585,11 +642,14 @@ fn install_debug_panic_hook() {
                 .unwrap_or_else(|| "unknown location".to_owned());
             let thread = std::thread::current();
             let thread_name = thread.name().unwrap_or("unnamed");
+            #[cfg(debug_assertions)]
             let backtrace = Backtrace::force_capture();
-
+            #[cfg(debug_assertions)]
             log::error!(
                 "Thread '{thread_name}' panicked at {location}: {message}\nBacktrace:\n{backtrace}"
             );
+            #[cfg(not(debug_assertions))]
+            log::error!("Thread '{thread_name}' panicked at {location}: {message}");
         }));
     });
 }
