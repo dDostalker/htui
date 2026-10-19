@@ -39,6 +39,7 @@ pub struct HitMap {
 }
 
 impl HitMap {
+    /// Create an empty hit map.
     pub fn new() -> HitMap {
         HitMap::default()
     }
@@ -48,6 +49,7 @@ impl HitMap {
         self.regions.len()
     }
 
+    /// True when no regions have been collected.
     pub fn is_empty(&self) -> bool {
         self.regions.is_empty()
     }

@@ -5,7 +5,7 @@ use crate::tdom::node::NodeId;
 
 /// Render-time state of one `<input>` field.
 ///
-/// The input loop updates this through [`RenderCmd::RenderInput`]
+/// The input loop updates this through `RenderCmd::RenderInput`
 /// (crate::tui::graph_api::RenderCmd); the paint phase reads it to draw the
 /// field's value and caret. An absent entry falls back to the DOM `value`
 /// attribute and an unfocused look, so an untouched document renders without
@@ -52,14 +52,17 @@ pub struct TermLayout {
 }
 
 impl TermLayout {
+    /// Terminal columns after applying `zoom` (rounded).
     pub fn effective_columns(&self) -> u16 {
         (self.columns as f32 / self.zoom).round() as u16
     }
 
+    /// Terminal rows after applying `zoom` (rounded).
     pub fn effective_rows(&self) -> u16 {
         (self.rows as f32 / self.zoom).round() as u16
     }
 
+    /// Maximum valid scroll offset for the painted canvas and viewport.
     pub fn max_scroll(&self) -> u32 {
         // The canvas grows to exactly the content height (see
         // `ensure_capacity`), but `rendered_rows` is a monotonic high-water
@@ -73,6 +76,7 @@ impl TermLayout {
         canvas_rows.saturating_sub(self.rows as usize).min(content) as u32
     }
 
+    /// Clamp `scroll_y` to the valid range `[0, max_scroll()]`.
     pub fn clamp_scroll(&mut self) {
         let max = self.max_scroll();
         if self.scroll_y > max {

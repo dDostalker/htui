@@ -17,7 +17,7 @@ use super::select::{close_select, hit_select_option, open_select, refresh_datali
 /// Handle a completed left-button click at canvas coordinates `(x, y)`.
 ///
 /// Queues the `Click` dispatch (the script thread runs it via
-/// [`interaction::on_click`], which also syncs the hover state) and then
+/// [`interaction::on_click`](crate::events::interaction::on_click), which also syncs the hover state) and then
 /// applies the field-focus rule used by the input loop: a click on an
 /// `<input>` focuses it (blurring the previously focused field), any other
 /// click blurs the focused field. `arena` is the input loop's latest DOM
@@ -330,7 +330,7 @@ pub fn handle_mouse_down(
 /// focused `<input>` the caret (and with it the character selection) follows
 /// the pointer; over page content the text selection rectangle tracks the
 /// pointer. A page text selection starts only once the drag has moved past
-/// [`TEXT_SEL_DRAG_THRESHOLD`] cells from the press point — a press alone
+/// `TEXT_SEL_DRAG_THRESHOLD` cells from the press point — a press alone
 /// never creates one. Without a press it queues a [`ScriptMsg::Move`] for the
 /// script thread's hover machinery (pointer enter / leave + `MouseOver` /
 /// `MouseOut`). Local render commands are appended to `cmds` in dispatch

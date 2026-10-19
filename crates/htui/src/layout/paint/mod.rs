@@ -3,18 +3,18 @@
 //! Walks a [`LayoutBox`] forest produced by
 //! [`super::layoutbox::inner_formatting_context::flow::layout_tree`] (and
 //! flex / grid trees) and writes styled cells into the
-//! [`TermLayout`](crate::graphics::TermLayout) canvas. Reads no DOM
+//! [`TermLayout`] canvas. Reads no DOM
 //! state beyond each box's `node_id`: every paint decision is derived from
 //! the box's own `rect`, `kind`, `paint_style`, and the CSS attributes
 //! stored on the source node.
 //!
 //! ## Submodules
 //!
-//! - [`block`]: painting for `BoxKind::Normal` — backgrounds, borders, inline
+//! - `block`: painting for `BoxKind::Normal` — backgrounds, borders, inline
 //!   runs.
-//! - [`border`]: the border-glyph rasteriser, shared with `block`.
-//! - [`image`]: rasterising for `BoxKind::Replaced(ReplacedContent::Image)`.
-//! - [`text`]: the inline-run painter, shared with `block`.
+//! - `border`: the border-glyph rasteriser, shared with `block`.
+//! - `image`: rasterising for `BoxKind::Replaced(ReplacedContent::Image)`.
+//! - `text`: the inline-run painter, shared with `block`.
 
 mod block;
 mod border;
@@ -236,7 +236,7 @@ pub fn paint_layout_tree(boxes: &[LayoutBox], arena: &NodeArena, term_layout: &m
 /// cells the dirty nodes' boxes (and their ancestors' background fills) cover
 /// can differ from the previous frame. Boxes whose rect does not intersect
 /// `region` are skipped entirely; the rest paint normally, with every cell
-/// write gated to the region by [`PaintCanvas::in_region`]. Because only the
+/// write gated to the region by `PaintCanvas::in_region`. Because only the
 /// region's cells are rewritten, the diff renderer emits exactly the cells
 /// that changed.
 pub fn paint_layout_tree_region(

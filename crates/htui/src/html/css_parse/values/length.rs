@@ -524,6 +524,7 @@ pub struct LengthContext {
 }
 
 impl FontContext {
+    /// Create the root font context (1-cell font, 1-cell root font).
     pub fn root() -> Self {
         Self {
             font_size_cells: 1,
@@ -531,6 +532,7 @@ impl FontContext {
         }
     }
 
+    /// Derive a child context with `child_cells` as its font size, keeping the root size.
     pub fn child(self, child_cells: usize) -> Self {
         Self {
             font_size_cells: child_cells,
@@ -553,13 +555,13 @@ impl FontContext {
 ///
 /// Accepted forms:
 /// - `auto` [`Length::Auto`] (caller decides what to fill)
-/// - `40px`, bare `40` [`Length::Px(n)`] ( `PX_PER_CELL` at resolve)
-/// - `50%` [`Length::Pct(p)`] (raw 0 00, divided at resolve)
-/// - `2em`, `1.5em` [`Length::Em(n)`]
-/// - `2rem`, `1.5rem` [`Length::Rem(n)`]
-/// - `12ch` [`Length::Ch(n)`] (1ch == one cell)
-/// - `50vw` [`Length::Vw(n)`] (1vw = viewport_cols / 100)
-/// - `50vh` [`Length::Vh(n)`] (1vh = viewport_rows / 100)
+/// - `40px`, bare `40` [`Length::Px`] ( `PX_PER_CELL` at resolve)
+/// - `50%` [`Length::Pct`] (raw 0 00, divided at resolve)
+/// - `2em`, `1.5em` [`Length::Em`]
+/// - `2rem`, `1.5rem` [`Length::Rem`]
+/// - `12ch` [`Length::Ch`] (1ch == one cell)
+/// - `50vw` [`Length::Vw`] (1vw = viewport_cols / 100)
+/// - `50vh` [`Length::Vh`] (1vh = viewport_rows / 100)
 ///
 /// Rejected (returns `None` from [`Length::parse`]):
 /// - `vmin`, `vmax` derive from `vw` / `vh` after `Layout` has viewport info;

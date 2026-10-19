@@ -258,10 +258,10 @@ pub fn reset_css_attr(arena: &mut NodeArena, root_id: NodeId) {
 ///
 /// Single source of truth for property names. Adding support for a new property:
 ///   1. Append the name here.
-///   2. Add an accessor on [`CssAttr`] (e.g. `get_padding()`).
+///   2. Add an accessor on [`CssAttr`](crate::html::css_parse::CssAttr) (e.g. `get_padding()`).
 ///   3. If it should inherit, also append to [`INHERITED_PROPS`].
 ///
-/// No other site needs editing — the cascade in [`inherit_css`] drives itself
+/// No other site needs editing — the cascade in `inherit_css` drives itself
 /// from these lists.
 pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "color",

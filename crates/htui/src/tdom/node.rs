@@ -131,6 +131,7 @@ pub(crate) fn is_collapsible_whitespace(c: char) -> bool {
 }
 
 impl Node {
+    /// Create an empty node of the given type.
     pub fn from(node_type: NodeType) -> Node {
         Node {
             node_type,
@@ -142,6 +143,7 @@ impl Node {
         }
     }
 
+    /// Create a text node carrying `data`.
     pub fn text(data: &str) -> Node {
         Node {
             node_type: NodeType::Text,

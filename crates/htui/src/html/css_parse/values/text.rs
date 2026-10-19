@@ -58,6 +58,7 @@ pub enum TextTransform {
 }
 
 #[doc(hidden)]
+/// Parse a `text-transform` keyword.
 pub fn parse_text_transform(s: &str) -> Option<TextTransform> {
     match s.trim().to_ascii_lowercase().as_str() {
         "none" => Some(TextTransform::None),
@@ -86,6 +87,7 @@ pub enum LineHeight {
 }
 
 #[doc(hidden)]
+/// Parse a `line-height` value (`normal`, unitless number, or length).
 pub fn parse_line_height(s: &str) -> Option<LineHeight> {
     let s = s.trim();
     if s.eq_ignore_ascii_case("normal") {
@@ -190,6 +192,7 @@ impl WhiteSpace {
 }
 
 #[doc(hidden)]
+/// Parse a `white-space` keyword.
 pub fn parse_white_space(s: &str) -> Option<WhiteSpace> {
     match s.trim().to_ascii_lowercase().as_str() {
         "normal" => Some(WhiteSpace::Normal),
@@ -216,6 +219,7 @@ pub enum WordBreak {
 }
 
 #[doc(hidden)]
+/// Parse a `word-break` keyword.
 pub fn parse_word_break(s: &str) -> Option<WordBreak> {
     match s.trim().to_ascii_lowercase().as_str() {
         "normal" => Some(WordBreak::Normal),
@@ -241,6 +245,7 @@ pub enum OverflowWrap {
 }
 
 #[doc(hidden)]
+/// Parse an `overflow-wrap` keyword.
 pub fn parse_overflow_wrap(s: &str) -> Option<OverflowWrap> {
     match s.trim().to_ascii_lowercase().as_str() {
         "normal" => Some(OverflowWrap::Normal),

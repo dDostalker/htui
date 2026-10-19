@@ -23,6 +23,7 @@ pub enum BoxSizing {
 }
 
 #[doc(hidden)]
+/// Parse a `box-sizing` keyword (`content-box` / `border-box`).
 pub fn parse_box_sizing(s: &str) -> Option<BoxSizing> {
     match s.trim().to_ascii_lowercase().as_str() {
         "content-box" => Some(BoxSizing::ContentBox),
@@ -69,6 +70,7 @@ pub enum Visibility {
 }
 
 #[doc(hidden)]
+/// Parse a `visibility` keyword (`hidden` / `collapse` map to `Hidden`).
 pub fn parse_visibility(s: &str) -> Option<Visibility> {
     match s.trim().to_ascii_lowercase().as_str() {
         "visible" => Some(Visibility::Visible),
@@ -106,6 +108,7 @@ pub struct Positioning {
 }
 
 #[doc(hidden)]
+/// Parse a `position` keyword.
 pub fn parse_position(s: &str) -> Option<Position> {
     match s.trim().to_ascii_lowercase().as_str() {
         "relative" => Some(Position::Relative),
@@ -232,7 +235,7 @@ pub(in crate::html::css_parse) fn parse_border_radius(
 /// The variant determines both the outer role (block-level vs inline-level)
 /// and the inner formatting context (flow / flex / table / grid) the box
 /// will use. See the per-variant docs for the exact mapping; helpers
-/// [`CssDisplay::outer_display`] and [`CssDisplay::inner_formatting_context`]
+/// [`CssAttr::outer_display`](crate::html::css_parse::CssAttr::outer_display) and [`CssAttr::inner_formatting_context`](crate::html::css_parse::CssAttr::inner_formatting_context)
 /// give the per-axis view for callers that need only one piece.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CssDisplay {
@@ -354,7 +357,7 @@ impl CssDisplay {
     /// `true` for block-level keywords (the box participates in its
     /// parent's flow as a block). Used by
     /// [`collect_runs`](crate::layout::layoutbox::collect_runs) and
-    /// [`layout_a`](crate::layout::layoutbox::inner_formatting_context::flow::a::layout_a)
+    /// `layout_a`
     /// to decide whether an element should be handled as a block or
     /// remain in the parent's inline runs.
     pub fn is_block_level(self) -> bool {

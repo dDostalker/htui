@@ -31,6 +31,7 @@ pub struct InlineRun {
 }
 
 impl InlineRun {
+    /// Create an inline run with the given text, style, and colors.
     pub fn new(
         text: impl Into<String>,
         style: FontStyle,

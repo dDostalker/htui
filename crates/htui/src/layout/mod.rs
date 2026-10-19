@@ -8,7 +8,7 @@
 //!
 //! - [`layoutbox`] defines the [`LayoutBox`] data model and its three-axis
 //!   classification ([`BoxKind`], [`OuterDisplay`], [`FormattingContext`]).
-//! - [`layoutbox::inner_formatting_context::flow`], [`flex`], and [`grid`]
+//! - [`layoutbox::inner_formatting_context::flow`], [`flex`](self::layoutbox::inner_formatting_context::flex), and [`grid`](self::layoutbox::inner_formatting_context::grid)
 //!   implement the three formatting contexts that build layout trees from a
 //!   DOM. Each lives under
 //!   [`layoutbox::inner_formatting_context`] and shares the same
@@ -48,6 +48,7 @@ pub struct LayoutContext {
 }
 
 impl LayoutContext {
+    /// Derive a child context with the given font size, keeping the viewport.
     pub fn child(self, child_font_size_cells: usize) -> Self {
         Self {
             font: self.font.child(child_font_size_cells),
@@ -227,7 +228,7 @@ fn collect_box_lines<'a>(arena: &'a NodeArena, lb: &'a LayoutBox, out: &mut Vec<
 
 /// Rectangular hit regions for inline elements that own their runs
 /// (`<label>` / `<a>`), derived from the same geometry the paint phase draws
-/// (see [`collect_box_lines`]). Each owned run's visual slice becomes a
+/// (see `collect_box_lines`). Each owned run's visual slice becomes a
 /// region, so a click on the element's text resolves to that element — the
 /// delegation target for `<label for>` / wrapped controls, and the click
 /// target for inline links.

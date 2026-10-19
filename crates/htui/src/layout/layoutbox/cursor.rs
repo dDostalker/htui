@@ -19,6 +19,7 @@ pub struct Cursor {
 }
 
 impl Cursor {
+    /// Create a cursor at the top of the containing block with no previous margin.
     pub fn new() -> Self {
         Self {
             y: 0,

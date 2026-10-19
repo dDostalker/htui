@@ -27,6 +27,7 @@ pub struct Parser {
 }
 
 impl Parser {
+    /// Create a parser for the given HTML source.
     pub fn new(input: &str) -> Self {
         Self {
             input: input.to_string(),

@@ -30,7 +30,7 @@ use crate::{
 ///
 /// Honors CSS `width` / `padding` / `border` / `margin` like any other block;
 /// the only element-specific behaviour is the user-agent default styling
-/// applied by [`apply_a_ua_defaults`]. Returns `None` for any non-`<a>` node
+/// applied by `apply_a_ua_defaults`. Returns `None` for any non-`<a>` node
 /// so the registry falls through to the next handler.
 pub fn layout_a(
     arena: &NodeArena,

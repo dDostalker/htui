@@ -91,7 +91,7 @@ pub fn layout_title(
 /// `<meta>` is a void element carrying document metadata (`charset`, `name`,
 /// `content`, `http-equiv`, etc.). It has no rendered content and reserves no
 /// rows on the terminal canvas, so it acts as a sink in the layout pass.
-/// CSS rules targeting `<meta>` still parse and apply to its [`CssAttr`], but
+/// CSS rules targeting `<meta>` still parse and apply to its [`CssAttr`](crate::html::css_parse::CssAttr), but
 /// have no visible effect because the element is never painted.
 pub fn layout_meta(
     arena: &NodeArena,

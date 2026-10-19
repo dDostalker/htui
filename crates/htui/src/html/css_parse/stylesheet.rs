@@ -35,7 +35,7 @@ pub struct CssRuleEntry {
 /// The parsed author stylesheet: every qualified rule, with the `!important`
 /// split already applied.
 ///
-/// The second field is the lazily-built [`CascadeIndex`] — computed on the
+/// The second field is the lazily-built `CascadeIndex` — computed on the
 /// first cascade pass and dropped by [`push`](Self::push) /
 /// [`add`](Self::add) so the next pass rebuilds it against the extended rule
 /// set. Rules mutated by any other route leave the index stale; extend the
@@ -48,6 +48,7 @@ pub struct CssRule(
 );
 
 impl CssRule {
+    /// Create an empty rule set.
     pub fn new() -> Self {
         CssRule(Vec::new(), OnceLock::new())
     }
@@ -92,12 +93,14 @@ pub struct Parser {
 }
 
 impl Parser {
+    /// Create a stylesheet parser for `input`.
     pub fn new(input: &str) -> Self {
         Parser {
             context: input.to_string(),
         }
     }
 
+    /// Parse the stylesheet and return the collected rules.
     pub fn parse(&mut self) -> CssRule {
         let mut parser_input = ParserInput::new(&self.context);
         let mut parser = CssParser::new(&mut parser_input);

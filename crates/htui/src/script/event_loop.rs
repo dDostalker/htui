@@ -92,7 +92,7 @@ impl ScriptEngine {
     ///
     /// Called on every script-thread loop iteration after message / timer
     /// processing. Each completed [`AsyncResult`] carries a `{id}:{url}` key
-    /// (see [`crate::resources::load_async`]); the id looks up the promise's
+    /// (see `crate::resources::load_async`); the id looks up the promise's
     /// `resolve` / `reject` functions stashed by `fetch`, which are invoked
     /// with a `Response`-like object (or an error). Promise reaction callbacks
     /// (`.then` / `await`) run through [`Context::run_jobs`], so this is the

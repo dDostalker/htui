@@ -125,6 +125,7 @@ pub struct InputState {
 }
 
 impl InputState {
+    /// Create the default input state (top of page, 100% zoom, no focus or selection).
     pub fn new() -> Self {
         Self {
             scroll_y: 0,

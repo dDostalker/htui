@@ -536,6 +536,7 @@ fn emit_preserving_newlines(runs: &[InlineRun]) -> Vec<Vec<InlineRun>> {
     lines
 }
 
+/// Wrap inline runs into visual lines according to the white-space, word-break, and overflow-wrap policies.
 pub fn wrap_runs(
     runs: &[InlineRun],
     max_width: usize,

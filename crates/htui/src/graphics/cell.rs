@@ -115,6 +115,7 @@ impl Default for Block {
 }
 
 impl Block {
+    /// Create a cell from its text, foreground/background colors, and style bits.
     pub fn new(
         word: String,
         fcolor: Option<Color>,

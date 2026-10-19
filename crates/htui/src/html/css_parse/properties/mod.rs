@@ -71,6 +71,7 @@ impl From<IndexMap<String, String>> for CssAttr {
 }
 
 impl CssAttr {
+    /// Create an empty declaration set.
     pub fn new() -> Self {
         CssAttr(IndexMap::new())
     }
@@ -256,7 +257,7 @@ impl CssAttr {
     /// Element width (CSS `width`).
     ///
     /// - `auto` / missing / unsupported unit → `None` (fill available)
-    /// - `40px` / bare `40` → px, divided by [`PX_PER_CELL`] (e.g. 40px → 5 cells)
+    /// - `40px` / bare `40` → px, divided by [`PX_PER_CELL`](crate::html::css_parse::PX_PER_CELL) (e.g. 40px → 5 cells)
     /// - `50%` → fraction of terminal width (rounded, minimum 1 column)
     /// - `2em` → cells (resolved against the current element's font-size)
     /// - `2rem` → cells (resolved against the root's font-size)
@@ -291,7 +292,7 @@ impl CssAttr {
     /// Callers resolve it via [`Length::resolve`] with the active font-size
     /// context (so `em` values inside `font-size` refer to the inherited
     /// font-size). Returns `None` when the property is unset — use
-    /// [`default_font_size_cells_for`](crate::tdom::node::default_font_size_cells_for)
+    /// [`effective_font_size_cells`](crate::tdom::node::effective_font_size_cells)
     /// to fall back to the per-element default.
     pub fn get_font_size(&self) -> Option<Length> {
         self.0.get("font-size").and_then(|raw| Length::parse(raw))
@@ -344,7 +345,7 @@ impl CssAttr {
     /// Resolve all four margin edges from `margin` / `margin-{side}`.
     ///
     /// `margin: auto` resolves to `0` here; the per-side `auto` flags (see
-    /// [`get_margin_auto`]) are handed to the layout phase, which distributes
+    /// [`Self::get_margin_auto`]) are handed to the layout phase, which distributes
     /// the containing block's free space — both horizontal auto margins
     /// center the block, a single one absorbs the remainder. Per-side
     /// longhands win over the shorthand.

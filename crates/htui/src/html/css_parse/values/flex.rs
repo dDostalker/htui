@@ -45,6 +45,7 @@ impl FlexDirection {
 }
 
 #[doc(hidden)]
+/// Parse a `flex-direction` keyword.
 pub fn parse_flex_direction(s: &str) -> Option<FlexDirection> {
     match s.trim().to_ascii_lowercase().as_str() {
         "row" => Some(FlexDirection::Row),
@@ -68,6 +69,7 @@ pub enum FlexWrap {
 }
 
 #[doc(hidden)]
+/// Parse a `flex-wrap` keyword.
 pub fn parse_flex_wrap(s: &str) -> Option<FlexWrap> {
     match s.trim().to_ascii_lowercase().as_str() {
         "nowrap" => Some(FlexWrap::NoWrap),
@@ -94,6 +96,7 @@ pub enum JustifyContent {
 }
 
 #[doc(hidden)]
+/// Parse a `justify-content` keyword.
 pub fn parse_justify_content(s: &str) -> Option<JustifyContent> {
     match s.trim().to_ascii_lowercase().as_str() {
         // `left` / `right` are valid justify-content keywords; the engine is
@@ -126,6 +129,7 @@ pub enum AlignItems {
 }
 
 #[doc(hidden)]
+/// Parse an `align-items` keyword.
 pub fn parse_align_items(s: &str) -> Option<AlignItems> {
     match s.trim().to_ascii_lowercase().as_str() {
         "stretch" => Some(AlignItems::Stretch),
@@ -158,6 +162,7 @@ pub enum AlignContent {
 }
 
 #[doc(hidden)]
+/// Parse an `align-content` keyword.
 pub fn parse_align_content(s: &str) -> Option<AlignContent> {
     match s.trim().to_ascii_lowercase().as_str() {
         "stretch" => Some(AlignContent::Stretch),
@@ -286,6 +291,7 @@ pub enum FlexBasis {
 }
 
 #[doc(hidden)]
+/// Parse a `flex-basis` value (`auto`, `content`, or a length).
 pub fn parse_flex_basis(s: &str) -> Option<FlexBasis> {
     let trimmed = s.trim();
     if trimmed.eq_ignore_ascii_case("auto") {
@@ -335,6 +341,7 @@ pub struct FlexShorthand {
 }
 
 #[doc(hidden)]
+/// Parse the `flex` shorthand into grow / shrink / basis.
 pub fn parse_flex_shorthand(s: &str) -> Option<FlexShorthand> {
     let trimmed = s.trim();
     if trimmed.eq_ignore_ascii_case("none") {
@@ -465,6 +472,7 @@ pub struct GapSizes {
 }
 
 #[doc(hidden)]
+/// Parse the 1- or 2-value `gap` shorthand into row and column sizes.
 pub fn parse_gap_shorthand(s: &str, font_ctx: FontContext, viewport: Viewport) -> Option<GapSizes> {
     // 1- or 2-value gap grammar. Each value is a length; unparseable
     // tokens become 0 so a single bad component doesn't kill the rule.

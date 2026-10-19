@@ -1,7 +1,7 @@
 //! Inner formatting context of a box — how a box arranges its own children.
 //!
 //! Independent of the outer display role (see
-//! [`super::outer_display`]): a flex container is
+//! [`OuterDisplay`](crate::layout::OuterDisplay)): a flex container is
 //! [`FormattingContext::Flex`] regardless of whether its outer role is block
 //! (`display: flex`) or inline (`display: inline-flex`). Browser engines treat
 //! the two axes as orthogonal; this enum encodes the same separation.
@@ -9,13 +9,13 @@
 //! ## Variants and their implementations
 //!
 //! - [`FormattingContext::Flow`] — Default block / inline flow. Implementation
-//!   lives in [`flow`](self::flow).
+//!   lives in [`flow`].
 //! - [`FormattingContext::Flex`] — CSS flexbox container. Implementation
-//!   lives in [`flex`](self::flex).
+//!   lives in [`flex`].
 //! - [`FormattingContext::Table`] — Internal table formatting context. Geometry
 //!   is assigned by the table algorithm.
 //! - [`FormattingContext::Grid`] — CSS grid container (reserved). Lives in
-//!   [`grid`](self::grid).
+//!   [`grid`].
 
 pub mod flex;
 pub mod flow;

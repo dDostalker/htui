@@ -63,6 +63,7 @@ impl TermMap {
 }
 
 impl TermLayout {
+    /// Create a canvas for the given terminal size and zoom, pre-sized to one viewport.
     pub fn new(map: &TermMap, zoom: f32) -> TermLayout {
         // The canvas starts at a single viewport and grows on demand (see
         // [`ensure_capacity`](Self::ensure_capacity)) to exactly the content

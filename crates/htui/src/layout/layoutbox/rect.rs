@@ -10,6 +10,7 @@ pub struct Rect {
 }
 
 impl Rect {
+    /// Create a rectangle at `(x, y)` with the given width and height.
     pub fn new(x: usize, y: usize, width: usize, height: usize) -> Self {
         Self {
             x,

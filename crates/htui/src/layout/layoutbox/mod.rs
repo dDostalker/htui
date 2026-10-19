@@ -149,7 +149,7 @@ impl LayoutBox {
     /// [`PaintStyle`], `outer_display`, and children. The inner formatting
     /// context defaults to [`FormattingContext::Flow`].
     ///
-    /// Use [`new_normal_with_context`] when the box establishes a non-default
+    /// Use [`Self::new_normal_with_context`] when the box establishes a non-default
     /// inner formatting context (currently only flex).
     pub fn new_normal(
         node_id: NodeId,
@@ -168,7 +168,7 @@ impl LayoutBox {
         )
     }
 
-    /// Same as [`new_normal`], but with an explicit inner formatting context.
+    /// Same as [`Self::new_normal`], but with an explicit inner formatting context.
     /// Use this for flex containers (which establish a
     /// [`FormattingContext::Flex`] for their children) or future grid
     /// containers.

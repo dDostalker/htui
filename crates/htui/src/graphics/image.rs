@@ -114,6 +114,7 @@ pub struct Img {
 }
 
 impl Img {
+    /// Create an undecoded image for `path` targeting the given terminal size (columns, rows).
     pub fn new(path: PathBuf, term_size: (u32, u32)) -> Self {
         Self {
             path,
@@ -124,6 +125,7 @@ impl Img {
         }
     }
 
+    /// Decode and rasterize the source into `picture` on first use.
     pub fn _create_img(&mut self) -> Result<(), ImageError> {
         if self.picture.is_some() {
             return Ok(());
@@ -396,7 +398,7 @@ impl ImageCache {
     }
 
     /// Return the rasterized image for `(path, size)`, decoding it on first
-    /// use. The source is resolved through [`resources::load`] (an
+    /// use. The source is resolved through `resources::load` (an
     /// unregistered `mem://` key is reported as an error). Failed decodes are
     /// not cached, so a temporarily unavailable source can recover on a later
     /// frame instead of pinning the error forever.

@@ -1,8 +1,8 @@
 //! htui visual test runner.
 //!
 //! Usage:
-//!   cargo run -p visual_test -- [test_name]
-//!   cargo run -p visual_test -- --dump [test_name] [--cols N] [--rows N]
+//!   cargo run -p visual_test -- `[test_name]`
+//!   cargo run -p visual_test -- --dump `[test_name]` `[--cols N]` `[--rows N]`
 //!
 //! `--dump` renders headlessly (no raw mode / alternate screen) and prints
 //! the canvas as plain text rows — handy for previews in a pipe or log.
@@ -19,7 +19,7 @@ use htui::Session;
 use log::info;
 
 /// Headless preview: parse the document, run the full layout pipeline into a
-/// [`TermLayout`] canvas, and print each non-empty row as plain text so the
+/// [`TermLayout`](htui::graphics::TermLayout) canvas, and print each non-empty row as plain text so the
 /// structure can be inspected without an interactive terminal.
 ///
 /// When `bg_map` is set, every cell that carries a background colour is shown

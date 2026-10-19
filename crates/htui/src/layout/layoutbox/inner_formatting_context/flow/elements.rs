@@ -3,7 +3,7 @@
 //! Most block-level elements share the exact same block pipeline
 //! ([`layout_block`]) and differ only in the options they hand it. Instead of
 //! one copy-pasted adapter per tag, a single [`layout_standard_block`] looks
-//! the node type up in [`STANDARD_BLOCK_ELEMENTS`]. Elements with dynamic
+//! the node type up in `STANDARD_BLOCK_ELEMENTS`. Elements with dynamic
 //! options (headings, lists, anchors with UA defaults) keep their own
 //! adapters in this module's siblings.
 
@@ -193,7 +193,7 @@ static STANDARD_BLOCK_ELEMENTS: &[BlockElementConfig] = &[
     },
 ];
 
-/// Build a [`LayoutBox`] for any element in [`STANDARD_BLOCK_ELEMENTS`].
+/// Build a [`LayoutBox`] for any element in `STANDARD_BLOCK_ELEMENTS`.
 ///
 /// Returns `None` for every other node type so the layout registry falls
 /// through to the specialised adapters.

@@ -2,7 +2,7 @@
 //!
 //! # Architecture
 //!
-//! A [`ScriptEngine`] owns a Boa [`Context`] plus a mutable DOM
+//! A [`ScriptEngine`] owns a Boa [`Context`](crate::boa_engine::Context) plus a mutable DOM
 //! ([`NodeArena`](crate::tdom::node::NodeArena)) that scripts manipulate
 //! through browser-aligned bindings
 //! (`document.getElementById`, `el.textContent`, `el.addEventListener`, …).
@@ -27,7 +27,7 @@
 //! Entries of [`EventBindings::host`](crate::events::EventBindings::host)
 //! become JS globals callable from scripts;
 //! they can push [`RenderCmd`](crate::tui::graph_api::RenderCmd)s and return
-//! values. See [`host`].
+//! values. See `host`.
 
 mod bindings;
 mod dom;

@@ -6,8 +6,8 @@
 //! registered by the host via [`ResourceRegistry::register`] — no file
 //! system access.
 //!
-//! The registry is **session-scoped**: the top-level [`Session`]
-//! (crate::session::Session) owns one and installs it on the rendering and
+//! The registry is **session-scoped**: the top-level [`Session`](crate::session::Session)
+//! owns one and installs it on the rendering and
 //! script threads for the duration of a render (see [`with_registry`]).
 //! There is no process-global registry — each render reads the session's
 //! resources, so parallel documents never share or collide.
@@ -144,8 +144,8 @@ thread_local! {
 ///
 /// [`Session::render`](crate::session::Session::render) wraps its rendering
 /// and script threads in this scope automatically; manual pipeline users
-/// (driving [`crate::html::html_parse::Parser`] / [`TermLayout`]
-/// (crate::tui::graph_api::TermLayout) directly) must wrap their work
+/// (driving [`crate::html::html_parse::Parser`] / [`TermLayout`](crate::graphics::TermLayout)
+/// directly) must wrap their work
 /// themselves. Scopes nest; leaving restores the previous registry.
 pub fn with_registry<R>(registry: Arc<ResourceRegistry>, f: impl FnOnce() -> R) -> R {
     CURRENT.with(|c| {

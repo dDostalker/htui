@@ -4,10 +4,10 @@
 //! does not allocate rows or columns; geometry is assigned by the geometry
 //! pass. The classifier mirrors the browser CSS display model:
 //!
-//! - [`BoxKind`](crate::layout::BoxKind) — the box's content shape.
-//! - [`OuterDisplay`](crate::layout::OuterDisplay) — how the box participates
+//! - `BoxKind` — the box's content shape.
+//! - [`OuterDisplay`] — how the box participates
 //!   in its parent's formatting context.
-//! - [`FormattingContext`](crate::layout::FormattingContext) — how the box
+//! - [`FormattingContext`] — how the box
 //!   arranges its own children.
 //!
 //! After generation, the geometry pass dispatches exclusively on those three
@@ -74,7 +74,7 @@ pub enum GeneratedPayload {
     /// frame; the geometry pass sizes it from the text width.
     Button,
     /// Marker produced by [`generate_node`] for a `display: contents`
-    /// element. The [`generate_children`] walker detects it and
+    /// element. The `generate_children` walker detects it and
     /// substitutes the contents element's own children in its place; the
     /// marker itself never reaches the geometry phase.
     Transparent,

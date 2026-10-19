@@ -5,8 +5,8 @@
 //! - `#[derive(FromJs)]` — read a struct back from a JS object.
 //! - `#[htui::command]` — the only way to expose a Rust function to JS:
 //!   - a plain function (args `FromJs`, return `IntoJs`) is wrapped into a
-//!     [`HostFn`] (`name_command()`), or
-//!   - a zero-argument function returning a [`HostFn`] is registered as-is,
+//!     `HostFn` (`name_command()`), or
+//!   - a zero-argument function returning a `HostFn` is registered as-is,
 //!     letting the returned closure capture arbitrary Rust state.
 //!     Accepts an optional `name = "..."` to control the JS-side name used by
 //!     `#[htui::commands]`.

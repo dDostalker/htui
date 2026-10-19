@@ -17,6 +17,7 @@ pub struct HoverState {
 }
 
 impl HoverState {
+    /// Create a hover state with no target.
     pub fn new() -> Self {
         Self::default()
     }

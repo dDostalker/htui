@@ -6,15 +6,15 @@ pub enum NodeType {
     /// HTML parser; never rendered directly.
     Document,
     /// `<!DOCTYPE html>` declaration (`nodeType` 10). The doctype name lives
-    /// in [`Node::data`]; never rendered.
+    /// in [`Node::data`](crate::tdom::node::Node::data); never rendered.
     DocumentType,
     /// Document fragment (`nodeType` 11). Created via
     /// `document.createDocumentFragment()`; renders nothing until its
     /// children are appended elsewhere.
     DocumentFragment,
-    /// Text node (`nodeType` 3). Content lives in [`Node::data`].
+    /// Text node (`nodeType` 3). Content lives in [`Node::data`](crate::tdom::node::Node::data).
     Text,
-    /// Comment node (`nodeType` 8). Content lives in [`Node::data`]; never
+    /// Comment node (`nodeType` 8). Content lives in [`Node::data`](crate::tdom::node::Node::data); never
     /// rendered.
     Comment,
     Span,
@@ -99,7 +99,7 @@ pub enum NodeType {
     Title,
     Meta,
     /// `<base>` — document base URL. The element is never rendered; its
-    /// `href` (see [`document_base_href`]) establishes the base URL against
+    /// `href` (see [`document_base_href`](crate::tdom::node::document_base_href)) establishes the base URL against
     /// which relative resource references (`<script src>`, `<link href>`,
     /// `<img src>`, JS `fetch`) resolve.
     Base,
@@ -317,6 +317,7 @@ impl NodeType {
         NodeType::Link,
     ];
 
+    /// True for void elements that never have children.
     pub fn is_self_closing(&self) -> bool {
         matches!(
             self,
@@ -389,7 +390,7 @@ impl NodeType {
     ///
     /// Returns the CSS `(property, value)` pairs the UA stylesheet applies when
     /// neither an author rule nor an inherited value has set the property. The
-    /// caller injects each pair only when [`CssAttr::is_set`] reports it unset.
+    /// caller injects each pair only when [`CssAttr::is_set`](crate::html::css_parse::CssAttr::is_set) reports it unset.
     ///
     /// `<abbr>`'s underline additionally depends on a `title` attribute and is
     /// handled by the caller; `<q>`'s generated quotes are not CSS declarations
@@ -417,7 +418,7 @@ impl NodeType {
     ///
     /// Values are rounded toward the nearest integer cell when applied
     /// (`1.5em` → 2 cells, `0.83em` → 1 cell); see
-    /// [`default_font_size_cells_for`].
+    /// [`effective_font_size_cells`](crate::tdom::node::effective_font_size_cells).
     pub fn default_font_size_em(&self) -> Option<f32> {
         match self {
             NodeType::H1 => Some(2.0),
@@ -548,7 +549,7 @@ impl NodeType {
     ///
     /// Derived from [`NodeType::ALL`] + [`NodeType::tag_name`] so there is
     /// exactly one tag table to keep in sync. The CSS selector parser
-    /// ([`crate::html::css_parse::selector`]) and the HTML parser
+    /// (`crate::html::css_parse::selector`) and the HTML parser
     /// ([`crate::html::html_parse::tag_name_to_node_type`]) both delegate
     /// here.
     pub fn from_tag_name(tag: &str) -> Option<NodeType> {
