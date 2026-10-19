@@ -5,7 +5,7 @@
 [![crates.io](https://img.shields.io/crates/v/htui.svg)](https://crates.io/crates/htui)
 [![docs.rs](https://img.shields.io/docsrs/htui)](https://docs.rs/htui)
 [![license](https://img.shields.io/crates/l/htui.svg)](https://github.com/dDostalker/htui)
-[![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.89%2B-orange.svg)](https://www.rust-lang.org)
 
 [中文说明](README.zh-CN.md)
 
@@ -73,7 +73,7 @@ Interactivity is one attribute away — `<button onclick="greet()">` with a
 
 ## Platform
 
-Rust **1.88+** (edition 2024). Windows console and POSIX terminals via
+Rust **1.89+** (edition 2024). Windows console and POSIX terminals via
 [crossterm](https://github.com/crossterm-rs/crossterm); truecolor recommended.
 
 ## License

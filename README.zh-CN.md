@@ -5,7 +5,7 @@
 [![crates.io](https://img.shields.io/crates/v/htui.svg)](https://crates.io/crates/htui)
 [![docs.rs](https://img.shields.io/docsrs/htui)](https://docs.rs/htui)
 [![license](https://img.shields.io/crates/l/htui.svg)](https://github.com/dDostalker/htui)
-[![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.89%2B-orange.svg)](https://www.rust-lang.org)
 
 [English](README.md)
 
@@ -75,7 +75,7 @@ fn main() {
 
 ## 平台
 
-Rust **1.88+**（edition 2024）。经
+Rust **1.89+**（edition 2024）。经
 [crossterm](https://github.com/crossterm-rs/crossterm) 支持 Windows 控制台与
 POSIX 终端；建议开启真彩色。
 

@@ -7,3 +7,6 @@ publish = false
 [dependencies]
 htui = { path = "../crates/htui" }
 log = "0.4.29"
+
+[lints]
+workspace = true

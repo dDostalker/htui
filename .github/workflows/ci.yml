@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Tests are pure in-memory (no terminal required), so they run on every
+      # platform the crate targets.
+      - name: Run tests
+        run: cargo test --workspace --locked
+      - name: Check benches compile
+        run: cargo check --workspace --benches --locked
+
+  msrv:
+    name: MSRV (1.89.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.89.0
+      - uses: Swatinem/rust-cache@v2
+      # Keep the declared `rust-version` honest (boa_engine requires 1.88,
+      # resvg's font stack requires 1.89).
+      - name: Check
+        run: cargo check --workspace --locked
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # Intentional structural lints (too_many_arguments, module_inception,
+      # doc_lazy_continuation) are allowed in the workspace lint config
+      # (root Cargo.toml), so any new warning fails the build.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  ast-grep:
+    name: ast-grep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install ast-grep
+        run: npm install -g @ast-grep/cli
+      # Project-specific rules (sg/rules/): no unsafe / unwrap / println /
+      # wildcard imports in src. See AGENTS.md.
+      - name: Scan
+        run: ast-grep scan

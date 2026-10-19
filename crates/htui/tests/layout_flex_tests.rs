@@ -1,4 +1,4 @@
-//! Flexbox layout tests — the v1 subset of CSS flexbox that
+//! Flexbox layout tests &#8212; the v1 subset of CSS flexbox that
 //! `flex::flex` implements.
 //!
 //! Each test stands up a small HTML snippet with a flex container and
@@ -125,7 +125,7 @@ fn test_flex_align_content_stretch_fills_the_container() {
     init();
     // `align-content: stretch` (the CSS initial value) grows the wrapped
     // lines to fill the container's free cross space: 3 one-row lines in a
-    // 7-row container leave 4 free rows → an even gap of 1 between lines.
+    // 7-row container leave 4 free rows &#8594; an even gap of 1 between lines.
     let html = r#"
         <div class="container">
             <div class="a">AAAA</div>
@@ -145,7 +145,7 @@ fn test_flex_align_content_stretch_fills_the_container() {
 #[test]
 fn test_flex_shorthand_grow_and_full_form() {
     init();
-    // `flex: 1` → `flex-grow: 1`, basis 0: two items split the container
+    // `flex: 1` &#8594; `flex-grow: 1`, basis 0: two items split the container
     // evenly.
     let html = r#"
         <div class="container"><div class="a">A</div><div class="b">B</div></div>
@@ -154,17 +154,17 @@ fn test_flex_shorthand_grow_and_full_form() {
     let (rows, _) = render_rows(html, css);
     // `flex: 1` gives each item 5 of the 10 cells; the plain items render
     // their single glyph at their slot start.
-    assert_eq!(rows[0].chars().nth(0), Some('A'));
+    assert_eq!(rows[0].chars().next(), Some('A'));
     assert_eq!(rows[0].chars().nth(5), Some('B'));
 
     // `flex: <grow> <shrink> <basis>`: bases 20 / 10 sum to the container,
-    // so no growth — A occupies [0, 20), B occupies [20, 30).
+    // so no growth &#8212; A occupies [0, 20), B occupies [20, 30).
     let html = r#"
         <div class="container"><div class="a">A</div><div class="b">B</div></div>
     "#;
     let css = ".container { display: flex; width: 30ch; } .a { flex: 2 1 20ch; } .b { flex: 1 1 10ch; }";
     let (rows, _) = render_rows(html, css);
-    assert_eq!(rows[0].chars().nth(0), Some('A'));
+    assert_eq!(rows[0].chars().next(), Some('A'));
     assert_eq!(rows[0].chars().nth(20), Some('B'));
 }
 
@@ -172,7 +172,7 @@ fn test_flex_shorthand_grow_and_full_form() {
 fn test_flex_flow_shorthand_sets_direction_and_wrap() {
     init();
     // `flex-flow: column wrap` = `flex-direction: column` + `flex-wrap:
-    // wrap`: a 2×2 column grid (A,B on line 1 / column 0; C,D on column 1).
+    // wrap`: a 2&#215;2 column grid (A,B on line 1 / column 0; C,D on column 1).
     let html = r#"
         <div class="container">
             <div class="a">A</div><div class="b">B</div>
@@ -402,23 +402,14 @@ fn flex_row_with_input_renders_the_field() {
 fn flex_row_with_bordered_input_reserves_border_cells() {
     init();
     // A CSS `border:` on a control inside a flex row adds its thickness to
-    // the item's intrinsic width — without it the measured slot (6 + 2)
+    // the item's intrinsic width &#8212; without it the measured slot (6 + 2)
     // would be border-less and the frame would be clipped or misaligned.
     let html = r#"<div class="container"><input id="f" width="6" value="ab"></div>"#;
     let css = ".container { display: flex; } #f { border: 1ch solid yellow; }";
     let (rows, _) = render_rows(html, css);
     let joined = rows.join("\n");
     assert!(
-        joined.contains('┌'),
-        "flex input must reserve border cells and paint its frame; rows:\n{}",
-        rows.iter()
-            .filter(|r| !r.trim().is_empty())
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
-    assert!(
-        joined.contains('└'),
+        joined.contains('�'),
         "bottom frame edge must paint too"
     );
     assert!(
@@ -461,8 +452,7 @@ fn test_place_content_two_values_set_both_axes() {
     init();
     // `place-content: center space-between` maps `align-content: center` and
     // `justify-content: space-between` independently: two items split a
-    // 10-cell single line to the two ends (justify). The line sits on row 0 —
-    // `align-content` is ignored for single-line flex containers, matching
+    // 10-cell single line to the two ends (justify). The line sits on row 0 —    // `align-content` is ignored for single-line flex containers, matching
     // browsers.
     let html = r#"
         <div class="container"><div class="a">A</div><div class="b">B</div></div>
@@ -516,7 +506,7 @@ fn test_justify_space_evenly_single_item_is_centered() {
 #[test]
 fn test_place_items_centers_on_the_cross_axis() {
     init();
-    // `place-items: center` → `align-items: center`: the 1-row item floats to
+    // `place-items: center` &#8594; `align-items: center`: the 1-row item floats to
     // the middle of the 5-row container.
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
     let css = ".container { display: flex; height: 5ch; place-items: center; }";
@@ -528,7 +518,7 @@ fn test_place_items_centers_on_the_cross_axis() {
 #[test]
 fn test_place_items_two_values_syntax_checked() {
     init();
-    // `place-items: center center` — the second value (`justify-items`) is
+    // `place-items: center center` &#8212; the second value (`justify-items`) is
     // not rendered by this engine but must still be syntactically valid.
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
     let css = ".container { display: flex; height: 5ch; place-items: center center; }";
@@ -633,7 +623,7 @@ fn test_justify_content_left_right_keywords() {
     let html = r#"<div class="container"><div class="a">A</div></div>"#;
     let css = ".container { display: flex; width: 10ch; justify-content: left; }";
     let (rows, _) = render_rows(html, css);
-    assert_eq!(rows[0].chars().nth(0), Some('A'), "left packs to the start: {:?}", rows[0]);
+    assert_eq!(rows[0].chars().next(), Some('A'), "left packs to the start: {:?}", rows[0]);
 }
 
 #[test]
@@ -994,7 +984,7 @@ fn test_flex_order_reorders_children() {
 #[test]
 fn test_flex_works_on_non_div_elements() {
     init();
-    // `display: flex` on a `<section>` — the dispatcher should claim
+    // `display: flex` on a `<section>` &#8212; the dispatcher should claim
     // it and lay it out as a flex container. The two child paragraphs
     // should land on the same row in row direction.
     let html = r#"
@@ -1147,8 +1137,7 @@ fn test_flex_container_carries_flex_formatting_context() {
         1,
         "flex container has the one flex item as its child"
     );
-    // A plain `<div>` flex item keeps its own inner formatting context —
-    // it does not inherit `Flex` from the container.
+    // A plain `<div>` flex item keeps its own inner formatting context —    // it does not inherit `Flex` from the container.
     assert_eq!(
         container.children[0].inner_formatting_context,
         FormattingContext::Flow,
@@ -1305,7 +1294,7 @@ fn test_flex_shrink_redistributes_overflow_proportionally() {
 fn test_flex_align_content_center_centers_lines() {
     init();
     // 3 items each 12 cells wide in a 12-cell container with
-    // `flex-wrap: wrap` — each item wraps onto its own line (3 lines
+    // `flex-wrap: wrap` &#8212; each item wraps onto its own line (3 lines
     // of 1 row, total 3). The container has explicit height = 7 so
     // 4 rows of cross-axis free space remain. `align-content: center`
     // shifts the block of lines down by half the free space (2 rows).
@@ -1346,7 +1335,7 @@ fn test_flex_align_content_center_centers_lines() {
 fn test_flex_nested_containers_both_have_flex_formatting_context() {
     init();
     // Outer is a flex row; inner is a flex column. Both must be tagged
-    // `FormattingContext::Flex` independently — the dispatch is
+    // `FormattingContext::Flex` independently &#8212; the dispatch is
     // idempotent across nesting levels.
     let html = r#"
         <div class="outer">
@@ -1690,7 +1679,7 @@ fn test_visual_flex_nested_document_keeps_all_nested_items_visible() {
     </style>
 </head>
 <body>
-    <h2>Flex — Nested containers</h2>
+    <h2>Flex &#8212; Nested containers</h2>
     <h3>1. row inside row (sidebar + main)</h3>
     <div class="row">
         <div class="col" style="background-color: cyan; color: black;">
@@ -1768,7 +1757,7 @@ fn test_flex_overflow_is_clipped_not_wrapped_on_small_terminals() {
     // width (here `flex-shrink: 0` keeps the 60-cell basis) must be
     // clipped at the right edge of the canvas. The canvas is a flat 1-D
     // buffer, so writing a cell at column >= `columns` would wrap into
-    // the next row's cells and corrupt the rows of following boxes — the
+    // the next row's cells and corrupt the rows of following boxes &#8212; the
     // misalignment observed on very small terminals.
     let html = r#"
         <section class="container">
@@ -1862,7 +1851,7 @@ fn test_flex_column_keeps_items_at_min_content_when_viewport_is_small() {
     // bottom = 5), so its bottom border lands below BAR rather than
     // overlapping the first child.
     assert!(
-        rows[bar_row + 1].contains("└"),
+        rows[bar_row + 1].contains("�"),
         "bottom border must sit below the last child: {:?}",
         rows[bar_row + 1]
     );
@@ -1973,7 +1962,7 @@ fn test_flex_item_min_width_prevents_shrink_below_floor() {
     init();
     // Two 10-cell items in a 24-cell container: without constraints the
     // line exactly fills the container (10 + 10). `.a { min-width: 14ch }`
-    // floors A's size at 14, pushing B to column 14 — the line still fits
+    // floors A's size at 14, pushing B to column 14 &#8212; the line still fits
     // inside the container (14 + 10 = 24), so nothing is clipped.
     let html = r#"
         <div class="container">
@@ -2028,7 +2017,7 @@ fn test_flex_item_content_taller_than_container_height_is_not_clipped() {
         .expect("FOOT should render");
     let bottom_border = rows
         .iter()
-        .position(|r| r.contains("└") && r.contains("┘"))
+        .position(|r| r.contains("�") && r.contains("�"))
         .expect("item bottom border should render");
     // HEAD above FOOT, FOOT above the bottom border: nothing clipped.
     assert!(head < foot, "HEAD row {} above FOOT row {}", head, foot);
@@ -2040,7 +2029,7 @@ fn test_flex_item_content_taller_than_container_height_is_not_clipped() {
     );
     assert_eq!(
         rows[bottom_border].trim().chars().last(),
-        Some('┘'),
+        Some('�'),
         "bottom border row ends with the corner glyph"
     );
 }
@@ -2055,7 +2044,7 @@ fn test_flex_row_line_grows_when_item_content_wraps() {
     // `align-items: stretch` must stretch every item to the final line
     // height. Before the fix the container stayed at the natural height, so
     // the paint clip drew the card's bottom border over its own last
-    // content row (broken `└──  ──┘` frame).
+    // content row (broken `���  ���` frame).
     let html = r#"
         <div class="row">
             <div class="card"><div>MEMORY</div><div>61%</div></div>
@@ -2082,18 +2071,18 @@ fn test_flex_row_line_grows_when_item_content_wraps() {
 
     // Both cards share one bottom border row (stretched to the same line
     // height), and each card's bottom border must be a continuous run of
-    // `─` between its `└` and `┘` corners — a space in the run means a
-    // content row painted over the border (the original "出框" symptom).
+    // `�` between its `�` and `�` corners &#8212; a space in the run means a
+    // content row painted over the border (the original "&#20986;&#26694;" symptom).
     let border_row = rows
         .iter()
-        .find(|r| r.contains('└'))
+        .find(|r| r.contains('�'))
         .expect("bottom border row");
-    let first_p = border_row.find('└').expect("left card corner");
-    let first_q = border_row[first_p..].find('┘').expect("left card end") + first_p;
-    let second_p = border_row[first_q..].find('└').expect("right card corner") + first_q;
-    let second_q = border_row[second_p..].find('┘').expect("right card end") + second_p;
+    let first_p = border_row.find('�').expect("left card corner");
+    let first_q = border_row[first_p..].find('�').expect("left card end") + first_p;
+    let second_p = border_row[first_q..].find('�').expect("right card corner") + first_q;
+    let second_q = border_row[second_p..].find('�').expect("right card end") + second_p;
     // Corner glyphs are 3-byte UTF-8; the end index must cover the whole
-    // `┘` character.
+    // `�` character.
     let left_border = &border_row[first_p..first_q + 3];
     let right_border = &border_row[second_p..second_q + 3];
     assert!(
@@ -2204,7 +2193,7 @@ fn test_flex_item_auto_margins_center_the_item() {
     let (rows, _) = render_rows(html, css);
     let col = rows[0].find('A').expect("item text present");
     // 5-cell item in 80 columns: free = 75, each auto margin gets 37 with
-    // the 1-cell remainder going to the leading margin → item starts at 38.
+    // the 1-cell remainder going to the leading margin &#8594; item starts at 38.
     assert_eq!(
         col, 38,
         "5-cell item centered in 80 columns (integer auto-margin split): {:?}",

@@ -212,27 +212,27 @@ pub(super) fn layout_flex_items(
         } else {
             justify_spacing(justify, free_for_justify, line_preps.len())
         };
-        let auto_shares: Vec<(usize, usize)> = if auto_count == 0 {
-            Vec::new()
-        } else {
-            let base = free_for_justify / auto_count;
-            let mut rem = free_for_justify % auto_count;
-            line_preps
-                .iter()
-                .map(|p| {
-                    let mut before = if p.margin_auto_main.0 { base } else { 0 };
-                    let mut after = if p.margin_auto_main.1 { base } else { 0 };
-                    if rem > 0 && p.margin_auto_main.0 {
-                        before += 1;
-                        rem -= 1;
-                    }
-                    if rem > 0 && p.margin_auto_main.1 {
-                        after += 1;
-                        rem -= 1;
-                    }
-                    (before, after)
-                })
-                .collect()
+        let auto_shares: Vec<(usize, usize)> = match free_for_justify.checked_div(auto_count) {
+            None => Vec::new(),
+            Some(base) => {
+                let mut rem = free_for_justify % auto_count;
+                line_preps
+                    .iter()
+                    .map(|p| {
+                        let mut before = if p.margin_auto_main.0 { base } else { 0 };
+                        let mut after = if p.margin_auto_main.1 { base } else { 0 };
+                        if rem > 0 && p.margin_auto_main.0 {
+                            before += 1;
+                            rem -= 1;
+                        }
+                        if rem > 0 && p.margin_auto_main.1 {
+                            after += 1;
+                            rem -= 1;
+                        }
+                        (before, after)
+                    })
+                    .collect()
+            }
         };
 
         // 3e. Per-line placement, factored so the line's cross size can be

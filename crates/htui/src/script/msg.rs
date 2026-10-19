@@ -122,9 +122,7 @@ fn summary_details(arena: &NodeArena, node_id: NodeId) -> Option<NodeId> {
     while let Some(id) = current {
         // `node_id` can be stale (a hit region referencing a node an
         // `innerHTML` sweep already freed) — treat it as "no target".
-        let Some(node) = arena.get(id) else {
-            return None;
-        };
+        let node = arena.get(id)?;
         if node.node_type == NodeType::Summary {
             return node
                 .parent

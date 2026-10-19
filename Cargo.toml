@@ -1,3 +1,15 @@
 [workspace]
 members = ["crates/htui", "crates/htui-macros", "visual_test" ]
 resolver = "3"
+
+[workspace.lints.clippy]
+# Pipeline stages pass their whole working set in one call; splitting the wide
+# signatures into argument structs would add an abstraction layer the
+# architecture deliberately avoids (see AGENTS.md).
+too_many_arguments = "allow"
+# `layout::layoutbox::geometry`-style nesting is intentional: the submodule
+# carries the public concept name of its parent.
+module_inception = "allow"
+# Pre-existing doc-comment list formatting. Existing API comments are not
+# rewritten casually (see AGENTS.md), so the lint stays allowed.
+doc_lazy_continuation = "allow"

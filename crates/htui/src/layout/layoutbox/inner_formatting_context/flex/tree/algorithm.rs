@@ -241,7 +241,7 @@ fn fixup_min_max(
         let candidates: Vec<usize> = (0..n)
             .filter(|&i| {
                 if growing {
-                    line[i].grow > 0.0 && maxs[i].map_or(true, |m| sizes[i] < m)
+                    line[i].grow > 0.0 && maxs[i].is_none_or(|m| sizes[i] < m)
                 } else {
                     line[i].shrink > 0.0 && sizes[i] > mins[i]
                 }
