@@ -71,7 +71,7 @@ fn main() {
 | [架构](docs/zh-cn/架构.md) | 渲染管线与线程模型 |
 | [边界文档](docs/zh-cn/边界文档.md) | 目标、承诺与拒绝清单 |
 | [能力差异清单](docs/zh-cn/能力差异清单.md) | 与浏览器的全矩阵对比 |
-| [脚本层完整文档](docs/zh-cn/script-layer.md) | 脚本层深度参考 |
+| [脚本层完整文档](docs/zh-cn/教程/script-layer.md) | 脚本层深度参考 |
 
 ## 平台
 
