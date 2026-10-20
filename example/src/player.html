@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<!--
+  htui music player demo — interface + interaction only (no audio).
+  Works in the terminal via htui and in a regular browser (standard DOM).
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>htui music player</title>
+<style>
+  body { background-color: #12121f; color: #d8d8e8; }
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #1d1d36;
+    padding: 0 1ch;
+    border-bottom: solid #34345e;
+  }
+  .brand { color: #6fd3ff; }
+  #state-label { color: #8888aa; }
+
+  .main { display: flex; gap: 2ch; padding: 1ch; }
+
+  .art {
+    width: 22ch;
+    height: 9ch;
+    border: 1ch solid #3a3a6a;
+    background-color: #181830;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+  .note { color: #ffd75f; }
+  .art-label { color: #55557a; }
+
+  .info { flex: 1; display: flex; flex-direction: column; gap: 1ch; }
+  .title { color: #ffffff; }
+  .artist { color: #9a9ac0; }
+
+  .progress { width: 100%; height: 1; background-color: #26264a; }
+  .bar { height: 1; background-color: #4488cc; }
+
+  .time { display: flex; justify-content: space-between; color: #8888aa; }
+
+  .controls { display: flex; gap: 1ch; }
+  .btn {
+    display: inline-block;
+    padding: 0 2ch;
+    border: 1ch solid #44446a;
+    background-color: #20203a;
+    color: #c8c8ee;
+  }
+  .btn:hover { background-color: #2e2e56; color: #ffffff; }
+  .btn-main { color: #6fd3ff; border-color: #4488cc; }
+  .btn.on { color: #ffd75f; border-color: #ffd75f; }
+
+  .vol { display: flex; align-items: center; gap: 1ch; color: #6fd3ff; }
+  #vol-bar { color: #4488cc; }
+
+  .plist-head {
+    padding: 0 1ch;
+    color: #8888aa;
+    border-top: solid #34345e;
+  }
+  .plist { padding: 0 1ch; }
+  .row { display: flex; gap: 2ch; padding: 0 1ch; }
+  .row:hover { background-color: #23233f; }
+  .row.active { background-color: #23355c; }
+  .idx { width: 3ch; flex-shrink: 0; color: #66668a; }
+  .row.active .idx { color: #ffd75f; }
+  .ptitle { flex: 1 1 auto; }
+  .row.active .ptitle { color: #6fd3ff; }
+  .partist { width: 22ch; flex-shrink: 0; color: #8888aa; }
+  .pdur { width: 5ch; flex-shrink: 0; text-align: right; color: #66668a; }
+
+  .footer { padding: 0 1ch; color: #55557a; border-top: solid #34345e; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <span class="brand">♪ htui player</span>
+    <span id="state-label">paused</span>
+  </div>
+
+  <div class="main">
+    <div class="art">
+      <div class="note">♪</div>
+      <div class="art-label">ALBUM ART</div>
+    </div>
+
+    <div class="info">
+      <div id="title" class="title">-</div>
+      <div id="artist" class="artist">-</div>
+
+      <div class="progress"><div id="bar" class="bar"></div></div>
+      <div class="time">
+        <span id="t-cur">0:00</span>
+        <span id="t-dur">0:00</span>
+      </div>
+
+      <div class="controls">
+        <span id="btn-prev" class="btn" onclick="prev()">«</span>
+        <span id="btn-play" class="btn btn-main" onclick="togglePlay()">▶</span>
+        <span id="btn-next" class="btn" onclick="next()">»</span>
+        <span id="btn-repeat" class="btn" onclick="toggleRepeat()">repeat</span>
+        <span id="btn-shuffle" class="btn" onclick="toggleShuffle()">shuffle</span>
+      </div>
+
+      <div class="vol">
+        <span id="btn-voldown" class="btn" onclick="volDown()">vol -</span>
+        <span id="vol-bar">██████████</span>
+        <span id="btn-volup" class="btn" onclick="volUp()">vol +</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="plist-head">PLAYLIST</div>
+  <div id="plist" class="plist">
+    <div class="row" id="row-0" onclick="pick(0)">
+      <span class="idx" id="idx-0">1</span>
+      <span class="ptitle" id="ptitle-0"></span>
+      <span class="partist" id="partist-0"></span>
+      <span class="pdur" id="pdur-0"></span>
+    </div>
+    <div class="row" id="row-1" onclick="pick(1)">
+      <span class="idx" id="idx-1">2</span>
+      <span class="ptitle" id="ptitle-1"></span>
+      <span class="partist" id="partist-1"></span>
+      <span class="pdur" id="pdur-1"></span>
+    </div>
+    <div class="row" id="row-2" onclick="pick(2)">
+      <span class="idx" id="idx-2">3</span>
+      <span class="ptitle" id="ptitle-2"></span>
+      <span class="partist" id="partist-2"></span>
+      <span class="pdur" id="pdur-2"></span>
+    </div>
+    <div class="row" id="row-3" onclick="pick(3)">
+      <span class="idx" id="idx-3">4</span>
+      <span class="ptitle" id="ptitle-3"></span>
+      <span class="partist" id="partist-3"></span>
+      <span class="pdur" id="pdur-3"></span>
+    </div>
+    <div class="row" id="row-4" onclick="pick(4)">
+      <span class="idx" id="idx-4">5</span>
+      <span class="ptitle" id="ptitle-4"></span>
+      <span class="partist" id="partist-4"></span>
+      <span class="pdur" id="pdur-4"></span>
+    </div>
+    <div class="row" id="row-5" onclick="pick(5)">
+      <span class="idx" id="idx-5">6</span>
+      <span class="ptitle" id="ptitle-5"></span>
+      <span class="partist" id="partist-5"></span>
+      <span class="pdur" id="pdur-5"></span>
+    </div>
+  </div>
+
+  <div class="footer">click a track or the controls · Esc quits the player</div>
+
+  <script>
+    var tracks = [
+      { title: "Terminal Dreams",   artist: "The Compilers",       dur: 214 },
+      { title: "Rust Async Nights", artist: "Tokio Trio",          dur: 187 },
+      { title: "Memory Safe",       artist: "The Borrow Checkers", dur: 243 },
+      { title: "Zero Cost",         artist: "Monomorphized",       dur: 176 },
+      { title: "Segfault Blues",    artist: "Undefined Behavior",  dur: 201 },
+      { title: "Cargo Wake",        artist: "Crates and Modules",  dur: 168 }
+    ];
+
+    var current = 0;
+    var elapsed = 0;
+    var playing = false;
+    var repeat = false;
+    var shuffle = false;
+    var volume = 8;
+
+    function $(id) { return document.getElementById(id); }
+
+    function fmt(s) {
+      var m = Math.floor(s / 60);
+      var r = Math.floor(s % 60);
+      return m + ":" + (r < 10 ? "0" : "") + r;
+    }
+
+    function padBar() {
+      var out = "";
+      for (var i = 0; i < 10; i++) {
+        out += i < volume ? "█" : "░";
+      }
+      return out;
+    }
+
+    function setOn(id, on) {
+      if (on) { $(id).classList.add("on"); }
+      else { $(id).classList.remove("on"); }
+    }
+
+    function updatePlaylist() {
+      for (var i = 0; i < tracks.length; i++) {
+        var row = $("row-" + i);
+        if (i === current) { row.classList.add("active"); }
+        else { row.classList.remove("active"); }
+        $("idx-" + i).textContent = (i === current && playing) ? "▶" : String(i + 1);
+        $("ptitle-" + i).textContent = tracks[i].title;
+        $("partist-" + i).textContent = tracks[i].artist;
+        $("pdur-" + i).textContent = fmt(tracks[i].dur);
+      }
+    }
+
+    function update() {
+      $("title").textContent = tracks[current].title;
+      $("artist").textContent = tracks[current].artist;
+      $("t-cur").textContent = fmt(elapsed);
+      $("t-dur").textContent = fmt(tracks[current].dur);
+      $("bar").style.width = Math.floor(elapsed * 100 / tracks[current].dur) + "%";
+      $("btn-play").textContent = playing ? "❚❚" : "▶";
+      $("state-label").textContent = playing ? "playing…" : "paused";
+      setOn("btn-repeat", repeat);
+      setOn("btn-shuffle", shuffle);
+      $("vol-bar").textContent = padBar();
+    }
+
+    function refresh() {
+      update();
+      updatePlaylist();
+    }
+
+    function pick(i) {
+      current = i;
+      elapsed = 0;
+      playing = true;
+      refresh();
+    }
+
+    function togglePlay() {
+      playing = !playing;
+      refresh();
+    }
+
+    function next() {
+      if (shuffle && tracks.length > 1) {
+        var n = current;
+        while (n === current) {
+          n = Math.floor(Math.random() * tracks.length);
+        }
+        current = n;
+      } else {
+        current = (current + 1) % tracks.length;
+      }
+      elapsed = 0;
+      playing = true;
+      refresh();
+    }
+
+    function prev() {
+      current = (current + tracks.length - 1) % tracks.length;
+      elapsed = 0;
+      refresh();
+    }
+
+    function toggleRepeat() { repeat = !repeat; update(); }
+    function toggleShuffle() { shuffle = !shuffle; update(); }
+    function volDown() { if (volume > 0) { volume--; update(); } }
+    function volUp() { if (volume < 10) { volume++; update(); } }
+
+    setInterval(function () {
+      if (!playing) return;
+      elapsed++;
+      if (elapsed >= tracks[current].dur) {
+        if (repeat) {
+          elapsed = 0;
+        } else {
+          next();
+          return;
+        }
+      }
+      update();
+    }, 1000);
+
+    update();
+    updatePlaylist();
+  </script>
+</body>
+</html>

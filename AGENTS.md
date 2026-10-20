@@ -243,6 +243,11 @@ htui/
 │           ├── 6.1-示例-实现贪吃蛇.md        # 示例：贪吃蛇（占位，待编写）
 │           ├── 6.2调试.md                   # 调试（占位，待编写）
 │           └── script-layer.md              # 脚本层完整使用与架构文档（脚本 / on* / 宿主函数 / RenderArena）
+├── example/                # 音乐播放器示例（cd example && cargo run；纯界面 + 交互演示，无音频）
+│   ├── Cargo.toml          # 空 [workspace] 表脱离根 workspace，可独立运行
+│   └── src/
+│       ├── main.rs         # 入口：加载 player.html 并 Session::render
+│       └── player.html     # 完整界面 + 交互（标准 HTML/CSS/JS，浏览器可直接打开）
 sg/                       # ast-grep 配套目录（sgconfig.yml 在仓库根）
 └── rules/                # ast-grep 规则定义（每个 .yml 一条规则）
 ```

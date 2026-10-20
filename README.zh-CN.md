@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/dDostalker/htui/main/logo.svg" alt="htui logo" width="140">
+  <img src="logo.svg" alt="htui logo" width="140">
 </p>
 
 # htui
@@ -15,6 +15,8 @@
 
 `htui` 是一个终端里渲染 HTML 文档来实现TUI界面的 rust 库，并支持部分css和script脚本。
 该库尽可能的对齐了纯 HTML 的开发体验、功能性和使用易用性。在确保最简单上手的情况下实现最多的功能。
+
+> 当前项目处于早期快速开发阶段，不保证接口、渲染界面、内部实现的稳定，谨慎使用
 
 ## 快速上手
 
@@ -40,6 +42,19 @@ fn main() {
 
 交互只需一个属性——`<button onclick="greet()">`，背后是一个
 `#[htui::command]` 的 Rust 函数。见下方教程。
+
+## 示例：终端音乐播放器
+
+`example/` 自带一个完整的音乐播放器界面——封面、进度条、控制按钮，
+以及支持悬停与选中高亮的播放列表。仅为界面 + 交互演示，不播放音频。
+运行：
+
+```bash
+cd example
+cargo run
+```
+
+![htui 音乐播放器](docs/example.png)
 
 ## 文档
 

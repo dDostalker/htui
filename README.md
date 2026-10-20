@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/dDostalker/htui/main/logo.svg" alt="htui logo" width="140">
+  <img src="logo.svg" alt="htui logo" width="140">
 </p>
 
 # htui
@@ -18,6 +18,10 @@ TUIs, with partial CSS and script support. It aligns as closely as possible
 with the pure-HTML development experience, functionality and ease of use —
 delivering as many features as possible while keeping the library as easy as
 possible to pick up.
+
+> This project is in an early stage of rapid development. No stability
+> guarantees are made for the API, the rendered interface, or the internal
+> implementation — use with caution.
 
 ## Quick start
 
@@ -43,6 +47,19 @@ fn main() {
 
 Interactivity is one attribute away — `<button onclick="greet()">`, backed by
 a `#[htui::command]` Rust function. See the tutorials below.
+
+## Example: terminal music player
+
+`example/` ships a complete music player UI — album art, progress bar,
+transport controls, and a playlist with hover and selection highlighting.
+It is an interface + interaction demo only; no audio is played. Run it:
+
+```bash
+cd example
+cargo run
+```
+
+![htui music player](docs/example.png)
 
 ## Documentation
 

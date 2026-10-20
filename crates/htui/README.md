@@ -19,6 +19,10 @@ with the pure-HTML development experience, functionality and ease of use —
 delivering as many features as possible while keeping the library as easy as
 possible to pick up.
 
+> This project is in an early stage of rapid development. No stability
+> guarantees are made for the API, the rendered interface, or the internal
+> implementation — use with caution.
+
 ## Quick start
 
 ```toml
@@ -43,6 +47,20 @@ fn main() {
 
 Interactivity is one attribute away — `<button onclick="greet()">`, backed by
 a `#[htui::command]` Rust function. See the tutorials below.
+
+## Example: terminal music player
+
+The [repository](https://github.com/dDostalker/htui) ships a complete music
+player UI under `example/` — album art, progress bar, transport controls, and
+a playlist with hover and selection highlighting. It is an interface +
+interaction demo only; no audio is played. Clone the repository and run:
+
+```bash
+cd example
+cargo run
+```
+
+![htui music player](https://raw.githubusercontent.com/dDostalker/htui/main/docs/example.png)
 
 ## Documentation
 

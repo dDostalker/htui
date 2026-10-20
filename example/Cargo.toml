@@ -1,0 +1,13 @@
+[package]
+name = "example"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Standalone scratch crate (gitignored): the empty `[workspace]` table
+# detaches it from the repository workspace, so `cargo run` / `cargo test`
+# work here without touching the root workspace members.
+[workspace]
+
+[dependencies]
+htui = { path = "../crates/htui" }
