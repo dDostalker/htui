@@ -7,6 +7,22 @@ use crate::{script::ScriptState, tdom::node::NodeId};
 
 use super::{mark_dirty, node_wrapper, this_node_id, with_state};
 
+/// Wire `on*` attribute handlers for a subtree that just entered the
+/// document (`appendChild` / `insertBefore` / `replaceChild`). Compilation
+/// failures are logged, never surfaced — a broken handler body must not
+/// abort the mutation that installed it.
+fn wire_inserted_handlers(
+    context: &mut Context,
+    rc: &std::rc::Rc<std::cell::RefCell<ScriptState>>,
+    root_id: NodeId,
+) {
+    if let Err(e) =
+        crate::script::bindings::compile_attribute_listeners_for_subtree(context, rc, root_id)
+    {
+        log::warn!("Failed to wire on* attributes after insertion: {e}");
+    }
+}
+
 /// Reject an insertion that would create a DOM cycle, with the browser's
 /// `HierarchyRequestError` semantics: `parent_id` must not be the node
 /// itself nor a descendant of it.
@@ -75,6 +91,7 @@ pub(super) fn native_insert_before(
         mark_dirty(&mut st, child_id);
     }
     drop(st);
+    wire_inserted_handlers(context, &rc, child_id);
     node_wrapper(context, child_id)
 }
 
@@ -114,6 +131,7 @@ pub(super) fn native_replace_child(
     mark_dirty(&mut st, new_child);
     mark_dirty(&mut st, old_child);
     drop(st);
+    wire_inserted_handlers(context, &rc, new_child);
     node_wrapper(context, old_child)
 }
 
@@ -183,6 +201,8 @@ pub(super) fn native_append_child(
         mark_dirty(&mut st, parent_id);
         mark_dirty(&mut st, child_id);
     }
+    drop(st);
+    wire_inserted_handlers(context, &rc, child_id);
     Ok(JsValue::undefined())
 }
 

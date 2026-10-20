@@ -15,12 +15,18 @@
 //!
 //! # Event model
 //!
-//! `on*` attribute bodies are compiled to `function (event) { body }` at
-//! startup (browser semantics: a bare identifier only evaluates, it never
-//! calls). `addEventListener(type, fn)` registers JS functions on the JS side
-//! (GC-safe). Dispatch walks the hit region's ancestor path target-first,
-//! firing each element's listeners with a DOM-style `Event` object
-//! (`target`, `currentTarget`, `x`, `y`, `stopPropagation()`).
+//! `on*` attribute bodies are compiled to `function (event) { body }` (browser
+//! semantics: a bare identifier only evaluates, it never calls). Each handler
+//! lives in a single slot per (element, event type) — installing overwrites,
+//! `removeAttribute` clears — and is (re)wired whenever its attribute appears:
+//! at engine startup, after `innerHTML` writes, and after mutations
+//! (`appendChild` / `insertBefore` / `replaceChild` / `cloneNode`) and
+//! `setAttribute`. `addEventListener(type, fn)` registers JS functions on a
+//! separate multicast list (GC-safe); at dispatch the attribute handler runs
+//! after that element's list listeners. Dispatch walks the hit region's
+//! ancestor path target-first, firing each element's handlers with a
+//! DOM-style `Event` object (`target`, `currentTarget`, `x`, `y`,
+//! `stopPropagation()`).
 //!
 //! # Host functions
 //!

@@ -30,7 +30,10 @@ mod wrapper;
 // msg.rs (crate-internal API surface); not every item is used today.
 pub(crate) use builtins::install_builtins;
 #[allow(unused_imports)]
-pub(crate) use events::{add_listener, get_listeners, parse_event_type, remove_listener};
+pub(crate) use events::{
+    add_listener, clear_attr_handler, get_attr_handler, get_listeners, parse_event_type,
+    remove_listener, set_attr_handler,
+};
 pub(crate) use fetch::response_object;
 
 use boa_engine::{

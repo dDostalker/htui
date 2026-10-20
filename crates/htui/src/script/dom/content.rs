@@ -212,8 +212,14 @@ pub(super) fn native_set_inner_html(
     let Some(rc) = with_state() else {
         return Ok(JsValue::undefined());
     };
-    let mut st = rc.borrow_mut();
-    set_inner_html(&mut st, node_id, &html, context)
+    {
+        let mut st = rc.borrow_mut();
+        set_inner_html(&mut st, node_id, &html, context)?;
+    }
+    // The fresh fragment's `on*` attributes wire their handlers now (browser
+    // semantics) — compile the inserted subtree before returning to JS.
+    crate::script::bindings::compile_attribute_listeners_for_subtree(context, &rc, node_id)?;
+    Ok(JsValue::undefined())
 }
 
 /// Shared `innerHTML` write: parse `html` as a fragment in the context of

@@ -16,7 +16,7 @@ use crate::{
 use super::bindings::{
     compile_attribute_listeners, prevent_default, register_host_global, stop_propagation,
 };
-use super::dom::{get_listeners, install_builtins, node_wrapper};
+use super::dom::{get_attr_handler, get_listeners, install_builtins, node_wrapper};
 use super::host::HostFn;
 use super::state::{ENGINE_STATE, ScriptState};
 use super::{EngineBuildError, EngineParts};
@@ -495,7 +495,6 @@ impl ScriptEngine {
                     Vec::new()
                 }
             };
-
             let mut stopped = false;
             for listener in listeners {
                 let call = listener.to_object(&mut self.context).and_then(|f| {
@@ -513,6 +512,40 @@ impl ScriptEngine {
                     break;
                 }
             }
+
+            // The `on*` attribute handler is a single slot per (element,
+            // event type); per the DOM spec it runs after that element's
+            // `addEventListener` listeners, still inside this element's leg
+            // of the bubbling path.
+            if !stopped {
+                let handler = match get_attr_handler(&mut self.context, element.node_id, event_type)
+                {
+                    Ok(h) => h,
+                    Err(e) => {
+                        log::warn!(
+                            "Failed to read attribute handler for {:?}: {e}",
+                            element.node_id
+                        );
+                        None
+                    }
+                };
+                if let Some(handler) = handler {
+                    let call = handler.to_object(&mut self.context).and_then(|f| {
+                        f.call(&wrapper, std::slice::from_ref(&event), &mut self.context)
+                    });
+                    if let Err(e) = call {
+                        log::warn!("Attribute handler threw: {e}");
+                    }
+                    if let Some(obj) = event.as_object()
+                        && let Ok(v) = obj.get(js_string!("_stopped"), &mut self.context)
+                        && v.is_boolean()
+                        && v.to_boolean()
+                    {
+                        stopped = true;
+                    }
+                }
+            }
+
             if stopped {
                 break;
             }

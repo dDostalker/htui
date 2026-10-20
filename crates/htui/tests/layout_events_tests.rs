@@ -111,8 +111,9 @@ fn input_events_dispatch_via_listeners_and_onstar_attributes() {
 
     let seen = eval_str(&mut engine, "String(globalThis.__seen.join(','))");
     assert_eq!(
-        seen, "a-focus,p-focus,i-input,a-input,i-change,a-change,a-blur,p-blur",
-        "on* attributes fire before addEventListener on the same element; target before ancestors"
+        seen, "a-focus,p-focus,a-input,i-input,a-change,i-change,a-blur,p-blur",
+        "addEventListener listeners fire before the element's on* attribute \
+         handler (DOM inner-invoke order); target before ancestors"
     );
 }
 
@@ -2164,5 +2165,148 @@ fn press_and_drag_away_clears_the_button_hover_on_release() {
             RenderCmd::Hover { node_id: Some(n) } if *n == btn.node_id
         )),
         "no Hover command may keep the button highlighted after the release"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic `on*` wiring — attribute handlers stay live on JS-inserted DOM.
+// Every test dispatches through `ScriptEngine::fire` with a hand-built hit
+// region, so the attribute-handler slot (not just the listener list) is
+// exercised end-to-end.
+// ---------------------------------------------------------------------------
+
+const DYNAMIC_WIRING_HTML: &str = r#"
+  <script>
+    var n = 0;
+    function bump() {
+      n += 1;
+      document.getElementById('status').textContent = String(n);
+    }
+    function alt() {
+      n += 10;
+      document.getElementById('status').textContent = String(n);
+    }
+  </script>
+  <div id="host"></div>
+  <button id="b" onclick="bump()">b</button>
+  <p id="status">0</p>
+"#;
+
+fn click_region(node_id: NodeId, id: &str) -> HitRegion {
+    HitRegion {
+        node_id,
+        rect: Rect {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 1,
+        },
+        path: vec![ElementRef {
+            id: Some(id.to_string()),
+            node_id,
+        }],
+    }
+}
+
+#[test]
+fn inner_html_onclick_wires_after_mutation() {
+    let mut engine =
+        ScriptEngine::new(DYNAMIC_WIRING_HTML, EventBindings::default()).expect("engine");
+    engine
+        .eval_source(
+            r#"document.getElementById('host').innerHTML =
+                   '<div id="dyn" onclick="bump()"></div>'"#,
+        )
+        .expect("innerHTML write");
+
+    let dyn_id = find_node_by_id(&engine.arena(), "dyn");
+    let region = click_region(dyn_id, "dyn");
+    engine.fire(&region, EventType::Click, 0, 0);
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('status').textContent"),
+        "1",
+        "the injected onclick must fire exactly once per click"
+    );
+    engine.fire(&region, EventType::Click, 0, 0);
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('status').textContent"),
+        "2",
+        "the injected handler must not double-fire"
+    );
+}
+
+#[test]
+fn set_attribute_onclick_replaces_handler() {
+    let mut engine =
+        ScriptEngine::new(DYNAMIC_WIRING_HTML, EventBindings::default()).expect("engine");
+    let region = click_region(find_node_by_id(&engine.arena(), "b"), "b");
+    engine.fire(&region, EventType::Click, 0, 0);
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('status').textContent"),
+        "1",
+        "boot"
+    );
+
+    engine
+        .eval_source(r#"document.getElementById('b').setAttribute('onclick', 'alt()')"#)
+        .expect("setAttribute");
+
+    engine.fire(&region, EventType::Click, 0, 0);
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('status').textContent"),
+        "11",
+        "the new handler must replace the old one (1 + 10), not add to it"
+    );
+    engine.fire(&region, EventType::Click, 0, 0);
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('status').textContent"),
+        "21",
+        "the replaced handler stays single-slot across clicks"
+    );
+}
+
+#[test]
+fn remove_attribute_onclick_unwires_handler() {
+    let mut engine =
+        ScriptEngine::new(DYNAMIC_WIRING_HTML, EventBindings::default()).expect("engine");
+    let region = click_region(find_node_by_id(&engine.arena(), "b"), "b");
+    engine.fire(&region, EventType::Click, 0, 0);
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('status').textContent"),
+        "1",
+        "boot"
+    );
+
+    engine
+        .eval_source(r#"document.getElementById('b').removeAttribute('onclick')"#)
+        .expect("removeAttribute");
+    engine.fire(&region, EventType::Click, 0, 0);
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('status').textContent"),
+        "1",
+        "the unwired handler must not fire after removeAttribute"
+    );
+}
+
+#[test]
+fn appended_child_onclick_becomes_clickable() {
+    let mut engine =
+        ScriptEngine::new(DYNAMIC_WIRING_HTML, EventBindings::default()).expect("engine");
+    engine
+        .eval_source(
+            r#"var d = document.createElement('div');
+               d.id = 'dyn';
+               d.setAttribute('onclick', 'bump()');
+               document.getElementById('host').appendChild(d);"#,
+        )
+        .expect("createElement + setAttribute + appendChild");
+
+    let dyn_id = find_node_by_id(&engine.arena(), "dyn");
+    let region = click_region(dyn_id, "dyn");
+    engine.fire(&region, EventType::Click, 0, 0);
+    assert_eq!(
+        eval_str(&mut engine, "document.getElementById('status').textContent"),
+        "1",
+        "an appended element whose onclick was set before insertion must fire"
     );
 }

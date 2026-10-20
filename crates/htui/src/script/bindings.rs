@@ -5,7 +5,7 @@ use boa_engine::{Context, JsResult, JsValue, NativeFunction, Source, js_string};
 
 use crate::{events::EventType, tdom::node::NodeId};
 
-use super::dom::{add_listener, with_state};
+use super::dom::{set_attr_handler, with_state};
 use super::host::HostCtx;
 use super::state::ScriptState;
 
@@ -73,6 +73,34 @@ fn dispatch_host(name: &str, args: &[JsValue], context: &mut Context) -> JsResul
     f(&mut call)
 }
 
+/// The `on*` content attributes the engine wires to DOM events, mapped to
+/// their [`EventType`]. Shared by the boot-time walk, the mutation-time
+/// subtree compilation, and the `setAttribute` / `removeAttribute` hooks.
+pub(super) const ATTRIBUTE_EVENT_TYPES: &[(&str, EventType)] = &[
+    ("onclick", EventType::Click),
+    ("onmouseover", EventType::MouseOver),
+    ("onmouseout", EventType::MouseOut),
+    ("onfocus", EventType::Focus),
+    ("onblur", EventType::Blur),
+    ("oninput", EventType::Input),
+    ("onchange", EventType::Change),
+    ("onkeydown", EventType::KeyDown),
+    ("onkeyup", EventType::KeyUp),
+    ("onsubmit", EventType::Submit),
+    ("onreset", EventType::Reset),
+    ("ontoggle", EventType::Toggle),
+    ("onclose", EventType::Close),
+];
+
+/// Map an `on*` attribute name to the event type it wires; `None` for any
+/// other attribute.
+pub(super) fn attribute_event_type(name: &str) -> Option<EventType> {
+    ATTRIBUTE_EVENT_TYPES
+        .iter()
+        .find(|(attr, _)| *attr == name)
+        .map(|(_, et)| *et)
+}
+
 /// Walk the arena and compile every `on*` attribute body into a listener,
 /// exactly like a browser does.
 pub(super) fn compile_attribute_listeners(
@@ -81,47 +109,77 @@ pub(super) fn compile_attribute_listeners(
 ) -> JsResult<()> {
     let node_ids: Vec<NodeId> = state.borrow().arena.iter().map(|(id, _)| id).collect();
     for node_id in node_ids {
-        let attrs = {
-            let st = state.borrow();
-            st.arena.get(node_id).map(|n| {
-                [
-                    ("onclick", EventType::Click),
-                    ("onmouseover", EventType::MouseOver),
-                    ("onmouseout", EventType::MouseOut),
-                    ("onfocus", EventType::Focus),
-                    ("onblur", EventType::Blur),
-                    ("oninput", EventType::Input),
-                    ("onchange", EventType::Change),
-                    ("onkeydown", EventType::KeyDown),
-                    ("onkeyup", EventType::KeyUp),
-                    ("onsubmit", EventType::Submit),
-                    ("onreset", EventType::Reset),
-                    ("ontoggle", EventType::Toggle),
-                    ("onclose", EventType::Close),
-                ]
+        compile_node_attribute_listeners(context, state, node_id)?;
+    }
+    Ok(())
+}
+
+/// Compile `on*` attributes for a freshly inserted subtree (dynamic DOM:
+/// `innerHTML` writes, `appendChild` / `insertBefore` / `replaceChild` /
+/// `cloneNode`). Browser semantics: an `on*` attribute wires its handler
+/// whenever the attribute is present, no matter when the node entered the
+/// document. Handler slots are single (overwrite), so re-compiling a moved
+/// node is idempotent.
+pub(super) fn compile_attribute_listeners_for_subtree(
+    context: &mut Context,
+    state: &Rc<RefCell<ScriptState>>,
+    root_id: NodeId,
+) -> JsResult<()> {
+    let node_ids = {
+        let st = state.borrow();
+        let mut out = Vec::new();
+        let mut stack = vec![root_id];
+        while let Some(id) = stack.pop() {
+            out.push(id);
+            if let Some(node) = st.arena.get(id) {
+                stack.extend(node.children.iter().copied());
+            }
+        }
+        out
+    };
+    for node_id in node_ids {
+        compile_node_attribute_listeners(context, state, node_id)?;
+    }
+    Ok(())
+}
+
+/// Compile every `on*` attribute of one node into the single-slot attribute
+/// handler registry. Overwrites previous slots (browser semantics: the
+/// latest attribute value wins), so re-running after `setAttribute` is
+/// idempotent and can never double-fire.
+pub(super) fn compile_node_attribute_listeners(
+    context: &mut Context,
+    state: &Rc<RefCell<ScriptState>>,
+    node_id: NodeId,
+) -> JsResult<()> {
+    let attr_bodies = {
+        let st = state.borrow();
+        st.arena.get(node_id).map(|n| {
+            ATTRIBUTE_EVENT_TYPES
                 .iter()
                 .filter_map(|(attr, et)| n.attributes.get(*attr).cloned().map(|b| (b, *et)))
                 .collect::<Vec<_>>()
-            })
-        };
-        let Some(attr_bodies) = attrs else { continue };
+        })
+    };
+    let Some(attr_bodies) = attr_bodies else {
+        return Ok(());
+    };
 
-        for (body, event_type) in attr_bodies {
-            // `(function (event) { <body> })` — attribute value is *code*.
-            let wrapped = format!("(function (event) {{ {body} }})");
-            let fn_val = match context.eval(Source::from_bytes(wrapped.as_bytes())) {
-                Ok(v) => v,
-                Err(e) => {
-                    log::warn!("Failed to compile attribute handler `{body}`: {e}");
-                    continue;
-                }
-            };
-            if let Err(e) = add_listener(context, node_id, event_type, &fn_val) {
-                log::warn!(
-                    "Failed to register attribute handler for {:?}: {e}",
-                    node_id
-                );
+    for (body, event_type) in attr_bodies {
+        // `(function (event) { <body> })` — attribute value is *code*.
+        let wrapped = format!("(function (event) {{ {body} }})");
+        let fn_val = match context.eval(Source::from_bytes(wrapped.as_bytes())) {
+            Ok(v) => v,
+            Err(e) => {
+                log::warn!("Failed to compile attribute handler `{body}`: {e}");
+                continue;
             }
+        };
+        if let Err(e) = set_attr_handler(context, node_id, event_type, &fn_val) {
+            log::warn!(
+                "Failed to register attribute handler for {:?}: {e}",
+                node_id
+            );
         }
     }
     Ok(())

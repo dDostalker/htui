@@ -11,6 +11,18 @@ globalThis.__htuiGetListeners = function (nodeId, type) {
   var entry = globalThis.__htuiListeners[nodeId];
   return entry ? (entry[type] || []) : [];
 };
+// Single-slot registry for `on*` attribute handlers. Unlike the multicast
+// listener list above, each (node, type) holds at most one function — a
+// browser event-handler slot: installing overwrites, clearing removes.
+globalThis.__htuiAttrHandlers = {};
+globalThis.__htuiSetAttrHandler = function (nodeId, type, fn) {
+  var entry = globalThis.__htuiAttrHandlers[nodeId] || (globalThis.__htuiAttrHandlers[nodeId] = {});
+  entry[type] = fn;
+};
+globalThis.__htuiClearAttrHandler = function (nodeId, type) {
+  var entry = globalThis.__htuiAttrHandlers[nodeId];
+  if (entry) { delete entry[type]; }
+};
 // Live NodeList factory: `getLen()` / `getItem(i)` are native closures over
 // the engine arena, so every access (length / index / enumeration) reflects
 // the current DOM — a held `childNodes` reference stays live.

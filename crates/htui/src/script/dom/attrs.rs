@@ -55,10 +55,19 @@ pub(super) fn native_set_attribute(
     let Some(rc) = with_state() else {
         return Ok(JsValue::undefined());
     };
-    let mut st = rc.borrow_mut();
-    if let Some(node) = st.arena.get_mut(node_id) {
-        node.attributes.insert(name, value);
-        mark_dirty(&mut st, node_id);
+    let wires_handler = crate::script::bindings::attribute_event_type(&name).is_some();
+    {
+        let mut st = rc.borrow_mut();
+        if let Some(node) = st.arena.get_mut(node_id) {
+            node.attributes.insert(name, value);
+            mark_dirty(&mut st, node_id);
+        }
+    }
+    // Browser semantics: wiring an `on*` attribute (re)compiles its handler
+    // right away. The single-slot registry overwrites, so the latest
+    // attribute value is authoritative and re-fires cannot accumulate.
+    if wires_handler {
+        crate::script::bindings::compile_node_attribute_listeners(context, &rc, node_id)?;
     }
     Ok(JsValue::undefined())
 }
@@ -81,10 +90,17 @@ pub(super) fn native_remove_attribute(
     let Some(rc) = with_state() else {
         return Ok(JsValue::undefined());
     };
-    let mut st = rc.borrow_mut();
-    if let Some(node) = st.arena.get_mut(node_id) {
-        node.attributes.shift_remove(&name);
-        mark_dirty(&mut st, node_id);
+    let unwired_handler = crate::script::bindings::attribute_event_type(&name);
+    {
+        let mut st = rc.borrow_mut();
+        if let Some(node) = st.arena.get_mut(node_id) {
+            node.attributes.shift_remove(&name);
+            mark_dirty(&mut st, node_id);
+        }
+    }
+    // Browser semantics: removing an `on*` attribute unwires its handler.
+    if let Some(event_type) = unwired_handler {
+        super::events::clear_attr_handler(context, node_id, event_type)?;
     }
     Ok(JsValue::undefined())
 }

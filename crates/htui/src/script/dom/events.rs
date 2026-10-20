@@ -160,6 +160,64 @@ pub(crate) fn add_listener(
     )
 }
 
+/// Install (overwrite) the `on*` attribute handler for `(node, event_type)`
+/// in the single-slot registry. Browser semantics: an event handler is one
+/// slot per element and type — the latest compilation replaces any previous
+/// one, so re-compiling after `setAttribute` cannot double-fire.
+pub(crate) fn set_attr_handler(
+    context: &mut Context,
+    node_id: NodeId,
+    event_type: EventType,
+    handler: &JsValue,
+) -> JsResult<()> {
+    call_registry_helper(
+        context,
+        "__htuiSetAttrHandler",
+        &[
+            js_string!(node_id_to_f64(node_id).to_string()).into(),
+            js_string!(event_type_str(event_type)).into(),
+            handler.clone(),
+        ],
+    )
+}
+
+/// Clear the attribute-handler slot (browser `removeAttribute('onclick')`
+/// semantics: the unwired handler no longer runs).
+pub(crate) fn clear_attr_handler(
+    context: &mut Context,
+    node_id: NodeId,
+    event_type: EventType,
+) -> JsResult<()> {
+    call_registry_helper(
+        context,
+        "__htuiClearAttrHandler",
+        &[
+            js_string!(node_id_to_f64(node_id).to_string()).into(),
+            js_string!(event_type_str(event_type)).into(),
+        ],
+    )
+}
+
+/// Read the current attribute-handler slot for `(node, event_type)`; `None`
+/// when unset.
+pub(crate) fn get_attr_handler(
+    context: &mut Context,
+    node_id: NodeId,
+    event_type: EventType,
+) -> JsResult<Option<JsValue>> {
+    let global = context.global_object();
+    let registry = global
+        .get(js_string!("__htuiAttrHandlers"), context)?
+        .to_object(context)?;
+    let node_entry = registry.get(js_string!(node_id_to_f64(node_id).to_string()), context)?;
+    if node_entry.is_undefined() || node_entry.is_null() {
+        return Ok(None);
+    }
+    let node_obj = node_entry.to_object(context)?;
+    let handler = node_obj.get(js_string!(event_type_str(event_type)), context)?;
+    Ok((!handler.is_undefined() && !handler.is_null()).then_some(handler))
+}
+
 /// Remove a JS listener (by identity) from the registry.
 pub(crate) fn remove_listener(
     context: &mut Context,

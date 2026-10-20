@@ -216,9 +216,9 @@ fn test_header_layout_structure() {
     let row = content_idx / cols;
     let rstart = row * cols;
     let rend = rstart + cols;
-    for i in rstart..rend {
+    for cell in &tl.layout[rstart..rend] {
         assert!(
-            tl.layout[i].bcolor.is_some(),
+            cell.bcolor.is_some(),
             "default width should fill entire row"
         );
     }
@@ -255,8 +255,8 @@ fn test_footer_layout_structure() {
     let row = content_idx / cols;
     let rstart = row * cols;
     let rend = rstart + cols;
-    for i in rstart..rend {
-        assert!(tl.layout[i].bcolor.is_some(), "footer row should have bg");
+    for cell in &tl.layout[rstart..rend] {
+        assert!(cell.bcolor.is_some(), "footer row should have bg");
     }
 }
 
