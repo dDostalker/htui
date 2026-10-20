@@ -14,7 +14,7 @@ pub(super) fn native_get_attribute(
     let name = args
         .first()
         .and_then(|v| v.as_string())
-        .map(|s| s.to_std_string_lossy());
+        .map(|s| s.to_std_string_lossy().to_ascii_lowercase());
     let Some(name) = name else {
         return Err(JsNativeError::typ()
             .with_message("getAttribute expects a string")
@@ -42,7 +42,7 @@ pub(super) fn native_set_attribute(
     let name = args
         .first()
         .and_then(|v| v.as_string())
-        .map(|s| s.to_std_string_lossy());
+        .map(|s| s.to_std_string_lossy().to_ascii_lowercase());
     let value = args
         .get(1)
         .and_then(|v| v.as_string())
@@ -81,7 +81,7 @@ pub(super) fn native_remove_attribute(
     let name = args
         .first()
         .and_then(|v| v.as_string())
-        .map(|s| s.to_std_string_lossy());
+        .map(|s| s.to_std_string_lossy().to_ascii_lowercase());
     let Some(name) = name else {
         return Err(JsNativeError::typ()
             .with_message("removeAttribute expects a string")

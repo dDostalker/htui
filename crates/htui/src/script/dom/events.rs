@@ -198,6 +198,17 @@ pub(crate) fn clear_attr_handler(
     )
 }
 
+/// Clear every attribute-handler slot of one node (all event types) — used
+/// when a node leaves the document, so the registry cannot grow without
+/// bound.
+pub(crate) fn clear_node_attr_handler(context: &mut Context, node_id: NodeId) -> JsResult<()> {
+    call_registry_helper(
+        context,
+        "__htuiClearAllAttrHandlers",
+        &[js_string!(node_id_to_f64(node_id).to_string()).into()],
+    )
+}
+
 /// Read the current attribute-handler slot for `(node, event_type)`; `None`
 /// when unset.
 pub(crate) fn get_attr_handler(

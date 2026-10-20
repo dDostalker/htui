@@ -299,6 +299,9 @@ fn sweep_replaced_subtrees(
         }
         for id in doomed {
             st.dirty.injected_css.swap_remove(&id);
+            // The node is leaving the arena for good — drop its attribute
+            // handler slots so the registry cannot grow without bound.
+            crate::script::bindings::clear_node_attribute_listeners(context, id)?;
             st.arena.remove(id);
         }
     }

@@ -132,6 +132,11 @@ pub(super) fn native_replace_child(
     mark_dirty(&mut st, old_child);
     drop(st);
     wire_inserted_handlers(context, &rc, new_child);
+    if let Err(e) =
+        crate::script::bindings::clear_attribute_handlers_for_subtree(context, &rc, old_child)
+    {
+        log::warn!("Failed to clear on* handlers after replaceChild: {e}");
+    }
     node_wrapper(context, old_child)
 }
 
@@ -224,6 +229,12 @@ pub(super) fn native_remove_child(
         parent.children.retain(|c| *c != child_id);
         mark_dirty(&mut st, parent_id);
         mark_dirty(&mut st, child_id);
+    }
+    drop(st);
+    if let Err(e) =
+        crate::script::bindings::clear_attribute_handlers_for_subtree(context, &rc, child_id)
+    {
+        log::warn!("Failed to clear on* handlers after removeChild: {e}");
     }
     Ok(JsValue::undefined())
 }

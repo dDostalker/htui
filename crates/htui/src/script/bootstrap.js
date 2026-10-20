@@ -23,6 +23,9 @@ globalThis.__htuiClearAttrHandler = function (nodeId, type) {
   var entry = globalThis.__htuiAttrHandlers[nodeId];
   if (entry) { delete entry[type]; }
 };
+globalThis.__htuiClearAllAttrHandlers = function (nodeId) {
+  delete globalThis.__htuiAttrHandlers[nodeId];
+};
 // Live NodeList factory: `getLen()` / `getItem(i)` are native closures over
 // the engine arena, so every access (length / index / enumeration) reflects
 // the current DOM — a held `childNodes` reference stays live.

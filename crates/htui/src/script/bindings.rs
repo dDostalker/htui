@@ -5,7 +5,7 @@ use boa_engine::{Context, JsResult, JsValue, NativeFunction, Source, js_string};
 
 use crate::{events::EventType, tdom::node::NodeId};
 
-use super::dom::{set_attr_handler, with_state};
+use super::dom::{clear_node_attr_handler, set_attr_handler, with_state};
 use super::host::HostCtx;
 use super::state::ScriptState;
 
@@ -141,6 +141,37 @@ pub(super) fn compile_attribute_listeners_for_subtree(
         compile_node_attribute_listeners(context, state, node_id)?;
     }
     Ok(())
+}
+
+pub(super) fn clear_attribute_handlers_for_subtree(
+    context: &mut Context,
+    state: &Rc<RefCell<ScriptState>>,
+    root_id: NodeId,
+) -> JsResult<()> {
+    let node_ids = {
+        let st = state.borrow();
+        let mut out = Vec::new();
+        let mut stack = vec![root_id];
+        while let Some(id) = stack.pop() {
+            out.push(id);
+            if let Some(node) = st.arena.get(id) {
+                stack.extend(node.children.iter().copied());
+            }
+        }
+        out
+    };
+    for node_id in node_ids {
+        clear_node_attribute_listeners(context, node_id)?;
+    }
+    Ok(())
+}
+
+/// Clear every attribute-handler slot of one node (all event types).
+pub(super) fn clear_node_attribute_listeners(
+    context: &mut Context,
+    node_id: NodeId,
+) -> JsResult<()> {
+    clear_node_attr_handler(context, node_id)
 }
 
 /// Compile every `on*` attribute of one node into the single-slot attribute
