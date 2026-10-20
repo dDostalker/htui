@@ -118,44 +118,7 @@
   </div>
 
   <div class="plist-head">PLAYLIST</div>
-  <div id="plist" class="plist">
-    <div class="row" id="row-0" onclick="pick(0)">
-      <span class="idx" id="idx-0">1</span>
-      <span class="ptitle" id="ptitle-0"></span>
-      <span class="partist" id="partist-0"></span>
-      <span class="pdur" id="pdur-0"></span>
-    </div>
-    <div class="row" id="row-1" onclick="pick(1)">
-      <span class="idx" id="idx-1">2</span>
-      <span class="ptitle" id="ptitle-1"></span>
-      <span class="partist" id="partist-1"></span>
-      <span class="pdur" id="pdur-1"></span>
-    </div>
-    <div class="row" id="row-2" onclick="pick(2)">
-      <span class="idx" id="idx-2">3</span>
-      <span class="ptitle" id="ptitle-2"></span>
-      <span class="partist" id="partist-2"></span>
-      <span class="pdur" id="pdur-2"></span>
-    </div>
-    <div class="row" id="row-3" onclick="pick(3)">
-      <span class="idx" id="idx-3">4</span>
-      <span class="ptitle" id="ptitle-3"></span>
-      <span class="partist" id="partist-3"></span>
-      <span class="pdur" id="pdur-3"></span>
-    </div>
-    <div class="row" id="row-4" onclick="pick(4)">
-      <span class="idx" id="idx-4">5</span>
-      <span class="ptitle" id="ptitle-4"></span>
-      <span class="partist" id="partist-4"></span>
-      <span class="pdur" id="pdur-4"></span>
-    </div>
-    <div class="row" id="row-5" onclick="pick(5)">
-      <span class="idx" id="idx-5">6</span>
-      <span class="ptitle" id="ptitle-5"></span>
-      <span class="partist" id="partist-5"></span>
-      <span class="pdur" id="pdur-5"></span>
-    </div>
-  </div>
+  <div id="plist" class="plist"></div>
 
   <div class="footer">click a track or the controls · Esc quits the player</div>
 
@@ -197,16 +160,19 @@
       else { $(id).classList.remove("on"); }
     }
 
-    function updatePlaylist() {
+    function renderPlaylist() {
+      var html = "";
       for (var i = 0; i < tracks.length; i++) {
-        var row = $("row-" + i);
-        if (i === current) { row.classList.add("active"); }
-        else { row.classList.remove("active"); }
-        $("idx-" + i).textContent = (i === current && playing) ? "▶" : String(i + 1);
-        $("ptitle-" + i).textContent = tracks[i].title;
-        $("partist-" + i).textContent = tracks[i].artist;
-        $("pdur-" + i).textContent = fmt(tracks[i].dur);
+        var mark = (i === current && playing) ? "▶" : String(i + 1);
+        html += '<div class="' + (i === current ? "row active" : "row")
+          + '" onclick="pick(' + i + ')">'
+          + '<span class="idx">' + mark + '</span>'
+          + '<span class="ptitle">' + tracks[i].title + '</span>'
+          + '<span class="partist">' + tracks[i].artist + '</span>'
+          + '<span class="pdur">' + fmt(tracks[i].dur) + '</span>'
+          + '</div>';
       }
+      $("plist").innerHTML = html;
     }
 
     function update() {
@@ -224,7 +190,7 @@
 
     function refresh() {
       update();
-      updatePlaylist();
+      renderPlaylist();
     }
 
     function pick(i) {
@@ -280,7 +246,7 @@
     }, 1000);
 
     update();
-    updatePlaylist();
+    renderPlaylist();
   </script>
 </body>
 </html>
