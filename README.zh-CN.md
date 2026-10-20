@@ -16,7 +16,6 @@
 `htui` 是一个终端里渲染 HTML 文档来实现TUI界面的 rust 库，并支持部分css和script脚本。
 该库尽可能的对齐了纯 HTML 的开发体验、功能性和使用易用性。在确保最简单上手的情况下实现最多的功能。
 
-
 ## 快速上手
 
 ```toml
@@ -41,25 +40,6 @@ fn main() {
 
 交互只需一个属性——`<button onclick="greet()">`，背后是一个
 `#[htui::command]` 的 Rust 函数。见下方教程。
-
-## 可视化测试库
-
-仓库自带交互式示例库（`visual_test`），覆盖全部支持的 HTML/CSS/JS 能力——
-布局、flexbox、表格、表单、图片、事件与脚本。在仓库根目录运行：
-
-```bash
-# 交互式浏览（默认 showcase；按 Esc 退出）
-cargo run -p visual_test
-
-# 指定示例
-cargo run -p visual_test -- flex
-cargo run -p visual_test -- events
-
-# headless 预览：输出纯文本行（不进入 raw mode / 备用屏）
-cargo run -p visual_test -- --dump showcase --cols 68
-cargo run -p visual_test -- --dump bg showcase   # 背景填充图（█）
-```
-
 
 ## 文档
 

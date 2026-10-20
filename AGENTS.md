@@ -13,7 +13,7 @@
 以下是项目的结构，如果不是特殊要求不得修改项目结构，仅当提示词要求需要时修改，修改前进行询问，并**必须**对项目结构进行同步
 ```
 htui/
-├── Cargo.toml              # workspace 根（members: crates/htui, crates/htui-macros, visual_test）+ workspace lints
+├── Cargo.toml              # workspace 根（members: crates/htui, crates/htui-macros）+ workspace lints
 ├── .editorconfig           # 全库 UTF-8（无 BOM）声明，防止编辑器按 ANSI/GBK 打开产生乱码
 ├── README.md               # 英文 README（GitHub 首页；与 crates/htui/README.md 内容同步）
 ├── README.zh-CN.md         # 中文 README
@@ -218,7 +218,6 @@ htui/
 │   │   │   ├── macro_tests.rs       # 注册宏测试（commands/host/command(name) 自动注册，纯内存）
 │   │   │   ├── query_selector_tests.rs # querySelector/querySelectorAll 测试（document/元素作用域、组合器、无效选择器抛错，纯内存）
 │   │   │   └── script_loop_tests.rs # 脚本线程桥测试（apply_message 语义 + 阻塞宿主函数不阻塞输入，纯内存）
-│   │   └── benches/               # criterion 基准（parse / cascade / paint / render_to_bytes / full_redraw；common/ 共享辅助）
 │   └── htui-macros/             # 过程宏 crate：#[htui::command]/#[htui::commands] + #[derive(IntoJs/FromJs)]
 │       ├── Cargo.toml
 │       └── src/
@@ -244,47 +243,6 @@ htui/
 │           ├── 6.1-示例-实现贪吃蛇.md        # 示例：贪吃蛇（占位，待编写）
 │           ├── 6.2调试.md                   # 调试（占位，待编写）
 │           └── script-layer.md              # 脚本层完整使用与架构文档（脚本 / on* / 宿主函数 / RenderArena）
-├── visual_test/          # 可视化测试工具（cargo run -p visual_test；渲染/布局/事件能力验证）
-│   └── src/
-│       ├── main.rs
-│       ├── all_in_one/   # index.html: 可直接浏览器打开，内部 <style> 内联 CSS
-│       ├── headings/
-│       ├── image/        # includes pic.png
-│       ├── colors/
-│       ├── nested/
-│       ├── text/
-│       ├── css/
-│       ├── css_props/    # 高频 CSS 属性演示（text-transform / line-height / min·max-width·height / box-sizing / border-radius / flex 尺寸约束）
-│       ├── events/       # 事件系统交互演示（onclick / hover / 动态重渲染，render_with_events）
-│       ├── header_footer/
-│       ├── aside/
-│       ├── blockquote/  # 块级引用演示（UA 默认 margin：上下 1 行、左右 4 列；嵌套/边框/背景/作者覆盖）
-│       ├── menu_dl/     # 菜单/描述列表演示（menu 同 ul：`• ` 前缀；dl 上下 1 行；dd 左缩 4 列）
-│       ├── q_abbr/      # 行内引用/缩写演示（q 自动引号嵌套交替；abbr[title] 下划线）
-│       ├── details/     # <details>/<summary> 折叠控件演示（▸/▾ 标记、点击切换 + toggle 事件、嵌套、noscript 恒不渲染）
-│       ├── dialog_template/ # <dialog>/<template> 演示（open 显隐 + UA 边框 + form[method=dialog] 关闭 + close 事件；template 惰性恒不渲染）
-│       ├── form_elements/ # 表单元素补全演示（output 计算行 + fieldset·legend 框架 + optgroup 分组下拉 + datalist 自动补全 + progress·meter 条）
-│       ├── helloworld/
-│       ├── font_styles/  # bold / italic / underline / line-through
-│       ├── list/
-│       ├── box_model/
-│       ├── font_size/
-│       ├── flex/
-│       ├── flex_align_content/
-│       ├── flex_align_self/
-│       ├── flex_nested/
-│       ├── flex_advanced/  # flex 高级能力演示（flex 简写 / flex-flow / direction·wrap reverse / baseline / align-content stretch / flex-basis content）
-│       ├── pre/
-│       ├── showcase/
-│       ├── table/
-│       ├── position/     # CSS 定位演示（relative / absolute / fixed / z-index）
-│       ├── input/        # <input> 输入框演示（点击聚焦 + 键盘编辑 + focus/blur/input/change 事件）
-│       ├── form/         # 表单控件演示（checkbox/radio 切换互斥、password 掩码、hidden 不渲染 + change 计数）
-│       ├── configurator/ # 配置器设置表单演示（input + 原生 select 下拉 + JS 开关 + 实时预览 + 保存/重置）
-│       ├── columns/      # 多列布局演示（column-count/width 自动列数/columns 简写/column-rule/column-fill:auto/文本+块混合分列）
-│       ├── place/        # place-content/place-items/place-self 简写演示（单值双轴/双值/声明顺序优先：后声明胜出，与浏览器一致）
-│       ├── fetch_demo/   # fetch 演示：<script src="mem://…"> 加载 + fetch 经 Promise 微任务事件循环写 DOM
-│       └── viewport_units/
 sg/                       # ast-grep 配套目录（sgconfig.yml 在仓库根）
 └── rules/                # ast-grep 规则定义（每个 .yml 一条规则）
 ```
@@ -508,7 +466,7 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
 | `no-println` | 日志 | warning | 仅 src | 禁止 `println!` / `eprintln!` / `dbg!`；改用 `log::debug!` 等 |
 | `no-wildcard-import` | import 风格 | warning | 全部 | 禁止 `use ...::*;` / `pub use ...::*;` 通配导入 |
 
-**测试与基准代码的宽松策略**：`no-unwrap` / `no-ignore-result` / `no-println` 三条规则通过 `ignores` 字段排除了 `**/tests/**`、`**/benches/**` 和 `visual_test/**`。在这些目录中，`.unwrap()`、`let _ = env_logger::try_init()` 和 `eprintln!` 是标准测试模式，不视为违规。`no-unsafe` 和 `no-wildcard-import` 在所有目录生效。
+**测试与基准代码的宽松策略**：`no-unwrap` / `no-ignore-result` / `no-println` 三条规则通过 `ignores` 字段排除了 `**/tests/**`。在这些目录中，`.unwrap()`、`let _ = env_logger::try_init()` 和 `eprintln!` 是标准测试模式，不视为违规。`no-unsafe` 和 `no-wildcard-import` 在所有目录生效。
 
 ### 使用方式
 ```powershell

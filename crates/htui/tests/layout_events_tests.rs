@@ -1767,23 +1767,6 @@ fn unknown_action_is_ignored_without_error() {
 }
 
 #[test]
-fn visual_test_events_document_initializes() {
-    // Smoke test: the events demo page's `<script>` block must initialize in
-    // the engine (functions defined, listeners registered) without error.
-    let html = include_str!("../../../visual_test/src/events/index.html");
-    let engine = ScriptEngine::new(html, EventBindings::default()).expect("engine");
-    let arena = engine.arena();
-    let ids: Vec<&str> = arena
-        .iter()
-        .filter_map(|(_, n)| n.attributes.get("id").map(String::as_str))
-        .collect();
-    assert!(
-        ids.contains(&"btn-add"),
-        "demo element btn-add must exist; got {ids:?}"
-    );
-}
-
-#[test]
 fn sysmon_refresh_pipeline_updates_the_dom() {
     // Full demo pipeline: JS `refresh()` calls the host `sample()` (returns a
     // JS object) and writes textContent into the DOM, marking the engine dirty

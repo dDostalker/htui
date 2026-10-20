@@ -2,4 +2,3 @@
 /.zed
 **/flamegraph.svg
 /example
-**/dhat-heap.json

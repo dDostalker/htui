@@ -718,7 +718,7 @@ fn test_nested_p_inherits_when_parent_has_no_bg() {
 
 #[test]
 fn test_nested_p_in_aside_with_fixed_width_centered() {
-    // Mirror the visual_test scenario exactly: `<aside width=30ch bg=cyan>`
+    // Scenario: `<aside width=30ch bg=cyan>`
     // containing `<p>30col</p>`. The aside sits flush left at col 0; the
     // text "30col" (5 chars) is centered within the 30-col block, so it
     // starts at col (30 - 5) / 2 = 12.

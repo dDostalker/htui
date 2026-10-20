@@ -32,8 +32,6 @@ jobs:
       # platform the crate targets.
       - name: Run tests
         run: cargo test --workspace --locked
-      - name: Check benches compile
-        run: cargo check --workspace --benches --locked
 
   msrv:
     name: MSRV (1.89.0)

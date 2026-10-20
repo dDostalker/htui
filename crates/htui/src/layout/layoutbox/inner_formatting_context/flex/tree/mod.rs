@@ -61,8 +61,7 @@
 //! collected as the container's inline runs and rendered as a single row
 //! of the container itself; they are **not** treated as anonymous flex
 //! items. This is the v1 limitation — see the [scope](#scope-v1) section
-//! above. The visual test `visual_test/src/flex/` shows the expected
-//! shape.
+//! above.
 //!
 //! ## Module layout
 //!

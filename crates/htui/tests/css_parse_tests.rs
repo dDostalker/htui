@@ -200,7 +200,7 @@ fn test_nth_child_an_plus_b_form() {
 
 #[test]
 fn test_nth_child_compound_with_tag() {
-    // `tr:nth-child(even)` — the visual-test form. The tag prefix must not
+    // `tr:nth-child(even)` — the tabular form. The tag prefix must not
     // disturb the nth-child evaluation.
     init();
     let mut arena = NodeArena::default();

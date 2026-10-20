@@ -536,9 +536,6 @@ html → tdom → layout → tui    （不可破坏的既有四层）
 - `tests/script_loop_tests.rs`：脚本线程桥——`apply_message` 语义（hover 进出顺序 /
   blur→change / select 提交+dirty）、`run_script_thread` 端到端，以及**阻塞宿主
   函数不阻塞输入侧通道**的解耦保证（纯内存）。
-- `visual_test/src/events/`：事件演示页（`<script>` + on* + addEventListener +
-  DOM 变更计数器）。
 
 运行：`cargo test --test layout_events_tests` / `cargo test --test macro_tests` /
-`cargo test --test script_loop_tests`；
-可视化：`cargo run -p visual_test -- events`。
+`cargo test --test script_loop_tests`。

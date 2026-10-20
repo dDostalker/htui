@@ -158,9 +158,9 @@ fn test_em_color_override_applies() {
 
 #[test]
 fn test_em_nested_in_p_renders_correctly() {
-    // The `all_in_one` visual test exercises `<em>` inline inside a
-    // paragraph among other text. Confirm the em tag survives and its
-    // italic flag is applied while the surrounding text is not italic.
+    // Exercise `<em>` inline inside a paragraph among other text. Confirm
+    // the em tag survives and its italic flag is applied while the
+    // surrounding text is not italic.
     // Use `l` (only in em "inline" and after) and `A` (only in pre-em
     // "Another") to disambiguate which cell we're inspecting.
     init();

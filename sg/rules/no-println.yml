@@ -2,8 +2,6 @@ id: no-println
 language: Rust
 ignores:
   - "**/tests/**"
-  - "**/benches/**"
-  - "visual_test/**"
 rule:
   any:
     - pattern: println!($$$ARGS)
@@ -14,4 +12,4 @@ severity: warning
 note: |
   Library code must use `log` macros; `dbg!` is for local debugging only — remove before commit.
   The rule uses `$$$ARGS` to match macro arguments (`...` does not work for macro token trees).
-  Tests and benchmarks are excluded — debug print output is acceptable in test code.
+  Tests are excluded — debug print output is acceptable in test code.

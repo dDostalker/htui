@@ -485,41 +485,6 @@ fn test_template_tag_round_trip() {
     );
 }
 
-#[test]
-fn visual_test_dialog_template_document_initializes() {
-    init();
-    // Smoke test mirroring `visual_test_details_document_initializes`: the
-    // demo page's `<script>` block must initialize in the engine without
-    // error (template content is addressable, d1's close listener is
-    // registered), and clicking the demo's Close button must drive the native
-    // dialog flow end-to-end — `open` is removed and the `close` event fires.
-    let html = include_str!("../../../visual_test/src/dialog_template/index.html");
-    let (mut engine, geo) = build_geometry(html);
-    let map = HitMap::build(&geo);
-
-    assert_eq!(
-        eval_str(&mut engine, "document.getElementById('status').textContent"),
-        "template holds: Inert template content — never rendered, but addressable via JS. Not clickable",
-        "the demo boots: template content is addressable, the template itself stays hidden"
-    );
-
-    let region = map.resolve_by_id("close-btn").expect("close button region");
-    let (x, y) = center(region.rect);
-    let d1 = find_node_by_id(&engine.arena(), "d1");
-
-    let mut hover = HoverState::new();
-    let _ = apply_message(&mut engine, &mut hover, &map, ScriptMsg::Click { x, y });
-    assert!(
-        !engine.arena()[d1].attributes.contains_key("open"),
-        "the demo Close button must close d1 via form[method=dialog]"
-    );
-    assert_eq!(
-        eval_str(&mut engine, "document.getElementById('status').textContent"),
-        "d1 closed — the dialog box just disappeared",
-        "the demo's close listener reports the native close"
-    );
-}
-
 // ============================================================
 // Helpers
 // ============================================================

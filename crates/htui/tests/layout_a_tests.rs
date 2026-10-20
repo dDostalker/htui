@@ -419,8 +419,8 @@ fn test_block_a_inherits_parent_color_when_no_override() {
 }
 
 #[test]
-fn test_block_a_visual_test_sidebar_renders_all_menu_items() {
-    // End-to-end regression for the `css` visual test: the sidebar's `<a>`
+fn test_block_a_sidebar_renders_all_menu_items() {
+    // End-to-end regression: the sidebar's `<a>`
     // menu items (Dashboard / Projects / Tasks / Settings) must each appear
     // in the canvas. Before `layout_a` was registered, only the `<h3>Menu`
     // heading rendered — the four `<a>` links were silently dropped.

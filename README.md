@@ -44,25 +44,6 @@ fn main() {
 Interactivity is one attribute away — `<button onclick="greet()">`, backed by
 a `#[htui::command]` Rust function. See the tutorials below.
 
-## Visual test gallery
-
-The repository ships an interactive gallery (`visual_test`) covering every
-supported HTML/CSS/JS capability — layout, flexbox, tables, forms, images,
-events and scripting. Run from the repository root:
-
-```bash
-# Interactive gallery (default: showcase; press Esc to quit)
-cargo run -p visual_test
-
-# A specific demo
-cargo run -p visual_test -- flex
-cargo run -p visual_test -- events
-
-# Headless preview: plain-text rows (no raw mode / alternate screen)
-cargo run -p visual_test -- --dump showcase --cols 68
-cargo run -p visual_test -- --dump bg showcase   # background-fill map (█)
-```
-
 ## Documentation
 
 | Document | Content |

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/htui", "crates/htui-macros", "visual_test" ]
+members = ["crates/htui", "crates/htui-macros"]
 resolver = "3"
 
 [workspace.lints.clippy]

@@ -466,41 +466,6 @@ fn test_open_details_shows_own_inline_text() {
     assert!(canvas_has_word(&tl, "v"), "open details paints its text");
 }
 
-#[test]
-fn visual_test_details_document_initializes() {
-    init();
-    // Smoke test mirroring `visual_test_events_document_initializes`: the
-    // demo page's `<script>` block must initialize in the engine (toggle
-    // listeners registered) without error, and clicking the summary must
-    // drive the native disclosure-widget end-to-end — `open` flips, the
-    // `toggle` event fires, and the page's own listener updates the status
-    // line.
-    let html = include_str!("../../../visual_test/src/details/index.html");
-    let (mut engine, geo) = build_geometry(html);
-    let map = HitMap::build(&geo);
-    let d1 = find_node_by_id(&engine.arena(), "d1");
-    let region = map.resolve_by_id("d1").expect("d1 hit region");
-    let (x, y) = center(region.rect);
-
-    assert_eq!(
-        eval_str(&mut engine, "document.getElementById('status').textContent"),
-        "— click a summary —",
-        "the demo boots with its initial status line"
-    );
-
-    let mut hover = HoverState::new();
-    let _ = apply_message(&mut engine, &mut hover, &map, ScriptMsg::Click { x, y });
-    assert!(
-        engine.arena()[d1].attributes.contains_key("open"),
-        "clicking the demo summary must open the details"
-    );
-    assert_eq!(
-        eval_str(&mut engine, "document.getElementById('status').textContent"),
-        "d1 opened",
-        "the demo's toggle listener reports the state flip"
-    );
-}
-
 // ============================================================
 // Helpers
 // ============================================================

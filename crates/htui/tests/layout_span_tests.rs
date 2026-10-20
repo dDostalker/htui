@@ -165,7 +165,7 @@ fn test_p_with_line_through_span_paints_crossed_run() {
 
 #[test]
 fn test_p_mixed_styles_in_single_row() {
-    // The visual_test font_styles §11 case: bold + italic + plain text
+    // Mixed font styles: bold + italic + plain text
     // interleaved in a single <p>. Each piece must carry its own style.
     init();
     let html =
@@ -571,13 +571,12 @@ fn test_pure_span_inside_p_renders_text() {
 }
 
 // ============================================================
-// 11. End-to-end mirror of the visual_test font_styles §11 scenario.
+// 11. End-to-end mirror of the mixed font styles scenario.
 // ============================================================
 
 #[test]
-fn test_font_styles_visual_test_mixed_inline() {
-    // Mirror of visual_test/src/font_styles/index.html §11 ("Mixed inline
-    // ranges"). Each `<span class="...">` should apply its own style on
+fn test_font_styles_mixed_inline() {
+    // Mixed inline ranges: each `<span class="...">` should apply its own style on
     // the canvas, while plain text between them stays in the block's
     // default style.
     init();

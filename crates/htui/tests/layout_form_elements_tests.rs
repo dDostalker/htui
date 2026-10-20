@@ -13,16 +13,14 @@
 
 use crossterm::event::MouseButton;
 use crossterm::style::Color;
-use htui::events::{EventBindings, Geometry, HitMap, HoverState};
+use htui::events::{EventBindings, Geometry, HitMap};
 use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
 use htui::layout::layoutbox::geometry::{SelectOption, SelectRow};
 use htui::layout::{BoxConstraint, Cursor, layout_tree};
-use htui::script::{ScriptEngine, ScriptMsg, apply_message};
+use htui::script::{ScriptEngine, ScriptMsg};
 use htui::tdom::node::{NodeArena, NodeId, NodeType};
-use htui::tui::graph_api::{
-    InputState, OverlayKind, RenderCmd, TermLayout, handle_click, handle_mouse_down,
-};
+use htui::tui::graph_api::{InputState, OverlayKind, RenderCmd, TermLayout, handle_mouse_down};
 
 const COLS: u16 = 80;
 const ROWS: u16 = 24;
@@ -553,102 +551,6 @@ fn test_datalist_ignored_without_list_attribute() {
         state.open_select.is_none(),
         "an input without a list attribute opens no dropdown"
     );
-}
-
-#[test]
-fn visual_test_form_elements_document_initializes() {
-    init();
-    // Smoke test mirroring `visual_test_details_document_initializes`: the
-    // demo page's `<script>` initializes, clicking Compute drives the
-    // calculator end-to-end (output.value replaces its text), the grouped
-    // `<select>` opens with optgroup header rows, and the `<datalist>` input
-    // opens its autocomplete dropdown.
-    let html = include_str!("../../../visual_test/src/form_elements/index.html");
-    let (mut engine, geo) = build_geometry(html);
-    let map = HitMap::build(&geo);
-    let mut state = InputState::new();
-
-    assert_eq!(
-        eval_str(&mut engine, "document.getElementById('status').textContent"),
-        "ready — click Compute / Apply, try the grouped select and the datalist",
-        "the demo boots with its initial status line"
-    );
-
-    // Compute: 3 + 4 → output.value replaces the text content.
-    let region = map
-        .resolve_by_id("compute-btn")
-        .expect("compute button region");
-    let (x, y) = center(region.rect);
-    let mut hover = HoverState::new();
-    let arena = engine.arena();
-    let mut msgs = Vec::new();
-    let mut cmds = Vec::new();
-    handle_click(&mut state, &map, &arena, x, y, &mut msgs, &mut cmds);
-    for msg in msgs {
-        let ev = apply_message(&mut engine, &mut hover, &map, msg);
-        cmds.extend(ev.cmds);
-    }
-    assert_eq!(
-        eval_str(&mut engine, "document.getElementById('sum').textContent"),
-        "7",
-        "the compute handler updates output via its value setter"
-    );
-
-    // Click the grouped select: optgroup labels become header rows.
-    let region = map.resolve_by_id("fruit").expect("fruit select region");
-    let (x, y) = center(region.rect);
-    let mut msgs = Vec::new();
-    let mut cmds = Vec::new();
-    handle_mouse_down(
-        &mut state,
-        &map,
-        &engine.arena(),
-        x,
-        y,
-        MouseButton::Left,
-        &mut msgs,
-        &mut cmds,
-    );
-    let open = state.open_select.as_ref().expect("fruit dropdown opens");
-    assert_eq!(open.kind, OverlayKind::Select);
-    assert!(matches!(&open.rows[0], SelectRow::Group(g) if g == "Citrus"));
-    assert!(matches!(&open.rows[2], SelectRow::Item(i) if *i == 1));
-
-    // Click the datalist input: the autocomplete opens with every suggestion.
-    // First close the fruit dropdown (its overlay overlaps the input below).
-    let mut msgs = Vec::new();
-    let mut cmds = Vec::new();
-    handle_mouse_down(
-        &mut state,
-        &map,
-        &engine.arena(),
-        95,
-        39,
-        MouseButton::Left,
-        &mut msgs,
-        &mut cmds,
-    );
-    assert!(
-        state.open_select.is_none(),
-        "a blank click closes the dropdown"
-    );
-    let region = map.resolve_by_id("lang").expect("lang input region");
-    let (x, y) = center(region.rect);
-    let mut msgs = Vec::new();
-    let mut cmds = Vec::new();
-    handle_mouse_down(
-        &mut state,
-        &map,
-        &engine.arena(),
-        x,
-        y,
-        MouseButton::Left,
-        &mut msgs,
-        &mut cmds,
-    );
-    let open = state.open_select.as_ref().expect("datalist dropdown opens");
-    assert_eq!(open.kind, OverlayKind::Datalist);
-    assert_eq!(open.options.len(), 4, "all datalist suggestions shown");
 }
 
 // ============================================================
