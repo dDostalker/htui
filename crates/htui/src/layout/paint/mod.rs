@@ -564,7 +564,7 @@ fn sorted_children(lb: &LayoutBox) -> SortedChildren<'_> {
             !matches!(c.positioning.position, Position::Static) as u8,
         )
     };
-    let first = lb.children.first().map(&key);
+    let first = lb.children.first().map(key);
     let needs_sort = lb.children.iter().any(|c| Some(key(c)) != first);
     if needs_sort {
         let mut children: Vec<&LayoutBox> = lb.children.iter().collect();
