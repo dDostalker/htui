@@ -4,7 +4,7 @@
 
 # htui
 
-**用 HTML、CSS 和 JavaScript 编写终端交互界面——终端界的 Tauri。**
+**用 HTML、CSS 和 JavaScript 编写终端交互界面**
 
 [![crates.io](https://img.shields.io/crates/v/htui.svg)](https://crates.io/crates/htui)
 [![docs.rs](https://img.shields.io/docsrs/htui)](https://docs.rs/htui)
@@ -13,28 +13,9 @@
 
 [English](README.md)
 
-`htui` 是一个 Rust 库：它在终端里渲染 HTML 文档（带完整 CSS 子集），并在内嵌
-的 JavaScript 引擎（[Boa](https://github.com/boa-dev/boa)）中运行页面的
-`<script>` 脚本，DOM 绑定与浏览器语义一致。Rust 侧通过**宿主函数**与页面
-交互——注册后即为 JS 可直接调用的全局函数。文档能看到的一切资源都来自
-内存 `mem://` 注册表：不访问文件系统、不访问网络。
+`htui` 是一个终端里渲染 HTML 文档来实现TUI界面的 rust 库，并支持部分css和script脚本。
+该库尽可能的对齐了纯 HTML 的开发体验、功能性和使用易用性。在确保最简单上手的情况下实现最多的功能。
 
-## 特性
-
-- **HTML + CSS 渲染**——流式排版、flexbox、表格、多列、定位、盒模型、文字
-  样式、`:hover` / `:focus`
-- **JavaScript 脚本**——对齐浏览器的 DOM 绑定、定时器、`fetch`（真
-  Promise）、`console`
-- **Rust ↔ JS 互操作**——`#[htui::command]` 把普通 Rust 函数变成带类型的
-  JS 全局函数
-- **DOM 风格事件**——click / hover / focus / input / 键盘 / 表单事件，冒泡 +
-  `preventDefault()`
-- **表单控件**——input、textarea、select + datalist、checkbox / radio、表单
-  提交 / 重置、details、dialog
-- **图片**——PNG / JPEG / WebP 与 SVG，真彩色半块字符渲染
-- **流畅渲染**——增量 diff 输出、区域重绘、60fps 上限
-- **全程无 `unsafe`**——页面 JS 受运行时限制；图片解码与资源层与文件系统 /
-  网络完全隔离
 
 ## 快速上手
 
@@ -79,14 +60,6 @@ cargo run -p visual_test -- --dump showcase --cols 68
 cargo run -p visual_test -- --dump bg showcase   # 背景填充图（█）
 ```
 
-每个示例是 `visual_test/src/` 下的一个文件夹（`index.html` + 可选
-`style.css`）。可用示例：`all_in_one`、`aside`、`blockquote`、`box_model`、
-`colors`、`columns`、`configurator`、`css`、`css_props`、`details`、
-`dialog_template`、`events`、`fetch_demo`、`flex`、`flex_advanced`、
-`flex_align_content`、`flex_align_self`、`flex_nested`、`font_size`、
-`font_styles`、`form`、`form_elements`、`header_footer`、`headings`、
-`helloworld`、`image`、`input`、`list`、`menu_dl`、`nested`、`place`、
-`position`、`pre`、`q_abbr`、`showcase`、`table`、`text`、`viewport_units`。
 
 ## 文档
 
@@ -106,9 +79,7 @@ cargo run -p visual_test -- --dump bg showcase   # 背景填充图（█）
 
 ## 平台
 
-Rust **1.89+**（edition 2024）。经
-[crossterm](https://github.com/crossterm-rs/crossterm) 支持 Windows 控制台与
-POSIX 终端；建议开启真彩色。
+Rust **1.89+**（edition 2024）。
 
 ## 许可证
 

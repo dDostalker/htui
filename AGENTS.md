@@ -357,7 +357,7 @@ flow/flex/table 算法并生成统一的 `LayoutBox` 树，最终由
              ▼
    输入循环（主线程，永不执行 JS）                脚本线程（独占 ScriptEngine）
    event::poll + 纯 UI 状态机          ScriptMsg    ├─ interaction::on_move/on_click
-   （滚动/缩放/焦点/拖选） ────────────────────►    ├─ ScriptEngine::fire（沿 path 触发监听器）
+   （滚动/缩放/焦点/拖选） ────────────────────►     ├─ ScriptEngine::fire（沿 path 触发监听器）
              ▲                                    └─ 宿主函数（可返回值 + push RenderCmd）
              │       ScriptResponse                   │
              └────────────────────────────────────────┤
