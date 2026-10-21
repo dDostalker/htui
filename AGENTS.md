@@ -26,8 +26,17 @@ htui/
 │   ├── htui/               # 主库 crate：终端 HTML/CSS 渲染引擎（独立发布单元）
 │   │   ├── Cargo.toml
 │   │   ├── src/
-│   │   │   ├── lib.rs              # 入口：render() / render_with_events()（主循环在 tui/run/）
+│   │   │   ├── lib.rs              # 入口：模块声明 + 公共 re-export（Session / Config / Parser / 宏 / boa_engine）
+│   │   │   ├── session.rs          # Session：渲染会话（mem:// 注册表 + Config + EventBindings，render() 主入口）
+│   │   │   ├── config.rs           # Config：渲染设置（zoom / events / frame_gap / copy_flow / copy_block）
 │   │   │   ├── resources.rs        # 资源层：mem:// 内存注册表（前缀可选），供 <script>/<link>/<img>/fetch
+│   │   │   ├── graphics/           # 终端图形原语层（依赖方向：layout → graphics → tui）
+│   │   │   │   ├── mod.rs          # 入口：显式 re-export（Block / TermLayout / Img / char_width / ...）
+│   │   │   │   ├── canvas.rs       # TermLayout 画布（layout/last_frame/image_cache/input_states）+ InputRenderState
+│   │   │   │   ├── cell.rs         # Block / FontStyle（CompactString 单元格模型）
+│   │   │   │   ├── image.rs        # Img / ImageCache / render_image_at*（图像解码与半块栅格化）
+│   │   │   │   ├── style.rs        # block_style（css_attr → FontStyle/颜色）
+│   │   │   │   └── text.rs         # char_width / grapheme_width（Unicode 宽度）
 │   │   │   ├── events/             # JS 风格事件系统（旁路，不参与渲染管线）
 │   │   │   │   ├── mod.rs          # EventType / HtmlEvent / ElementRef / EventBindings（宿主函数注册表）
 │   │   │   │   ├── geometry.rs     # Geometry（arena + boxes 快照，Arc 共享）
@@ -41,6 +50,7 @@ htui/
 │   │   │   │   ├── bindings.rs     # stop_propagation/prevent_default/register_host_global/dispatch_host/compile_attribute_listeners
 │   │   │   │   ├── host.rs         # HostFn / HostCtx（Rust 回调 → JS 可调用）+ host_fn（Boa 无关构造器）+ arg/arg_required/event/render/object 方法
 │   │   │   │   ├── convert.rs      # IntoJs/FromJs 转换层 + JsObjectBuilder（Rust ↔ JS 值）+ HostError（Boa 无关错误）
+│   │   │   │   ├── msg.rs          # 脚本线程桥：ScriptMsg/ScriptResponse + apply_message + run_script_thread（引擎独占线程）
 │   │   │   │   └── dom/          # DOM 绑定（mod.rs = 入口 re-export + 共享助手 with_state/mark_dirty/node_wrapper/...）
 │   │   │   │       ├── wrapper.rs       # make_node_wrapper（元素包装属性接线中心）
 │   │   │   │       ├── builtins.rs      # install_builtins（全局对象安装）
@@ -55,7 +65,6 @@ htui/
 │   │   │   │       ├── timers.rs        # setTimeout/setInterval/clear
 │   │   │   │       ├── fetch.rs         # native_fetch + response_object
 │   │   │   │       └── console.rs       # console.log/warn/error + alert + quit
-│   │   │   │   └── msg.rs          # 脚本线程桥：ScriptMsg/ScriptResponse + apply_message + run_script_thread（引擎独占线程）
 │   │   │   ├── html/
 │   │   │   │   ├── mod.rs
 │   │   │   │   ├── html_parse.rs   # HTML → tdom 树（html5ever）；提取 <style> CSS / <script> JS（含 <link rel=stylesheet> 与 <script src> 经 resources 加载）
@@ -89,21 +98,17 @@ htui/
 │   │   │   │   ├── layoutbox/      # LayoutBox 数据结构（镜像浏览器 CSS Display 三轴分类）
 │   │   │   │   │   ├── mod.rs      # LayoutBox struct + 三个轴分类 re-exports
 │   │   │   │   │   ├── rect.rs, paint_style.rs, inline_run.rs, cursor.rs, inline.rs, wrap.rs
+│   │   │   │   │   ├── position.rs  # CSS 定位后处理（resolve_positioned_rects / pin_fixed_boxes，absolute/fixed 包含块解析）
 │   │   │   │   │   ├── generation/  # styled DOM → geometry-free GeneratedBox tree
 │   │   │   │   │   │   └── mod.rs  # normal/text/anonymous/replaced + display classification
 │   │   │   │   │   ├── geometry/    # GeneratedBox → positioned LayoutBox tree
 │   │   │   │   │   │   ├── mod.rs           # BoxKind × OuterDisplay × FormattingContext dispatch
 │   │   │   │   │   │   ├── replaced.rs      # layout_replaced（img/input/textarea/button/select）
 │   │   │   │   │   │   └── select_overlay.rs # SelectOption/SelectRow + 下拉数据（select_options/overlay_options/...）
-│   │   │   │   │   ├── box_kind/   # BoxKind { Normal, Replaced, Anonymous } + ReplacedContent
-│   │   │   │   │   │   ├── mod.rs          # enum + ReplacedContent
-│   │   │   │   │   │   ├── normal.rs       # NormalExt trait
-│   │   │   │   │   │   ├── replaced.rs     # ReplacedExt trait
-│   │   │   │   │   │   └── anonymous.rs    # AnonymousExt trait
-│   │   │   │   │   ├── outer_display/    # OuterDisplay { Block, Inline }
-│   │   │   │   │   │   ├── mod.rs          # enum
-│   │   │   │   │   │   ├── block.rs        # BlockExt trait
-│   │   │   │   │   │   └── inline.rs       # InlineExt trait
+│   │   │   │   │   ├── box_kind/   # BoxKind { Normal, Replaced, Anonymous } + ReplacedContent（单文件模块）
+│   │   │   │   │   │   └── mod.rs          # 两个枚举 + 分类语义文档
+│   │   │   │   │   ├── outer_display/    # OuterDisplay { BlockLevel, Inline }（单文件模块）
+│   │   │   │   │   │   └── mod.rs          # enum + from_css_display 映射
 │   │   │   │   │   └── inner_formatting_context/  # FormattingContext { Flow, Flex, Table, Grid }
 │   │   │   │   │       ├── mod.rs          # enum + FlowExt/FlexExt/GridExt re-exports
 │   │   │   │   │       ├── flow/           # Block/Inline Formatting Context 实现
@@ -141,10 +146,13 @@ htui/
 │   │   │   │       ├── border.rs   # paint_borders
 │   │   │   │       ├── button.rs   # paint_button（`[ 文本 ]` 按钮框）
 │   │   │   │       ├── image.rs    # paint_image
+│   │   │   │       ├── input.rs    # paint_input（<input> 控件：值/光标/选区绘制）
+│   │   │   │       ├── select.rs   # paint_select（<select> 控件绘制）
+│   │   │   │       ├── textarea.rs # paint_textarea（<textarea> 控件：多行值/光标绘制）
 │   │   │   │       └── text.rs     # paint_runs
 │   │   │   └── tui/
 │   │   │       ├── mod.rs
-│   │   │       └── run/          # 引擎驱动：run() 输入循环 + panic hook（mod.rs）+ 渲染/命中/脚本线程 + 增量重绘辅助
+│   │   │       ├── run/          # 引擎驱动：run() 输入循环 + panic hook（mod.rs）+ 渲染/命中/脚本线程 + 增量重绘辅助
 │   │   │           ├── mod.rs     # run() 输入主循环 + install_panic_hook
 │   │   │           ├── state.rs     # RenderState + handle_input/handle_select/TextSel/OpenSelect + 配色常量
 │   │   │           ├── pipeline.rs  # redraw/layout_and_paint/render_arena/render_html/repaint_dynamic/pin_fixed_and_repaint
@@ -152,11 +160,9 @@ htui/
 │   │   │           ├── region.rs    # incremental_region / union_rect / collect_box_rects / pseudo_affected_region
 │   │   │           ├── selection.rs # selection_lines / lines_bounds / extract_selection / highlight_lines
 │   │   │           └── overlay.rs   # apply_select_overlay（select 下拉叠加绘制）
-│   │   │       └── graph_api.rs    # 模块入口：re-exports（TermLayout / Block / RenderCmd / Img / ...）
+│   │   │       └── graph_api.rs    # 模块入口：re-export graphics（TermLayout / Block / Img / char_width / ...）+ 输入层与渲染器
 │   │   │           └── graph_api/  # 子模块目录（与 graph_api.rs 同模块）
-│   │   │               ├── canvas.rs   # TermLayout 画布
-│   │   │               ├── cell.rs     # Block / FontStyle
-│   │   │               ├── image.rs    # Img / 图像加载
+│   │   │               ├── render.rs   # TermLayout::render（增量） / render_diff_to_bytes / render_to_bytes
 │   │   │               └── input/  # 输入层（mod.rs = InputState + 常量 + re-exports）
 │   │   │                   ├── cmd.rs       # RenderCmd（含 RenderArena）/ DirtyInfo / SelectionMode / DrainedBatch（渲染线程命令合并）
 │   │   │                   ├── key_info.rs  # key_event_info / char_code / media·modifier_key
@@ -167,14 +173,12 @@ htui/
 │   │   │                   ├── select.rs    # OverlayKind / open·close_select / refresh_datalist
 │   │   │                   ├── refresh.rs   # trigger_refresh（按键分发状态机）
 │   │   │                   └── page.rs      # page_level_builtins（页面级滚动/缩放/复制）
-│   │   │               ├── render.rs   # TermLayout::render（增量） / render_diff_to_bytes / render_to_bytes
-│   │   │               ├── style.rs    # block_style
-│   │   │               └── text.rs     # char_width / grapheme_width
 │   │   ├── tests/               # 集成测试（跟随主库）
 │   │   │   ├── html_parse_tests.rs
 │   │   │   ├── css_parse_tests.rs
 │   │   │   ├── dom_node_tests.rs    # DOM 节点 API 测试（insertBefore/replaceChild/cloneNode + Text·Comment·Fragment + document 访问器，纯内存）
 │   │   │   ├── resources_tests.rs   # mem:// 资源层测试（注册 / 读取 / 前缀，纯内存）
+│   │   │   ├── session_tests.rs     # Session/Config 测试（默认值 / setter / registry 访问，纯内存）
 │   │   │   ├── fetch_e2e_tests.rs   # fetch 端到端测试（<script src> 加载 + Promise 微任务事件循环写 DOM，纯内存）
 │   │   │   ├── layout_tests.rs
 │   │   │   ├── layout_div_tests.rs
@@ -226,7 +230,8 @@ htui/
 │           ├── command.rs       # #[htui::command] 展开（纯 fn 包装 HostFn / 有状态 HostFn 直通）+ command_attr 校验 + returns_host_fn
 │           └── commands.rs      # #[htui::commands] 展开（register + js_bindings 样本 JS 接口生成，JSDoc）
 ├── docs/
-│   ├── TODO.md            # 待办（B：mousedown/mouseup、[attr] 选择器、getComputedStyle；C：img change）
+│   ├── en-us/             # 英文文档（当前仅 todo 占位文件，内容为空）
+│   ├── example.png        # 文档配图
 │   └── zh-cn/
 │       ├── 边界文档.md           # 边界文档（目标 / 核心承诺 / 拒绝清单 / 能力地图）
 │       ├── 架构.md               # 渲染管线与线程模型（generation/geometry 分层、四线程职责、合并与安全模型）
@@ -515,6 +520,8 @@ let x = find(b).unwrap();
 
 | 类型               | 位置                    | 说明                      |
 | ------------------ | ----------------------- | ------------------------- |
+| `Session`          | `session`               | 渲染会话：mem:// 注册表 + `Config` + `EventBindings`，`render()` 主入口 |
+| `Config`           | `config`                | 渲染设置（zoom / events / frame_gap / copy_flow / copy_block） |
 | `NodeId`           | `tdom::node`            | slotmap 生成的类型安全 ID |
 | `NodeArena`        | `tdom::node`            | `SlotMap<NodeId, Node>`   |
 | `Node`             | `tdom::node`            | DOM 节点（含子节点/属性） |
@@ -533,18 +540,18 @@ let x = find(b).unwrap();
 | `PaintStyle`       | `layout::layoutbox::paint_style` | 视觉 chrome（padding/border/margin + inline runs + 背景/间距标志） |
 | `InlineRun`        | `layout::layoutbox::inline_run` | 单个 inline 文本段 |
 | `Cursor`           | `layout::layoutbox::cursor` | block 流行游标 |
-| `OuterDisplay`     | `layout::layoutbox::outer_display` | 盒子在父级流中的角色（`Block` / `Inline`） |
+| `OuterDisplay`     | `layout::layoutbox::outer_display` | 盒子在父级流中的角色（`BlockLevel { container }` / `Inline { block }`） |
 | `FormattingContext`| `layout::layoutbox::inner_formatting_context` | 盒子安排子项的格式化上下文（`Flow` / `Flex` / `Grid`） |
 | `AlignSelf`        | `html::css_parse::properties::align_self` | `align-self` 解析结果（`Auto` / `Value(AlignItems)`） |
 | `LayoutFn`         | `layout::mod`           | 布局函数签名              |
 | `TermMap`          | `layout::layout`        | 终端尺寸信息              |
-| `TermLayout`       | `tui::graph_api`        | 终端画布 + 渲染方法       |
-| `Block`            | `tui::graph_api`        | 单个屏幕字符单元格（含 `style: FontStyle`） |
-| `FontStyle`        | `tui::graph_api`        | `Block` 的聚合样式位掩码（`BOLD` / `ITALIC` / `UNDERLINED` / `CROSSED_OUT`） |
+| `TermLayout`       | `graphics`（`tui::graph_api` re-export） | 终端画布 + 渲染方法        |
+| `Block`            | `graphics`（`tui::graph_api` re-export） | 单个屏幕字符单元格（含 `style: FontStyle`） |
+| `FontStyle`        | `graphics`（`tui::graph_api` re-export） | `Block` 的聚合样式位掩码（`BOLD` / `ITALIC` / `UNDERLINED` / `CROSSED_OUT`） |
 | `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举（Rerender / Redraw / RenderArena / RenderHtml / Hover / Quit） |
 | `DirtyInfo`        | `tui::graph_api`        | `RenderArena` 携带的脏节点集合（`nodes: Vec<NodeId>` + `injected_css: IndexMap<NodeId, String>`，后者按宿主键控、重写即替换，渲染端内容不变则跳过重解析） |
 | `InputState`       | `tui::graph_api::input` | 输入循环状态（scroll_y / zoom / pressed / 焦点输入框 / 编辑缓冲 / 选择 / open_select；hover 归脚本线程） |
-| `InputRenderState` | `tui::graph_api::canvas`| `<input>` 渲染状态（value / cursor / focused），`TermLayout.input_states` |
+| `InputRenderState` | `graphics::canvas`      | `<input>` 渲染状态（value / cursor / focused），`TermLayout.input_states` |
 | `EventType`        | `events`                | DOM 事件类型（Click / MouseOver / MouseOut）               |
 | `HtmlEvent`        | `events`                | 事件对象（event_type / target / current_target / x / y / bubbles）|
 | `ElementRef`       | `events`                | 冒泡路径上的单个元素（id + node_id）                |
