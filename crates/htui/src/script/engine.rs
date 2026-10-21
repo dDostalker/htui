@@ -464,7 +464,7 @@ impl ScriptEngine {
             });
         }
 
-        for element in &region.path {
+        for element in region.path.iter() {
             // The element wrapper doubles as the listener's `this`: browsers
             // bind `this` inside a listener to the element it is attached to
             // (the current target of the dispatch).

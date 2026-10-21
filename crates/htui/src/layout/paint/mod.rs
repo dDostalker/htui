@@ -558,21 +558,29 @@ fn paint_children(
 /// children slice directly (zero allocation); only when the keys actually
 /// differ does it collect into a `Vec` and sort.
 fn sorted_children(lb: &LayoutBox) -> SortedChildren<'_> {
-    let key = |c: &LayoutBox| {
-        (
-            c.positioning.z_index.unwrap_or(0),
-            !matches!(c.positioning.position, Position::Static) as u8,
-        )
-    };
-    let first = lb.children.first().map(key);
-    let needs_sort = lb.children.iter().any(|c| Some(key(c)) != first);
+    let first = lb.children.first().map(stacking_key);
+    let needs_sort = lb.children.iter().any(|c| Some(stacking_key(c)) != first);
     if needs_sort {
         let mut children: Vec<&LayoutBox> = lb.children.iter().collect();
-        children.sort_by_key(|c| key(c));
+        children.sort_by_key(|c| stacking_key(c));
         SortedChildren::Sorted(children.into_iter())
     } else {
         SortedChildren::Straight(lb.children.iter())
     }
+}
+
+/// Paint stacking key of one child box: `(z-index, positioned-above-static)`.
+///
+/// Higher key paints later (on top); the stable sort keeps DOM order within
+/// the same level. Shared with the hit-map builder
+/// ([`crate::events::HitMap`]) so hit testing resolves overlapping regions in
+/// the same stacking order the paint phase draws — the browser rule that the
+/// hit target is the element painted on top.
+pub(crate) fn stacking_key(c: &LayoutBox) -> (i32, u8) {
+    (
+        c.positioning.z_index.unwrap_or(0),
+        !matches!(c.positioning.position, Position::Static) as u8,
+    )
 }
 
 /// Iterator over a box's children in paint stacking order — see

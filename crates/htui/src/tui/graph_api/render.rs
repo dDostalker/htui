@@ -97,76 +97,13 @@ impl TermLayout {
                 .saturating_mul(4),
         );
         let cols = self.columns as usize;
-        let rows = self.rows as usize;
-        // The scroll position is normally clamped to the canvas, but guard the
-        // slice bounds anyway: a stale out-of-range position (sent before the
-        // clamp republished) must degrade to an empty frame instead of
-        // indexing past the buffer and panicking the render thread.
-        let scroll_start = (self.scroll_y as usize)
-            .saturating_mul(cols)
-            .min(self.layout.len());
-        let scroll_end = scroll_start
-            .saturating_add(rows.saturating_mul(cols))
-            .min(self.layout.len());
+        let (scroll_start, scroll_end) = self.viewport_range();
 
-        let mut i = scroll_start;
-        // One reusable batch buffer per call: each run clears and refills it,
-        // so a styled run no longer allocates a fresh `String` (the buffer
-        // grows to the longest run once and is reused thereafter).
         let mut batch = String::new();
-
-        while i < scroll_end {
-            if self.layout[i].word.is_empty() {
-                i += 1;
-                continue;
-            }
-
-            let cell = &self.layout[i];
-
-            let batch_start = i;
-            let fg = cell.fcolor;
-            let bg = cell.bcolor;
-            let cell_style = cell.style;
-            // A cell is rendered as a "bare" space only when it has no
-            // background AND no style flags. Anything styled (even a plain
-            // space) must still receive the SGR codes — otherwise spaces
-            // between underlined/italic letters would drop the underline.
-            let is_empty = cell.word == " " && cell.bcolor.is_none() && cell.style.is_empty();
-            batch.clear();
-
-            while i < scroll_end {
-                let c = &self.layout[i];
-                if c.word.is_empty() {
-                    i += 1;
-                    continue;
-                }
-                if i > batch_start && i.is_multiple_of(cols) {
-                    break;
-                }
-                let c_empty = c.word == " " && c.bcolor.is_none() && c.style.is_empty();
-                if c_empty != is_empty {
-                    break;
-                }
-                if !c_empty && (c.fcolor != fg || c.bcolor != bg || c.style != cell_style) {
-                    break;
-                }
-                batch.push_str(&c.word);
-                i += 1;
-            }
-
-            let batch_row = batch_start / cols;
-            let x = (batch_start % cols) as u16;
-            let y = batch_row.saturating_sub(self.scroll_y as usize);
-            if batch_row >= self.scroll_y as usize && y < self.rows as usize {
-                if let Err(e) = crossterm::queue!(out, MoveTo(x, y as u16)) {
-                    log::error!("Failed to queue cursor move to ({}, {}): {}", x, y, e);
-                }
-                if is_empty {
-                    out.extend_from_slice(batch.as_bytes());
-                } else {
-                    push_styled(&mut out, &batch, cell_style, fg, bg);
-                }
-            }
+        let mut i = scroll_start;
+        while let Some(run) = self.next_batch(i, scroll_end, cols, &mut batch) {
+            self.queue_batch(&mut out, &run, &batch);
+            i = run.end;
         }
         out
     }
@@ -191,17 +128,7 @@ impl TermLayout {
                 .saturating_mul(4),
         );
         let cols = self.columns as usize;
-        let rows = self.rows as usize;
-        // Guarded the same way as `render_to_bytes`: a scroll position past
-        // the canvas end (which the old `max_scroll` could advertise for
-        // documents taller than the buffer cap) must not underflow the
-        // viewport slice.
-        let scroll_start = (self.scroll_y as usize)
-            .saturating_mul(cols)
-            .min(self.layout.len());
-        let scroll_end = scroll_start
-            .saturating_add(rows.saturating_mul(cols))
-            .min(self.layout.len());
+        let (scroll_start, scroll_end) = self.viewport_range();
         let viewport_cells = scroll_end.saturating_sub(scroll_start);
 
         if self.last_frame.len() != viewport_cells {
@@ -215,62 +142,21 @@ impl TermLayout {
             self.last_frame = vec![Block::default(); viewport_cells];
         }
 
-        let mut i = scroll_start;
-        // Reusable batch buffer (see `render_to_bytes`): avoids a per-run
-        // `String` allocation on the incremental frame path.
         let mut batch = String::new();
-
-        while i < scroll_end {
-            if self.layout[i].word.is_empty() {
-                i += 1;
-                continue;
+        let mut i = scroll_start;
+        while let Some(run) = self.next_batch(i, scroll_end, cols, &mut batch) {
+            // A batch "changed" when any of its non-empty cells differs from
+            // the snapshot. Empty filler cells never matter: they are skipped
+            // by the batch scan and the diff renderer only writes
+            // glyph-bearing cells.
+            let changed = (run.start..run.end).any(|i| {
+                !self.layout[i].word.is_empty()
+                    && !block_state_eq(&self.last_frame[i - scroll_start], &self.layout[i])
+            });
+            if changed {
+                self.queue_batch(&mut out, &run, &batch);
             }
-
-            let cell = &self.layout[i];
-            let batch_start = i;
-            let fg = cell.fcolor;
-            let bg = cell.bcolor;
-            let cell_style = cell.style;
-            let is_empty = cell.word == " " && cell.bcolor.is_none() && cell.style.is_empty();
-            batch.clear();
-            let mut any_changed = false;
-
-            while i < scroll_end {
-                let c = &self.layout[i];
-                if c.word.is_empty() {
-                    i += 1;
-                    continue;
-                }
-                if i > batch_start && i.is_multiple_of(cols) {
-                    break;
-                }
-                let c_empty = c.word == " " && c.bcolor.is_none() && c.style.is_empty();
-                if c_empty != is_empty {
-                    break;
-                }
-                if !c_empty && (c.fcolor != fg || c.bcolor != bg || c.style != cell_style) {
-                    break;
-                }
-                if !block_state_eq(&self.last_frame[i - scroll_start], c) {
-                    any_changed = true;
-                }
-                batch.push_str(&c.word);
-                i += 1;
-            }
-
-            let batch_row = batch_start / cols;
-            let x = (batch_start % cols) as u16;
-            let y = batch_row.saturating_sub(self.scroll_y as usize);
-            if any_changed && batch_row >= self.scroll_y as usize && y < self.rows as usize {
-                if let Err(e) = crossterm::queue!(out, MoveTo(x, y as u16)) {
-                    log::error!("Failed to queue cursor move to ({}, {}): {}", x, y, e);
-                }
-                if is_empty {
-                    out.extend_from_slice(batch.as_bytes());
-                } else {
-                    push_styled(&mut out, &batch, cell_style, fg, bg);
-                }
-            }
+            i = run.end;
         }
 
         // Refresh the snapshot for the whole viewport. `clear` + `push_str`
@@ -291,6 +177,135 @@ impl TermLayout {
         }
         out
     }
+
+    /// The visible viewport as `(scroll_start, scroll_end)` indexes into
+    /// `layout`. The scroll position is normally clamped to the canvas, but
+    /// the bounds are guarded anyway: a stale out-of-range position (sent
+    /// before the clamp republished, or one the old `max_scroll` advertised
+    /// for documents taller than the buffer cap) must degrade to an empty
+    /// frame instead of indexing past the buffer and panicking the render
+    /// thread.
+    fn viewport_range(&self) -> (usize, usize) {
+        let cols = self.columns as usize;
+        let scroll_start = (self.scroll_y as usize)
+            .saturating_mul(cols)
+            .min(self.layout.len());
+        let scroll_end = scroll_start
+            .saturating_add((self.rows as usize).saturating_mul(cols))
+            .min(self.layout.len());
+        (scroll_start, scroll_end)
+    }
+
+    /// Scan the next maximal batch of same-styled cells starting at/after
+    /// `from`, appending its words to `batch` (cleared first; the buffer is
+    /// reused across batches so a styled run no longer allocates a fresh
+    /// `String` — it grows to the longest run once and is reused
+    /// thereafter). Returns `None` past the viewport end.
+    ///
+    /// This scan is the single source of truth for the run batching shared
+    /// by [`Self::render_to_bytes`] and [`Self::render_diff_to_bytes`]:
+    ///
+    /// - empty words (filler, the second half of a wide glyph) are skipped
+    ///   without ending the batch — a batch may therefore continue past a
+    ///   row whose remaining cells are all empty;
+    /// - a non-empty cell on a new row ends the batch (emission is
+    ///   row-positioned);
+    /// - a switch between "bare space" and styled rendering ends the batch,
+    ///   as does any styled-cell change of fg / bg / style flags.
+    fn next_batch(
+        &self,
+        from: usize,
+        scroll_end: usize,
+        cols: usize,
+        batch: &mut String,
+    ) -> Option<BatchRun> {
+        let mut i = from;
+        while i < scroll_end && self.layout[i].word.is_empty() {
+            i += 1;
+        }
+        if i >= scroll_end {
+            return None;
+        }
+        let start = i;
+        let cell = &self.layout[start];
+        let fg = cell.fcolor;
+        let bg = cell.bcolor;
+        let style = cell.style;
+        // A cell is rendered as a "bare" space only when it has no
+        // background AND no style flags. Anything styled (even a plain
+        // space) must still receive the SGR codes — otherwise spaces
+        // between underlined/italic letters would drop the underline.
+        let bare = is_rendered_as_bare_space(cell);
+        batch.clear();
+        batch.push_str(&cell.word);
+
+        i += 1;
+        while i < scroll_end {
+            let c = &self.layout[i];
+            if c.word.is_empty() {
+                i += 1;
+                continue;
+            }
+            // `i` is always past `start` here, so a non-empty cell at a row
+            // boundary ends the batch (the scan only continues past a row
+            // end through skipped empty cells).
+            if i.is_multiple_of(cols) {
+                break;
+            }
+            let c_bare = is_rendered_as_bare_space(c);
+            if c_bare != bare {
+                break;
+            }
+            if !c_bare && (c.fcolor != fg || c.bcolor != bg || c.style != style) {
+                break;
+            }
+            batch.push_str(&c.word);
+            i += 1;
+        }
+        Some(BatchRun {
+            start,
+            end: i,
+            fg,
+            bg,
+            style,
+            bare,
+        })
+    }
+
+    /// Write one batch to `out` — `MoveTo` its start cell, then the text
+    /// (bare bytes for unstyled spaces, SGR-wrapped otherwise). Batches that
+    /// fall outside the visible viewport rows are silently dropped.
+    fn queue_batch(&self, out: &mut Vec<u8>, run: &BatchRun, batch: &str) {
+        let cols = self.columns as usize;
+        let batch_row = run.start / cols;
+        let x = (run.start % cols) as u16;
+        let y = batch_row.saturating_sub(self.scroll_y as usize);
+        if batch_row >= self.scroll_y as usize && y < self.rows as usize {
+            if let Err(e) = crossterm::queue!(out, MoveTo(x, y as u16)) {
+                log::error!("Failed to queue cursor move to ({}, {}): {}", x, y, e);
+            }
+            if run.bare {
+                out.extend_from_slice(batch.as_bytes());
+            } else {
+                push_styled(out, batch, run.style, run.fg, run.bg);
+            }
+        }
+    }
+}
+
+/// One maximal same-styled run of viewport cells produced by
+/// [`TermLayout::next_batch`]: the cell range it covers plus the rendering
+/// decision shared by every cell in the run.
+struct BatchRun {
+    /// Index of the run's first cell.
+    start: usize,
+    /// One past the run's last cell (a row-boundary cell or `scroll_end`).
+    end: usize,
+    fg: Option<Color>,
+    bg: Option<Color>,
+    style: FontStyle,
+    /// The run renders as bare spaces (no SGR codes).
+    bare: bool,
 }
 
 /// True when two cells render identically (same text, colors and style).
