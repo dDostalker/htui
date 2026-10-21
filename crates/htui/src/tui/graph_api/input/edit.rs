@@ -1,3 +1,4 @@
+use compact_str::CompactString;
 use crossterm::event::{self, KeyCode, KeyModifiers};
 
 use crate::tdom::node::NodeId;
@@ -9,7 +10,7 @@ use super::focus::push_input_render;
 /// `cursor` is a character index into `value`. Returns `true` when the value
 /// or caret changed (the caller should repaint the field); `false` for keys
 /// the field does not consume (`Esc` / `Enter` are handled by the caller).
-pub fn apply_input_key(value: &mut String, cursor: &mut usize, key: KeyCode) -> bool {
+pub fn apply_input_key(value: &mut CompactString, cursor: &mut usize, key: KeyCode) -> bool {
     match key {
         KeyCode::Char(c) => {
             if c == '\r' || c == '\n' {
@@ -151,7 +152,7 @@ fn is_word_char(c: char) -> bool {
 /// helper does not own. Non-navigation word edits clear the selection, like
 /// plain typing.
 pub fn apply_input_word_key(
-    value: &mut String,
+    value: &mut CompactString,
     cursor: &mut usize,
     sel_anchor: &mut Option<usize>,
     key: KeyCode,

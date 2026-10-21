@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use compact_str::CompactString;
+
 use super::{cell::Block, image::ImageCache};
 use crate::tdom::node::NodeId;
 
@@ -13,7 +15,7 @@ use crate::tdom::node::NodeId;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InputRenderState {
     /// Current field value (the DOM `value` attribute is the initial value).
-    pub value: String,
+    pub value: CompactString,
     /// Caret position in `value` (byte index into the displayed string).
     pub cursor: usize,
     /// Whether the field currently holds keyboard focus.

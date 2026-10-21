@@ -5,6 +5,7 @@ use std::io::{BufWriter, Write};
 use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, Mutex};
 
+use compact_str::CompactString;
 use crossterm::style::Color;
 
 use crate::events::Geometry;
@@ -159,7 +160,7 @@ impl RenderState {
         &mut self,
         out: &mut BufWriter<W>,
         node_id: NodeId,
-        value: String,
+        value: CompactString,
         cursor: usize,
         focused: bool,
         selection: Option<(usize, usize)>,

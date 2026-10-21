@@ -161,7 +161,7 @@ pub(crate) fn paint_textarea(
     // content (the textarea's initial value).
     let (value, cursor, focused, selection) = match canvas.input_states.get(&lb.node_id) {
         Some(st) => (st.value.clone(), st.cursor, st.focused, st.selection),
-        None => (node.text_content(arena), 0, false, None),
+        None => (node.text_content(arena).into(), 0, false, None),
     };
 
     let fg = node.css_attr.get_color();

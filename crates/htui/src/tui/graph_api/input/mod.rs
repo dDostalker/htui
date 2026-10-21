@@ -1,5 +1,7 @@
 use std::sync::{Arc, Mutex};
 
+use compact_str::CompactString;
+
 use crate::tdom::node::NodeId;
 
 mod cmd;
@@ -60,8 +62,7 @@ pub struct InputState {
     /// Enter inserts a newline, ↑/↓ move the caret, click maps to rows).
     pub focused_is_textarea: bool,
     /// Edit buffer of the focused input; the DOM `value` attribute is the
-    /// initial content.
-    pub input_value: String,
+    pub input_value: CompactString,
     /// Caret position in [`InputState::input_value`] (character index).
     pub input_cursor: usize,
     /// Selection anchor (character index). `Some(a)` selects the character
@@ -133,7 +134,7 @@ impl InputState {
             pressed: None,
             focused_input: None,
             focused_is_textarea: false,
-            input_value: String::new(),
+            input_value: CompactString::new(""),
             input_cursor: 0,
             input_sel_anchor: None,
             input_clipboard: String::new(),

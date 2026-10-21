@@ -1,3 +1,5 @@
+use compact_str::CompactString;
+
 use crate::events::HitMap;
 use crate::layout::layoutbox::geometry::{
     SelectRow, overlay_options, select_overlay_rect, select_rows,
@@ -108,7 +110,7 @@ fn open_overlay(
     });
     cmds.push(RenderCmd::SelectOpen {
         node_id,
-        filter: filter.map(str::to_string),
+        filter: filter.map(CompactString::from),
     });
 }
 

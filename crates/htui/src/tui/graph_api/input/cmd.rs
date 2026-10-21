@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use compact_str::CompactString;
 use indexmap::IndexMap;
 
 use crate::html::css_parse::DynamicState;
@@ -94,7 +95,7 @@ pub enum RenderCmd {
     /// only that rectangle is repainted.
     RenderInput {
         node_id: NodeId,
-        value: String,
+        value: CompactString,
         cursor: usize,
         focused: bool,
         selection: Option<(usize, usize)>,
@@ -118,7 +119,7 @@ pub enum RenderCmd {
     /// recolours the field's frame. `filter` is `None` for a plain `<select>`.
     SelectOpen {
         node_id: NodeId,
-        filter: Option<String>,
+        filter: Option<CompactString>,
     },
     /// Close the dropdown overlay for `node_id` (clears the painted overlay
     /// and restores the field's frame).
