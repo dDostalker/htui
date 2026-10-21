@@ -634,7 +634,7 @@ fn apply_message_blur_commits_the_value_and_fires_blur_then_change() {
         &map,
         ScriptMsg::BlurInput {
             node_id,
-            value: "new".to_string(),
+            value: "new".into(),
         },
     );
     assert_eq!(
@@ -679,7 +679,7 @@ fn blur_handler_rewrite_reports_the_final_value_in_the_dirty_arena() {
         &map,
         ScriptMsg::BlurInput {
             node_id,
-            value: "new".to_string(),
+            value: "new".into(),
         },
     );
     let dirty = ev.dirty.expect("blur commit must report a repaint");
@@ -719,7 +719,7 @@ fn apply_message_select_pick_commits_and_reports_dirty() {
         &map,
         ScriptMsg::SelectPick {
             node_id,
-            value: "b".to_string(),
+            value: "b".into(),
         },
     );
     assert_eq!(

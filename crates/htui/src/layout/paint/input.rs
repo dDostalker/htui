@@ -3,6 +3,7 @@
 //! declaration opts into a CSS frame; otherwise the field reads as a plain
 //! rectangle, like a browser's default `<input>`.
 
+use compact_str::CompactString;
 use crossterm::style::Color;
 
 use crate::{
@@ -140,7 +141,11 @@ pub(crate) fn paint_input(
     let (value, cursor, focused, selection) = match canvas.input_states.get(&lb.node_id) {
         Some(st) => (st.value.clone(), st.cursor, st.focused, st.selection),
         None => (
-            node.attributes.get("value").cloned().unwrap_or_default(),
+            node.attributes
+                .get("value")
+                .cloned()
+                .map(CompactString::from)
+                .unwrap_or_default(),
             0,
             false,
             None,

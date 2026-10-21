@@ -17,6 +17,8 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use compact_str::CompactString;
+
 use crate::events::{
     ElementRef, EventBindings, EventType, HitMap, HitRegion, HoverState, KeyEventInfo, interaction,
 };
@@ -40,12 +42,18 @@ pub enum ScriptMsg {
     FocusInput { node_id: NodeId },
     /// Blur `node_id`, committing the edited `value` into the DOM and firing
     /// `blur` (+ `change` when the value differs from the committed one).
-    BlurInput { node_id: NodeId, value: String },
+    BlurInput {
+        node_id: NodeId,
+        value: CompactString,
+    },
     /// Editing keystroke on a focused `<input>` (fire `input`).
     InputKeystroke { node_id: NodeId },
     /// A `<select>` option was picked: `set_value_dirty` + fire `change` when
     /// the value actually changed.
-    SelectPick { node_id: NodeId, value: String },
+    SelectPick {
+        node_id: NodeId,
+        value: CompactString,
+    },
     /// An `<input type=checkbox|radio>` was clicked: toggle its `checked`
     /// attribute (clearing same-`name` radio siblings), then fire `input` /
     /// `change`.

@@ -1,5 +1,7 @@
 //! Shared option / row model for `<select>` and datalist dropdown overlays.
 
+use compact_str::CompactString;
+
 use crate::{
     graphics::char_width,
     layout::Rect,
@@ -14,9 +16,9 @@ use crate::{
 /// `<optgroup label>` it belongs to (if any).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectOption {
-    pub value: String,
-    pub label: String,
-    pub group: Option<String>,
+    pub value: CompactString,
+    pub label: CompactString,
+    pub group: Option<CompactString>,
 }
 
 /// One dropdown row: a non-selectable `<optgroup>` header or an option item
@@ -41,7 +43,11 @@ pub(crate) fn select_options(arena: &NodeArena, node_id: NodeId) -> Vec<SelectOp
         match child.node_type {
             NodeType::HtmlOption => out.push(option_value(arena, child_id, None)),
             NodeType::Optgroup => {
-                let group = child.attributes.get("label").cloned();
+                let group = child
+                    .attributes
+                    .get("label")
+                    .cloned()
+                    .map(CompactString::from);
                 for &option_id in &child.children {
                     if arena[option_id].node_type == NodeType::HtmlOption {
                         out.push(option_value(arena, option_id, group.clone()));
@@ -56,9 +62,13 @@ pub(crate) fn select_options(arena: &NodeArena, node_id: NodeId) -> Vec<SelectOp
 
 /// The [`SelectOption`] for one `<option>` node, with the `value` attribute
 /// falling back to the label like a browser.
-fn option_value(arena: &NodeArena, option_id: NodeId, group: Option<String>) -> SelectOption {
+fn option_value(
+    arena: &NodeArena,
+    option_id: NodeId,
+    group: Option<CompactString>,
+) -> SelectOption {
     let child = &arena[option_id];
-    let label: String = child
+    let label: CompactString = child
         .children
         .iter()
         .filter_map(|&c| match &arena[c].node_type {
@@ -70,6 +80,7 @@ fn option_value(arena: &NodeArena, option_id: NodeId, group: Option<String>) -> 
         .attributes
         .get("value")
         .cloned()
+        .map(CompactString::from)
         .unwrap_or_else(|| label.clone());
     SelectOption {
         value,

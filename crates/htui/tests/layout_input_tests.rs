@@ -4,6 +4,7 @@
 //! The editing tests drive `apply_input_key` directly (no terminal, no event
 //! loop); the render tests draw a small document and assert on the canvas.
 
+use compact_str::CompactString;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 use htui::events::EventBindings;
 use htui::html::{css_parse, html_parse};
@@ -159,7 +160,7 @@ fn input_renders_selection_highlight() {
     tl.input_states.insert(
         input_id,
         InputRenderState {
-            value: "hello".to_string(),
+            value: "hello".into(),
             cursor: 4,
             focused: true,
             selection: Some((1, 4)),
@@ -221,7 +222,7 @@ fn input_long_value_windows_around_the_caret() {
     tl.input_states.insert(
         input_id,
         InputRenderState {
-            value: "abcdefghijkl".to_string(),
+            value: "abcdefghijkl".into(),
             cursor: 12,
             focused: true,
             selection: None,
@@ -298,7 +299,7 @@ fn layout_drops_unfocused_input_state_but_keeps_focused() {
     tl.input_states.insert(
         input_id,
         InputRenderState {
-            value: "stale".to_string(),
+            value: "stale".into(),
             cursor: 0,
             focused: false,
             selection: None,
@@ -316,7 +317,7 @@ fn layout_drops_unfocused_input_state_but_keeps_focused() {
     tl.input_states.insert(
         input_id,
         InputRenderState {
-            value: "typing".to_string(),
+            value: "typing".into(),
             cursor: 5,
             focused: true,
             selection: None,
@@ -378,7 +379,7 @@ fn input_field_key_classifies_editing_keys() {
 
 #[test]
 fn apply_input_key_inserts_removes_and_moves() {
-    let mut value = String::from("hello");
+    let mut value = CompactString::from("hello");
     let mut cursor = 5;
 
     assert!(apply_input_key(&mut value, &mut cursor, KeyCode::Char('!')));
@@ -402,7 +403,7 @@ fn apply_input_key_inserts_removes_and_moves() {
 
 #[test]
 fn apply_input_key_home_end_and_limits() {
-    let mut value = String::from("ab");
+    let mut value = CompactString::from("ab");
     let mut cursor = 2;
 
     assert!(apply_input_key(&mut value, &mut cursor, KeyCode::Home));
@@ -428,7 +429,7 @@ fn apply_input_key_home_end_and_limits() {
 #[test]
 fn apply_input_key_handles_multibyte_chars() {
     // Caret is a character index; multi-byte characters must stay intact.
-    let mut value = String::from("你好");
+    let mut value = CompactString::from("你好");
     let mut cursor = 0;
 
     assert!(apply_input_key(&mut value, &mut cursor, KeyCode::Char('!')));
@@ -457,7 +458,7 @@ fn engine_input_state_renders_value_and_caret() {
     tl.input_states.insert(
         input_id,
         InputRenderState {
-            value: "abc".to_string(),
+            value: "abc".into(),
             cursor: 1,
             focused: true,
             selection: None,
@@ -493,7 +494,7 @@ fn input_caret_color_paints_the_caret_cell() {
     tl.input_states.insert(
         input_id,
         InputRenderState {
-            value: "abc".to_string(),
+            value: "abc".into(),
             cursor: 1,
             focused: true,
             selection: None,
@@ -527,7 +528,7 @@ fn textarea_caret_color_paints_the_caret_cell() {
     tl.input_states.insert(
         textarea_id,
         InputRenderState {
-            value: "hi".to_string(),
+            value: "hi".into(),
             cursor: 1,
             focused: true,
             selection: None,
@@ -576,7 +577,7 @@ fn word_boundaries_match_browser_semantics() {
 
 #[test]
 fn apply_word_key_moves_caret_by_word() {
-    let mut value = String::from("hello brave new world");
+    let mut value = CompactString::from("hello brave new world");
     let mut cursor = 0;
     let mut anchor = None;
 
@@ -622,7 +623,7 @@ fn apply_word_key_moves_caret_by_word() {
 #[test]
 fn apply_word_key_deletes_by_word() {
     // Ctrl+Backspace removes the word before the caret.
-    let mut value = String::from("hello world");
+    let mut value = CompactString::from("hello world");
     let mut cursor = 11;
     let mut anchor = None;
     assert!(apply_input_word_key(
@@ -636,7 +637,7 @@ fn apply_word_key_deletes_by_word() {
     assert_eq!(cursor, 6, "caret lands on the deleted word's start");
 
     // Ctrl+Delete removes the word after the caret.
-    let mut value = String::from("hello world");
+    let mut value = CompactString::from("hello world");
     let mut cursor = 6;
     let mut anchor = None;
     assert!(apply_input_word_key(
@@ -650,7 +651,7 @@ fn apply_word_key_deletes_by_word() {
     assert_eq!(cursor, 6);
 
     // Ctrl+Home / Ctrl+End jump to the line edges (browser caret movement).
-    let mut value = String::from("abc def");
+    let mut value = CompactString::from("abc def");
     let mut cursor = 3;
     let mut anchor = None;
     assert!(apply_input_word_key(
@@ -674,7 +675,7 @@ fn apply_word_key_deletes_by_word() {
 #[test]
 fn apply_word_key_shift_extends_the_selection() {
     // Shift+Ctrl+Right selects from the original caret to the next word end.
-    let mut value = String::from("hello brave");
+    let mut value = CompactString::from("hello brave");
     let mut cursor = 0;
     let mut anchor = None;
     assert!(apply_input_word_key(
