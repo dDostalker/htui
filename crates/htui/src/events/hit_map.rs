@@ -65,20 +65,26 @@ impl HitMap {
         self.regions.iter()
     }
 
-    /// Build the region list by walking the layout forest.
+    /// Build the region list by walking the layout forest in paint order.
     ///
-    /// Every laid-out box becomes a region, so hit testing finds the deepest
-    /// element under the pointer (needed for CSS `:hover`, which applies to
-    /// any element). Event dispatch is unaffected: the bubbling walk only
-    /// invokes handlers for elements that declare `on*` attributes, and a
-    /// non-interactive element's empty action map falls through to its
+    /// Every laid-out box becomes a region, so hit testing finds the element
+    /// painted on top under the pointer (needed for CSS `:hover`, which
+    /// applies to any element). Event dispatch is unaffected: the bubbling
+    /// walk only invokes handlers for elements that declare `on*` attributes,
+    /// and a non-interactive element's empty action map falls through to its
     /// ancestors.
     ///
-    /// Two sharing passes keep the build proportional to unique content
-    /// instead of boxes: the bubbling path is resolved once per distinct
-    /// node and shared through an `Arc`, and the finished regions are
-    /// bucketed by canvas row so [`HitMap::hit_test`] never scans the whole
-    /// list.
+    /// Three sharing passes keep the build proportional to unique content
+    /// instead of boxes:
+    ///
+    /// - children are visited in the **paint stacking order** (the same
+    ///   `z-index` / positioned-above-static key the paint phase sorts by),
+    ///   so the region index doubles as the paint rank and hit testing can
+    ///   resolve overlaps by "painted last wins" — the browser rule;
+    /// - the bubbling path is resolved once per distinct node and shared
+    ///   through an `Arc`;
+    /// - the finished regions are bucketed by canvas row so
+    ///   [`HitMap::hit_test`] never scans the whole list.
     pub fn build(geometry: &Geometry) -> HitMap {
         let mut regions = Vec::new();
         // One ancestor-chain resolution per distinct node, shared by every
@@ -90,10 +96,14 @@ impl HitMap {
                 .or_insert_with(|| ancestor_path(&geometry.arena, node_id).into())
                 .clone()
         };
-        collect_regions(&geometry.boxes, &mut path_of, &mut regions);
+        collect_regions_roots(&geometry.boxes, &mut path_of, &mut regions);
         // Inline `<label>` runs get their own small regions (the label's
         // text slice within its block box) so a click on label text resolves
-        // to the label for `for=` / wrapped-control delegation.
+        // to the label for `for=` / wrapped-control delegation. They are
+        // appended after the box forest — they have no box of their own, so
+        // they win against everything they overlap (an approximation: an
+        // overlay painted above the label text would still lose the hit to
+        // the label region).
         for (node_id, rect) in crate::layout::label_regions(&geometry.arena, &geometry.boxes) {
             regions.push(HitRegion {
                 node_id,
@@ -117,29 +127,21 @@ impl HitMap {
         HitMap { regions, rows }
     }
 
-    /// Deepest region containing the canvas point.
+    /// The topmost region containing the canvas point.
     ///
-    /// Children always sit inside their ancestors' content boxes, so the
-    /// region with the smallest rect area is the innermost one; ties resolve
-    /// to the later (deeper, in DFS order) candidate. Only the regions
-    /// covering the point's row are examined.
+    /// Browser semantics: the hit target is the element **painted on top**.
+    /// Regions are indexed in paint stacking order (see [`HitMap::build`]),
+    /// so among the candidates covering the point the last one in paint
+    /// order wins — a positioned overlay beats the static content beneath
+    /// it, a higher `z-index` beats a lower one, and a child beats its
+    /// ancestor. Only the regions covering the point's row are examined.
     pub fn hit_test(&self, x: u32, y: u32) -> Option<&HitRegion> {
         let mut best: Option<&HitRegion> = None;
         for &idx in self.rows.get(y as usize)? {
             let region = &self.regions[idx as usize];
-            if !region.rect.contains(x, y) {
-                continue;
-            }
-            match best {
-                None => best = Some(region),
-                Some(current) => {
-                    // Replace when the candidate is at least as specific
-                    // (smaller area ⇒ deeper nesting). Equal areas keep the
-                    // later, deeper DFS-order candidate.
-                    if region.rect.area() <= current.rect.area() {
-                        best = Some(region);
-                    }
-                }
+            if region.rect.contains(x, y) {
+                // Later region index = painted later = on top.
+                best = Some(region);
             }
         }
         best
@@ -154,18 +156,35 @@ impl HitMap {
     }
 }
 
-fn collect_regions(
-    boxes: &[LayoutBox],
+/// Walk the layout forest roots, pushing one region per box in paint
+/// stacking order.
+fn collect_regions_roots(
+    roots: &[LayoutBox],
     path_of: &mut impl FnMut(NodeId) -> Arc<[ElementRef]>,
     out: &mut Vec<HitRegion>,
 ) {
-    for b in boxes {
-        out.push(HitRegion {
-            node_id: b.node_id,
-            rect: b.rect,
-            path: path_of(b.node_id),
-        });
-        collect_regions(&b.children, path_of, out);
+    for root in roots {
+        collect_regions(root, path_of, out);
+    }
+}
+
+/// Push `box_tree`'s region, then recurse into its children in the paint
+/// stacking order (the same key the paint phase sorts by), so the region
+/// index doubles as the paint rank.
+fn collect_regions(
+    box_tree: &LayoutBox,
+    path_of: &mut impl FnMut(NodeId) -> Arc<[ElementRef]>,
+    out: &mut Vec<HitRegion>,
+) {
+    out.push(HitRegion {
+        node_id: box_tree.node_id,
+        rect: box_tree.rect,
+        path: path_of(box_tree.node_id),
+    });
+    let mut children: Vec<&LayoutBox> = box_tree.children.iter().collect();
+    children.sort_by_key(|c| crate::layout::paint::stacking_key(c));
+    for child in children {
+        collect_regions(child, path_of, out);
     }
 }
 
