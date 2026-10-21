@@ -2,6 +2,13 @@
 members = ["crates/htui", "crates/htui-macros"]
 resolver = "3"
 
+# Cross-crate inlining for release builds: the render pipeline and the Boa
+# engine are both call-heavy, so LTO measurably helps the shipped binary.
+# `thin` keeps release build times reasonable; switch to `lto = true` (fat)
+# when squeezing the last percent of runtime matters more than build time.
+[profile.release]
+lto = "thin"
+
 # Single source of truth for dependency versions: member crates reference
 # these with `<dep> = { workspace = true }` and must not pin their own
 # versions. Features live here too (features are additive; members may add,
