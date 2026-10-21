@@ -2,134 +2,349 @@
 <!--
   htui music player demo — interface + interaction only (no audio).
   Works in the terminal via htui and in a regular browser (standard DOM).
+  Theme: "neon night" — charcoal slate + mint/cyan/violet/coral accents.
+  Features: animated spectrum, waveform progress, lyrics, up-next queue,
+  favorites with filtering, seek, repeat/shuffle, volume, live clock.
+  Layout: viewport-fit — the page is exactly 100vh (flex column); panels
+  stretch on tall terminals and clip gracefully on small ones, so it never
+  scrolls.
 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>htui music player</title>
+<title>htui wave</title>
 <style>
-  body { background-color: #12121f; color: #d8d8e8; }
+  body { background-color: #0b0e14; color: #e4eaf7; margin: 0; }
 
-  .header {
+  /* ---------- viewport-fit frame ----------
+     Each region is a plain block with a definite vh height. Definite
+     blocks never grow with their content: inner layout may overflow, but
+     the paint clip chain drops everything past the region's border box,
+     so rendered rows never exceed the viewport and the page never
+     scrolls at any terminal size. The footer is viewport-fixed. */
+
+  /* ---------- top bar ---------- */
+  .top {
+    height: 1ch;
+    margin: 0 1ch;
+    border: 1ch solid #1f2740;
+    border-radius: 1;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background-color: #1d1d36;
     padding: 0 1ch;
-    border-bottom: solid #34345e;
+    background-color: #0e121c;
   }
-  .brand { color: #6fd3ff; }
-  #state-label { color: #8888aa; }
+  .brand { color: #43e5a0; font-weight: bold; }
+  .feed { color: #556085; margin-left: auto; }
+  #state-label { color: #43e5a0; margin-left: 2ch; }
+  #state-label.off { color: #8b96b5; }
+  .clock { color: #56c8f5; font-weight: bold; margin-left: 2ch; }
 
-  .main { display: flex; gap: 2ch; padding: 1ch; }
+  /* ---------- layout ---------- */
+  .main-wrap { margin: 1ch 1ch 0 1ch; height: 50vh; }
+  .main { display: flex; gap: 1ch; align-items: flex-start; }
+  .np { flex: 1 1 0; display: flex; flex-direction: column; }
+  .side { width: 30ch; flex-shrink: 0; display: flex; flex-direction: column; gap: 1ch; }
 
+  .card {
+    border: 1ch solid #1f2740;
+    border-radius: 1;
+    background-color: #10141d;
+    padding: 1ch;
+  }
+  .card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1ch;
+  }
+  .head-label { color: #556085; text-transform: uppercase; font-weight: bold; }
+  .head-extra { color: #43e5a0; }
+
+  /* ---------- now playing ---------- */
+  .np-body { flex: 1 1 auto; min-height: 0; display: flex; gap: 1ch; align-items: flex-start; }
   .art {
-    width: 22ch;
-    height: 9ch;
-    border: 1ch solid #3a3a6a;
-    background-color: #181830;
+    width: 14ch;
+    flex-shrink: 0;
+    border: 1ch solid #2a3554;
+    border-radius: 1;
     display: flex;
     flex-direction: column;
-    justify-content: center;
-    align-items: center;
+    justify-content: flex-end;
+    overflow: hidden;
   }
-  .note { color: #ffd75f; }
-  .art-label { color: #55557a; }
+  .band { flex: 0 0 auto; height: 1ch; }
+  .band1 { background-color: #101c2e; color: #1d3a5f; }
+  .band2 { background-color: #0f2438; color: #1f5f8a; }
+  .band3 { background-color: #0d3346; color: #1f8fb8; }
+  .band4 { background-color: #0b4552; color: #1fbfa8; }
+  .band5 { background-color: #0d5547; color: #2fe6a8; }
+  .band6 { background-color: #2a2a52; color: #7c7cf0; }
+  .band7 { background-color: #33224a; color: #a06ae0; }
+  .band8 { background-color: #3a1f3d; color: #c66ad8; }
+  .art-cap {
+    flex: 0 0 auto;
+    height: 1ch;
+    background-color: #0b0e14;
+    color: #556085;
+    text-align: center;
+  }
 
-  .info { flex: 1; display: flex; flex-direction: column; gap: 1ch; }
-  .title { color: #ffffff; }
-  .artist { color: #9a9ac0; }
+  .np-info { flex: 1; display: flex; flex-direction: column; }
+  .np-titlerow { display: flex; justify-content: space-between; align-items: center; }
+  .np-title { color: #ffffff; font-weight: bold; }
+  .like { color: #556085; }
+  .like:hover { color: #ff7a90; }
+  .like.on { color: #ff7a90; }
+  .np-artist { color: #8b96b5; }
+  .badges { display: flex; gap: 1ch; margin-top: 1ch; }
+  .badge {
+    border-radius: 1;
+    padding: 0 1ch;
+    background-color: #1a2233;
+    color: #8b96b5;
+  }
+  .tag-SYNTH   { background-color: #221e42; color: #a78bfa; }
+  .tag-LOFI    { background-color: #0e2a3d; color: #56c8f5; }
+  .tag-AMBIENT { background-color: #0f2a22; color: #43e5a0; }
+  .tag-HOUSE   { background-color: #3a1a26; color: #ff7a90; }
+  .tag-JAZZ    { background-color: #3a2f14; color: #f5c169; }
+  .tag-ROCK    { background-color: #22330f; color: #a3e635; }
 
-  .progress { width: 100%; height: 1; background-color: #26264a; }
-  .bar { height: 1; background-color: #4488cc; }
+  .spacer { flex: 0 0 auto; height: 1ch; }
+  .wave { white-space: pre; }
+  .wave-on { color: #43e5a0; }
+  .wave-off { color: #24304e; }
+  .times { display: flex; justify-content: space-between; color: #556085; }
 
-  .time { display: flex; justify-content: space-between; color: #8888aa; }
-
-  .controls { display: flex; gap: 1ch; }
+  .controls { display: flex; gap: 1ch; align-items: center; margin-top: 1ch; }
   .btn {
     display: inline-block;
-    padding: 0 2ch;
-    border: 1ch solid #44446a;
-    background-color: #20203a;
-    color: #c8c8ee;
-  }
-  .btn:hover { background-color: #2e2e56; color: #ffffff; }
-  .btn-main { color: #6fd3ff; border-color: #4488cc; }
-  .btn.on { color: #ffd75f; border-color: #ffd75f; }
-
-  .vol { display: flex; align-items: center; gap: 1ch; color: #6fd3ff; }
-  #vol-bar { color: #4488cc; }
-
-  .plist-head {
     padding: 0 1ch;
-    color: #8888aa;
-    border-top: solid #34345e;
+    border-radius: 1;
+    background-color: #1a2233;
+    color: #c3cde8;
+    flex-shrink: 0;
   }
-  .plist { padding: 0 1ch; }
-  .row { display: flex; gap: 2ch; padding: 0 1ch; }
-  .row:hover { background-color: #23233f; }
-  .row.active { background-color: #23355c; }
-  .idx { width: 3ch; flex-shrink: 0; color: #66668a; }
-  .row.active .idx { color: #ffd75f; }
-  .ptitle { flex: 1 1 auto; }
-  .row.active .ptitle { color: #6fd3ff; }
-  .partist { width: 22ch; flex-shrink: 0; color: #8888aa; }
-  .pdur { width: 5ch; flex-shrink: 0; text-align: right; color: #66668a; }
+  .btn:hover { background-color: #26314a; color: #ffffff; }
+  .btn-main {
+    background-color: #43e5a0;
+    color: #0b0e14;
+    font-weight: bold;
+    padding: 0 2ch;
+  }
+  .btn-main:hover { background-color: #6ff0b8; color: #0b0e14; }
+  .btn.on { color: #f5c169; background-color: #2a2410; }
 
-  .footer { padding: 0 1ch; color: #55557a; border-top: solid #34345e; }
+  .vol { display: flex; gap: 1ch; align-items: center; margin-top: 1ch; }
+  .vol-label { color: #556085; }
+  .vol-on { color: #43e5a0; }
+  .vol-off { color: #24304e; }
+  .vol-pct { color: #56c8f5; }
+
+  /* ---------- spectrum ---------- */
+  .viz { display: flex; gap: 2ch; }
+  .viz-pre { white-space: pre; height: 4ch; }
+  #viz-l { color: #43e5a0; }
+  #viz-r { color: #a78bfa; }
+
+  /* ---------- queue / lyrics ---------- */
+  .qrow { display: flex; gap: 1ch; padding: 0 1ch; border-left: 1ch solid #1f2740; }
+  .qrow.next { border-left: 1ch solid #43e5a0; background-color: #0f1a24; }
+  .qrow.next .qtitle { color: #43e5a0; }
+  .qidx { width: 3ch; flex-shrink: 0; color: #556085; text-align: right; }
+  .qtitle { flex: 1; color: #c3cde8; }
+  .qartist { color: #556085; }
+
+  .card-lyr { flex: 1; }
+  .ly { color: #4a5372; }
+  .ly.on { color: #43e5a0; font-weight: bold; }
+
+  /* ---------- library ---------- */
+  .lib-wrap { margin: 1ch 1ch 0 1ch; height: 26vh; }
+  .lib { display: flex; flex-direction: column; }
+  .lib-head { flex: 0 0 auto; display: flex; align-items: center; gap: 2ch; margin-bottom: 1ch; }
+  .lib-title { font-weight: bold; color: #ffffff; text-transform: uppercase; }
+  .tabs { display: flex; gap: 1ch; }
+  .tab {
+    display: inline-block;
+    padding: 0 1ch;
+    border-radius: 1;
+    background-color: #1a2233;
+    color: #8b96b5;
+  }
+  .tab:hover { color: #ffffff; background-color: #26314a; }
+  .tab.on { color: #43e5a0; background-color: #0f2a22; }
+  .lib-meta { flex: 1; text-align: right; color: #556085; }
+
+  .row { display: flex; gap: 2ch; padding: 0 1ch; }
+  .row:nth-child(odd) { background-color: #0e1220; }
+  .row:hover { background-color: #161c2c; }
+  .row.active { background-color: #0f2a22; border-radius: 1; }
+  .idx { width: 4ch; flex-shrink: 0; text-align: right; color: #556085; }
+  .row.active .idx { color: #43e5a0; }
+  .ptitle { flex: 1 1 auto; }
+  .row.active .ptitle { color: #43e5a0; font-weight: bold; }
+  .heart { color: #ff7a90; }
+  .partist { width: 20ch; flex-shrink: 0; color: #8b96b5; }
+  .ptag {
+    width: 10ch;
+    flex-shrink: 0;
+    text-align: center;
+    border-radius: 1;
+  }
+  .pq { width: 8ch; flex-shrink: 0; text-align: center; color: #556085; }
+  .pdur { width: 5ch; flex-shrink: 0; text-align: right; color: #556085; }
+
+  /* ---------- footer ---------- */
+  .footer {
+    position: fixed;
+    bottom: 0;
+    left: 1ch;
+    right: 1ch;
+    border: 1ch solid #1f2740;
+    border-radius: 1;
+    display: flex;
+    justify-content: space-between;
+    padding: 0 1ch;
+    color: #556085;
+    background-color: #0e121c;
+  }
+  .foot-key { color: #8b96b5; }
 </style>
 </head>
 <body>
-  <div class="header">
-    <span class="brand">♪ htui player</span>
-    <span id="state-label">paused</span>
+  <div class="top">
+    <span class="brand">&#9679; HTUI&middot;WAVE &middot; DEMO</span>
+    <span class="feed">44.1 kHz &middot; 24-BIT &middot; STEREO</span>
+    <span id="state-label">&#9679; PAUSED</span>
+    <span id="clock" class="clock">00:00:00</span>
   </div>
 
+  <div class="main-wrap">
   <div class="main">
-    <div class="art">
-      <div class="note">♪</div>
-      <div class="art-label">ALBUM ART</div>
+    <div class="np card">
+      <div class="card-head">
+        <span class="head-label">Now Playing</span>
+        <span id="np-state" class="head-extra">IDLE</span>
+      </div>
+      <div class="np-body">
+        <div class="art">
+          <div class="band band1">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+          <div class="band band2">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+          <div class="band band3">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+          <div class="band band4">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+          <div class="band band5">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+          <div class="band band6">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+          <div class="band band7">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+          <div class="art-cap">NEON NIGHTS</div>
+        </div>
+
+        <div class="np-info">
+          <div class="np-titlerow">
+            <span id="title" class="np-title">-</span>
+            <span id="btn-like" class="like" onclick="toggleLike()">&#9825;</span>
+          </div>
+          <div id="artist" class="np-artist">-</div>
+          <div class="badges">
+            <span id="badge-genre" class="badge">-</span>
+            <span id="badge-q" class="badge">-</span>
+            <span id="badge-bpm" class="badge">-</span>
+          </div>
+
+          <div class="spacer"></div>
+          <div class="wave"><span id="wave-on" class="wave-on"></span><span id="wave-off" class="wave-off"></span></div>
+          <div class="times">
+            <span id="t-cur">0:00</span>
+            <span id="t-rem">-0:00</span>
+          </div>
+
+          <div class="controls">
+            <span class="btn" onclick="seek(-10)">-10</span>
+            <span class="btn" onclick="prev()">&#9664;&#9664;</span>
+            <span id="btn-play" class="btn btn-main" onclick="togglePlay()">&#9654; PLAY</span>
+            <span class="btn" onclick="next()">&#9654;&#9654;</span>
+            <span class="btn" onclick="seek(10)">+10</span>
+            <span id="btn-repeat" class="btn" onclick="toggleRepeat()">rep</span>
+            <span id="btn-shuffle" class="btn" onclick="toggleShuffle()">shuf</span>
+          </div>
+
+          <div class="vol">
+            <span class="vol-label">VOL</span>
+            <span id="btn-voldown" class="btn" onclick="volDown()">-</span>
+            <span><span id="vol-on" class="vol-on"></span><span id="vol-off" class="vol-off"></span></span>
+            <span id="btn-volup" class="btn" onclick="volUp()">+</span>
+            <span id="vol-pct" class="vol-pct">80%</span>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <div class="info">
-      <div id="title" class="title">-</div>
-      <div id="artist" class="artist">-</div>
-
-      <div class="progress"><div id="bar" class="bar"></div></div>
-      <div class="time">
-        <span id="t-cur">0:00</span>
-        <span id="t-dur">0:00</span>
+    <div class="side">
+      <div class="card">
+        <div class="card-head">
+          <span class="head-label">Spectrum</span>
+          <span class="head-extra">L / R</span>
+        </div>
+        <div class="viz">
+          <div id="viz-l" class="viz-pre"> </div>
+          <div id="viz-r" class="viz-pre"> </div>
+        </div>
       </div>
 
-      <div class="controls">
-        <span id="btn-prev" class="btn" onclick="prev()">«</span>
-        <span id="btn-play" class="btn btn-main" onclick="togglePlay()">▶</span>
-        <span id="btn-next" class="btn" onclick="next()">»</span>
-        <span id="btn-repeat" class="btn" onclick="toggleRepeat()">repeat</span>
-        <span id="btn-shuffle" class="btn" onclick="toggleShuffle()">shuffle</span>
+      <div class="card">
+        <div class="card-head">
+          <span class="head-label">Up Next</span>
+          <span class="head-extra">AUTO</span>
+        </div>
+        <div id="queue"></div>
       </div>
 
-      <div class="vol">
-        <span id="btn-voldown" class="btn" onclick="volDown()">vol -</span>
-        <span id="vol-bar">██████████</span>
-        <span id="btn-volup" class="btn" onclick="volUp()">vol +</span>
+      <div class="card card-lyr">
+        <div class="card-head">
+          <span class="head-label">Lyrics</span>
+          <span class="head-extra">&#9835;</span>
+        </div>
+        <div id="lyr"></div>
       </div>
     </div>
   </div>
+  </div>
 
-  <div class="plist-head">PLAYLIST</div>
-  <div id="plist" class="plist"></div>
+  <div class="lib-wrap">
+  <div class="lib">
+    <div class="lib-head">
+      <span class="lib-title">Library</span>
+      <span class="tabs">
+        <span id="tab-all" class="tab on" onclick="setTab('all')">All</span>
+        <span id="tab-fav" class="tab" onclick="setTab('fav')">&#9825; Fav</span>
+      </span>
+      <span id="lib-meta" class="lib-meta"></span>
+    </div>
+    <div id="plist"></div>
+  </div>
+  </div>
 
-  <div class="footer">click a track or the controls · Esc quits the player</div>
+  <div class="footer">
+    <span><span class="foot-key">-10/+10</span> seek &middot; <span class="foot-key">&#9825;</span> fav &middot; <span class="foot-key">Esc</span> quit</span>
+    <span>htui engine demo</span>
+  </div>
 
   <script>
     var tracks = [
-      { title: "Terminal Dreams",   artist: "The Compilers",       dur: 214 },
-      { title: "Rust Async Nights", artist: "Tokio Trio",          dur: 187 },
-      { title: "Memory Safe",       artist: "The Borrow Checkers", dur: 243 },
-      { title: "Zero Cost",         artist: "Monomorphized",       dur: 176 },
-      { title: "Segfault Blues",    artist: "Undefined Behavior",  dur: 201 },
-      { title: "Cargo Wake",        artist: "Crates and Modules",  dur: 168 }
+      { title: "Terminal Dreams",   artist: "The Compilers",       dur: 214, genre: "SYNTH",   q: "HI-RES",  bpm: 124, fav: true,
+        lyrics: [[0,"neon rain on the window"],[35,"circuits hum in the dark"],[80,"we compile the night away"],[130,"every loop a heartbeat"],[180,"terminal dreams... carry me"]] },
+      { title: "Rust Async Nights", artist: "Tokio Trio",          dur: 187, genre: "LO-FI",   q: "320kbps", bpm: 92,  fav: false,
+        lyrics: [[0,"awaiting the midnight build"],[40,"green threads on the wall"],[90,"no deadlock can hold us"],[140,"async nights, sync hearts"],[170,"till the cargo wakes"]] },
+      { title: "Memory Safe",       artist: "The Borrow Checkers", dur: 243, genre: "AMBIENT", q: "HI-RES",  bpm: 70,  fav: true,
+        lyrics: [[0,"borrowed light, owned soul"],[50,"the checker guards the gate"],[100,"no segfault in paradise"],[160,"memory safe, heart unsafe"],[210,"drop goes the last ref"]] },
+      { title: "Zero Cost",         artist: "Monomorphized",       dur: 176, genre: "HOUSE",   q: "320kbps", bpm: 128, fav: false,
+        lyrics: [[0,"abstractions dissolve"],[40,"monomorphize my heart"],[85,"zero cost, all feeling"],[130,"inline the sorrow"],[160,"ship it at dawn"]] },
+      { title: "Segfault Blues",    artist: "Undefined Behavior",  dur: 201, genre: "JAZZ",    q: "HI-RES",  bpm: 96,  fav: false,
+        lyrics: [[0,"address 0x0 blues"],[45,"core dumped on the floor"],[95,"gdb sings the story"],[150,"backtrace of a broken heart"],[180,"undefined behavior again"]] },
+      { title: "Cargo Wake",        artist: "Crates and Modules",  dur: 168, genre: "ROCK",    q: "320kbps", bpm: 140, fav: true,
+        lyrics: [[0,"morning build alarm"],[35,"crates stacked to the sky"],[80,"wake up, the tests are green"],[125,"modules hum a tune"],[155,"cargo wake, new day"]] }
     ];
 
     var current = 0;
@@ -138,21 +353,53 @@
     var repeat = false;
     var shuffle = false;
     var volume = 8;
+    var tab = "all";
+
+    var WAVE_N = 48;
+    var VOL_N = 10;
+    var VIZ_H = 4;
+    var CAPS = [" ", "\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587"];
+    var FULL = "\u2588";
+    var EMPTY = "\u2591";
+    var BLOCKS = ["\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587", "\u2588"];
 
     function $(id) { return document.getElementById(id); }
+
+    function pad2(n) { return (n < 10 ? "0" : "") + n; }
 
     function fmt(s) {
       var m = Math.floor(s / 60);
       var r = Math.floor(s % 60);
-      return m + ":" + (r < 10 ? "0" : "") + r;
+      return m + ":" + pad2(r);
     }
 
-    function padBar() {
+    function repeatStr(s, n) {
       var out = "";
-      for (var i = 0; i < 10; i++) {
-        out += i < volume ? "█" : "░";
-      }
+      for (var i = 0; i < n; i++) { out += s; }
       return out;
+    }
+
+    function waveChar(i) {
+      var v = Math.abs(Math.sin(i * 0.37)) * 0.6 + Math.abs(Math.sin(i * 1.31 + 1)) * 0.4;
+      return BLOCKS[Math.min(7, Math.floor(v * 7.99))];
+    }
+
+    function updateWave() {
+      var played = Math.floor(elapsed * WAVE_N / tracks[current].dur);
+      if (played > WAVE_N) { played = WAVE_N; }
+      var on = "";
+      var off = "";
+      for (var i = 0; i < WAVE_N; i++) {
+        if (i < played) { on += waveChar(i); } else { off += waveChar(i); }
+      }
+      $("wave-on").textContent = on;
+      $("wave-off").textContent = off;
+    }
+
+    function updateVolume() {
+      $("vol-on").textContent = repeatStr(FULL, volume);
+      $("vol-off").textContent = repeatStr(EMPTY, VOL_N - volume);
+      $("vol-pct").textContent = (volume * 10) + "%";
     }
 
     function setOn(id, on) {
@@ -160,37 +407,86 @@
       else { $(id).classList.remove("on"); }
     }
 
+    function update() {
+      var t = tracks[current];
+      $("title").textContent = t.title;
+      $("artist").textContent = t.artist;
+      $("t-cur").textContent = fmt(elapsed);
+      $("t-rem").textContent = "-" + fmt(t.dur - elapsed);
+      $("badge-genre").textContent = t.genre;
+      $("badge-genre").className = "badge tag-" + t.genre.replace("-", "");
+      $("badge-q").textContent = t.q;
+      $("badge-bpm").textContent = t.bpm + " BPM";
+      $("np-state").textContent = playing ? "\u25b6 " + fmt(elapsed) + " / " + fmt(t.dur) : "IDLE";
+      $("btn-play").textContent = playing ? "\u275a\u275a PAUSE" : "\u25b6 PLAY";
+      $("state-label").textContent = playing ? "\u25cf PLAYING" : "\u25cf PAUSED";
+      $("state-label").className = playing ? "" : "off";
+      setOn("btn-like", t.fav);
+      $("btn-like").textContent = t.fav ? "\u2665" : "\u2661";
+      setOn("btn-repeat", repeat);
+      setOn("btn-shuffle", shuffle);
+      updateWave();
+      updateVolume();
+    }
+
     function renderPlaylist() {
+      var count = 0;
+      var total = 0;
       var html = "";
       for (var i = 0; i < tracks.length; i++) {
-        var mark = (i === current && playing) ? "▶" : String(i + 1);
+        if (tab === "fav" && !tracks[i].fav) { continue; }
+        count++;
+        total += tracks[i].dur;
+        var mark = (i === current && playing) ? "\u25b6" : String(i + 1);
+        var heart = tracks[i].fav ? '<span class="heart">\u2665</span> ' : "";
         html += '<div class="' + (i === current ? "row active" : "row")
           + '" onclick="pick(' + i + ')">'
           + '<span class="idx">' + mark + '</span>'
-          + '<span class="ptitle">' + tracks[i].title + '</span>'
+          + '<span class="ptitle">' + heart + tracks[i].title + '</span>'
           + '<span class="partist">' + tracks[i].artist + '</span>'
+          + '<span class="ptag tag-' + tracks[i].genre.replace("-", "") + '">' + tracks[i].genre + '</span>'
+          + '<span class="pq">' + tracks[i].q + '</span>'
           + '<span class="pdur">' + fmt(tracks[i].dur) + '</span>'
           + '</div>';
       }
       $("plist").innerHTML = html;
+      var allTotal = 0;
+      for (var j = 0; j < tracks.length; j++) { allTotal += tracks[j].dur; }
+      $("lib-meta").textContent = count + " TRACKS \u00b7 " + fmt(total) + (tab === "all" ? " \u00b7 TOTAL " + fmt(allTotal) : "");
     }
 
-    function update() {
-      $("title").textContent = tracks[current].title;
-      $("artist").textContent = tracks[current].artist;
-      $("t-cur").textContent = fmt(elapsed);
-      $("t-dur").textContent = fmt(tracks[current].dur);
-      $("bar").style.width = Math.floor(elapsed * 100 / tracks[current].dur) + "%";
-      $("btn-play").textContent = playing ? "❚❚" : "▶";
-      $("state-label").textContent = playing ? "playing…" : "paused";
-      setOn("btn-repeat", repeat);
-      setOn("btn-shuffle", shuffle);
-      $("vol-bar").textContent = padBar();
+    function renderQueue() {
+      var html = "";
+      for (var k = 1; k <= 3; k++) {
+        var i = (current + k) % tracks.length;
+        html += '<div class="' + (k === 1 ? "qrow next" : "qrow") + '">'
+          + '<span class="qidx">' + k + '</span>'
+          + '<span class="qtitle">' + tracks[i].title + '</span>'
+          + '<span class="qartist">' + tracks[i].artist + '</span>'
+          + '</div>';
+      }
+      $("queue").innerHTML = html;
+    }
+
+    function renderLyrics() {
+      var lines = tracks[current].lyrics;
+      var active = -1;
+      for (var i = 0; i < lines.length; i++) {
+        if (elapsed >= lines[i][0]) { active = i; }
+      }
+      var html = "";
+      for (var j = 0; j < lines.length; j++) {
+        html += '<div class="' + (j === active ? "ly on" : "ly") + '">'
+          + (j === active ? "\u25b8 " : "&nbsp;&nbsp; ") + lines[j][1] + '</div>';
+      }
+      $("lyr").innerHTML = html;
     }
 
     function refresh() {
       update();
       renderPlaylist();
+      renderQueue();
+      renderLyrics();
     }
 
     function pick(i) {
@@ -198,6 +494,19 @@
       elapsed = 0;
       playing = true;
       refresh();
+    }
+
+    function toggleLike() {
+      tracks[current].fav = !tracks[current].fav;
+      update();
+      renderPlaylist();
+    }
+
+    function like(event, i) {
+      if (event && event.stopPropagation) { event.stopPropagation(); }
+      tracks[i].fav = !tracks[i].fav;
+      if (i === current) { update(); }
+      renderPlaylist();
     }
 
     function togglePlay() {
@@ -226,13 +535,72 @@
       refresh();
     }
 
+    function seek(delta) {
+      elapsed += delta;
+      if (elapsed < 0) { elapsed = 0; }
+      if (elapsed >= tracks[current].dur) { elapsed = tracks[current].dur - 1; }
+      update();
+      renderLyrics();
+    }
+
     function toggleRepeat() { repeat = !repeat; update(); }
     function toggleShuffle() { shuffle = !shuffle; update(); }
-    function volDown() { if (volume > 0) { volume--; update(); } }
-    function volUp() { if (volume < 10) { volume++; update(); } }
+    function volDown() { if (volume > 0) { volume--; updateVolume(); } }
+    function volUp() { if (volume < VOL_N) { volume++; updateVolume(); } }
+
+    function setTab(t) {
+      tab = t;
+      setOn("tab-all", t === "all");
+      setOn("tab-fav", t === "fav");
+      renderPlaylist();
+    }
+
+    /* ---------- spectrum ---------- */
+    var vizLevels = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    var vizTick = 0;
+
+    function renderViz() {
+      var left = "";
+      var right = "";
+      for (var row = 0; row < VIZ_H; row++) {
+        var lineL = "";
+        var lineR = "";
+        for (var col = 0; col < 16; col++) {
+          var rem = VIZ_H - 1 - row;
+          var lv = vizLevels[col] * VIZ_H;
+          var filled = Math.floor(lv);
+          var frac = lv - filled;
+          var ch = " ";
+          if (rem < filled) { ch = FULL; }
+          else if (rem === filled) { ch = CAPS[Math.min(7, Math.floor(frac * 7.99))]; }
+          if (col < 8) { lineL += ch; } else { lineR += ch; }
+        }
+        left += (row > 0 ? "\n" : "") + lineL;
+        right += (row > 0 ? "\n" : "") + lineR;
+      }
+      $("viz-l").textContent = left;
+      $("viz-r").textContent = right;
+    }
+
+    function tickViz() {
+      vizTick++;
+      for (var i = 0; i < 16; i++) {
+        var base = 0.5 + 0.5 * Math.sin(vizTick * 0.35 + i * 0.85);
+        var target = playing ? base * (0.3 + 0.7 * Math.random()) : 0.05;
+        vizLevels[i] = vizLevels[i] + (target - vizLevels[i]) * 0.5;
+        if (vizLevels[i] < 0.02) { vizLevels[i] = 0.02; }
+      }
+      renderViz();
+    }
+
+    /* ---------- timers ---------- */
+    setInterval(function () {
+      var d = new Date();
+      $("clock").textContent = pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds());
+    }, 1000);
 
     setInterval(function () {
-      if (!playing) return;
+      if (!playing) { return; }
       elapsed++;
       if (elapsed >= tracks[current].dur) {
         if (repeat) {
@@ -243,10 +611,13 @@
         }
       }
       update();
+      renderLyrics();
     }, 1000);
 
-    update();
-    renderPlaylist();
+    setInterval(tickViz, 150);
+
+    refresh();
+    tickViz();
   </script>
 </body>
 </html>
