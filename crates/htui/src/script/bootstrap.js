@@ -132,7 +132,7 @@
       },
       has: function (t, p) {
         if (typeof p !== 'string') return Reflect.has(t, p);
-        return keys().indexOf(kebab(p)) !== -1;
+        return get(kebab(p)) !== undefined;
       },
       deleteProperty: function (t, p) {
         if (typeof p !== 'string') return false;
@@ -159,9 +159,15 @@
   // rejected (`SyntaxError`), and add / remove / toggle / replace only rewrite
   // the attribute when the token set actually changed.
   globalThis.__htuiClassList = function (getAttr, setAttr) {
+    // Token list memoized
+    var cacheTokens = [];
     function tokens() {
       var raw = getAttr();
-      return raw ? raw.split(/\s+/).filter(Boolean) : [];
+      if (raw !== cacheRaw) {
+        cacheRaw = raw;
+        cacheTokens = raw ? raw.split(/\s+/).filter(Boolean) : [];
+      }
+      return cacheTokens;
     }
     function write(list) {
       setAttr(list.join(' '));
