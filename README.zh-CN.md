@@ -20,9 +20,8 @@
 
 ## 快速上手
 
-```toml
-[dependencies]
-htui = "0.1"
+```sh
+cargo add htui
 ```
 
 ```rust
@@ -54,7 +53,9 @@ cd example
 cargo run
 ```
 
-![htui 音乐播放器](docs/example.png)
+| 终端 —— `cargo run` | 浏览器 —— 同一份 `player.html` |
+| --- | --- |
+| ![htui 音乐播放器（终端）](docs/example.png) | ![htui 音乐播放器（浏览器）](docs/example-html.png) |
 
 ## 文档
 

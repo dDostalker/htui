@@ -231,7 +231,8 @@ htui/
 │           └── commands.rs      # #[htui::commands] 展开（register + js_bindings 样本 JS 接口生成，JSDoc）
 ├── docs/
 │   ├── en-us/             # 英文文档（当前仅 todo 占位文件，内容为空）
-│   ├── example.png        # 文档配图
+│   ├── example.png        # 文档配图（终端示例）
+│   ├── example-html.png   # 文档配图（浏览器打开 player.html）
 │   └── zh-cn/
 │       ├── 边界文档.md           # 边界文档（目标 / 核心承诺 / 拒绝清单 / 能力地图）
 │       ├── 架构.md               # 渲染管线与线程模型（generation/geometry 分层、四线程职责、合并与安全模型）

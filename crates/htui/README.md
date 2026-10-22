@@ -60,7 +60,9 @@ cd example
 cargo run
 ```
 
-![htui music player](https://raw.githubusercontent.com/dDostalker/htui/main/docs/example.png)
+| Terminal — `cargo run` | Browser — same `player.html` |
+| --- | --- |
+| ![htui music player in the terminal](https://raw.githubusercontent.com/dDostalker/htui/main/docs/example.png) | ![htui music player in the browser](https://raw.githubusercontent.com/dDostalker/htui/main/docs/example-html.png) |
 
 ## Documentation
 
