@@ -25,9 +25,8 @@ possible to pick up.
 
 ## Quick start
 
-```toml
-[dependencies]
-htui = "0.1"
+```sh
+cargo add htui
 ```
 
 ```rust
@@ -59,7 +58,9 @@ cd example
 cargo run
 ```
 
-![htui music player](docs/example.png)
+| Terminal — `cargo run` | Browser — same `player.html` |
+| --- | --- |
+| ![htui music player in the terminal](docs/example.png) | ![htui music player in the browser](docs/example-html.png) |
 
 ## Documentation
 
