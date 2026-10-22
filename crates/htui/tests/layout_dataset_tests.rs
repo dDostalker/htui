@@ -350,3 +350,17 @@ fn hidden_unchanged_write_does_not_mark_dirty() {
         "clearing the hidden attribute must re-render"
     );
 }
+
+#[test]
+fn dataset_access_returns_the_same_live_instance() {
+    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
+        .expect("engine initializes");
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "document.getElementById('d').dataset === document.getElementById('d').dataset"
+        ),
+        "true",
+        "repeated access returns the same instance (browser identity)"
+    );
+}

@@ -4,6 +4,8 @@
   globalThis.__htuiElements = {};
   globalThis.__htuiTimers = {};
   globalThis.__htuiFetchResolvers = {};
+  globalThis.__htuiClassListCache = {};
+  globalThis.__htuiDatasetCache = {};
 
   // Canonical array-index property key: `'0'`, `'1'`, ... map to their
   // number; everything else (symbols, '01', '1.0', '-0', 'length') is NaN.

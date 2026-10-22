@@ -430,3 +430,32 @@ fn class_list_changes_mark_the_element_dirty() {
         "a real classList change must be reported for re-render: {dirty:?}"
     );
 }
+
+#[test]
+fn class_list_access_returns_the_same_live_instance() {
+    let mut engine = ScriptEngine::new(r#"<div id="d" class="a"></div>"#, EventBindings::default())
+        .expect("engine initializes");
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "document.getElementById('d').classList === document.getElementById('d').classList"
+        ),
+        "true",
+        "repeated access returns the same instance (browser identity)"
+    );
+    // A held reference keeps tracking attribute changes made through other
+    // paths (the cached instance is the live view, not a snapshot).
+    eval_str(
+        &mut engine,
+        "globalThis.cl = document.getElementById('d').classList",
+    );
+    eval_str(
+        &mut engine,
+        "document.getElementById('d').className = 'a b'",
+    );
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.cl.contains('b')"),
+        "true",
+        "the cached instance must stay live"
+    );
+}
