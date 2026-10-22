@@ -1,9 +1,9 @@
 //! Tests for the `dataset` / `hidden` global attributes on the JS side:
 //! `el.dataset` is a live `DOMStringMap` over the element's `data-*`
-//! attributes (camelCase↔kebab-case mapping, live reads / writes, empty-string
-//! deletes, `Object.keys` enumeration), and `el.hidden` toggles the `hidden`
-//! attribute (the UA `[hidden] { display: none }` rule). Pure in-memory — no
-//! terminal required.
+//! attributes (camelCase↔kebab-case mapping, live reads / writes, WebIDL
+//! `DOMString` conversion on writes, `delete`-only removal, `Object.keys`
+//! enumeration), and `el.hidden` toggles the `hidden` attribute (the UA
+//! `[hidden] { display: none }` rule). Pure in-memory — no terminal required.
 
 use htui::events::EventBindings;
 use htui::layout::generate_box_tree;
@@ -158,20 +158,38 @@ fn dataset_write_sets_the_kebab_cased_attribute() {
 }
 
 #[test]
-fn dataset_empty_string_removes_the_attribute() {
+fn dataset_write_uses_webidl_string_conversion() {
     let mut engine = ScriptEngine::new(
-        r#"<div id="d" data-tmp="x"></div>"#,
+        r#"<div id="d" data-tmp="x" data-n="1" data-u="2"></div>"#,
         EventBindings::default(),
     )
     .expect("engine initializes");
-    eval_str(&mut engine, "document.getElementById('d').dataset.tmp = ''");
+    eval_str(
+        &mut engine,
+        "globalThis.ds = document.getElementById('d').dataset",
+    );
+    // An empty string sets an empty attribute value (a browser keeps the
+    // attribute present); removal is `delete`-only.
+    eval_str(&mut engine, "globalThis.ds.tmp = ''");
+    assert_eq!(data_attr(&engine, "d", "data-tmp"), Some("".into()));
+    assert_eq!(eval_str(&mut engine, "globalThis.ds.tmp"), "");
+    assert_eq!(
+        eval_str(&mut engine, "'tmp' in globalThis.ds"),
+        "true",
+        "an empty-string write must keep the attribute present"
+    );
+    // WebIDL `DOMString` conversion: null / undefined stringify.
+    eval_str(&mut engine, "globalThis.ds.n = null");
+    assert_eq!(data_attr(&engine, "d", "data-n"), Some("null".into()));
+    eval_str(&mut engine, "globalThis.ds.u = undefined");
+    assert_eq!(data_attr(&engine, "d", "data-u"), Some("undefined".into()));
+    // Removal stays `delete`-only.
+    eval_str(&mut engine, "delete globalThis.ds.tmp");
     assert_eq!(data_attr(&engine, "d", "data-tmp"), None);
     assert_eq!(
-        eval_str(
-            &mut engine,
-            "String(document.getElementById('d').dataset.tmp)"
-        ),
-        "undefined"
+        eval_str(&mut engine, "'tmp' in globalThis.ds"),
+        "false",
+        "delete must remove the attribute"
     );
 }
 

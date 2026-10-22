@@ -89,8 +89,6 @@ globalThis.__htuiLiveList = function (getLen, getItem) {
 // `keys` are native closures over the engine arena (the element's `data-*`
 // attributes), so every access reflects the current DOM - a held `dataset`
 // reference stays live. Property names use the browser camelCase<->kebab-case
-// mapping (`dataset.fooBar` <-> `data-foo-bar`); assigning `''` removes the
-// attribute, and `Object.keys(dataset)` enumerates the kebab-cased names.
 globalThis.__htuiDataset = function (get, set, remove, keys) {
   function kebab(p) {
     return String(p).replace(/[A-Z]/g, function (c) { return '-' + c.toLowerCase(); });
@@ -112,9 +110,7 @@ globalThis.__htuiDataset = function (get, set, remove, keys) {
     },
     set: function (t, p, v) {
       if (typeof p !== 'string' || p === 'then') return false;
-      var k = kebab(p);
-      if (v === null || v === undefined || v === '') { remove(k); }
-      else { set(k, String(v)); }
+      set(kebab(p), String(v));
       return true;
     },
     has: function (t, p) {

@@ -241,9 +241,6 @@ fn dataset_get(
     })
 }
 
-/// Live `dataset` write: set `data-<name>` to the value. An empty string
-/// removes the attribute (browser `dataset` semantics); the node is marked
-/// dirty only when the attribute actually changed.
 fn dataset_set(
     _this: &JsValue,
     args: &[JsValue],
@@ -270,12 +267,7 @@ fn dataset_set(
     };
     let key = format!("data-{name}");
     let existing = node.attributes.get(&key).cloned();
-    if value.is_empty() {
-        if existing.is_some() {
-            node.attributes.shift_remove(&key);
-            mark_dirty(&mut st, node_id);
-        }
-    } else if existing.as_deref() != Some(value.as_str()) {
+    if existing.as_deref() != Some(value.as_str()) {
         node.attributes.insert(key, value);
         mark_dirty(&mut st, node_id);
     }
