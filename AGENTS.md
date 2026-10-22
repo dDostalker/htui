@@ -21,7 +21,7 @@ htui/
 ├── LICENSE-APACHE          # Apache-2.0 许可证文本（cargo package 自动打入 .crate）
 ├── .github/
 │   └── workflows/
-│       └── ci.yml          # GitHub Actions：test 矩阵（Linux/Windows/macOS）+ MSRV 1.89 + clippy + fmt + ast-grep
+│       └── ci.yml          # GitHub Actions
 ├── crates/
 │   ├── htui/               # 主库 crate：终端 HTML/CSS 渲染引擎（独立发布单元）
 │   │   ├── Cargo.toml
@@ -487,10 +487,16 @@ ast-grep scan -r sg/rules/no-unwrap.yml # 只跑某条规则
 ast-grep run -p 'PATTERN' --lang rust crates  # 一次性查询（不需规则文件）
 ```
 
-CI（`.github/workflows/ci.yml`）在 push / PR 上执行：`cargo test --workspace`（Linux /
-Windows / macOS 三平台矩阵）、MSRV 1.89.0 编译检查、`cargo clippy --all-targets
--D warnings`、`cargo fmt --all -- --check`、全库 UTF-8 编码检查（无 BOM / 非法字节 /
-U+FFFD）、以及 `ast-grep scan`。本地提交前应至少跑一遍 `cargo fmt`、clippy 与
+CI（`.github/workflows/ci.yml`）按**变更路径分区触发**（`dorny/paths-filter`）：
+`crates/htui/src/html|tdom` 等改动只跑 HTML/CSS/DOM 组测试，`layout|graphics` 只跑
+布局组，`script|events` 与 `htui-macros` 跑脚本/宏组，`tui` 跑渲染/输入组，
+`example/**` 只构建示例；fmt / clippy / cargo doc / MSRV / ast-grep 仅在 Rust
+代码变更时执行；纯文档改动只跑 UTF-8 编码检查。跨界测试文件（input/textarea/
+form 系列、fetch_e2e、font_size）在相关两组中**重复执行**，宁可重复不可漏测。
+跨领域根改动（`lib.rs` / `Cargo.toml` / 工作流自身）、手动触发与每周定时任务
+（周一 03:00 UTC）触发 3 平台（Linux / Windows / macOS）全量 `cargo test
+--workspace` 矩阵作为安全网。新增测试文件时必须把它登记进 ci.yml 对应分区
+（跨领域的登记到多组）。本地提交前应至少跑一遍 `cargo fmt`、clippy 与
 ast-grep。
 
 ### 跳过规则（仅限正当理由）

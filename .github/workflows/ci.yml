@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  # Weekly full-matrix drift guard: path-filtered jobs skip on a no-change
+  # diff, so the schedule is the only guaranteed periodic full run.
+  schedule:
+    - cron: "0 3 * * 1"
 
 permissions:
   contents: read
@@ -17,62 +21,71 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  test:
-    name: Test (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      # Tests are pure in-memory (no terminal required), so they run on every
-      # platform the crate targets.
-      - name: Run tests
-        run: cargo test --workspace --locked
-
-  msrv:
-    name: MSRV (1.89.0)
+  # Detect which areas a change touches; every other job is gated on these
+  # outputs so a single-area change runs only its own tests instead of the
+  # full matrix. Cross-cutting roots (lib.rs, manifests, this workflow) map
+  # to `infra`, which triggers the full matrix — the safety net against a
+  # stale path->test mapping silently skipping a broken area.
+  changes:
+    name: Changes
     runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      macros: ${{ steps.filter.outputs.macros }}
+      html: ${{ steps.filter.outputs.html }}
+      layout: ${{ steps.filter.outputs.layout }}
+      script: ${{ steps.filter.outputs.script }}
+      tui: ${{ steps.filter.outputs.tui }}
+      example: ${{ steps.filter.outputs.example }}
+      infra: ${{ steps.filter.outputs.infra }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.89.0
-      - uses: Swatinem/rust-cache@v2
-      # Keep the declared `rust-version` honest (boa_engine requires 1.88,
-      # resvg's font stack requires 1.89).
-      - name: Check
-        run: cargo check --workspace --locked
-
-  clippy:
-    name: Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+        # Full history so push events diff against the real previous state
+        # (HEAD^ would miss files changed in earlier commits of the push).
         with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      # Intentional structural lints (too_many_arguments, module_inception,
-      # doc_lazy_continuation) are allowed in the workspace lint config
-      # (root Cargo.toml), so any new warning fails the build.
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+          fetch-depth: 0
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'crates/htui/src/**'
+              - 'crates/htui-macros/**'
+              - 'crates/htui/Cargo.toml'
+              - 'crates/htui-macros/Cargo.toml'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+            macros:
+              - 'crates/htui-macros/**'
+            html:
+              - 'crates/htui/src/html/**'
+              - 'crates/htui/src/tdom/**'
+              - 'crates/htui/src/resources.rs'
+              - 'crates/htui/src/session.rs'
+              - 'crates/htui/src/config.rs'
+            layout:
+              - 'crates/htui/src/layout/**'
+              - 'crates/htui/src/graphics/**'
+            script:
+              - 'crates/htui/src/script/**'
+              - 'crates/htui/src/events/**'
+            tui:
+              - 'crates/htui/src/tui/**'
+            example:
+              - 'example/**'
+            infra:
+              - '.github/workflows/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'crates/htui/src/lib.rs'
 
-  fmt:
-    name: Formatting
+  encoding:
+    name: Encoding (UTF-8, no BOM)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-      # Guard the repository's UTF-8 invariant: a lossy editor / tool pass
-      # (ANSI or OEM conversion) must not silently reintroduce BOMs, invalid
-      # byte sequences or U+FFFD replacement characters.
+      # Runs on every push (including docs-only changes): the UTF-8 invariant
+      # covers .md/.yml/.html too, and the check needs no Rust toolchain.
       - name: Check encoding
         run: |
           python3 - <<'PY'
@@ -109,21 +122,48 @@ jobs:
           print("encoding OK")
           PY
 
-  docs:
-    name: Docs
+  check:
+    name: Fmt + Clippy + Doc
     runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      # Intentional structural lints (too_many_arguments, module_inception,
+      # doc_lazy_continuation) are allowed in the workspace lint config
+      # (root Cargo.toml), so any new warning fails the build.
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Build docs
         env:
           RUSTDOCFLAGS: "-D warnings"
         run: cargo doc --workspace --no-deps --locked
 
+  msrv:
+    name: MSRV (1.89.0)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.89.0
+      - uses: Swatinem/rust-cache@v2
+      # Keep the declared `rust-version` honest (boa_engine requires 1.88,
+      # resvg's font stack requires 1.89).
+      - name: Check
+        run: cargo check --workspace --locked
+
   ast-grep:
     name: ast-grep
     runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.rust == 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -135,3 +175,149 @@ jobs:
       # wildcard imports in src. See AGENTS.md.
       - name: Scan
         run: ast-grep scan
+
+  # ---- Area tests (ubuntu) ------------------------------------------------
+  # Each job compiles and runs only the integration-test targets of its area.
+  # Tests that span two areas (e.g. the form/input family needs both layout
+  # geometry and tui input editing) are deliberately listed in BOTH groups:
+  # duplicated runs are cheap, a silently skipped broken area is not.
+
+  test-html:
+    name: Test HTML / CSS / DOM / resources
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.html == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run area tests
+        run: cargo test -p htui --locked
+          --test html_parse_tests
+          --test css_parse_tests
+          --test dom_node_tests
+          --test query_selector_tests
+          --test resources_tests
+          --test session_tests
+          --test fetch_e2e_tests
+          --test layout_inner_html_tests
+          --test layout_class_list_tests
+          --test layout_dataset_tests
+          --test layout_noscript_tests
+          --test layout_dialog_template_tests
+          --test layout_html_body_tests
+          --test layout_font_size_tests
+
+  test-layout:
+    name: Test layout / graphics
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.layout == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run area tests
+        run: cargo test -p htui --locked
+          --test layout_tests
+          --test layout_div_tests
+          --test layout_span_tests
+          --test layout_list_tests
+          --test layout_img_tests
+          --test layout_aside_tests
+          --test layout_header_footer_tests
+          --test layout_blockquote_tests
+          --test layout_menu_dl_tests
+          --test layout_q_abbr_tests
+          --test layout_data_time_tests
+          --test layout_emoji_tests
+          --test layout_box_model_tests
+          --test layout_font_size_tests
+          --test layout_tree_tests
+          --test layout_columns_tests
+          --test layout_flex_tests
+          --test layout_pipeline_tests
+          --test layout_a_tests
+          --test layout_display_tests
+          --test layout_em_tests
+          --test layout_table_tests
+          --test layout_wrap_tests
+          --test layout_wrap_runs_tests
+          --test layout_position_tests
+          --test layout_details_tests
+          --test layout_input_tests
+          --test layout_textarea_tests
+          --test layout_form_tests
+          --test layout_form_elements_tests
+
+  test-script:
+    name: Test script / events / macros
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.script == 'true' || needs.changes.outputs.macros == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run area tests
+        run: cargo test -p htui --locked
+          --test script_loop_tests
+          --test layout_events_tests
+          --test layout_focus_tests
+          --test macro_tests
+          --test fetch_e2e_tests
+
+  test-tui:
+    name: Test tui / render / input
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.tui == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run area tests
+        run: cargo test -p htui --locked
+          --test render_diff_tests
+          --test layout_input_tests
+          --test layout_textarea_tests
+          --test layout_form_tests
+          --test layout_form_elements_tests
+
+  # The example is its own workspace (no tests) — building validates it.
+  build-example:
+    name: Build example
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.example == 'true' || needs.changes.outputs.rust == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workdir: example
+      - name: Build
+        working-directory: example
+        run: cargo build --locked
+
+  # ---- Full matrix ---------------------------------------------------------
+  # Triggered by cross-cutting changes (manifests, lib.rs, this workflow),
+  # manual dispatch, or the weekly schedule. This is the only place the
+  # three-platform matrix runs, so single-area pushes stay cheap.
+  test-full:
+    name: Test full matrix (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: changes
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.infra == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Tests are pure in-memory (no terminal required), so they run on every
+      # platform the crate targets.
+      - name: Run tests
+        run: cargo test --workspace --locked
