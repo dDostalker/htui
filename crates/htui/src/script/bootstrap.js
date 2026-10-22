@@ -21,6 +21,13 @@
     return PROTO_OWN.indexOf(p) !== -1;
   }
 
+  // XML Name production (minus ':'): what the HTML spec requires of a
+  // dataset candidate name before it may become a `data-*` attribute.
+  var NAME_REST = /^[A-Za-z_\u0080-\uFFFF][A-Za-z0-9_.\-\u0080-\uFFFF]*$/;
+  function isValidName(name) {
+    return NAME_REST.test(name);
+  }
+
   globalThis.__htuiAddListener = function (nodeId, type, fn) {
     var entry = globalThis.__htuiListeners[nodeId] || (globalThis.__htuiListeners[nodeId] = {});
     var arr = entry[type] || (entry[type] = []);
@@ -122,10 +129,16 @@
       },
       set: function (t, p, v) {
         if (typeof p === 'symbol' || isProtoOwn(p)) return Reflect.set(t, p, v);
+        var k = kebab(p);
+        // The transformed candidate must be a valid name or the setter
+        // throws (browser: `dataset['a b'] = 1` -> SyntaxError).
+        if (!isValidName(k)) {
+          throw new SyntaxError("'" + p + "' is not a valid name.");
+        }
         // WebIDL `DOMString` conversion: null becomes "null", undefined
         // becomes "undefined". Assignment never removes the attribute - an
         // empty string sets an empty value; `delete dataset.key` removes.
-        set(kebab(p), String(v));
+        set(k, String(v));
         return true;
       },
       has: function (t, p) {
@@ -135,7 +148,11 @@
       deleteProperty: function (t, p) {
         if (typeof p === 'symbol') return Reflect.deleteProperty(t, p);
         if (isProtoOwn(p)) return true;
-        remove(kebab(p));
+        var k = kebab(p);
+        // The deleter silently ignores invalid candidate names (browser
+        // parity: no throw, no removal).
+        if (!isValidName(k)) return true;
+        remove(k);
         return true;
       },
       ownKeys: function () {

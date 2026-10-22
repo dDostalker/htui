@@ -364,3 +364,50 @@ fn dataset_access_returns_the_same_live_instance() {
         "repeated access returns the same instance (browser identity)"
     );
 }
+
+#[test]
+fn dataset_proto_keys_keep_object_semantics_and_names_are_validated() {
+    let mut engine = ScriptEngine::new(
+        r#"<div id="d" data-foo="1" data-constructor="x"></div>"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
+    eval_str(&mut engine, "globalThis.ds = document.getElementById('d').dataset");
+    // WebIDL named-property visibility: Object.prototype's own property
+    // names keep their normal semantics and are never shadowed by data-*.
+    assert_eq!(
+        eval_str(&mut engine, "typeof globalThis.ds.constructor"),
+        "function",
+        "constructor must come from the prototype, not the data-constructor attr"
+    );
+    assert_eq!(eval_str(&mut engine, "'toString' in globalThis.ds"), "true");
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.ds.hasOwnProperty('foo')"),
+        "true",
+        "prototype methods must work and see the data keys"
+    );
+    // The setter validates the transformed candidate name.
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "(function () { try { globalThis.ds['a b'] = 1; return 'no-throw'; } catch (e) { return e.name; } })()"
+        ),
+        "SyntaxError"
+    );
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "(function () { try { globalThis.ds.UPPER = 1; return 'no-throw'; } catch (e) { return e.name; } })()"
+        ),
+        "SyntaxError",
+        "UPPER transforms to '-u-p-p-e-r', which cannot start a name"
+    );
+    // Valid names still write; the deleter silently ignores invalid names.
+    eval_str(&mut engine, "globalThis.ds['a-b'] = 2");
+    assert_eq!(data_attr(&engine, "d", "data-a-b"), Some("2".into()));
+    assert_eq!(
+        eval_str(&mut engine, "delete globalThis.ds['a b']"),
+        "true",
+        "deleting an invalid name is a no-op, not a throw"
+    );
+}
