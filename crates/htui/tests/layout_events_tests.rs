@@ -1560,6 +1560,76 @@ fn add_event_listener_is_idempotent_for_identical_listener() {
 }
 
 #[test]
+fn remove_child_drops_listeners_of_the_detached_subtree() {
+    // A node leaving the document must not retain its listeners in the
+    // GC-rooted registry — otherwise removeChild churn grows the registry
+    // (and every closure the listeners captured) without bound.
+    let html = r#"
+      <script>
+        var wrap = document.getElementById('wrap');
+        wrap.addEventListener('click', function () {});
+        document.getElementById('btn').addEventListener('click', function () {});
+        document.body.removeChild(wrap);
+      </script>
+      <div id="wrap"><div id="btn">b</div></div>
+    "#;
+    let mut engine = ScriptEngine::new(html, EventBindings::default()).expect("engine");
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "Object.keys(globalThis.__htuiListeners).length"
+        ),
+        "0",
+        "the removed node and its subtree must leave no listener entries"
+    );
+}
+
+#[test]
+fn replace_child_drops_listeners_of_the_replaced_subtree() {
+    let html = r#"
+      <script>
+        var wrap = document.getElementById('wrap');
+        wrap.addEventListener('click', function () {});
+        document.getElementById('btn').addEventListener('click', function () {});
+        document.body.replaceChild(document.createElement('div'), wrap);
+      </script>
+      <div id="wrap"><div id="btn">b</div></div>
+    "#;
+    let mut engine = ScriptEngine::new(html, EventBindings::default()).expect("engine");
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "Object.keys(globalThis.__htuiListeners).length"
+        ),
+        "0",
+        "the replaced node and its subtree must leave no listener entries"
+    );
+}
+
+#[test]
+fn removing_a_sibling_keeps_the_survivor_listener() {
+    // Clearing is scoped to the detached subtree: a listener on a node that
+    // stays in the document must survive a sibling's removal.
+    let html = r#"
+      <script>
+        document.getElementById('live').addEventListener('click', function () {});
+        document.body.removeChild(document.getElementById('gone'));
+      </script>
+      <div id="gone">g</div>
+      <div id="live">l</div>
+    "#;
+    let mut engine = ScriptEngine::new(html, EventBindings::default()).expect("engine");
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "Object.keys(globalThis.__htuiListeners).length"
+        ),
+        "1",
+        "only the removed node's entry must be cleared"
+    );
+}
+
+#[test]
 fn js_can_mutate_the_dom_and_marks_dirty() {
     let html = r#"
       <script>

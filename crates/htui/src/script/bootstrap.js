@@ -11,6 +11,9 @@ globalThis.__htuiGetListeners = function (nodeId, type) {
   var entry = globalThis.__htuiListeners[nodeId];
   return entry ? (entry[type] || []) : [];
 };
+globalThis.__htuiClearAllListeners = function (nodeId) {
+  delete globalThis.__htuiListeners[nodeId];
+};
 // Single-slot registry for `on*` attribute handlers. Unlike the multicast
 // listener list above, each (node, type) holds at most one function - a
 // browser event-handler slot: installing overwrites, clearing removes.

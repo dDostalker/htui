@@ -5,7 +5,7 @@ use boa_engine::{Context, JsResult, JsValue, NativeFunction, Source, js_string};
 
 use crate::{events::EventType, tdom::node::NodeId};
 
-use super::dom::{clear_node_attr_handler, set_attr_handler, with_state};
+use super::dom::{clear_node_attr_handler, clear_node_listeners, set_attr_handler, with_state};
 use super::host::HostCtx;
 use super::state::ScriptState;
 
@@ -172,6 +172,30 @@ pub(super) fn clear_node_attribute_listeners(
     node_id: NodeId,
 ) -> JsResult<()> {
     clear_node_attr_handler(context, node_id)
+}
+
+/// Drop every multicast `addEventListener` listener of a subtree (
+pub(super) fn clear_listeners_for_subtree(
+    context: &mut Context,
+    state: &Rc<RefCell<ScriptState>>,
+    root_id: NodeId,
+) -> JsResult<()> {
+    let node_ids = {
+        let st = state.borrow();
+        let mut out = Vec::new();
+        let mut stack = vec![root_id];
+        while let Some(id) = stack.pop() {
+            out.push(id);
+            if let Some(node) = st.arena.get(id) {
+                stack.extend(node.children.iter().copied());
+            }
+        }
+        out
+    };
+    for node_id in node_ids {
+        clear_node_listeners(context, node_id)?;
+    }
+    Ok(())
 }
 
 /// Compile every `on*` attribute of one node into the single-slot attribute

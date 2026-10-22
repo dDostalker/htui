@@ -137,6 +137,9 @@ pub(super) fn native_replace_child(
     {
         log::warn!("Failed to clear on* handlers after replaceChild: {e}");
     }
+    if let Err(e) = crate::script::bindings::clear_listeners_for_subtree(context, &rc, old_child) {
+        log::warn!("Failed to clear listeners after replaceChild: {e}");
+    }
     node_wrapper(context, old_child)
 }
 
@@ -235,6 +238,9 @@ pub(super) fn native_remove_child(
         crate::script::bindings::clear_attribute_handlers_for_subtree(context, &rc, child_id)
     {
         log::warn!("Failed to clear on* handlers after removeChild: {e}");
+    }
+    if let Err(e) = crate::script::bindings::clear_listeners_for_subtree(context, &rc, child_id) {
+        log::warn!("Failed to clear listeners after removeChild: {e}");
     }
     Ok(JsValue::undefined())
 }
