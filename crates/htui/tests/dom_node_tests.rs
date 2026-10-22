@@ -141,6 +141,31 @@ fn child_nodes_is_a_true_live_list() {
 }
 
 #[test]
+fn child_nodes_supports_symbol_iteration_and_canonical_indices_only() {
+    // Symbol-keyed access (spread / for-of / Array.from) must reach the
+    // iterator; non-canonical numeric strings must miss like a browser.
+    let mut e = engine(r#"<div id="d"><span id="a">A</span><span id="b">B</span></div>"#);
+    eval(&mut e, "var nl = document.getElementById('d').childNodes");
+    assert_eq!(
+        eval_str(&mut e, "Array.from(nl).length"),
+        "2",
+        "Array.from needs Symbol.iterator on the proxy"
+    );
+    eval(
+        &mut e,
+        "var out = []; for (var n of nl) { out.push(n.id); } globalThis.__out = out",
+    );
+    assert_eq!(eval_str(&mut e, "globalThis.__out.join(',')"), "a,b");
+    assert_eq!(eval_str(&mut e, "[...nl].length"), "2", "spread iterates");
+    assert_eq!(
+        eval_str(&mut e, "String(nl['01'])"),
+        "undefined",
+        "non-canonical index must miss, not resolve"
+    );
+    assert_eq!(eval_str(&mut e, "String(nl['-0'])"), "undefined");
+}
+
+#[test]
 fn parent_and_sibling_traversal() {
     let mut e = engine(r#"<div id="d"><span id="a">A</span><span id="b">B</span></div>"#);
     eval(&mut e, "var a = document.getElementById('a')");
