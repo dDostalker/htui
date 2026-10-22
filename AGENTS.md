@@ -13,7 +13,7 @@
 以下是项目的结构，如果不是特殊要求不得修改项目结构，仅当提示词要求需要时修改，修改前进行询问，并**必须**对项目结构进行同步
 ```
 htui/
-├── Cargo.toml              # workspace 根（members: crates/htui, crates/htui-macros）+ workspace lints
+├── Cargo.toml              # workspace 根（members: crates/htui, crates/htui-macros）+ workspace lints + [workspace.dependencies]（依赖版本单一真源，成员用 `<dep> = { workspace = true }` 引用）
 ├── .editorconfig           # 全库 UTF-8（无 BOM）声明，防止编辑器按 ANSI/GBK 打开产生乱码
 ├── README.md               # 英文 README（GitHub 首页；与 crates/htui/README.md 内容同步）
 ├── README.zh-CN.md         # 中文 README

@@ -458,7 +458,7 @@ fn el_blur_commits_edited_value_back_to_the_dom() {
         .expect("focus t");
     drive(&mut engine, &mut state, &arena);
     // Simulate typed edits in the edit buffer, then blur() from JS.
-    state.input_value = "new text".to_string();
+    state.input_value = "new text".into();
     state.input_cursor = 8;
     engine
         .eval_source("document.getElementById('t').blur()")

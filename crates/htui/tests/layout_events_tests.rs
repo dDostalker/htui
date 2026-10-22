@@ -1115,6 +1115,38 @@ fn build_geometry(html: &str, bindings: EventBindings) -> (ScriptEngine, Geometr
     (engine, geo)
 }
 
+/// Geometry for a document with its `<style>` CSS cascaded — the styled
+/// counterpart of `build_geometry` (`ScriptEngine::new` returns a raw
+/// uncascaded arena, so inline-only or `<style>` styling needs this path).
+fn build_styled_geometry(html: &str) -> Geometry {
+    let mut parser = html_parse::Parser::new(html);
+    let (root_id, mut arena, embedded) = parser.parse();
+    if !embedded.trim().is_empty() {
+        let mut css_parser = CssParser::new(&embedded);
+        let rules = css_parser.parse();
+        css_into_node(&mut arena, root_id, &rules);
+    }
+    let term_map = TermMap {
+        columns: COLS,
+        rows: ROWS,
+    };
+    let containing = BoxConstraint::root(&term_map);
+    let mut cursor = Cursor::new();
+    let boxes = layout_tree(
+        &arena,
+        root_id,
+        containing,
+        &mut cursor,
+        term_map.columns as usize,
+        term_map.rows as usize,
+    );
+    Geometry {
+        arena,
+        boxes,
+        root_id,
+    }
+}
+
 /// `NodeId` of the element whose `id` attribute equals `id`.
 fn find_node_by_id(arena: &NodeArena, id: &str) -> NodeId {
     arena
@@ -1184,7 +1216,7 @@ fn region_of(arena: &NodeArena, node_id: NodeId) -> HitRegion {
     HitRegion {
         node_id,
         rect: Rect::new(0, 0, 0, 0),
-        path,
+        path: path.into(),
     }
 }
 
@@ -1339,6 +1371,66 @@ fn hit_test_prefers_the_deepest_element() {
     );
     // A point outside every element hits nothing.
     assert!(map.hit_test(0, 1000).is_none());
+}
+
+#[test]
+fn hit_test_resolves_overlaps_by_paint_order() {
+    // Browser rule: the hit target is the element painted on top. A
+    // positioned box earlier in the DOM paints above the static content
+    // beneath it, so it — not the later static sibling — wins the overlap
+    // (the previous smallest-area rule could pick either).
+    let geo = build_styled_geometry(
+        r#"<style>
+            #overlay { position: absolute; top: 0ch; left: 0ch; width: 10ch; height: 2ch; }
+            #static { width: 10ch; }
+        </style>
+        <div id="overlay">ov</div><div id="static">static text</div>"#,
+    );
+    let map = HitMap::build(&geo);
+    let overlay = map.resolve_by_id("overlay").expect("overlay region").rect;
+    let stat = map.resolve_by_id("static").expect("static region").rect;
+    // The fixture must actually overlap; otherwise the test proves nothing.
+    let (x, y) = (overlay.x.max(stat.x), overlay.y.max(stat.y));
+    assert!(
+        overlay.contains(x as u32, y as u32) && stat.contains(x as u32, y as u32),
+        "fixture boxes must overlap: overlay={overlay:?} static={stat:?}"
+    );
+    assert_eq!(
+        map.hit_test(x as u32, y as u32)
+            .expect("overlap must hit")
+            .id(),
+        Some("overlay"),
+        "the positioned box painted above the static content must win"
+    );
+}
+
+#[test]
+fn hit_test_orders_overlaps_by_z_index() {
+    // Higher z-index paints on top even when it comes first in the DOM —
+    // the previous smallest-area rule would have picked the later sibling
+    // on an area tie.
+    let geo = build_styled_geometry(
+        r#"<style>
+            #high { position: absolute; top: 0ch; left: 0ch; width: 10ch; height: 2ch; z-index: 2; }
+            #low { position: absolute; top: 0ch; left: 0ch; width: 10ch; height: 2ch; z-index: 1; }
+        </style>
+        <div id="high">h</div><div id="low">l</div>"#,
+    );
+    let map = HitMap::build(&geo);
+    let high = map.resolve_by_id("high").expect("high region").rect;
+    let low = map.resolve_by_id("low").expect("low region").rect;
+    let (x, y) = (high.x.max(low.x), high.y.max(low.y));
+    assert!(
+        high.contains(x as u32, y as u32) && low.contains(x as u32, y as u32),
+        "fixture boxes must overlap: high={high:?} low={low:?}"
+    );
+    assert_eq!(
+        map.hit_test(x as u32, y as u32)
+            .expect("overlap must hit")
+            .id(),
+        Some("high"),
+        "the higher z-index box must win the overlap"
+    );
 }
 
 #[test]
@@ -2204,7 +2296,8 @@ fn click_region(node_id: NodeId, id: &str) -> HitRegion {
         path: vec![ElementRef {
             id: Some(id.to_string()),
             node_id,
-        }],
+        }]
+        .into(),
     }
 }
 

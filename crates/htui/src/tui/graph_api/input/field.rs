@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use compact_str::CompactString;
 use crossterm::event::KeyCode;
 
 use crate::layout::Rect;
@@ -41,7 +42,7 @@ pub const KEY_GATE_TIMEOUT: Duration = Duration::from_millis(8);
 /// or caret changed (the caller should repaint the field); `false` for keys
 /// the field does not consume (`Esc` / `Enter` are handled by the caller).
 pub fn apply_textarea_key(
-    value: &mut String,
+    value: &mut CompactString,
     cursor: &mut usize,
     content_width: usize,
     key: KeyCode,

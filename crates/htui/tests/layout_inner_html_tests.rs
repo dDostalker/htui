@@ -48,7 +48,7 @@ fn region_of(arena: &NodeArena, node_id: NodeId) -> HitRegion {
     HitRegion {
         node_id,
         rect: Rect::new(0, 0, 0, 0),
-        path,
+        path: path.into(),
     }
 }
 

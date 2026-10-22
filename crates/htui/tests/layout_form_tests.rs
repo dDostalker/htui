@@ -294,7 +294,7 @@ fn test_paste_into_single_line_input_collapses_newlines() {
     let mut state = InputState::new();
     state.focused_input = Some(NodeId::default());
     state.focused_is_textarea = false;
-    state.input_value = "ab".to_string();
+    state.input_value = "ab".into();
     state.input_cursor = 2;
     let mut cmds = Vec::new();
     assert!(paste_into_field(
@@ -317,7 +317,7 @@ fn test_paste_into_textarea_keeps_newlines() {
     let mut state = InputState::new();
     state.focused_input = Some(NodeId::default());
     state.focused_is_textarea = true;
-    state.input_value = "ab".to_string();
+    state.input_value = "ab".into();
     state.input_cursor = 2;
     let mut cmds = Vec::new();
     assert!(paste_into_field(
@@ -337,7 +337,7 @@ fn test_paste_into_textarea_keeps_newlines() {
 fn test_paste_at_caret_inserts_in_middle() {
     let mut state = InputState::new();
     state.focused_input = Some(NodeId::default());
-    state.input_value = "abcd".to_string();
+    state.input_value = "abcd".into();
     state.input_cursor = 2;
     let mut cmds = Vec::new();
     assert!(paste_into_field(
@@ -353,7 +353,7 @@ fn test_paste_at_caret_inserts_in_middle() {
 #[test]
 fn test_paste_only_newlines_into_input_is_noop() {
     let mut state = InputState::new();
-    state.input_value = "ab".to_string();
+    state.input_value = "ab".into();
     state.input_cursor = 1;
     state.focused_is_textarea = false;
     let mut cmds = Vec::new();

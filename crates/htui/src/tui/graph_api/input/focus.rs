@@ -1,3 +1,5 @@
+use compact_str::CompactString;
+
 use crate::script::ScriptMsg;
 use crate::tdom::node::{NodeArena, NodeId, NodeType};
 
@@ -41,9 +43,14 @@ pub(super) fn focus_input(
     // `<input>` fields read the DOM `value` attribute; a `<textarea>`'s
     // initial value is its text content.
     let value = match arena.get(node_id) {
-        Some(n) if n.node_type == NodeType::Textarea => n.text_content(arena),
-        Some(n) => n.attributes.get("value").cloned().unwrap_or_default(),
-        None => String::new(),
+        Some(n) if n.node_type == NodeType::Textarea => n.text_content(arena).into(),
+        Some(n) => n
+            .attributes
+            .get("value")
+            .cloned()
+            .map(CompactString::from)
+            .unwrap_or_default(),
+        None => CompactString::new(""),
     };
     let cursor = value.chars().count();
     state.input_value = value;

@@ -6,6 +6,7 @@
 //! caret-driven scroll keeps the caret visible). Blur commits the edited
 //! text back into the textarea's child text nodes.
 
+use compact_str::CompactString;
 use crossterm::event::KeyCode;
 use crossterm::style::Color;
 use htui::events::{EventBindings, Geometry, HitMap, interaction::HoverState};
@@ -170,7 +171,7 @@ fn test_textarea_default_size() {
 
 #[test]
 fn test_textarea_key_enter_inserts_newline() {
-    let mut value = "ab".to_string();
+    let mut value = CompactString::from("ab");
     let mut cursor = 2;
     assert!(apply_textarea_key(
         &mut value,
@@ -181,7 +182,7 @@ fn test_textarea_key_enter_inserts_newline() {
     assert_eq!(value, "ab\n");
     assert_eq!(cursor, 3);
     // A literal newline char inserts the same way.
-    let mut value = "a".to_string();
+    let mut value = CompactString::from("a");
     let mut cursor = 1;
     assert!(apply_textarea_key(
         &mut value,
@@ -195,7 +196,7 @@ fn test_textarea_key_enter_inserts_newline() {
 #[test]
 fn test_textarea_key_up_down_moves_caret_between_lines() {
     // Visual lines are "abc" / "def"; moving down from (0,1) lands on (1,1).
-    let mut value = "abc\ndef".to_string();
+    let mut value = CompactString::from("abc\ndef");
     let mut cursor = 1;
     assert!(
         apply_textarea_key(&mut value, &mut cursor, 10, KeyCode::Down),
@@ -227,7 +228,7 @@ fn test_textarea_key_up_down_moves_caret_between_lines() {
 fn test_textarea_wrap_moves_caret_across_wrapped_lines() {
     // content_width 3: "abcdef" wraps to "abc" / "def" — down from (0,1)
     // lands on the second visual line's column 1.
-    let mut value = "abcdef".to_string();
+    let mut value = CompactString::from("abcdef");
     let mut cursor = 1;
     assert!(apply_textarea_key(
         &mut value,
@@ -251,7 +252,7 @@ fn test_textarea_blur_commits_text_content() {
         &map,
         ScriptMsg::BlurInput {
             node_id: t,
-            value: "new\nvalue".to_string(),
+            value: "new\nvalue".into(),
         },
     );
     let arena = engine.arena();
@@ -278,7 +279,7 @@ fn test_textarea_blur_same_value_no_change_event() {
         &map,
         ScriptMsg::BlurInput {
             node_id: t,
-            value: "same".to_string(),
+            value: "same".into(),
         },
     );
     assert!(
@@ -301,7 +302,7 @@ fn test_textarea_scroll_keeps_caret_visible() {
     tl.input_states.insert(
         t,
         InputRenderState {
-            value: "a\nb\nc\nd".to_string(),
+            value: "a\nb\nc\nd".into(),
             cursor: 7,
             focused: true,
             selection: None,
@@ -419,7 +420,7 @@ fn test_textarea_focused_paints_inverted_caret() {
     tl.input_states.insert(
         t,
         InputRenderState {
-            value: "ab".to_string(),
+            value: "ab".into(),
             cursor: 1,
             focused: true,
             selection: None,
@@ -449,7 +450,7 @@ fn test_textarea_caret_at_line_end_stays_on_its_line() {
     tl.input_states.insert(
         t,
         InputRenderState {
-            value: "ab\ncd".to_string(),
+            value: "ab\ncd".into(),
             cursor: 2,
             focused: true,
             selection: None,
@@ -479,7 +480,7 @@ fn test_textarea_backspace_delete_match_caret_position() {
     // "ab\ncd" with the caret after 'b' (cursor 2): Backspace removes 'b'
     // and Delete removes the '\n' — exactly the characters either side of
     // the painted caret (see the caret-position test above).
-    let mut value = "ab\ncd".to_string();
+    let mut value = CompactString::from("ab\ncd");
     let mut cursor = 2;
     assert!(apply_textarea_key(
         &mut value,
@@ -493,7 +494,7 @@ fn test_textarea_backspace_delete_match_caret_position() {
     );
     assert_eq!(cursor, 1);
 
-    let mut value = "ab\ncd".to_string();
+    let mut value = CompactString::from("ab\ncd");
     let mut cursor = 2;
     assert!(apply_textarea_key(
         &mut value,
@@ -510,7 +511,7 @@ fn test_textarea_wide_char_caret_matches_editing() {
     // A CJK character occupies two cells: the caret after '中' paints at
     // column 2 and Backspace removes the whole character (never half of a
     // UTF-8 sequence / a single cell).
-    let mut value = "中文".to_string();
+    let mut value = CompactString::from("中文");
     let mut cursor = 1;
     assert!(apply_textarea_key(
         &mut value,
@@ -528,7 +529,7 @@ fn test_textarea_wide_char_caret_matches_editing() {
     tl.input_states.insert(
         t,
         InputRenderState {
-            value: "中文".to_string(),
+            value: "中文".into(),
             cursor: 1,
             focused: true,
             selection: None,
