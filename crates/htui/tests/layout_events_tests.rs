@@ -1536,6 +1536,30 @@ fn add_event_listener_registers_a_js_listener() {
 }
 
 #[test]
+fn add_event_listener_is_idempotent_for_identical_listener() {
+    // Browser semantics: re-registering the same (type, callback) pair is a
+    // no-op — the listener must fire once per event, not once per add call.
+    let seen = Arc::new(Mutex::new(0usize));
+    let seen2 = Arc::clone(&seen);
+    let html = r#"
+      <script>
+        var h = function () { tick(); };
+        var btn = document.getElementById('btn');
+        btn.addEventListener('click', h);
+        btn.addEventListener('click', h);
+      </script>
+      <div id="btn">click me</div>
+    "#;
+    let (mut engine, geo) = build_geometry(html, counting_host(seen2));
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("btn").expect("region");
+    let (x, y) = center(region.rect);
+    let mut hover = HoverState::new();
+    on_click(&mut hover, &map, &mut engine, x, y);
+    assert_eq!(*seen.lock().unwrap(), 1);
+}
+
+#[test]
 fn js_can_mutate_the_dom_and_marks_dirty() {
     let html = r#"
       <script>

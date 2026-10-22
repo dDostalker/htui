@@ -5,14 +5,14 @@ globalThis.__htuiFetchResolvers = {};
 globalThis.__htuiAddListener = function (nodeId, type, fn) {
   var entry = globalThis.__htuiListeners[nodeId] || (globalThis.__htuiListeners[nodeId] = {});
   var arr = entry[type] || (entry[type] = []);
-  arr.push(fn);
+  if (arr.indexOf(fn) === -1) { arr.push(fn); }
 };
 globalThis.__htuiGetListeners = function (nodeId, type) {
   var entry = globalThis.__htuiListeners[nodeId];
   return entry ? (entry[type] || []) : [];
 };
 // Single-slot registry for `on*` attribute handlers. Unlike the multicast
-// listener list above, each (node, type) holds at most one function — a
+// listener list above, each (node, type) holds at most one function - a
 // browser event-handler slot: installing overwrites, clearing removes.
 globalThis.__htuiAttrHandlers = {};
 globalThis.__htuiSetAttrHandler = function (nodeId, type, fn) {
@@ -28,7 +28,7 @@ globalThis.__htuiClearAllAttrHandlers = function (nodeId) {
 };
 // Live NodeList factory: `getLen()` / `getItem(i)` are native closures over
 // the engine arena, so every access (length / index / enumeration) reflects
-// the current DOM — a held `childNodes` reference stays live.
+// the current DOM - a held `childNodes` reference stays live.
 globalThis.__htuiLiveList = function (getLen, getItem) {
   function index(p) {
     var n = Number(p);
@@ -84,8 +84,8 @@ globalThis.__htuiLiveList = function (getLen, getItem) {
 };
 // Live DOMStringMap factory for `el.dataset`. `get` / `set` / `remove` /
 // `keys` are native closures over the engine arena (the element's `data-*`
-// attributes), so every access reflects the current DOM — a held `dataset`
-// reference stays live. Property names use the browser camelCase↔kebab-case
+// attributes), so every access reflects the current DOM - a held `dataset`
+// reference stays live. Property names use the browser camelCase<->kebab-case
 // mapping (`dataset.fooBar` <-> `data-foo-bar`); assigning `''` removes the
 // attribute, and `Object.keys(dataset)` enumerates the kebab-cased names.
 globalThis.__htuiDataset = function (get, set, remove, keys) {
@@ -136,7 +136,7 @@ globalThis.__htuiDataset = function (get, set, remove, keys) {
 };
 // Live DOMTokenList factory for `el.classList`. `getAttr()` / `setAttr()`
 // are native closures over the engine arena (the element's `class`
-// attribute), so every access reflects the current DOM — a held `classList`
+// attribute), so every access reflects the current DOM - a held `classList`
 // reference stays live. Mirrors the browser semantics: token order and first
 // occurrences are preserved, empty / whitespace-containing tokens are
 // rejected (`SyntaxError`), and add / remove / toggle / replace only rewrite
