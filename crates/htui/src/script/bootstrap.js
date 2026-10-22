@@ -16,6 +16,11 @@
     return String(n) === p ? n : NaN;
   }
 
+  var PROTO_OWN = Object.getOwnPropertyNames(Object.prototype);
+  function isProtoOwn(p) {
+    return PROTO_OWN.indexOf(p) !== -1;
+  }
+
   globalThis.__htuiAddListener = function (nodeId, type, fn) {
     var entry = globalThis.__htuiListeners[nodeId] || (globalThis.__htuiListeners[nodeId] = {});
     var arr = entry[type] || (entry[type] = []);
@@ -103,9 +108,6 @@
   // attributes), so every access reflects the current DOM - a held `dataset`
   // reference stays live. Property names use the browser camelCase<->kebab-case
   // mapping (`dataset.fooBar` <-> `data-foo-bar`); assignment stringifies the
-  // value (WebIDL `DOMString`: null -> "null", '' -> empty value) and never
-  // removes - `delete dataset.key` does - and `Object.keys(dataset)`
-  // enumerates the kebab-cased names.
   globalThis.__htuiDataset = function (get, set, remove, keys) {
     function kebab(p) {
       return String(p).replace(/[A-Z]/g, function (c) { return '-' + c.toLowerCase(); });
@@ -115,15 +117,11 @@
     };
     return new Proxy(target, {
       get: function (t, p) {
-        if (typeof p === 'symbol') return Reflect.get(t, p);
-        // `toString` / `valueOf` fall back to the target so coercions such as
-        // `String(dataset)` succeed; everything else is a data-* lookup.
-        if (p === 'toString' || p === 'valueOf') return Reflect.get(t, p);
-        if (p === 'then' || p === 'toJSON') return undefined;
+        if (typeof p === 'symbol' || isProtoOwn(p)) return Reflect.get(t, p);
         return get(kebab(p));
       },
       set: function (t, p, v) {
-        if (typeof p !== 'string' || p === 'then') return false;
+        if (typeof p === 'symbol' || isProtoOwn(p)) return Reflect.set(t, p, v);
         // WebIDL `DOMString` conversion: null becomes "null", undefined
         // becomes "undefined". Assignment never removes the attribute - an
         // empty string sets an empty value; `delete dataset.key` removes.
@@ -131,11 +129,12 @@
         return true;
       },
       has: function (t, p) {
-        if (typeof p !== 'string') return Reflect.has(t, p);
+        if (typeof p === 'symbol' || isProtoOwn(p)) return Reflect.has(t, p);
         return get(kebab(p)) !== undefined;
       },
       deleteProperty: function (t, p) {
-        if (typeof p !== 'string') return false;
+        if (typeof p === 'symbol') return Reflect.deleteProperty(t, p);
+        if (isProtoOwn(p)) return true;
         remove(kebab(p));
         return true;
       },
@@ -143,7 +142,7 @@
         return keys();
       },
       getOwnPropertyDescriptor: function (t, p) {
-        if (typeof p !== 'string') return undefined;
+        if (typeof p !== 'string' || isProtoOwn(p)) return undefined;
         var v = get(kebab(p));
         if (v === undefined) return undefined;
         return { value: v, writable: true, enumerable: true, configurable: true };
@@ -160,6 +159,7 @@
   // the attribute when the token set actually changed.
   globalThis.__htuiClassList = function (getAttr, setAttr) {
     // Token list memoized
+    var cacheRaw = null;
     var cacheTokens = [];
     function tokens() {
       var raw = getAttr();
