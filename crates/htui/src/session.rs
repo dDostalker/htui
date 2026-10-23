@@ -1,19 +1,5 @@
-//! Render session — the single entry point for rendering a document.
+//! entry point for rendering a document.
 //!
-//! A [`Session`] owns the session-scoped `mem://` resource registry (see
-//! [`crate::resources`]) and the render settings (see [`crate::config`]).
-//! Everything a document can see — `<script src>`, `<link href>`, `<img
-//! src>`, JS `fetch` — is scoped to the session that renders it, so parallel
-//! sessions never share or collide resources.
-
-use std::sync::Arc;
-
-use crate::config::Config;
-use crate::events::EventBindings;
-use crate::resources::{ResourceError, ResourceRegistry};
-
-/// One render session: a resource registry plus render settings.
-///
 /// ```
 /// use htui::{Config, Session};
 ///
@@ -25,11 +11,18 @@ use crate::resources::{ResourceError, ResourceRegistry};
 /// session.register("mem://app.js", b"console.log('hi')".to_vec()).unwrap();
 /// // session.render("<html>…</html>", "");
 /// ```
+
+
+use std::sync::Arc;
+
+use crate::config::Config;
+use crate::events::EventBindings;
+use crate::resources::{ResourceError, ResourceRegistry};
+
+/// One render session is a resource registry plus render settings.
 pub struct Session {
     registry: Arc<ResourceRegistry>,
     config: Config,
-    /// Host-function bindings exposed to the document's scripts (used when
-    /// [`Config::events`] is enabled).
     bindings: EventBindings,
 }
 
@@ -40,42 +33,32 @@ impl Default for Session {
 }
 
 impl Session {
-    /// Create a session with an empty registry, the default config (events
-    /// enabled) and no host bindings.
     pub fn new() -> Self {
-        Self {
-            registry: Arc::new(ResourceRegistry::new()),
-            config: Config::default(),
-            bindings: EventBindings::default(),
-        }
+        Default::default()
     }
 
-    /// Register raw bytes under a virtual `mem://` path (see
-    /// [`ResourceRegistry::register`]).
+    /// Register raw bytes under a virtual `mem://` path
     pub fn register(&self, path: impl Into<String>, bytes: Vec<u8>) -> Result<(), ResourceError> {
         self.registry.register(path, bytes)
     }
 
-    /// Remove a virtual entry (see [`ResourceRegistry::unregister`]).
+    /// Remove a virtual entry 
     pub fn unregister(&self, path: &str) -> bool {
         self.registry.unregister(path)
     }
 
-    /// Load the bytes registered under `path` (see [`ResourceRegistry::load`]).
+    /// Load the bytes registered under `path` 
     pub fn load(&self, path: &str) -> Result<Arc<Vec<u8>>, ResourceError> {
         self.registry.load(path)
     }
 
-    /// Access the session's resource registry (for advanced uses such as
-    /// manual pipeline driving with [`crate::resources::with_registry`]).
+    /// Access the session's resource registry 
     pub fn registry(&self) -> &ResourceRegistry {
         &self.registry
     }
 
     /// Run `f` with the session's resources installed on this thread, for
-    /// manual pipeline driving (e.g. headless previews that parse and draw
-    /// outside [`Session::render`]). Equivalent to
-    /// `resources::with_registry(self.registry(), f)`.
+    /// manual pipeline driving
     pub fn with_registry<R>(&self, f: impl FnOnce() -> R) -> R {
         crate::resources::with_registry(Arc::clone(&self.registry), f)
     }
@@ -85,8 +68,7 @@ impl Session {
         &self.config
     }
 
-    /// Mutably access the session's render settings (zoom / theme / frame
-    /// gap). Takes effect on the next [`Session::render`].
+    /// Mutably access the session's render settings 
     pub fn config_mut(&mut self) -> &mut Config {
         &mut self.config
     }
@@ -96,8 +78,8 @@ impl Session {
         self.config = config;
     }
 
-    /// Set the initial zoom factor (default 1.0). The user can still zoom
-    /// interactively during a render; this only seeds the start value.
+    /// Set the initial zoom factor . The user can still zoom
+    /// interactively during a render before restart value.
     pub fn set_zoom(&mut self, zoom: f32) {
         self.config.zoom = zoom;
     }
@@ -108,7 +90,7 @@ impl Session {
     }
 
     /// Set the session's host-function bindings, exposed to the document's
-    /// scripts as JS globals (used when [`Config::events`] is enabled). Takes
+    /// scripts as JS globals. Takes
     /// effect on the next [`Session::render`].
     pub fn set_bindings(&mut self, bindings: EventBindings) {
         self.bindings = bindings;
@@ -120,16 +102,6 @@ impl Session {
     }
 
     /// Render an HTML document in the terminal.
-    ///
-    /// Whether JS-like event handling (click / hover / keyboard events, the
-    /// script thread) is active is controlled by [`Config::events`] (default
-    /// `true`). With events enabled the session's host bindings (see
-    /// [`Session::set_bindings`]) are exposed to the document's scripts, hit
-    /// regions are tracked, and events bubble through the DOM ancestor chain
-    /// to the handlers registered in the bindings or in page JS. Hovering
-    /// produces no visual highlight (matching a browser without CSS `:hover`
-    /// rules) — only the `onmouseover` / `onmouseout` events fire. See the
-    /// [`events`](crate::events) module for the event model.
     pub fn render(&mut self, html: &str, css: &str) {
         // The bindings are consumed by the script thread; an events-disabled
         // render never touches them.
