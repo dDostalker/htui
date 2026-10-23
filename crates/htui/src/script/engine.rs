@@ -105,18 +105,8 @@ impl ScriptEngine {
         }));
         ENGINE_STATE.with(|s| *s.borrow_mut() = Some(Rc::clone(&state)));
 
+        // run boa，add limits
         let mut context = Context::default();
-
-        // Runtime limits: a runaway page (`while (true) {}` or unbounded
-        // recursion) must throw a JS error instead of hanging the script
-        // thread forever. While hung, every pointer move still queues a
-        // `ScriptMsg::Move` on the unbounded channel — an unbounded memory
-        // growth — so killing the loop is what keeps the whole pipeline
-        // bounded. The iteration budget is generous (a interpreted iteration
-        // costs ~100ns, so the worst stall per loop construct is ~0.1s) and
-        // the thrown error surfaces through the usual per-listener /
-        // per-script `log::warn!` paths, exactly like a page script that
-        // throws.
         let limits = context.runtime_limits_mut();
         limits.set_recursion_limit(512);
         limits.set_loop_iteration_limit(1_000_000);

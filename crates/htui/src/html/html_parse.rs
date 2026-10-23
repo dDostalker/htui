@@ -20,7 +20,7 @@ pub struct ParsedDocument {
     pub scripts: Vec<String>,
 }
 
-/// HTML parser (slotmap arena-based).
+/// HTML parser.
 #[derive(Debug)]
 pub struct Parser {
     input: String,
