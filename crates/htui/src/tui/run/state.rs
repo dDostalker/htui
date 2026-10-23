@@ -10,6 +10,7 @@ use crossterm::style::Color;
 
 use crate::events::Geometry;
 use crate::html::css_parse::{self, CssRule, DynamicState, PseudoClassSet};
+use crate::html::html_parse::ParsedDocument;
 use crate::layout::Rect;
 use crate::layout::layoutbox::geometry::{
     SelectRow, overlay_options, select_item_indices, select_overlay_rect, select_rows,
@@ -22,11 +23,13 @@ use super::pipeline::flush_frame;
 use super::region::{find_box_rect, union_rect};
 use super::selection::{extract_selection, highlight_lines, lines_bounds, selection_lines};
 
-fn parse_and_apply(html: &str, css_rules: &CssRule) -> (NodeId, NodeArena) {
-    let mut html_parser = crate::html::html_parse::Parser::new(html);
-    let (root_id, mut arena, _embedded) = html_parser.parse();
-    css_parse::css_into_node(&mut arena, root_id, css_rules);
-    (root_id, arena)
+pub(super) fn cascade_document(
+    document: &ParsedDocument,
+    css_rules: &CssRule,
+) -> (NodeId, NodeArena) {
+    let mut arena = document.arena.clone();
+    css_parse::css_into_node(&mut arena, document.root_id, css_rules);
+    (document.root_id, arena)
 }
 
 // ============================================================
@@ -108,7 +111,7 @@ impl OpenSelect {
 }
 
 pub(super) struct RenderState {
-    pub(super) html: Arc<str>,
+    pub(super) document: ParsedDocument,
     /// Combined initial stylesheet source (document-embedded + session CSS),
     /// kept so `innerHTML`-injected CSS can be appended and re-parsed.
     pub(super) base_css: Arc<str>,
@@ -368,10 +371,5 @@ impl RenderState {
         if let Ok(mut guard) = self.selection_text.lock() {
             *guard = text;
         }
-    }
-
-    /// Parse the current session document and cascade its styles.
-    pub(super) fn parse_and_apply(&self) -> (NodeId, NodeArena) {
-        parse_and_apply(&self.html, &self.css_rules)
     }
 }

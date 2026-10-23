@@ -34,7 +34,7 @@ use crossterm::{
 use crate::Session;
 use crate::{
     events::{Geometry, HitMap},
-    html::css_parse::DynamicState,
+    html::{css_parse::DynamicState, html_parse::Parser},
     layout::layout::{MAX_TERM_COLS, MAX_TERM_ROWS, TermMap},
     resources,
     script::{ScriptMsg, ScriptResponse, run_script_thread},
@@ -78,8 +78,11 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
     TERMINAL_ACTIVE.store(true, Ordering::SeqCst);
 
     // load source
-    let css_source: Arc<str> = Arc::from(combined_css_source(html, css));
-    let html: Arc<str> = Arc::from(html);
+    let document = session.with_registry(|| {
+        let mut parser = Parser::new(html);
+        parser.parse_with_scripts()
+    });
+    let css_source: Arc<str> = Arc::from(combined_css_source(&document.css, css));
     let config = *session.config();
     let registry = session.registry_handle();
     let bindings = if config.events {
@@ -102,12 +105,18 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
     let (script_out_tx, script_out_rx) = mpsc::channel::<ScriptResponse>();
     // start js thread
     let script_thread: Option<std::thread::JoinHandle<()>> = bindings.map(|bindings| {
-        let html = Arc::clone(&html);
+        let script_document = document.clone();
         let hit_map_thread = Arc::clone(&hit_map);
         let script_registry = Arc::clone(&registry);
         std::thread::spawn(move || {
             resources::with_registry(script_registry, || {
-                run_script_thread(html, bindings, script_rx, script_out_tx, hit_map_thread)
+                run_script_thread(
+                    script_document,
+                    bindings,
+                    script_rx,
+                    script_out_tx,
+                    hit_map_thread,
+                )
             });
         })
     });
@@ -144,7 +153,7 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
     // distinguish a *stuck* render thread from an idle one.
     let render_beat: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
     let render_handle = std::thread::spawn({
-        let html_clone = Arc::clone(&html);
+        let render_document = document;
         let css_clone = Arc::clone(&css_source);
         let max_scroll_clone = Arc::clone(&max_scroll);
         let selection_text_clone = Arc::clone(&selection_text);
@@ -157,7 +166,7 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
             resources::with_registry(render_registry, || {
                 render_thread(
                     rx,
-                    html_clone,
+                    render_document,
                     css_clone,
                     max_scroll_clone,
                     geo_tx,

@@ -12,7 +12,7 @@ use crate::tdom::node::{Node, NodeArena, NodeId, NodeType, document_base_href};
 /// Parsed HTML document: the DOM arena plus the `<style>` CSS and `<script>`
 /// JS sources extracted during parsing (inline, or external files loaded via
 /// `<link rel="stylesheet">` / `<script src="...">`).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ParsedDocument {
     pub root_id: NodeId,
     pub arena: NodeArena,

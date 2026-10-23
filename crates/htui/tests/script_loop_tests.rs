@@ -1064,10 +1064,12 @@ fn spawn_script(
     bindings: EventBindings,
     hit_map: Arc<Mutex<Arc<HitMap>>>,
 ) -> (Sender<ScriptMsg>, Receiver<ScriptResponse>, JoinHandle<()>) {
-    let html: Arc<str> = Arc::from(html);
+    let mut parser = htui::html::html_parse::Parser::new(html);
+    let document = parser.parse_with_scripts();
     let (tx, rx) = mpsc::channel::<ScriptMsg>();
     let (out_tx, out_rx) = mpsc::channel::<ScriptResponse>();
-    let handle = std::thread::spawn(move || run_script_thread(html, bindings, rx, out_tx, hit_map));
+    let handle =
+        std::thread::spawn(move || run_script_thread(document, bindings, rx, out_tx, hit_map));
     (tx, out_rx, handle)
 }
 

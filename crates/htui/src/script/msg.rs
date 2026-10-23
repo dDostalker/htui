@@ -22,6 +22,7 @@ use compact_str::CompactString;
 use crate::events::{
     ElementRef, EventBindings, EventType, HitMap, HitRegion, HoverState, KeyEventInfo, interaction,
 };
+use crate::html::html_parse::ParsedDocument;
 use crate::layout::Rect;
 use crate::script::ScriptEngine;
 use crate::tdom::node::{NodeArena, NodeId, NodeType};
@@ -423,13 +424,13 @@ pub fn apply_message(
 /// state, and key-gate results. `Quit` or a closed request channel ends the
 /// loop.
 pub fn run_script_thread(
-    html: Arc<str>,
+    document: ParsedDocument,
     bindings: EventBindings,
     rx: Receiver<ScriptMsg>,
     tx: Sender<ScriptResponse>,
     hit_map: Arc<Mutex<Arc<HitMap>>>,
 ) {
-    let mut engine = match ScriptEngine::new(html.as_ref(), bindings) {
+    let mut engine = match ScriptEngine::new_from_document(document, bindings) {
         Ok(engine) => engine,
         Err(err) => {
             log::error!("Failed to initialize script engine: {err}");
