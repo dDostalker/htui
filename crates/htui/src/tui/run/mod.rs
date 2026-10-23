@@ -161,8 +161,6 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
         let render_registry = Arc::clone(&registry);
         let geo_tx = events_active.then_some(geo_tx);
         move || {
-            // The render thread resolves `<img src>` / `<script src>` / `<link
-            // href>` through the session's registry for its whole lifetime.
             resources::with_registry(render_registry, || {
                 render_thread(
                     rx,

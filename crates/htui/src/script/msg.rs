@@ -454,17 +454,6 @@ pub fn run_script_thread(
     }
 
     loop {
-        // Block for the next message. The wait is bounded only by real wake
-        // sources:
-        // - the earliest due timer (JS `setTimeout` / `setInterval`) bounds
-        //   it to its deadline;
-        // - a pending `fetch` completion needs a zero wait: loads resolve
-        //   synchronously into the fetch channel at `fetch()` call time, so
-        //   an outstanding fetch id means the result is already queued and
-        //   the loop must drain it now;
-        // - a quiet page (no timers, no fetches) blocks indefinitely — the
-        //   input loop's messages and its drop are the only wake-ups, so an
-        //   idle session costs zero script-thread wake-ups.
         let wait = match engine.next_timer_timeout() {
             Some(deadline) => Some(deadline),
             None if engine.has_pending_fetch() => Some(Duration::ZERO),
