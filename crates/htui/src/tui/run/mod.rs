@@ -31,12 +31,12 @@ use crossterm::{
     },
 };
 
+use crate::Session;
 use crate::{
-    config::Config,
-    events::{EventBindings, Geometry, HitMap},
+    events::{Geometry, HitMap},
     html::css_parse::DynamicState,
     layout::layout::{MAX_TERM_COLS, MAX_TERM_ROWS, TermMap},
-    resources::{self, ResourceRegistry},
+    resources,
     script::{ScriptMsg, ScriptResponse, run_script_thread},
     tdom::node::{NodeArena, NodeId},
     tui::graph_api::{
@@ -45,18 +45,8 @@ use crate::{
     },
 };
 
-// debug panic hook
-// this fun only used in debug to hook render panic
-pub(crate) fn run(
-    html: &str,
-    css: &str,
-    bindings: Option<EventBindings>,
-    registry: Arc<ResourceRegistry>,
-    config: Config,
-) {
-    // Panic hook: restores the terminal on any panic in any thread, then
-    // logs (with a backtrace in debug builds). Must be installed before the
-    // terminal setup so a panic during setup is covered too.
+pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
+    // register log hook
     install_panic_hook();
 
     if let Err(e) = enable_raw_mode() {
@@ -82,9 +72,15 @@ pub(crate) fn run(
 
     let html: Arc<str> = Arc::from(html);
 
-    // Shared scroll upper bound — initial value `u32::MAX` means "not yet
-    // known" (the first layout hasn't run); the render thread overwrites it
-    // on every successful render with the real `tl.max_scroll()`.
+    let config = *session.config();
+    let registry = session.registry_handle();
+    let bindings = if config.events {
+        Some(session.take_bindings())
+    } else {
+        None
+    };
+
+    // Shared scroll upper bound
     let max_scroll = Arc::new(AtomicU32::new(u32::MAX));
 
     // Geometry snapshot channel (render thread → hit-test thread) and the

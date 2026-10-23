@@ -1,5 +1,8 @@
 //! entry point for rendering a document.
 //!
+use crate::config::Config;
+use crate::events::EventBindings;
+use crate::resources::{ResourceError, ResourceRegistry};
 /// ```
 /// use htui::{Config, Session};
 ///
@@ -11,13 +14,7 @@
 /// session.register("mem://app.js", b"console.log('hi')".to_vec()).unwrap();
 /// // session.render("<html>…</html>", "");
 /// ```
-
-
 use std::sync::Arc;
-
-use crate::config::Config;
-use crate::events::EventBindings;
-use crate::resources::{ResourceError, ResourceRegistry};
 
 /// One render session is a resource registry plus render settings.
 pub struct Session {
@@ -34,7 +31,11 @@ impl Default for Session {
 
 impl Session {
     pub fn new() -> Self {
-        Default::default()
+        Self {
+            registry: Arc::new(ResourceRegistry::new()),
+            config: Config::default(),
+            bindings: EventBindings::default(),
+        }
     }
 
     /// Register raw bytes under a virtual `mem://` path
@@ -42,19 +43,27 @@ impl Session {
         self.registry.register(path, bytes)
     }
 
-    /// Remove a virtual entry 
+    /// Remove a virtual entry
     pub fn unregister(&self, path: &str) -> bool {
         self.registry.unregister(path)
     }
 
-    /// Load the bytes registered under `path` 
+    /// Load the bytes registered under `path`
     pub fn load(&self, path: &str) -> Result<Arc<Vec<u8>>, ResourceError> {
         self.registry.load(path)
     }
 
-    /// Access the session's resource registry 
+    /// Access the session's resource registry
     pub fn registry(&self) -> &ResourceRegistry {
         &self.registry
+    }
+
+    pub(crate) fn registry_handle(&self) -> Arc<ResourceRegistry> {
+        Arc::clone(&self.registry)
+    }
+
+    pub(crate) fn take_bindings(&mut self) -> EventBindings {
+        std::mem::take(&mut self.bindings)
     }
 
     /// Run `f` with the session's resources installed on this thread, for
@@ -68,7 +77,7 @@ impl Session {
         &self.config
     }
 
-    /// Mutably access the session's render settings 
+    /// Mutably access the session's render settings
     pub fn config_mut(&mut self) -> &mut Config {
         &mut self.config
     }
@@ -90,26 +99,14 @@ impl Session {
     }
 
     /// Set the session's host-function bindings, exposed to the document's
-    /// scripts as JS globals. Takes
-    /// effect on the next [`Session::render`].
+    /// scripts as JS globals. Takes effect on the next [`Session::render`].
     pub fn set_bindings(&mut self, bindings: EventBindings) {
         self.bindings = bindings;
     }
 
-    /// The session's host-function bindings.
-    pub fn bindings(&self) -> &EventBindings {
-        &self.bindings
-    }
 
     /// Render an HTML document in the terminal.
     pub fn render(&mut self, html: &str, css: &str) {
-        // The bindings are consumed by the script thread; an events-disabled
-        // render never touches them.
-        let bindings = if self.config.events {
-            Some(std::mem::take(&mut self.bindings))
-        } else {
-            None
-        };
-        crate::tui::run::run(html, css, bindings, Arc::clone(&self.registry), self.config);
+        crate::tui::run::run(html, css, self);
     }
 }
