@@ -270,7 +270,7 @@ impl RenderState {
         out: &mut BufWriter<W>,
         geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>,
         term_map: &TermMap,
-        arena: &NodeArena,
+        arena: &Arc<NodeArena>,
         root_id: NodeId,
         scroll_y: u32,
         zoom: f32,
@@ -284,10 +284,11 @@ impl RenderState {
         if css_changed {
             self.apply_injected_css(&dirty.injected_css);
         }
-        let mut arena = arena.clone();
+        let source_arena = Arc::clone(arena);
+        let mut arena = (*source_arena).clone();
         reset_css_attr(&mut arena, root_id);
         css_into_node_with_state(&mut arena, root_id, &self.css_rules, &self.dynamic);
-        self.document.arena = arena.clone();
+        self.document.arena = source_arena;
         self.document.root_id = root_id;
         let dirty = if state_changed || css_changed {
             None

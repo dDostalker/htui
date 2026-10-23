@@ -111,7 +111,7 @@ impl ScriptEngine {
         let doc = document;
         let (fetch_tx, fetch_rx) = ScriptState::fetch_channel();
         let state = Rc::new(RefCell::new(ScriptState {
-            arena: doc.arena,
+            arena: (*doc.arena).clone(),
             root_id: doc.root_id,
             render_cmds: Vec::new(),
             dirty: DirtyInfo::default(),
@@ -154,7 +154,7 @@ impl ScriptEngine {
         }
 
         // Run the document's `<script>` blocks.
-        for script in &doc.scripts {
+        for script in doc.scripts.iter() {
             if let Err(e) = context.eval(Source::from_bytes(script.as_bytes())) {
                 log::warn!("Script execution failed: {e}");
             }

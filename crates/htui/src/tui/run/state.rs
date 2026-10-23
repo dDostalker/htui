@@ -27,7 +27,7 @@ pub(super) fn cascade_document(
     document: &ParsedDocument,
     css_rules: &CssRule,
 ) -> (NodeId, NodeArena) {
-    let mut arena = document.arena.clone();
+    let mut arena = (*document.arena).clone();
     css_parse::css_into_node(&mut arena, document.root_id, css_rules);
     (document.root_id, arena)
 }

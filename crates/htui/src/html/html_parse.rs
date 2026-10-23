@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use std::sync::Arc;
 
 use html5ever::driver::ParseOpts;
 use html5ever::tendril::TendrilSink;
@@ -15,9 +16,9 @@ use crate::tdom::node::{Node, NodeArena, NodeId, NodeType, document_base_href};
 #[derive(Debug, Clone)]
 pub struct ParsedDocument {
     pub root_id: NodeId,
-    pub arena: NodeArena,
-    pub css: String,
-    pub scripts: Vec<String>,
+    pub arena: Arc<NodeArena>,
+    pub css: Arc<str>,
+    pub scripts: Arc<[String]>,
 }
 
 /// HTML parser.
@@ -37,7 +38,8 @@ impl Parser {
     /// Parse HTML and return (root_id, arena, embedded_css).
     pub fn parse(&mut self) -> (NodeId, NodeArena, String) {
         let doc = self.parse_with_scripts();
-        (doc.root_id, doc.arena, doc.css)
+        let arena = (*doc.arena).clone();
+        (doc.root_id, arena, doc.css.to_string())
     }
 
     /// Parse HTML and return the arena plus the embedded `<style>` CSS and
@@ -66,11 +68,13 @@ impl Parser {
             css_sources.join("\n").len(),
             scripts.join("\n").len()
         );
+        let arena = Arc::new(arena);
+        let css = css_sources.join("\n");
         ParsedDocument {
             root_id,
             arena,
-            css: css_sources.join("\n"),
-            scripts,
+            css: Arc::from(css),
+            scripts: scripts.into(),
         }
     }
 }
