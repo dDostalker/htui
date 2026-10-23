@@ -372,7 +372,10 @@ fn dataset_proto_keys_keep_object_semantics_and_names_are_validated() {
         EventBindings::default(),
     )
     .expect("engine initializes");
-    eval_str(&mut engine, "globalThis.ds = document.getElementById('d').dataset");
+    eval_str(
+        &mut engine,
+        "globalThis.ds = document.getElementById('d').dataset",
+    );
     // WebIDL named-property visibility: Object.prototype's own property
     // names keep their normal semantics and are never shadowed by data-*.
     assert_eq!(

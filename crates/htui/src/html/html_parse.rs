@@ -60,7 +60,7 @@ impl Parser {
         );
 
         debug!(
-            "解析完成: root={}, {} 节点, CSS: {} 字节, JS: {} 字节",
+            "parse done: root={}, {} B, CSS: {} B, JS: {} B",
             root_id,
             arena.len(),
             css_sources.join("\n").len(),

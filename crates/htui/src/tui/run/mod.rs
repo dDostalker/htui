@@ -1,9 +1,9 @@
-//! Terminal engine driver — the `render` / `render_with_events` entry-point
-//! machinery.
+//! `render` / `render_with_events` entry-point machinery.
 //!
-//! Owns the render thread (HTML → layout → paint → ANSI diff output), the
-//! hit-test thread (geometry snapshots → shared `HitMap`), the incremental
-//! region-repaint helpers, and the input loop that translates keys / mouse
+//! Owns the render thread HTML → layout → paint → ANSI diff output，
+//! the hit-test thread geometry snapshots → shared `HitMap`,
+//!  the incremental region-repaint helpers,
+//!  and the input loop that translates keys mouse
 //! events into `RenderCmd`s.
 
 mod overlay;
@@ -45,10 +45,18 @@ use crate::{
     },
 };
 
+/// Whether the terminal is currently in raw mode / alternate screen
+static TERMINAL_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Maximum number of pointer-move messages that may wait for the script
+/// thread. Extra moves are dropped.
+const MAX_IN_FLIGHT_MOVES: usize = 8;
+
 pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
     // register log hook
     install_panic_hook();
 
+    // crossterm init
     if let Err(e) = enable_raw_mode() {
         log::error!("Failed to enable raw mode: {}", e);
         return;
@@ -66,12 +74,12 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
         }
         return;
     }
+    //
     TERMINAL_ACTIVE.store(true, Ordering::SeqCst);
 
-    let css_source = Arc::<str>::from(combined_css_source(html, css));
-
+    // load source
+    let css_source: Arc<str> = Arc::from(combined_css_source(html, css));
     let html: Arc<str> = Arc::from(html);
-
     let config = *session.config();
     let registry = session.registry_handle();
     let bindings = if config.events {
@@ -83,26 +91,21 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
     // Shared scroll upper bound
     let max_scroll = Arc::new(AtomicU32::new(u32::MAX));
 
-    // Geometry snapshot channel (render thread → hit-test thread) and the
-    // published hit map (hit-test thread → input loop + script thread). The
-    // hit-test thread is only spawned when event handling is requested.
+    // The render thread sends layout snapshots to the hit-test thread.
+    // The hit-test thread publishes clickable regions in this shared map.
     let (geo_tx, geo_rx) = mpsc::channel::<Arc<Geometry>>();
     let hit_map: Arc<Mutex<Arc<HitMap>>> = Arc::new(Mutex::new(Arc::new(HitMap::new())));
 
-    // The script engine owns the live DOM when events are enabled; it parses
-    // the document itself (arena + `<script>` blocks) and reports dirty flags
-    // when JS mutates the DOM. It runs on a dedicated script thread so a
-    // blocking host function never stalls input handling (see
-    // `script::msg::run_script_thread`).
+    // Input-loop requests go to the script thread; its responses come back
+    // on the second channel. Start that thread only when event bindings exist.
     let (script_tx, script_rx) = mpsc::channel::<ScriptMsg>();
     let (script_out_tx, script_out_rx) = mpsc::channel::<ScriptResponse>();
+    // start js thread
     let script_thread: Option<std::thread::JoinHandle<()>> = bindings.map(|bindings| {
         let html = Arc::clone(&html);
         let hit_map_thread = Arc::clone(&hit_map);
         let script_registry = Arc::clone(&registry);
         std::thread::spawn(move || {
-            // The script thread resolves `fetch` / `<script src>` through the
-            // session's registry for its whole lifetime.
             resources::with_registry(script_registry, || {
                 run_script_thread(html, bindings, script_rx, script_out_tx, hit_map_thread)
             });
@@ -208,10 +211,9 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
     let mut hovered: Option<NodeId> = None;
 
     let mut quit = false;
-    // Un-acked `ScriptMsg::Move` count (see `MAX_IN_FLIGHT_MOVES`). Every
-    // script-thread response folds exactly one message batch, so each folded
-    // event decrements this; timer-driven responses also decrement, which can
-    // only loosen the bound (timer rate is user-visible, not pointer-rate).
+    // Pointer moves sent to the script thread but not answered yet.
+    // Any script response can free a slot, so the count never rises above
+    // `MAX_IN_FLIGHT_MOVES`.
     let mut moves_in_flight: usize = 0;
     // Render-stall watchdog state: `(heartbeat at last command send, when it
     // was sent)`. The render thread bumps its heartbeat after each processed
@@ -361,9 +363,8 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
             state.request_resize_revalidation();
         }
 
-        // Hand the actions that need the engine to the script thread (the
-        // channel is unbounded, so a busy script thread never blocks us —
-        // but Move messages are capped, see `MAX_IN_FLIGHT_MOVES`).
+        // Send engine work to the script thread. Move messages are capped so
+        // a busy script thread cannot accumulate a large pointer backlog.
         for msg in msgs {
             if let ScriptMsg::Move { .. } = msg {
                 if moves_in_flight >= MAX_IN_FLIGHT_MOVES {
@@ -567,23 +568,6 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
         log::error!("Failed to disable raw mode: {}", e);
     }
 }
-/// Whether the terminal is currently in raw mode / alternate screen (i.e.
-/// `run` completed its setup and has not yet restored). The panic hook reads
-/// this so it only touches the terminal when the engine actually owns it.
-static TERMINAL_ACTIVE: AtomicBool = AtomicBool::new(false);
-
-/// Maximum number of un-acked `ScriptMsg::Move` messages allowed on the
-/// script channel before the input loop starts dropping new ones.
-///
-/// The channel is unbounded by design (a busy script thread must never block
-/// the input loop), which also means a busy / blocked script thread accumulates
-/// every pointer move. Pointer moves are *state transitions*, not queued
-/// events — only the latest position determines hover enter / leave, so a
-/// browser-style drop of the excess is semantically invisible: the next
-/// accepted move (or the backlog drain) re-syncs the hover state. The bound
-/// caps both the channel backlog and the hover-dispatch work a stall can
-/// amass.
-const MAX_IN_FLIGHT_MOVES: usize = 8;
 
 #[cfg(debug_assertions)]
 use std::backtrace::Backtrace;

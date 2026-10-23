@@ -414,13 +414,14 @@ pub fn apply_message(
     }
 }
 
-/// Drive a [`ScriptEngine`] on a dedicated thread.
+/// Run the page's JS engine on its own thread.
 ///
-/// Constructs the engine (running the document's `<script>` blocks), answers
-/// with `ScriptResponse::Ready` (or `Failed`), then processes [`ScriptMsg`]s
-/// from the input loop. When `EventBindings::auto` is set, ticks the periodic
-/// action between messages via `recv_timeout`. Exits on `ScriptMsg::Quit` or
-/// when the input loop drops its sender.
+/// Build the engine and run top-level `<script>` code, then report the
+/// initial DOM with `Ready` or initialization failure with `Failed`. Handle
+/// `ScriptMsg` requests from the input loop, and wake for due JS timers or
+/// completed fetches. Each reply carries render commands, DOM updates, hover
+/// state, and key-gate results. `Quit` or a closed request channel ends the
+/// loop.
 pub fn run_script_thread(
     html: Arc<str>,
     bindings: EventBindings,

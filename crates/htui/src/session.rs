@@ -104,7 +104,6 @@ impl Session {
         self.bindings = bindings;
     }
 
-
     /// Render an HTML document in the terminal.
     pub fn render(&mut self, html: &str, css: &str) {
         crate::tui::run::run(html, css, self);
