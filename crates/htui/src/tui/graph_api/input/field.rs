@@ -155,6 +155,21 @@ pub(super) fn is_readonly_input(arena: Option<&NodeArena>, node_id: NodeId) -> b
     })
 }
 
+/// `true` for a form control carrying a `disabled` attribute — such controls
+/// swallow clicks and presses (no Click dispatch, no focus change, no
+/// dropdown) and are skipped by `Tab` focus cycling, matching browsers.
+pub(super) fn is_disabled_control(arena: Option<&NodeArena>, node_id: NodeId) -> bool {
+    arena.is_some_and(|a| {
+        a.get(node_id).is_some_and(|n| {
+            n.attributes.contains_key("disabled")
+                && matches!(
+                    n.node_type,
+                    NodeType::Button | NodeType::Input | NodeType::Select | NodeType::Textarea
+                )
+        })
+    })
+}
+
 /// The nearest `<form>` ancestor of `node_id`, if any — the target of the
 /// browser's implicit submission when Enter is pressed in a text field.
 pub(super) fn focused_form(arena: Option<&NodeArena>, node_id: NodeId) -> Option<NodeId> {
@@ -217,6 +232,16 @@ pub fn collect_input_ids(arena: &NodeArena) -> Vec<NodeId> {
     let mut stack = vec![root];
     while let Some(id) = stack.pop() {
         let node = &arena[id];
+        // A disabled control is unfocusable: browsers skip it in `Tab`
+        // cycling entirely. (Only form controls honour `disabled`.)
+        if node.attributes.contains_key("disabled")
+            && matches!(
+                node.node_type,
+                NodeType::Button | NodeType::Input | NodeType::Select | NodeType::Textarea
+            )
+        {
+            continue;
+        }
         match node.node_type {
             NodeType::Textarea => out.push(id),
             NodeType::Input => {
