@@ -512,6 +512,44 @@ fn inline_block_boxes_flow_side_by_side() {
 }
 
 #[test]
+fn inline_row_skips_unlayouttable_item_without_shifting_siblings() {
+    init();
+    // An inline row containing a `display: inline-grid` item (grid geometry
+    // is unimplemented — its layout dispatch returns `None`) must skip that
+    // item. The measurement pass used to compact successful measurements
+    // while the placement pass indexed by the item position, so every later
+    // sibling consumed the *previous* item's measurements and the last
+    // sibling's box was never placed at all (its text still leaked through
+    // the parent's inline runs, but its box — here the background fill —
+    // went missing).
+    let html = r#"<div><span class="a">AA</span><span class="g" style="display: inline-grid">G</span><span class="b">BBB</span></div>"#;
+    let css = ".a, .b { display: inline-block; } .b { background-color: navy; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let row0: String = tl.layout[..80].iter().map(|b| b.word.as_str()).collect();
+    assert_eq!(
+        row0.find("AA"),
+        Some(0),
+        "the first inline item keeps its own measurements: {row0:?}"
+    );
+    let navy = Color::Rgb {
+        r: 0,
+        g: 0,
+        b: 0x80,
+    };
+    let painted = tl.layout[..80]
+        .iter()
+        .any(|b| b.word == "B" && b.bcolor == Some(navy));
+    assert!(
+        painted,
+        "the sibling after the unlayouttable item must keep its own measurements \
+         and place its box (background fill) on the row: {row0:?}"
+    );
+}
+
+#[test]
 fn inline_block_whitespace_separates_and_collapses() {
     init();
     // Inter-element whitespace between two inline-blocks collapses to one
