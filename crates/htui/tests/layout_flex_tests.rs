@@ -2435,3 +2435,26 @@ fn test_row_reverse_moves_item_subtrees() {
         rows[0]
     );
 }
+
+#[test]
+fn test_unlayouttable_flex_item_does_not_desync_align_content() {
+    init();
+    // A `display: grid` child (grid geometry is unimplemented — its dispatch
+    // returns `None`, only a warning is logged) inside a multi-line flex
+    // container must not desync the `align-content` pass: the old
+    // prep-indexed walk assumed one placed box per prep and indexed past
+    // `placed` (panic) or shifted the wrong boxes.
+    let html = r#"<div class="c"><div class="a">A</div><div class="g" style="display: grid">G</div><div class="b">B</div><div class="d">D</div></div>"#;
+    let css = ".c { display: flex; flex-wrap: wrap; align-content: center; height: 20ch; width: 12ch; } \
+               .a { width: 8ch; } .b { width: 6ch; }";
+    let (rows, _) = render_rows(html, css);
+    let a_row = rows
+        .iter()
+        .position(|r| r.contains('A'))
+        .expect("layoutable items must still render");
+    assert!(
+        a_row >= 7,
+        "the line's boxes must shift with align-content: center over a 20-row \
+         container even when a sibling item failed to lay out, got row {a_row}"
+    );
+}

@@ -78,6 +78,12 @@ pub(super) fn layout_flex_items(
     // natural max-content measure assumed (text wrapping at the item's
     // final width), so the line / container must expand to cover it.
     let mut line_extents: Vec<usize> = Vec::with_capacity(line_count);
+    // Number of boxes each line actually contributed to `placed`. A line can
+    // place fewer boxes than it has preps (an item whose dispatch returns
+    // `None` — an unimplemented formatting context, a handlerless tag — only
+    // logs a warning), so the `align-content` pass must walk `placed` by
+    // these counts instead of assuming one box per prep.
+    let mut line_box_counts: Vec<usize> = Vec::with_capacity(line_count);
 
     // Pre-measure every line's natural cross size so `align-content:
     // stretch` can grow the lines (filling the container edge-to-edge — the
@@ -458,6 +464,7 @@ pub(super) fn layout_flex_items(
         } else {
             (first_boxes, first_extent, first_placed_main)
         };
+        let line_box_count = line_boxes.len();
         placed.extend(line_boxes);
 
         // The container height is the line's main-axis extent in column
@@ -467,6 +474,7 @@ pub(super) fn layout_flex_items(
         // container instead of being clipped by it.
         total_main = total_main.max(justify_leading.saturating_add(placed_main));
         line_extents.push(actual_extent);
+        line_box_counts.push(line_box_count);
 
         // 3f. Advance the cross-axis cursor for the next line.
         current_cross = line_origin.saturating_add(actual_extent);
@@ -503,12 +511,14 @@ pub(super) fn layout_flex_items(
         let (leading, between) = align_content_spacing(align_content, free_space, line_count);
         let mut shift: usize = leading;
         let mut running_offset: usize = 0;
-        for (i, indices) in lines.iter().enumerate() {
+        // Walk `placed` by the per-line box counts: a line whose item failed
+        // to lay out contributes fewer boxes than preps, and indexing by the
+        // prep grouping would run past the vec (or shift the wrong boxes).
+        for (i, count) in line_box_counts.iter().enumerate() {
             if i > 0 {
                 shift = shift.saturating_add(between);
             }
-            for (idx_pos, &_prep_idx) in indices.iter().enumerate() {
-                let child = &mut placed[running_offset + idx_pos];
+            for child in &mut placed[running_offset..running_offset + count] {
                 let delta = match direction.is_row() {
                     true => (0, shift as i64),
                     false => (shift as i64, 0),
@@ -518,7 +528,7 @@ pub(super) fn layout_flex_items(
                 // border-box itself.
                 translate_subtree(child, delta.0, delta.1);
             }
-            running_offset = running_offset.saturating_add(indices.len());
+            running_offset = running_offset.saturating_add(*count);
         }
     }
 
