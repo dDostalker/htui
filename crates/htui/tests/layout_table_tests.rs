@@ -566,3 +566,47 @@ fn test_table_outside_table_falls_back_to_block() {
         "stray <td> text should still render via fallback block"
     );
 }
+
+#[test]
+fn scaled_columns_never_collapse_to_zero_width() {
+    init();
+    // When one dominant column drives the total far past the available
+    // width, the narrow columns' proportional share used to round down to 0
+    // — a zero-width column is skipped by the paint phase and its content
+    // vanished silently. Every scaled column keeps a 1-cell floor, so each
+    // narrow column still shows at least its first character.
+    let long_word = "0123456789".repeat(33); // 330 chars
+    let html = format!(
+        "<table><tr><td>a1</td><td>b2</td><td>{long_word}</td></tr></table>"
+    );
+    let (root_id, arena) = setup(&html, "");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
+    assert!(
+        canvas.contains('a') && canvas.contains('b'),
+        "the narrow columns must keep at least one visible cell after scaling: {canvas:?}"
+    );
+}
+
+#[test]
+fn cell_column_width_counts_inline_descendant_text() {
+    init();
+    // A `<td><b>…</b></td>` cell's column must size to the bold text: the
+    // inline descendants' text folds into the cell's own runs at layout
+    // time, so the column width must count it too — the old direct-text-only
+    // measurement reported 0 and the column collapsed to the 3-cell minimum,
+    // wrapping the content over many rows.
+    let html = "<table><tr><td><b>tenchars!!</b></td><td>x</td></tr></table>";
+    let (root_id, arena) = setup(html, "");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let row0: String = tl.layout[..80].iter().map(|b| b.word.as_str()).collect();
+    assert!(
+        row0.contains("tenchars!!"),
+        "the bold cell's text must fit on one row (column sized to the inline \
+         descendant's text, not the 3-cell minimum): {row0:?}"
+    );
+}
