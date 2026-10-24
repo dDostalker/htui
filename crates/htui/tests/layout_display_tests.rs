@@ -14,10 +14,12 @@
 //! - `display: none` on a parent also removes its descendants
 
 use htui::html::{css_parse, html_parse};
+use htui::layout::layout::TermMap;
 use htui::layout::{
     FormattingContext, GeneratedBox, GeneratedBoxKind, OuterDisplay, generate_box_tree,
 };
 use htui::tdom::node::{NodeArena, NodeId, NodeType};
+use htui::tui::graph_api::TermLayout;
 
 fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     let mut p = html_parse::Parser::new(html);
@@ -270,4 +272,62 @@ fn display_grid_is_grid_formatting_context() {
     let div =
         find(&boxes, &arena, |nt| matches!(nt, NodeType::Div)).expect("div should generate a box");
     assert_eq!(div.inner_formatting_context, FormattingContext::Grid);
+}
+
+// --- end-to-end geometry tests -------------------------------------------
+//
+// The generation tests above only assert the GeneratedBox tree; these pin
+// the *layout* behaviour: a `display: contents` element produces no box, so
+// its children must be spliced into the parent's layout walk (flow and flex)
+// instead of being silently dropped.
+
+fn layout_canvas(html: &str, css: &str) -> String {
+    let (root_id, arena) = setup(html, css);
+    let term_map = TermMap {
+        columns: 80,
+        rows: 24,
+    };
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    tl.layout.iter().map(|b| b.word.as_str()).collect()
+}
+
+#[test]
+fn display_contents_children_render_in_flow() {
+    let canvas = layout_canvas(
+        "<div>before<div style=\"display: contents\"><p>inner</p></div>after</div>",
+        "",
+    );
+    assert!(
+        canvas.contains("inner"),
+        "the contents element's children must render in the parent's flow"
+    );
+    assert!(
+        canvas.contains("after"),
+        "siblings after the contents element must still render"
+    );
+}
+
+#[test]
+fn display_contents_flattens_recursively() {
+    let canvas = layout_canvas(
+        "<div style=\"display: contents\"><div style=\"display: contents\"><p>deep</p></div></div>",
+        "",
+    );
+    assert!(
+        canvas.contains("deep"),
+        "nested display: contents elements must flatten recursively"
+    );
+}
+
+#[test]
+fn display_contents_children_become_flex_items() {
+    let canvas = layout_canvas(
+        "<div style=\"display: flex\"><div style=\"display: contents\"><p>alpha</p><p>beta</p></div></div>",
+        "",
+    );
+    assert!(
+        canvas.contains("alpha") && canvas.contains("beta"),
+        "the contents element's children must become flex items, not vanish"
+    );
 }

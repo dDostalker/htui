@@ -240,6 +240,30 @@ pub fn visible_children(arena: &NodeArena, parent_id: NodeId) -> Vec<NodeId> {
     }
 }
 
+/// Splice `display: contents` elements out of a sibling list, recursively.
+///
+/// A contents element produces no box of its own (its subtree is removed from
+/// the box tree while its contents remain — CSS Display §2), so its visible
+/// children take its place in document order. The DOM-walking layout paths
+/// (flow `layout_children`, flex item collection) call this before iterating,
+/// otherwise the contents element's entire subtree is silently dropped: the
+/// walker visits one DOM level and never reaches the flattened children.
+pub fn flatten_contents_children(arena: &NodeArena, children: &[NodeId]) -> Vec<NodeId> {
+    let mut out = Vec::with_capacity(children.len());
+    for &id in children {
+        let is_contents = arena
+            .get(id)
+            .and_then(|node| node.css_attr.display())
+            .is_some_and(|d| d.is_transparent());
+        if is_contents {
+            out.extend(flatten_contents_children(arena, &visible_children(arena, id)));
+        } else {
+            out.push(id);
+        }
+    }
+    out
+}
+
 fn generate_children(arena: &NodeArena, parent_id: NodeId) -> Vec<GeneratedBox> {
     let mut children = Vec::new();
     let mut inline_group = Vec::new();

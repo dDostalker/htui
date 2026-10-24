@@ -16,8 +16,8 @@ use crate::{
     layout::{
         BoxConstraint, Cursor, DEFAULT_LAYOUT, LayoutBox, LayoutContext, OuterDisplay, Rect,
         layoutbox::{
-            GeneratedBoxKind, generate_box_tree, generate_node, layout_generated_box,
-            layout_generated_tree, resolve_positioned_rects,
+            GeneratedBoxKind, flatten_contents_children, generate_box_tree, generate_node,
+            layout_generated_box, layout_generated_tree, resolve_positioned_rects,
         },
     },
     tdom::node::{Node, NodeArena, NodeId, NodeType, is_collapsible_whitespace},
@@ -99,11 +99,28 @@ fn collapsed_interitem_space(node: &Node, parent_white_space: WhiteSpace) -> usi
 /// Lay out a sequence of sibling node IDs under `containing`.
 pub fn layout_children(
     arena: &NodeArena,
-    children: &[NodeId],
+    dom_children: &[NodeId],
     containing: BoxConstraint,
     cursor: &mut Cursor,
     context: LayoutContext,
 ) -> Vec<LayoutBox> {
+    // The `white-space` mode governing inter-element whitespace: the parent
+    // element's own declaration when it has one (default `normal`). The
+    // cascade does not inherit `white-space`, matching `white_space_or`.
+    // Read from the *un-expanded* sibling list — a spliced `display: contents`
+    // grandchild's parent is the contents element, not the block being filled.
+    let parent_white_space = dom_children
+        .first()
+        .and_then(|&first| arena.get(first))
+        .and_then(|first| first.parent)
+        .map(|pid| arena[pid].css_attr.get_white_space(&arena[pid].node_type))
+        .unwrap_or(WhiteSpace::Normal);
+    // `display: contents` elements are spliced out of the sibling list
+    // (recursively) before the walk: the walker visits one DOM level and a
+    // contents element produces no box, so without the splice its entire
+    // subtree would be silently dropped.
+    let children = flatten_contents_children(arena, dom_children);
+    let children = &children;
     let mut boxes = Vec::new();
     // Consecutive inline-level boxes (`display: inline-block`) share one
     // line: they flow left-to-right and wrap at the containing width, like
@@ -113,15 +130,6 @@ pub fn layout_children(
     // Collapsed whitespace accumulated since the last inline-level item,
     // waiting to be attached as the next item's `leading_space`.
     let mut pending_space: usize = 0;
-    // The `white-space` mode governing inter-element whitespace: the parent
-    // element's own declaration when it has one (default `normal`). The
-    // cascade does not inherit `white-space`, matching `white_space_or`.
-    let parent_white_space = children
-        .first()
-        .and_then(|&first| arena.get(first))
-        .and_then(|first| first.parent)
-        .map(|pid| arena[pid].css_attr.get_white_space(&arena[pid].node_type))
-        .unwrap_or(WhiteSpace::Normal);
     for &child_id in children {
         let Some(generated) = generate_node(arena, child_id) else {
             continue;
