@@ -548,6 +548,17 @@ pub(crate) fn run(
         drop(handle);
     }
 
+    // Wake the render thread before joining: the error break paths above (a
+    // dead script thread, a poisoned hit-map lock, a failed channel send) exit
+    // the loop without any `Quit` in flight, and `tx` stays alive on this
+    // stack frame until after `join` — the render thread would block in
+    // `rx.recv()` forever and the terminal restore below would never run.
+    if let Err(e) = tx.send(RenderCmd::Quit) {
+        // The render thread already terminated (e.g. panicked): `join` below
+        // returns immediately, nothing is left to wake up.
+        log::debug!("Render thread already gone; skipping Quit: {e}");
+    }
+
     if let Err(payload) = render_handle.join() {
         log::error!(
             "Render thread panicked: {}",
