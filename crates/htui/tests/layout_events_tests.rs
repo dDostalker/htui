@@ -689,9 +689,7 @@ fn redraw_behind_a_pending_arena_folds_scroll_and_zoom() {
         zoom: 2.0,
     });
     match batch.take_snapshot() {
-        Some(RenderCmd::RenderArena {
-            scroll_y, zoom, ..
-        }) => {
+        Some(RenderCmd::RenderArena { scroll_y, zoom, .. }) => {
             assert_eq!(scroll_y, 5);
             assert_eq!(zoom, 2.0);
         }
@@ -704,14 +702,19 @@ fn viewport_commands_behind_a_pending_render_html_are_dropped() {
     // A document replacement is the dominant intent: a queued scroll or a
     // hover for the *old* document must neither replace it nor restyle it.
     let mut batch = DrainedBatch::new();
-    batch.absorb(RenderCmd::RenderHtml { html: Arc::from("<p>new</p>") });
+    batch.absorb(RenderCmd::RenderHtml {
+        html: Arc::from("<p>new</p>"),
+    });
     batch.absorb(RenderCmd::Rerender { scroll_y: 3 });
     batch.absorb(RenderCmd::Hover { node_id: None });
     assert!(
         matches!(batch.take_snapshot(), Some(RenderCmd::RenderHtml { .. })),
         "the document replacement must survive the queued viewport commands"
     );
-    assert!(batch.take_hover().is_none(), "the stale hover must be dropped");
+    assert!(
+        batch.take_hover().is_none(),
+        "the stale hover must be dropped"
+    );
 }
 
 #[test]

@@ -404,8 +404,7 @@ pub(crate) fn run(
             // indefinitely, stalling scrolling / quitting for seconds.
             let deadline = Instant::now() + KEY_GATE_TIMEOUT;
             while !resolved {
-                match script_out_rx
-                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                match script_out_rx.recv_timeout(deadline.saturating_duration_since(Instant::now()))
                 {
                     Ok(ScriptResponse::Event(ev)) => {
                         let verdict = ev.key_gate.filter(|(id, _)| *id == gate.id);

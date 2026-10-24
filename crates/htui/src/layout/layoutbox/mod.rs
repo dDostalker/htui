@@ -98,10 +98,10 @@ pub use inline_run::InlineRun;
 pub use inner_formatting_context::FormattingContext;
 pub use outer_display::OuterDisplay;
 pub use paint_style::{ColumnLayout, PaintStyle};
+pub(crate) use position::translate_subtree;
 pub use position::{
     apply_relative_offset, pin_fixed_boxes, pin_sticky_boxes, resolve_positioned_rects,
 };
-pub(crate) use position::translate_subtree;
 pub use rect::Rect;
 pub use wrap::{is_cjk_break_opportunity, wrap_runs, wrapped_size};
 

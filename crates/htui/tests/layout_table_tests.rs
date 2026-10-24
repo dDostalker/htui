@@ -576,9 +576,7 @@ fn scaled_columns_never_collapse_to_zero_width() {
     // vanished silently. Every scaled column keeps a 1-cell floor, so each
     // narrow column still shows at least its first character.
     let long_word = "0123456789".repeat(33); // 330 chars
-    let html = format!(
-        "<table><tr><td>a1</td><td>b2</td><td>{long_word}</td></tr></table>"
-    );
+    let html = format!("<table><tr><td>a1</td><td>b2</td><td>{long_word}</td></tr></table>");
     let (root_id, arena) = setup(&html, "");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);

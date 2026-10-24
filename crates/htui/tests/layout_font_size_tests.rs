@@ -684,7 +684,8 @@ fn collapsed_space_wrap_accounting_matches_paint_expansion() {
         .position(|b| b.word == "c")
         .expect("the trailing glyph must not be clipped by the wrap/paint width mismatch");
     assert_eq!(
-        c_idx / cols, 2,
+        c_idx / cols,
+        2,
         "the line wraps to the second visual line (line-height = font-size = 2 \
          rows per line) instead of overflowing the block"
     );

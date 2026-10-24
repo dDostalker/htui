@@ -265,7 +265,11 @@ fn tokenize_run(
 /// the wrap accounting and the paint accounting must agree or
 /// `text-align` offsets and the trailing-slot clip diverge once the font
 /// size exceeds 1.
-fn apply_white_space(tokens: Vec<Token>, ws: WhiteSpace, font_size_cells: usize) -> Vec<Vec<Token>> {
+fn apply_white_space(
+    tokens: Vec<Token>,
+    ws: WhiteSpace,
+    font_size_cells: usize,
+) -> Vec<Vec<Token>> {
     let space_width = font_size_cells.max(1);
     if ws.preserves_whitespace() {
         // `pre` / `pre-wrap`: every Newline is a forced break; spaces

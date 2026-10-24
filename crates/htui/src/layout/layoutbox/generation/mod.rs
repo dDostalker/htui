@@ -259,7 +259,10 @@ pub fn flatten_contents_children(arena: &NodeArena, children: &[NodeId]) -> Vec<
             .and_then(|node| node.css_attr.display())
             .is_some_and(|d| d.is_transparent());
         if is_contents {
-            out.extend(flatten_contents_children(arena, &visible_children(arena, id)));
+            out.extend(flatten_contents_children(
+                arena,
+                &visible_children(arena, id),
+            ));
         } else {
             out.push(id);
         }

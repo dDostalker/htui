@@ -238,7 +238,9 @@ impl DrainedBatch {
                 // replacing it (superseding would drop a resize re-layout or
                 // the DOM mutations an arena carries — see the type docs).
                 Some(
-                    RenderCmd::RenderArena { .. } | RenderCmd::Redraw { .. } | RenderCmd::Rerender { .. },
+                    RenderCmd::RenderArena { .. }
+                    | RenderCmd::Redraw { .. }
+                    | RenderCmd::Rerender { .. },
                 ) => self.hover = Some(other),
                 // The document was replaced: the hover target belonged to the
                 // old document and must neither style nor displace the new one.
@@ -273,7 +275,10 @@ impl DrainedBatch {
                 // Fold the newer scroll offset into a pending arena render:
                 // the arena carries the DOM mutations, the rerender only
                 // moves the viewport.
-                Some(RenderCmd::RenderArena { scroll_y: arena_scroll, .. }) => {
+                Some(RenderCmd::RenderArena {
+                    scroll_y: arena_scroll,
+                    ..
+                }) => {
                     *arena_scroll = scroll_y;
                 }
                 // A pending `RenderHtml` replaces the document wholesale; it
@@ -285,7 +290,11 @@ impl DrainedBatch {
             RenderCmd::Redraw { scroll_y, zoom } => match self.snapshot.as_mut() {
                 // Fold the newer viewport state into a pending arena render
                 // (a resize / zoom must not drop the DOM mutations).
-                Some(RenderCmd::RenderArena { scroll_y: arena_scroll, zoom: arena_zoom, .. }) => {
+                Some(RenderCmd::RenderArena {
+                    scroll_y: arena_scroll,
+                    zoom: arena_zoom,
+                    ..
+                }) => {
                     *arena_scroll = scroll_y;
                     *arena_zoom = zoom;
                 }

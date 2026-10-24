@@ -8,8 +8,9 @@ use crate::{
         BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext, PaintStyle, Rect,
         inner_formatting_context::flow::{constrained_block_width, dispatch},
         layoutbox::{
+            flatten_contents_children,
             generation::{GeneratedBoxKind, generate_node},
-            flatten_contents_children, text_node_run, visible_children,
+            text_node_run, visible_children,
         },
     },
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},

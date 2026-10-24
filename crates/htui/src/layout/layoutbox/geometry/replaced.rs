@@ -119,7 +119,12 @@ fn layout_input(
                 // The `.max(4)` floor exists for legibility, but a container
                 // narrower than 4 cells must win — the floor may not push the
                 // control past its containing block.
-                ((text_w.saturating_add(4)).min(containing.width).max(containing.width.min(4)), 1)
+                (
+                    (text_w.saturating_add(4))
+                        .min(containing.width)
+                        .max(containing.width.min(4)),
+                    1,
+                )
             } else {
                 let attr_w = node
                     .get_width()
@@ -333,10 +338,7 @@ fn layout_button(
                 // `<select>` paths: a long label must not hand the box a
                 // rect wider than the terminal (the paint phase then skips
                 // or truncates it).
-                (
-                    (text_w.saturating_add(4)).min(containing.width).max(1),
-                    1,
-                ),
+                ((text_w.saturating_add(4)).min(containing.width).max(1), 1),
             )
         }
     };
