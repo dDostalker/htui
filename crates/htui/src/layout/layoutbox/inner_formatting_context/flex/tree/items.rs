@@ -342,9 +342,15 @@ pub(super) fn layout_flex_items(
                         crate::layout::inner_formatting_context::flow::dispatch(
                             arena,
                             *item_id,
+                            // Percentage margins / paddings (and `width` / `min-*` /
+                            // `max-*` percentages) of a flex item resolve against
+                            // the flex container's content-box width — the item's
+                            // own allocated size is already fixed by
+                            // `pre_allocated_rect` and must not feed back into
+                            // percentage resolution.
                             BoxConstraint {
                                 x: item_x,
-                                width: item_w.max(1),
+                                width: content.width,
                             },
                             &mut Cursor {
                                 y: item_y,

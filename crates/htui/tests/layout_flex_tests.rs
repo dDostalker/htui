@@ -2338,3 +2338,56 @@ fn test_flex_grow_redistributes_space_when_capped_by_max_width() {
         rows[0]
     );
 }
+
+#[test]
+fn test_flex_item_percentage_margin_resolves_against_container_width() {
+    init();
+    // Percentage margins on a flex item resolve against the container's
+    // content width (80 columns here): `margin-left: 10%` = 8 cells. The
+    // item preparation used to resolve edges against a `usize::MAX`
+    // containing width, turning the margin into ~9.2e17 cells and pushing
+    // the item off the canvas entirely.
+    let html = r#"<div class="c"><div class="a">A</div></div>"#;
+    let css = ".c { display: flex; } .a { margin-left: 10%; }";
+    let (rows, _) = render_rows(html, css);
+    assert_eq!(
+        rows[0].find('A'),
+        Some(8),
+        "10% left margin against an 80-column container places the item at column 8: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn test_flex_item_percentage_padding_resolves_against_container_width() {
+    init();
+    // Same rule for percentage padding: `padding-left: 50%` against an
+    // 80-column container = 40 cells of padding; the item's text starts at
+    // column 40 instead of the billion-cell blow-up.
+    let html = r#"<div class="c"><div class="a">A</div></div>"#;
+    let css = ".c { display: flex; } .a { padding-left: 50%; }";
+    let (rows, _) = render_rows(html, css);
+    assert_eq!(
+        rows[0].find('A'),
+        Some(40),
+        "50% left padding against an 80-column container places the text at column 40: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn test_flex_column_item_percentage_margin_top_resolves_against_width() {
+    init();
+    // CSS resolves percentage margins against the containing block's *width*
+    // even on the vertical axis: `margin-top: 10%` in an 80-column container
+    // = 8 rows, so the item's text lands on row 8.
+    let html = r#"<div class="c"><div class="a">A</div></div>"#;
+    let css = ".c { display: flex; flex-direction: column; } .a { margin-top: 10%; }";
+    let (rows, _) = render_rows(html, css);
+    assert_eq!(
+        rows[8].trim(),
+        "A",
+        "10% top margin resolves to 8 rows (against the width, not the height): {:?}",
+        &rows[0..10]
+    );
+}
