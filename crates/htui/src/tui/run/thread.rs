@@ -299,6 +299,16 @@ pub(super) fn render_thread(
                 state.repaint_dynamic(&mut out, PseudoClass::Hover, prev, node_id);
             }
         }
+        // A deferred `Focus` (queued behind a `Redraw` / `Rerender`) runs
+        // after the snapshot render for the same reason: it re-styles the
+        // fresh frame instead of displacing it.
+        if let Some(RenderCmd::Focus { node_id }) = batch.take_focus() {
+            let prev = state.dynamic.focused;
+            state.dynamic.focused = node_id;
+            if state.pseudo_rules.contains_pseudo(PseudoClass::Focus) {
+                state.repaint_dynamic(&mut out, PseudoClass::Focus, prev, node_id);
+            }
+        }
     }
 }
 

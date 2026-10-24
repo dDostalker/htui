@@ -628,6 +628,134 @@ fn hover_behind_a_pending_arena_is_deferred_not_dropped() {
 }
 
 #[test]
+fn hover_behind_a_pending_redraw_is_deferred_not_dropped() {
+    // A resize pushes a `Redraw`, and pointer motion in the same batch queues
+    // a `Hover` behind it. The drain used to let the hover supersede the
+    // redraw, permanently losing the resize re-layout; it must defer instead.
+    let mut batch = DrainedBatch::new();
+    batch.absorb(RenderCmd::Redraw {
+        scroll_y: 0,
+        zoom: 1.0,
+    });
+    batch.absorb(RenderCmd::Hover { node_id: None });
+    assert!(
+        matches!(batch.take_snapshot(), Some(RenderCmd::Redraw { .. })),
+        "the resize re-layout must survive the deferred hover"
+    );
+    assert!(
+        matches!(batch.take_hover(), Some(RenderCmd::Hover { node_id: None })),
+        "the newer hover must be deferred, not dropped"
+    );
+}
+
+#[test]
+fn rerender_behind_a_pending_arena_folds_the_scroll() {
+    // A scroll queued behind a pending `RenderArena` must fold into the arena
+    // instead of replacing it: the arena carries DOM mutations a pure
+    // viewport command must not drop.
+    let mut batch = DrainedBatch::new();
+    batch.absorb(RenderCmd::RenderArena {
+        arena: Arc::new(NodeArena::default()),
+        root_id: NodeId::default(),
+        scroll_y: 0,
+        zoom: 1.0,
+        dynamic: DynamicState::default(),
+        dirty: DirtyInfo::default(),
+    });
+    batch.absorb(RenderCmd::Rerender { scroll_y: 9 });
+    match batch.take_snapshot() {
+        Some(RenderCmd::RenderArena { scroll_y, .. }) => {
+            assert_eq!(scroll_y, 9, "the newer scroll must fold into the arena");
+        }
+        other => panic!("expected the arena snapshot to survive, got {other:?}"),
+    }
+}
+
+#[test]
+fn redraw_behind_a_pending_arena_folds_scroll_and_zoom() {
+    // Same fold rule for `Redraw` (resize / zoom): the DOM mutations win,
+    // the viewport state updates in place.
+    let mut batch = DrainedBatch::new();
+    batch.absorb(RenderCmd::RenderArena {
+        arena: Arc::new(NodeArena::default()),
+        root_id: NodeId::default(),
+        scroll_y: 0,
+        zoom: 1.0,
+        dynamic: DynamicState::default(),
+        dirty: DirtyInfo::default(),
+    });
+    batch.absorb(RenderCmd::Redraw {
+        scroll_y: 5,
+        zoom: 2.0,
+    });
+    match batch.take_snapshot() {
+        Some(RenderCmd::RenderArena {
+            scroll_y, zoom, ..
+        }) => {
+            assert_eq!(scroll_y, 5);
+            assert_eq!(zoom, 2.0);
+        }
+        other => panic!("expected the arena snapshot to survive, got {other:?}"),
+    }
+}
+
+#[test]
+fn viewport_commands_behind_a_pending_render_html_are_dropped() {
+    // A document replacement is the dominant intent: a queued scroll or a
+    // hover for the *old* document must neither replace it nor restyle it.
+    let mut batch = DrainedBatch::new();
+    batch.absorb(RenderCmd::RenderHtml { html: Arc::from("<p>new</p>") });
+    batch.absorb(RenderCmd::Rerender { scroll_y: 3 });
+    batch.absorb(RenderCmd::Hover { node_id: None });
+    assert!(
+        matches!(batch.take_snapshot(), Some(RenderCmd::RenderHtml { .. })),
+        "the document replacement must survive the queued viewport commands"
+    );
+    assert!(batch.take_hover().is_none(), "the stale hover must be dropped");
+}
+
+#[test]
+fn focus_behind_a_pending_redraw_is_deferred_not_dropped() {
+    // Focus moving while a resize `Redraw` is pending must defer like a
+    // hover, not supersede the re-layout.
+    let mut batch = DrainedBatch::new();
+    batch.absorb(RenderCmd::Redraw {
+        scroll_y: 0,
+        zoom: 1.0,
+    });
+    batch.absorb(RenderCmd::Focus {
+        node_id: Some(NodeId::default()),
+    });
+    assert!(
+        matches!(batch.take_snapshot(), Some(RenderCmd::Redraw { .. })),
+        "the resize re-layout must survive the deferred focus"
+    );
+    assert!(
+        matches!(batch.take_focus(), Some(RenderCmd::Focus { .. })),
+        "the focus delta must be deferred, not dropped"
+    );
+}
+
+#[test]
+fn rerender_still_supersedes_a_pending_redraw() {
+    // Two viewport-only snapshots: the later one carries the newest complete
+    // state and wins, as before.
+    let mut batch = DrainedBatch::new();
+    batch.absorb(RenderCmd::Redraw {
+        scroll_y: 0,
+        zoom: 1.0,
+    });
+    batch.absorb(RenderCmd::Rerender { scroll_y: 7 });
+    assert!(
+        matches!(
+            batch.take_snapshot(),
+            Some(RenderCmd::Rerender { scroll_y: 7 })
+        ),
+        "the latest viewport snapshot must win"
+    );
+}
+
+#[test]
 fn focus_without_a_pending_arena_supersedes_as_a_snapshot() {
     // With no arena pending, a later `Focus` fully supersedes an earlier one
     // (both are complete interaction-state deltas).
