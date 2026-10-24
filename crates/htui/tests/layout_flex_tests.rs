@@ -2391,3 +2391,47 @@ fn test_flex_column_item_percentage_margin_top_resolves_against_width() {
         &rows[0..10]
     );
 }
+
+#[test]
+fn test_align_content_center_moves_item_subtrees() {
+    init();
+    // A multi-line flex container with `align-content: center` shifts the
+    // lines down by the leading free space. Rects are absolute coordinates,
+    // so each item's laid-out subtree (its nested text) must move with its
+    // border-box — moving only the top-level rect used to leave the nested
+    // text stranded on the pre-shift rows.
+    let html = r#"<div class="c"><div class="a"><div class="t">T1</div></div><div class="b">B</div><div class="d">D</div></div>"#;
+    let css = ".c { display: flex; flex-wrap: wrap; align-content: center; height: 20ch; width: 12ch; } \
+               .a { width: 8ch; } .b { width: 6ch; }";
+    let (rows, _) = render_rows(html, css);
+    let text_row = rows
+        .iter()
+        .position(|r| r.contains("T1"))
+        .expect("nested item text must render");
+    assert!(
+        text_row >= 7,
+        "the nested text must shift down with its item's border-box \
+         (align-content: center over a 20-row container), got row {text_row}: {:?}",
+        &rows[0..=text_row.min(12)]
+    );
+}
+
+#[test]
+fn test_row_reverse_moves_item_subtrees() {
+    init();
+    // `row-reverse` mirrors each item toward the main-end edge; a nested
+    // child's text must mirror with its parent's border-box instead of
+    // staying at the pre-mirror columns.
+    let html = r#"<div class="c"><div class="a"><div class="t">T1</div></div><div class="b">B</div></div>"#;
+    let css = ".c { display: flex; flex-direction: row-reverse; } .a { width: 10ch; }";
+    let (rows, _) = render_rows(html, css);
+    let text_col = rows[0]
+        .rfind("T1")
+        .expect("nested item text must render on the first row");
+    assert!(
+        text_col >= 60,
+        "the nested text must mirror with its item's border-box \
+         (item packed against the right edge of an 80-column container), got column {text_col}: {:?}",
+        rows[0]
+    );
+}

@@ -205,7 +205,12 @@ fn stick(b: &mut LayoutBox, viewport: Rect) {
 }
 
 /// Shift a box's rect (and every descendant's) by `dx` / `dy`.
-fn translate_subtree(b: &mut LayoutBox, dx: i64, dy: i64) {
+///
+/// Layout-tree rects are absolute canvas coordinates, so any pass that moves
+/// a box after its subtree was laid out must move the whole subtree with it —
+/// the flex `align-content` / `*-reverse` placement passes share this helper
+/// with the CSS positioning pass.
+pub(crate) fn translate_subtree(b: &mut LayoutBox, dx: i64, dy: i64) {
     b.rect.x = shift(b.rect.x, dx);
     b.rect.y = shift(b.rect.y, dy);
     for child in &mut b.children {

@@ -8,7 +8,7 @@ use crate::{
     },
     layout::{
         BoxConstraint, Cursor, LayoutBox, LayoutContext, OuterDisplay, PaintStyle, Rect,
-        layoutbox::wrap_runs,
+        layoutbox::{translate_subtree, wrap_runs},
     },
     tdom::node::{NodeArena, NodeId},
 };
@@ -510,11 +510,13 @@ pub(super) fn layout_flex_items(
             for (idx_pos, &_prep_idx) in indices.iter().enumerate() {
                 let child = &mut placed[running_offset + idx_pos];
                 let delta = match direction.is_row() {
-                    true => (0, shift as isize),
-                    false => (shift as isize, 0),
+                    true => (0, shift as i64),
+                    false => (shift as i64, 0),
                 };
-                child.rect.x = (child.rect.x as isize + delta.0).max(0) as usize;
-                child.rect.y = (child.rect.y as isize + delta.1).max(0) as usize;
+                // Rects are absolute canvas coordinates: the item's laid-out
+                // subtree must move with its border-box, not just the
+                // border-box itself.
+                translate_subtree(child, delta.0, delta.1);
             }
             running_offset = running_offset.saturating_add(indices.len());
         }
@@ -550,10 +552,12 @@ pub(super) fn layout_flex_items(
             let new_main = main_end
                 .saturating_sub(main_pos.saturating_sub(main_origin))
                 .saturating_sub(main_size);
+            // Rects are absolute canvas coordinates: mirror the laid-out
+            // subtree together with the item's border-box.
             if direction.is_row() {
-                child.rect.x = new_main;
+                translate_subtree(child, new_main as i64 - main_pos as i64, 0);
             } else {
-                child.rect.y = new_main;
+                translate_subtree(child, 0, new_main as i64 - main_pos as i64);
             }
         }
     }
@@ -578,10 +582,12 @@ pub(super) fn layout_flex_items(
             let new_cross = cross_end
                 .saturating_sub(cross_pos.saturating_sub(cross_origin))
                 .saturating_sub(cross_size);
+            // Rects are absolute canvas coordinates: mirror the laid-out
+            // subtree together with the item's border-box.
             if direction.is_row() {
-                child.rect.y = new_cross;
+                translate_subtree(child, 0, new_cross as i64 - cross_pos as i64);
             } else {
-                child.rect.x = new_cross;
+                translate_subtree(child, new_cross as i64 - cross_pos as i64, 0);
             }
         }
     }
