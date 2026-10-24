@@ -225,18 +225,21 @@ pub fn generate_node(arena: &NodeArena, node_id: NodeId) -> Option<GeneratedBox>
 /// `<summary>` child — the browser's closed disclosure widget hides every
 /// other child (and everything when no `<summary>` exists) until opened. Any
 /// other element returns all of its children unchanged.
-pub fn visible_children(arena: &NodeArena, parent_id: NodeId) -> Vec<NodeId> {
+///
+/// The common case is borrowed: this runs for every element on every layout
+/// pass, so only the closed-`<details>` filter pays for an allocation.
+pub fn visible_children(arena: &NodeArena, parent_id: NodeId) -> std::borrow::Cow<'_, [NodeId]> {
     let parent = &arena[parent_id];
-    let ids = parent.children.clone();
     if parent.node_type != NodeType::Details || parent.attributes.contains_key("open") {
-        return ids;
+        return std::borrow::Cow::Borrowed(&parent.children);
     }
-    match ids
+    match parent
+        .children
         .iter()
         .position(|&id| arena[id].node_type == NodeType::Summary)
     {
-        Some(pos) => vec![ids[pos]],
-        None => Vec::new(),
+        Some(pos) => std::borrow::Cow::Owned(vec![parent.children[pos]]),
+        None => std::borrow::Cow::Owned(Vec::new()),
     }
 }
 
@@ -268,7 +271,7 @@ fn generate_children(arena: &NodeArena, parent_id: NodeId) -> Vec<GeneratedBox> 
     let mut children = Vec::new();
     let mut inline_group = Vec::new();
 
-    for &child_id in &visible_children(arena, parent_id) {
+    for &child_id in visible_children(arena, parent_id).iter() {
         // `display: contents` flattens the element's own children into
         // `parent_id`. We can't do that inside `generate_node` because
         // the wrapper is needed to *detect* the case here.

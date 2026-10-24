@@ -103,7 +103,7 @@ fn walk_runs(
     // A closed `<details>` shows only its first `<summary>` child, so its own
     // inline content (text / spans directly inside the element) stays hidden
     // too — the same filter the box generation and block layout apply.
-    for child_id in visible_children(arena, node_id) {
+    for &child_id in visible_children(arena, node_id).iter() {
         let child = &arena[child_id];
         // In a flex container every element child is a flex item (inline
         // elements are blockified), so only raw text folds into the
@@ -457,12 +457,13 @@ pub(crate) fn q_quote_pair(arena: &NodeArena, node_id: NodeId) -> (&'static str,
 ///
 /// `capitalize` uppercases the first character of each whitespace / punct
 /// delimited word; `to_uppercase` / `to_lowercase` delegate to the Unicode
-/// case mappings (a single char may expand, e.g. `ß` → `SS`).
-fn apply_text_transform(text: &str, transform: TextTransform) -> String {
+/// case mappings (a single char may expand, e.g. `ß` → `SS`). `None` borrows
+/// the input untouched — this runs for every text node on every layout pass.
+fn apply_text_transform(text: &str, transform: TextTransform) -> std::borrow::Cow<'_, str> {
     match transform {
-        TextTransform::None => text.to_string(),
-        TextTransform::Uppercase => text.to_uppercase(),
-        TextTransform::Lowercase => text.to_lowercase(),
+        TextTransform::None => std::borrow::Cow::Borrowed(text),
+        TextTransform::Uppercase => std::borrow::Cow::Owned(text.to_uppercase()),
+        TextTransform::Lowercase => std::borrow::Cow::Owned(text.to_lowercase()),
         TextTransform::Capitalize => {
             let mut out = String::with_capacity(text.len());
             let mut new_word = true;
@@ -479,7 +480,7 @@ fn apply_text_transform(text: &str, transform: TextTransform) -> String {
                     new_word = true;
                 }
             }
-            out
+            std::borrow::Cow::Owned(out)
         }
     }
 }

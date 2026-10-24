@@ -455,23 +455,33 @@ fn merge_ua_border(node: &Node, edges: BoxEdges, ua_border: Option<BorderSides>)
         return edges;
     };
     let css = &node.css_attr;
-    let authored = |side: &str, component: &str| -> bool {
-        css.is_set("border")
-            || css.is_set(&format!("border-{side}"))
-            || css.is_set(&format!("border-{component}"))
-    };
-    let merge = |side: &str, author: Border, ua_side: Border| Border {
-        width: if authored(side, "width") {
+    // Fixed candidate tables instead of `format!`-built lookup keys: this
+    // runs per block element per layout pass, and every candidate is a
+    // static string.
+    let has_shorthand = css.is_set("border");
+    let side_declared = [
+        css.is_set("border-top"),
+        css.is_set("border-right"),
+        css.is_set("border-bottom"),
+        css.is_set("border-left"),
+    ];
+    let component_declared = [
+        css.is_set("border-width"),
+        css.is_set("border-style"),
+        css.is_set("border-color"),
+    ];
+    let merge = |side: usize, author: Border, ua_side: Border| Border {
+        width: if has_shorthand || side_declared[side] || component_declared[0] {
             author.width
         } else {
             ua_side.width
         },
-        style: if authored(side, "style") {
+        style: if has_shorthand || side_declared[side] || component_declared[1] {
             author.style
         } else {
             ua_side.style
         },
-        color: if authored(side, "color") {
+        color: if has_shorthand || side_declared[side] || component_declared[2] {
             author.color
         } else {
             ua_side.color
@@ -479,10 +489,10 @@ fn merge_ua_border(node: &Node, edges: BoxEdges, ua_border: Option<BorderSides>)
     };
     BoxEdges {
         border: BorderSides {
-            top: merge("top", edges.border.top, ua.top),
-            right: merge("right", edges.border.right, ua.right),
-            bottom: merge("bottom", edges.border.bottom, ua.bottom),
-            left: merge("left", edges.border.left, ua.left),
+            top: merge(0, edges.border.top, ua.top),
+            right: merge(1, edges.border.right, ua.right),
+            bottom: merge(2, edges.border.bottom, ua.bottom),
+            left: merge(3, edges.border.left, ua.left),
         },
         ..edges
     }
