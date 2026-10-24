@@ -11,7 +11,8 @@ use indexmap::IndexMap;
 
 use crate::events::Geometry;
 use crate::html::css_parse::{
-    self, CssRule, PseudoClass, css_into_node_with_state, css_pseudo_rule_set, reset_css_attr,
+    self, CssRule, DynamicState, PseudoClass, css_into_node_with_state, css_pseudo_rule_set,
+    reset_css_attr,
 };
 use crate::layout::Rect;
 use crate::layout::layout::TermMap;
@@ -471,6 +472,16 @@ impl RenderState {
         self.html = html;
         // A fresh document discards any `innerHTML`-injected CSS.
         self.extra_css = String::new();
+        // The old document's interaction state is meaningless here: its
+        // selection / open dropdown / hover / focus node ids belong to the
+        // replaced arena, and carrying them over would re-apply stale
+        // overlays (or style wrong nodes) on the fresh document.
+        self.text_selection = None;
+        self.open_select = None;
+        self.dynamic = DynamicState::default();
+        if let Ok(mut guard) = self.selection_text.lock() {
+            guard.clear();
+        }
         let rules = parse_css_source(&self.base_css);
         self.pseudo_rules = css_pseudo_rule_set(&rules);
         self.css_rules = Arc::new(rules);

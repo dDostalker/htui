@@ -258,7 +258,15 @@ fn tokenize_run(
 /// emit "logical lines": sequences of tokens that must appear on the
 /// same line (unless wrapping kicks in). Forced breaks (`Newline`)
 /// separate logical lines.
-fn apply_white_space(tokens: Vec<Token>, ws: WhiteSpace) -> Vec<Vec<Token>> {
+///
+/// `font_size_cells` is the run's effective font expansion: a collapsed
+/// space occupies one *expanded* slot (`max(grapheme_width, font)`), the
+/// same width the paint phase's `width_at` accounts for the `" "` run —
+/// the wrap accounting and the paint accounting must agree or
+/// `text-align` offsets and the trailing-slot clip diverge once the font
+/// size exceeds 1.
+fn apply_white_space(tokens: Vec<Token>, ws: WhiteSpace, font_size_cells: usize) -> Vec<Vec<Token>> {
+    let space_width = font_size_cells.max(1);
     if ws.preserves_whitespace() {
         // `pre` / `pre-wrap`: every Newline is a forced break; spaces
         // are preserved as-is. `<br>` breaks are unconditional.
@@ -294,7 +302,7 @@ fn apply_white_space(tokens: Vec<Token>, ws: WhiteSpace) -> Vec<Vec<Token>> {
                     let last_is_space = matches!(line.last(), Some(Token::Space { .. }));
                     if !last_is_space {
                         line.push(Token::Space {
-                            width: 1,
+                            width: space_width,
                             _count: 1,
                         });
                     }
@@ -595,7 +603,7 @@ pub fn wrap_runs(
         tokenize_run(r, font_size_cells, word_break, &mut tokens);
     }
     // Phase 2: apply white-space collapsing / forced breaks.
-    let logical_lines = apply_white_space(tokens, white_space);
+    let logical_lines = apply_white_space(tokens, white_space, font_size_cells);
     // Phase 3: greedy wrap each logical line.
     let mut visual_lines: Vec<Vec<InlineRun>> = Vec::new();
     for logical in logical_lines {
