@@ -1,6 +1,8 @@
 //! Incremental region-repaint helpers: compute the smallest rectangle to
 //! repaint for dirty nodes, pinned boxes and dynamic pseudo-class restyles.
 
+use std::collections::HashMap;
+
 use crate::html::css_parse::{
     CssRule, Position, PseudoClass, PseudoClassSet, selector_chain_matches_with_state,
 };
@@ -17,37 +19,49 @@ use crate::tdom::node::{NodeArena, NodeId};
 /// identical rect — otherwise the change moved geometry (e.g. wrapping or a
 /// structural mutation) and only a full repaint is safe. The union of the
 /// matched boxes' rects is the repaint region.
+///
+/// Both layouts are indexed by node id once (`O(boxes)`), so each dirty
+/// node's ancestor walk is a handful of hash lookups instead of a linear
+/// scan of the whole flattened forest per candidate.
 pub(super) fn incremental_region(
     old_boxes: &[LayoutBox],
     new_boxes: &[LayoutBox],
     arena: &NodeArena,
     dirty: &[NodeId],
 ) -> Option<Rect> {
-    let old_rects = collect_box_rects(old_boxes);
-    let new_rects = collect_box_rects(new_boxes);
+    fn index(boxes: &[LayoutBox], out: &mut HashMap<NodeId, Vec<Rect>>) {
+        for b in boxes {
+            out.entry(b.node_id).or_default().push(b.rect);
+            index(&b.children, out);
+        }
+    }
+    let mut old_index: HashMap<NodeId, Vec<Rect>> = HashMap::new();
+    let mut new_index: HashMap<NodeId, Vec<Rect>> = HashMap::new();
+    index(old_boxes, &mut old_index);
+    index(new_boxes, &mut new_index);
+
     let mut region: Option<Rect> = None;
     for &node_id in dirty {
         let mut found = false;
         let mut cur = Some(node_id);
         while let Some(id) = cur {
-            let rects: Vec<Rect> = new_rects
-                .iter()
-                .filter(|(n, _)| *n == id)
-                .map(|(_, r)| *r)
-                .collect();
-            if !rects.is_empty() {
-                found = true;
-                for rect in rects {
-                    let old_ok = old_rects.iter().any(|(n, r)| *n == id && *r == rect);
-                    if !old_ok {
-                        return None;
+            if let Some(rects) = new_index.get(&id) {
+                if !rects.is_empty() {
+                    found = true;
+                    let old_rects = old_index.get(&id);
+                    for rect in rects {
+                        match old_rects {
+                            Some(old) if old.contains(rect) => {
+                                region = Some(match region {
+                                    Some(r) => union_rect(r, *rect),
+                                    None => *rect,
+                                });
+                            }
+                            _ => return None,
+                        }
                     }
-                    region = Some(match region {
-                        Some(r) => union_rect(r, rect),
-                        None => rect,
-                    });
+                    break;
                 }
-                break;
             }
             cur = arena.get(id).and_then(|n| n.parent);
         }
@@ -67,19 +81,6 @@ pub(super) fn union_rect(a: Rect, b: Rect) -> Rect {
         a.y.saturating_add(a.height)
             .max(b.y.saturating_add(b.height));
     Rect::new(left, top, right - left, bottom - top)
-}
-
-/// Flatten the box forest into `(node_id, rect)` pairs.
-pub(super) fn collect_box_rects(boxes: &[LayoutBox]) -> Vec<(NodeId, Rect)> {
-    fn walk(boxes: &[LayoutBox], out: &mut Vec<(NodeId, Rect)>) {
-        for b in boxes {
-            out.push((b.node_id, b.rect));
-            walk(&b.children, out);
-        }
-    }
-    let mut out = Vec::new();
-    walk(boxes, &mut out);
-    out
 }
 
 /// First box rect belonging to `node_id`, in tree order.
