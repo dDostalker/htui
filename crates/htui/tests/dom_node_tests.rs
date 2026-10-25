@@ -979,3 +979,112 @@ fn attributes_snapshot_object() {
     let fresh = eval_str(&mut e, "document.getElementById('i').attributes.value");
     assert_eq!(fresh, "w", "a fresh read picks up the change");
 }
+
+#[test]
+fn request_animation_frame_schedules_repeating_timer() {
+    let mut e = engine(r#"<div id="d">x</div>"#);
+    eval(
+        &mut e,
+        r#"globalThis.ticks = 0;
+           globalThis.rafId = requestAnimationFrame(function () { ticks++ });
+           globalThis.isFunction = typeof requestAnimationFrame === 'function';"#,
+    );
+    assert_eq!(eval_str(&mut e, "isFunction"), "true");
+    assert_eq!(eval_str(&mut e, "ticks"), "0", "no synchronous fire");
+    // Advance past the ~16ms frame period; run_due_timers drives the
+    // repeating frame callback.
+    std::thread::sleep(std::time::Duration::from_millis(40));
+    e.run_due_timers();
+    let after_first = eval_str(&mut e, "ticks");
+    assert!(
+        after_first != "0",
+        "frame callback fired at least once (got {after_first})"
+    );
+    // cancelAnimationFrame stops the loop.
+    eval(&mut e, "cancelAnimationFrame(rafId)");
+    let baseline = eval_str(&mut e, "ticks").parse::<u32>().unwrap_or(0);
+    std::thread::sleep(std::time::Duration::from_millis(40));
+    e.run_due_timers();
+    let after_cancel = eval_str(&mut e, "ticks").parse::<u32>().unwrap_or(0);
+    assert_eq!(
+        after_cancel, baseline,
+        "no further frames after cancellation"
+    );
+}
+
+#[test]
+fn namespace_and_document_position() {
+    let mut e = engine(
+        r#"<html><body><div id="a"><span id="s">x</span></div><p id="b"></p></body></html>"#,
+    );
+    eval(
+        &mut e,
+        "var a = document.getElementById('a'), s = document.getElementById('s'), b = document.getElementById('b')",
+    );
+    assert_eq!(
+        eval_str(&mut e, "a.namespaceURI"),
+        "http://www.w3.org/1999/xhtml"
+    );
+    assert_eq!(eval_str(&mut e, "a.localName"), "div");
+    assert_eq!(eval_str(&mut e, "String(a.prefix)"), "null");
+    // a contains s: from a's view s is a descendant → CONTAINS(8) | FOLLOWING(4).
+    assert_eq!(
+        eval_str(&mut e, "a.compareDocumentPosition(s) & 0x0c"),
+        "12"
+    );
+    // From s's view a is an ancestor → CONTAINED_BY(0x10).
+    assert_eq!(
+        eval_str(&mut e, "s.compareDocumentPosition(a) & 0x10"),
+        "16"
+    );
+    // a precedes b in document order → from a's view b is FOLLOWING(4).
+    assert_eq!(eval_str(&mut e, "a.compareDocumentPosition(b) & 0x06"), "4");
+    // ...and from b's view a is PRECEDING(2).
+    assert_eq!(eval_str(&mut e, "b.compareDocumentPosition(a) & 0x06"), "2");
+    // Same node → 0; detached nodes → DISCONNECTED(1).
+    assert_eq!(eval_str(&mut e, "a.compareDocumentPosition(a)"), "0");
+    eval(&mut e, "var loose = document.createElement('em')");
+    assert_eq!(
+        eval_str(&mut e, "a.compareDocumentPosition(loose) & 0x01"),
+        "1"
+    );
+}
+
+#[test]
+fn document_metadata_and_xml_serializer() {
+    let e = engine(
+        r#"<html><head><base href="mem://root/page.html"></head><body><div id="d">x</div></body></html>"#,
+    );
+    let mut e = e;
+    assert_eq!(eval_str(&mut e, "document.characterSet"), "UTF-8");
+    assert_eq!(eval_str(&mut e, "document.charset"), "UTF-8");
+    assert_eq!(eval_str(&mut e, "document.contentType"), "text/html");
+    assert_eq!(eval_str(&mut e, "document.compatMode"), "CSS1Compat");
+    assert_eq!(
+        eval_str(&mut e, "document.URL"),
+        "mem://root/page.html",
+        "URL mirrors the <base href>"
+    );
+    assert_eq!(eval_str(&mut e, "document.visibilityState"), "visible");
+    assert_eq!(eval_str(&mut e, "String(document.hidden)"), "false");
+    assert_eq!(eval_str(&mut e, "String(document.hasFocus())"), "true");
+    assert_eq!(
+        eval_str(
+            &mut e,
+            "new XMLSerializer().serializeToString(document.getElementById('d'))"
+        ),
+        r#"<div id="d">x</div>"#
+    );
+}
+
+#[test]
+fn event_time_stamp_present() {
+    let e = engine(r#"<div id="d">x</div>"#);
+    let mut e = e;
+    eval(&mut e, "globalThis.ev = new Event('t')");
+    // A positive epoch-milliseconds timestamp (DOM semantics).
+    assert!(
+        eval_str(&mut e, "Number(ev.timeStamp) > 1_000_000_000_000") == "true",
+        "timeStamp is epoch milliseconds"
+    );
+}

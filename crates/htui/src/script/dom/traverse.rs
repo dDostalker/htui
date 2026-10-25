@@ -736,3 +736,167 @@ pub(super) fn native_get_root_node(
     drop(st);
     node_wrapper(context, top)
 }
+
+// ============================================================
+// Element namespace / document-order comparison
+// ============================================================
+
+/// The HTML namespace URI every parsed element carries.
+const HTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
+
+/// `element.namespaceURI` — the HTML namespace for every element (the
+/// parser never produces foreign-content nodes).
+pub(super) fn native_get_namespace_uri(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    this_node_id(this, context)?;
+    Ok(js_string!(HTML_NAMESPACE).into())
+}
+
+/// `element.prefix` — `null` for HTML documents (no namespace prefix is
+/// ever parsed).
+pub(super) fn native_get_prefix(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    this_node_id(this, context)?;
+    Ok(JsValue::null())
+}
+
+/// `element.localName` — the lowercase tag name.
+pub(super) fn native_get_local_name(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let name = with_state()
+        .and_then(|rc| {
+            rc.borrow()
+                .arena
+                .get(node_id)
+                .and_then(|n| n.node_type.tag_name().map(str::to_string))
+        })
+        .unwrap_or_default();
+    Ok(js_string!(name.to_ascii_lowercase()).into())
+}
+
+/// `Node.compareDocumentPosition(other)` bitmasks (the DOM's
+/// `DOCUMENT_POSITION_*` values, not exposed as constants — there is no
+/// `Node` constructor):
+/// `1` disconnected · `2` preceding · `4` following · `8` contains ·
+/// `0x10` contained-by · `0x20` implementation-specific.
+pub(super) fn native_compare_document_position(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let undefined = JsValue::undefined();
+    let other = args.first().unwrap_or(&undefined);
+    let Some(other_obj) = other.as_object() else {
+        return Err(JsNativeError::typ()
+            .with_message("compareDocumentPosition expects a Node")
+            .into());
+    };
+    let id_val = other_obj.get(js_string!("_nodeId"), context)?;
+    let Some(n) = id_val.as_number() else {
+        return Err(JsNativeError::typ()
+            .with_message("compareDocumentPosition expects a Node")
+            .into());
+    };
+    let other_id = f64_to_node_id(n);
+
+    const DISCONNECTED: u32 = 0x01;
+    const PRECEDING: u32 = 0x02;
+    const FOLLOWING: u32 = 0x04;
+    const CONTAINS: u32 = 0x08;
+    const CONTAINED_BY: u32 = 0x10;
+    const IMPLEMENTATION_SPECIFIC: u32 = 0x20;
+
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::from(DISCONNECTED | IMPLEMENTATION_SPECIFIC));
+    };
+    let st = rc.borrow();
+    let arena = &st.arena;
+    // Stale ids compare as disconnected.
+    if arena.get(node_id).is_none() || arena.get(other_id).is_none() {
+        return Ok(JsValue::from(DISCONNECTED | IMPLEMENTATION_SPECIFIC));
+    }
+    // Comparing a node with itself is 0 (no bits).
+    if node_id == other_id {
+        return Ok(JsValue::from(0u32));
+    }
+    let ancestors = |from: NodeId| -> Vec<NodeId> {
+        let mut chain = vec![from];
+        let mut cur = arena.get(from).and_then(|n| n.parent);
+        while let Some(id) = cur {
+            chain.push(id);
+            cur = arena.get(id).and_then(|n| n.parent);
+        }
+        chain
+    };
+    let mine = ancestors(node_id);
+    let theirs = ancestors(other_id);
+    // Connected = the two root chains share a top node.
+    let connected = match (mine.last(), theirs.last()) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    };
+    if !connected {
+        return Ok(JsValue::from(DISCONNECTED | IMPLEMENTATION_SPECIFIC));
+    }
+    if mine
+        .iter()
+        .position(|&id| id == other_id)
+        .is_some_and(|d| d > 0)
+    {
+        // `other` is an ancestor of this node.
+        return Ok(JsValue::from(CONTAINED_BY | PRECEDING));
+    }
+    if theirs
+        .iter()
+        .position(|&id| id == node_id)
+        .is_some_and(|d| d > 0)
+    {
+        // `other` is a descendant of this node.
+        return Ok(JsValue::from(CONTAINS | FOLLOWING));
+    }
+    // Siblings under a common ancestor: pre-order document order decides.
+    // Walk the common ancestor's subtree, stopping as soon as both nodes
+    // have been numbered.
+    let common = mine
+        .iter()
+        .rev()
+        .zip(theirs.iter().rev())
+        .find(|(a, b)| a == b)
+        .map(|(a, _)| *a);
+    let Some(common) = common else {
+        return Ok(JsValue::from(DISCONNECTED | IMPLEMENTATION_SPECIFIC));
+    };
+    let mut order: std::collections::HashMap<NodeId, usize> = std::collections::HashMap::new();
+    let mut stack = vec![common];
+    while let Some(id) = stack.pop() {
+        let done = order.contains_key(&node_id) && order.contains_key(&other_id);
+        if done {
+            break;
+        }
+        if !order.contains_key(&id) {
+            order.insert(id, order.len());
+        }
+        if let Some(n) = arena.get(id) {
+            stack.extend(n.children.iter().rev().copied());
+        }
+    }
+    match (order.get(&node_id), order.get(&other_id)) {
+        // The result describes `other` relative to `this`: `other` numbered
+        // later (follows in document order) → FOLLOWING; earlier → PRECEDING.
+        (Some(a), Some(b)) if a < b => Ok(JsValue::from(FOLLOWING)),
+        (Some(_), Some(_)) => Ok(JsValue::from(PRECEDING)),
+        // Defensive fallback (should not trigger for a well-formed DOM).
+        _ => Ok(JsValue::from(DISCONNECTED | IMPLEMENTATION_SPECIFIC)),
+    }
+}

@@ -808,6 +808,15 @@ fn read_event_init(init: Option<&JsValue>, context: &mut Context) -> JsResult<(b
 
 /// Populate `this` (the freshly-constructed object under `new`) with the
 /// event surface and return it.
+/// `event.timeStamp` source: milliseconds since the Unix epoch (the DOM
+/// spec allows a monotonic origin; wall-clock keeps it simple here).
+fn now_millis() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64() * 1000.0)
+        .unwrap_or(0.0)
+}
+
 fn build_event_object(
     this: &JsValue,
     context: &mut Context,
@@ -835,6 +844,12 @@ fn build_event_object(
     obj.set(js_string!("detail"), detail, false, context)?;
     obj.set(js_string!("target"), JsValue::null(), false, context)?;
     obj.set(js_string!("currentTarget"), JsValue::null(), false, context)?;
+    obj.set(
+        js_string!("timeStamp"),
+        JsValue::from(now_millis()),
+        false,
+        context,
+    )?;
     obj.set(
         js_string!("defaultPrevented"),
         JsValue::from(false),

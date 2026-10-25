@@ -13,15 +13,18 @@ use super::{
     console::{console_error, console_log, console_warn, native_alert, native_quit},
     document::{
         native_create_comment, native_create_document_fragment, native_create_element,
-        native_create_text_node, native_get_document_body, native_get_document_doctype,
+        native_create_text_node, native_get_character_set, native_get_compat_mode,
+        native_get_content_type, native_get_document_body, native_get_document_doctype,
         native_get_document_element, native_get_document_head, native_get_document_title,
-        native_get_element_by_id, native_set_document_title,
+        native_get_document_uri, native_get_element_by_id, native_get_hidden,
+        native_get_visibility_state, native_has_focus, native_set_document_title,
     },
     events::{custom_event_constructor, event_constructor},
     fetch::native_fetch,
     js_fn, node_wrapper,
     timers::{
-        native_clear_interval, native_clear_timeout, native_set_interval, native_set_timeout,
+        native_cancel_animation_frame, native_clear_interval, native_clear_timeout,
+        native_request_animation_frame, native_set_interval, native_set_timeout,
     },
     traverse::{
         native_get_elements_by_class_name, native_get_elements_by_tag_name, native_query_selector,
@@ -128,6 +131,52 @@ pub(crate) fn install_builtins(context: &mut Context) -> JsResult<()> {
         .configurable(true)
         .build();
     doc_obj.define_property_or_throw(js_string!("title"), title_desc, context)?;
+    // Environment snapshots libraries sniff for (always-constant here).
+    for (name, native) in [
+        (
+            "characterSet",
+            NativeFunction::from_fn_ptr(native_get_character_set),
+        ),
+        (
+            "charset",
+            NativeFunction::from_fn_ptr(native_get_character_set),
+        ),
+        (
+            "inputEncoding",
+            NativeFunction::from_fn_ptr(native_get_character_set),
+        ),
+        (
+            "contentType",
+            NativeFunction::from_fn_ptr(native_get_content_type),
+        ),
+        (
+            "compatMode",
+            NativeFunction::from_fn_ptr(native_get_compat_mode),
+        ),
+        ("URL", NativeFunction::from_fn_ptr(native_get_document_uri)),
+        (
+            "documentURI",
+            NativeFunction::from_fn_ptr(native_get_document_uri),
+        ),
+        (
+            "visibilityState",
+            NativeFunction::from_fn_ptr(native_get_visibility_state),
+        ),
+        ("hidden", NativeFunction::from_fn_ptr(native_get_hidden)),
+    ] {
+        let desc = PropertyDescriptorBuilder::new()
+            .get(js_fn(context, native))
+            .enumerable(true)
+            .configurable(true)
+            .build();
+        doc_obj.define_property_or_throw(js_string!(name), desc, context)?;
+    }
+    doc_obj.set(
+        js_string!("hasFocus"),
+        js_fn(context, NativeFunction::from_fn_ptr(native_has_focus)),
+        false,
+        context,
+    )?;
     context.register_global_property(js_string!("document"), document, Attribute::all())?;
 
     // console
@@ -226,7 +275,85 @@ pub(crate) fn install_builtins(context: &mut Context) -> JsResult<()> {
     .constructor(true)
     .build();
     context.register_global_property(js_string!("CustomEvent"), custom_ctor, Attribute::all())?;
+
+    // Animation frames: a fixed ~60fps repeating timer per callback — the
+    // engine's documented animation path (no vsync exists in a terminal).
+    context.register_global_builtin_callable(
+        js_string!("requestAnimationFrame"),
+        1,
+        NativeFunction::from_fn_ptr(native_request_animation_frame),
+    )?;
+    context.register_global_builtin_callable(
+        js_string!("cancelAnimationFrame"),
+        1,
+        NativeFunction::from_fn_ptr(native_cancel_animation_frame),
+    )?;
+
+    // XMLSerializer: `new XMLSerializer().serializeToString(node)` — the
+    // node's outer-HTML form.
+    let serializer_ctor = boa_engine::object::FunctionObjectBuilder::new(
+        context.realm(),
+        NativeFunction::from_fn_ptr(xml_serializer_constructor),
+    )
+    .name(js_string!("XMLSerializer"))
+    .length(0)
+    .constructor(true)
+    .build();
+    context.register_global_property(
+        js_string!("XMLSerializer"),
+        serializer_ctor,
+        Attribute::all(),
+    )?;
     Ok(())
+}
+
+/// `new XMLSerializer()` — installs `serializeToString` on the fresh
+/// instance (calling without `new` still yields a usable object via the
+/// implicit `this`).
+fn xml_serializer_constructor(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let obj = this
+        .to_object(context)
+        .map_err(|_| JsNativeError::typ().with_message("XMLSerializer requires `new`"))?;
+    let method = js_fn(
+        context,
+        NativeFunction::from_fn_ptr(xml_serializer_serialize),
+    );
+    let method_val: JsValue = method.into();
+    obj.set(js_string!("serializeToString"), method_val, false, context)?;
+    Ok(this.clone())
+}
+
+/// `XMLSerializer.serializeToString(node)` — the node's outer-HTML
+/// serialization (element tags included; text / comment bodies).
+fn xml_serializer_serialize(
+    _this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let undefined = JsValue::undefined();
+    let arg = args.first().unwrap_or(&undefined);
+    let Some(obj) = arg.as_object() else {
+        return Err(JsNativeError::typ()
+            .with_message("serializeToString expects a Node")
+            .into());
+    };
+    let id_val = obj.get(js_string!("_nodeId"), context)?;
+    let Some(n) = id_val.as_number() else {
+        return Err(JsNativeError::typ()
+            .with_message("serializeToString expects a Node")
+            .into());
+    };
+    let node_id = crate::script::dom::f64_to_node_id(n);
+    let Some(rc) = with_state() else {
+        return Ok(js_string!().into());
+    };
+    let st = rc.borrow();
+    let html = crate::html::html_parse::serialize_outer_html(&st.arena, node_id);
+    Ok(js_string!(html).into())
 }
 
 /// `queueMicrotask(callback)` — schedule `callback` on the engine's microtask

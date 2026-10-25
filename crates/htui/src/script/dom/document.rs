@@ -253,3 +253,81 @@ pub(super) fn native_create_element(
     drop(st);
     node_wrapper(context, node_id)
 }
+
+// ============================================================
+// Document metadata (constant snapshots of the environment)
+// ============================================================
+
+/// `document.characterSet` / `charset` / `inputEncoding` — the parser
+/// always decodes UTF-8.
+pub(super) fn native_get_character_set(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    Ok(js_string!("UTF-8").into())
+}
+
+/// `document.contentType` — always `text/html`.
+pub(super) fn native_get_content_type(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    Ok(js_string!("text/html").into())
+}
+
+/// `document.compatMode` — the engine always lays out in standards mode.
+pub(super) fn native_get_compat_mode(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    Ok(js_string!("CSS1Compat").into())
+}
+
+/// `document.URL` / `document.documentURI` — the `<base href>` when the
+/// document declares one, otherwise an empty string (there is no network
+/// origin in htui).
+pub(super) fn native_get_document_uri(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    let Some(rc) = with_state() else {
+        return Ok(js_string!().into());
+    };
+    let st = rc.borrow();
+    let uri = crate::tdom::node::document_base_href(&st.arena, st.root_id).unwrap_or_default();
+    Ok(js_string!(uri).into())
+}
+
+/// `document.hasFocus()` — always `true`: a terminal UI owns the foreground
+/// for its whole lifetime (the documented approximation; focus of a
+/// specific field is separate, see `focus()`).
+pub(super) fn native_has_focus(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    Ok(JsValue::from(true))
+}
+
+/// `document.visibilityState` — always `"visible"` (a terminal app cannot
+/// be backgrounded by the page).
+pub(super) fn native_get_visibility_state(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    Ok(js_string!("visible").into())
+}
+
+/// `document.hidden` — always `false` (see [`native_get_visibility_state`]).
+pub(super) fn native_get_hidden(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    Ok(JsValue::from(false))
+}

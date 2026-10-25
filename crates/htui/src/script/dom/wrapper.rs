@@ -37,11 +37,12 @@ use super::{
     node_id_to_f64,
     style::native_get_style,
     traverse::{
-        native_closest, native_contains, native_get_base_uri, native_get_child_nodes,
-        native_get_elements_by_class_name, native_get_elements_by_tag_name, native_get_first_child,
-        native_get_is_connected, native_get_last_child, native_get_next_element_sibling,
+        native_closest, native_compare_document_position, native_contains, native_get_base_uri,
+        native_get_child_nodes, native_get_elements_by_class_name, native_get_elements_by_tag_name,
+        native_get_first_child, native_get_is_connected, native_get_last_child,
+        native_get_local_name, native_get_namespace_uri, native_get_next_element_sibling,
         native_get_next_sibling, native_get_node_name, native_get_node_type,
-        native_get_owner_document, native_get_parent, native_get_parent_element,
+        native_get_owner_document, native_get_parent, native_get_parent_element, native_get_prefix,
         native_get_prev_element_sibling, native_get_prev_sibling, native_get_root_node,
         native_get_tag_name, native_has_child_nodes, native_is_equal_node, native_is_same_node,
         native_matches, native_query_selector, native_query_selector_all,
@@ -139,6 +140,12 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
         context,
         NativeFunction::from_fn_ptr(native_get_is_connected),
     );
+    let get_namespace_uri = js_fn(
+        context,
+        NativeFunction::from_fn_ptr(native_get_namespace_uri),
+    );
+    let get_prefix = js_fn(context, NativeFunction::from_fn_ptr(native_get_prefix));
+    let get_local_name = js_fn(context, NativeFunction::from_fn_ptr(native_get_local_name));
 
     let mut init = ObjectInitializer::new(context);
     init.property(js_string!("_nodeId"), node_key, hidden);
@@ -322,6 +329,29 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
 
     if is_element {
         init.accessor(js_string!("tagName"), Some(get_tag), None, Attribute::all());
+        init.accessor(
+            js_string!("namespaceURI"),
+            Some(get_namespace_uri),
+            None,
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("prefix"),
+            Some(get_prefix),
+            None,
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("localName"),
+            Some(get_local_name),
+            None,
+            Attribute::all(),
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_compare_document_position),
+            js_string!("compareDocumentPosition"),
+            1,
+        );
         init.accessor(
             js_string!("className"),
             Some(get_class),
