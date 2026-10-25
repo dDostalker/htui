@@ -3130,3 +3130,112 @@ fn test_not_specificity_takes_most_specific_argument() {
     assert_eq!(class_sel.specificity(), (0, 1, 1));
     assert_eq!(not_sel.specificity(), (1, 0, 1));
 }
+
+/// Mixed-sibling fixture: `text, p, span, p, comment, p, span` — the `*-of-type`
+/// selectors must count per-type while `*-child` counts every node.
+fn mixed_children() -> (NodeArena, NodeId, Vec<NodeId>, Vec<NodeId>) {
+    let mut arena = NodeArena::default();
+    let parent = arena.insert(Node::from(NodeType::Div));
+    let text = arena.insert(Node::text("t"));
+    Node::append_child(&mut arena, parent, text);
+    let mut ps = Vec::new();
+    let mut spans = Vec::new();
+    for (i, nt) in [
+        NodeType::P,
+        NodeType::Span,
+        NodeType::P,
+        NodeType::P,
+        NodeType::Span,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        // A comment before the 3rd `<p>` — of-type indices must ignore it.
+        if i == 3 {
+            let mut comment = Node::from(NodeType::Comment);
+            comment.data = Some("c".to_string());
+            let comment_id = arena.insert(comment);
+            Node::append_child(&mut arena, parent, comment_id);
+        }
+        let id = arena.insert(Node::from(nt));
+        Node::append_child(&mut arena, parent, id);
+        if nt == NodeType::P {
+            ps.push(id);
+        } else {
+            spans.push(id);
+        }
+    }
+    (arena, parent, ps, spans)
+}
+
+#[test]
+fn test_nth_of_type_counts_same_type_only() {
+    init();
+    let (arena, _parent, ps, spans) = mixed_children();
+
+    // `p:nth-of-type(2)` — the second `<p>`, ignoring the text / span /
+    // comment children around it.
+    let sel: CssSelector = "p:nth-of-type(2)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, ps[0], &sel));
+    assert!(selector_chain_matches(&arena, ps[1], &sel));
+    assert!(!selector_chain_matches(&arena, ps[2], &sel));
+
+    // `:nth-of-type(even)` over the span sequence (indices 1, 2).
+    let even: CssSelector = "span:nth-of-type(even)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, spans[0], &even));
+    assert!(selector_chain_matches(&arena, spans[1], &even));
+
+    // `:nth-last-of-type(1)` == `:last-of-type` for the p sequence.
+    let last: CssSelector = "p:nth-last-of-type(1)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, ps[0], &last));
+    assert!(!selector_chain_matches(&arena, ps[1], &last));
+    assert!(selector_chain_matches(&arena, ps[2], &last));
+
+    // `:nth-last-of-type(2)` — the second `<p>` counting from the end.
+    let second_last: CssSelector = "p:nth-last-of-type(2)".parse().unwrap();
+    assert!(selector_chain_matches(&arena, ps[1], &second_last));
+}
+
+#[test]
+fn test_first_last_only_of_type() {
+    init();
+    let (arena, _parent, ps, spans) = mixed_children();
+
+    let first_p: CssSelector = "p:first-of-type".parse().unwrap();
+    assert!(selector_chain_matches(&arena, ps[0], &first_p));
+    assert!(!selector_chain_matches(&arena, ps[1], &first_p));
+
+    let last_span: CssSelector = "span:last-of-type".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, spans[0], &last_span));
+    assert!(selector_chain_matches(&arena, spans[1], &last_span));
+
+    // `:only-of-type` needs exactly one same-type sibling: neither the p
+    // nor span sequences qualify here.
+    let only: CssSelector = ":only-of-type".parse().unwrap();
+    for id in ps.iter().chain(spans.iter()) {
+        assert!(!selector_chain_matches(&arena, *id, &only));
+    }
+    // A lone `<b>` child qualifies.
+    let mut arena2 = NodeArena::default();
+    let parent = arena2.insert(Node::from(NodeType::Div));
+    let b = arena2.insert(Node::from(NodeType::B));
+    Node::append_child(&mut arena2, parent, b);
+    let text = arena2.insert(Node::text("x"));
+    Node::append_child(&mut arena2, parent, text);
+    assert!(selector_chain_matches(&arena2, b, &only));
+
+    // Case-insensitive names, like the other pseudo-classes.
+    let upper: CssSelector = "p:FIRST-OF-TYPE".parse().unwrap();
+    assert!(selector_chain_matches(&arena, ps[0], &upper));
+}
+
+#[test]
+fn test_nth_of_type_parse_errors() {
+    init();
+    assert!("p:nth-of-type".parse::<CssSelector>().is_err());
+    assert!("p:nth-of-type(".parse::<CssSelector>().is_err());
+    assert!("p:nth-of-type(0)".parse::<CssSelector>().is_err());
+    assert!("p:nth-last-of-type(n)".parse::<CssSelector>().is_err());
+    // Spaces inside the argument survive (paren-aware split).
+    assert!("p:nth-of-type(2n + 1)".parse::<CssSelector>().is_ok());
+}

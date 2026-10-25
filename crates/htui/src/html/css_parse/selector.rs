@@ -59,6 +59,16 @@ pub enum SelectorError {
     /// The tag name does not map to any known `NodeType`.
     #[error("unsupported CSS tag: {0:?}")]
     UnsupportedTag(String),
+    /// `:nth-of-type` / `:nth-last-of-type` is missing its `(...)` list.
+    #[error(":{0} requires `(...)`")]
+    NthOfTypeRequiresParens(String),
+    /// `:nth-of-type(...)` / `:nth-last-of-type(...)` is missing the `)`.
+    #[error(":{0}(...) missing ')'")]
+    NthOfTypeMissingCloseParen(String),
+    /// The `:nth-of-type` / `:nth-last-of-type` argument is not a supported
+    /// `an+b` form.
+    #[error("invalid :{0} arg: {1:?}")]
+    InvalidNthOfTypeArg(String, String),
 }
 
 /// `an + b` expression used by the `:nth-child()` pseudo-class.
@@ -182,6 +192,13 @@ pub enum Selector {
     /// `:nth-last-child(<expr>)` — the `:nth-child` mirror counting from the
     /// end of the sibling list (the last child is index 1).
     NthLastChild(NthExpr),
+    /// `:nth-of-type(<expr>)` — like `:nth-child` but counting only siblings
+    /// of the same element type (same `NodeType`; text / comment siblings
+    /// never count, matching the CSS "of its type" semantics).
+    NthOfType(NthExpr),
+    /// `:nth-last-of-type(<expr>)` — the `:nth-of-type` mirror counting
+    /// same-type siblings from the end.
+    NthLastOfType(NthExpr),
     /// `:root` — the document's root element (the child of the `Document`
     /// node, i.e. `<html>` in a parsed document).
     Root,
@@ -474,15 +491,40 @@ fn parse_compound_inner(
                             Selector::NthChild(expr)
                         });
                     }
+                    "nth-of-type" | "nth-last-of-type" => {
+                        let lower_name = name.to_ascii_lowercase();
+                        if i >= chars.len() || chars[i] != '(' {
+                            return Err(SelectorError::NthOfTypeRequiresParens(lower_name));
+                        }
+                        let Some(arg) = capture_balanced_arg(&chars, &mut i) else {
+                            return Err(SelectorError::NthOfTypeMissingCloseParen(lower_name));
+                        };
+                        let from_last = lower_name == "nth-last-of-type";
+                        let expr = parse_nth_child_arg(&arg).ok_or_else(|| {
+                            SelectorError::InvalidNthOfTypeArg(lower_name, arg.clone())
+                        })?;
+                        out.push(if from_last {
+                            Selector::NthLastOfType(expr)
+                        } else {
+                            Selector::NthOfType(expr)
+                        });
+                    }
                     // `:first-child` / `:last-child` / `:only-child` are
                     // positional special cases of the nth machinery: they
                     // decompose into index-1-from-start / index-1-from-end
-                    // expressions, so the matcher keeps one code path.
+                    // expressions, so the matcher keeps one code path. The
+                    // `*-of-type` forms do the same over the same-type index.
                     "first-child" => out.push(Selector::NthChild(FIRST_CHILD_EXPR)),
                     "last-child" => out.push(Selector::NthLastChild(FIRST_CHILD_EXPR)),
                     "only-child" => {
                         out.push(Selector::NthChild(FIRST_CHILD_EXPR));
                         out.push(Selector::NthLastChild(FIRST_CHILD_EXPR));
+                    }
+                    "first-of-type" => out.push(Selector::NthOfType(FIRST_CHILD_EXPR)),
+                    "last-of-type" => out.push(Selector::NthLastOfType(FIRST_CHILD_EXPR)),
+                    "only-of-type" => {
+                        out.push(Selector::NthOfType(FIRST_CHILD_EXPR));
+                        out.push(Selector::NthLastOfType(FIRST_CHILD_EXPR));
                     }
                     "root" => out.push(Selector::Root),
                     "empty" => out.push(Selector::Empty),
@@ -609,6 +651,8 @@ fn compound_specificity(compound: &[Selector]) -> (u32, u32, u32) {
             | Selector::PseudoClass(_)
             | Selector::NthChild(_)
             | Selector::NthLastChild(_)
+            | Selector::NthOfType(_)
+            | Selector::NthLastOfType(_)
             | Selector::Root
             | Selector::Empty
             | Selector::Checked

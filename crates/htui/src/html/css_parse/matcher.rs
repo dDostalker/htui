@@ -86,6 +86,8 @@ fn matches_css(arena: &NodeArena, node_id: NodeId, sel: &Selector, state: &Dynam
             .unwrap_or(false),
         Selector::NthChild(expr) => nth_child_matches(arena, node_id, *expr),
         Selector::NthLastChild(expr) => nth_last_child_matches(arena, node_id, *expr),
+        Selector::NthOfType(expr) => nth_of_type_matches(arena, node_id, *expr, false),
+        Selector::NthLastOfType(expr) => nth_of_type_matches(arena, node_id, *expr, true),
         Selector::Root => is_root_element(arena, node_id),
         Selector::Empty => is_empty_element(arena, node_id),
         Selector::Not(compounds) => !compounds
@@ -144,6 +146,34 @@ fn nth_last_child_matches(arena: &NodeArena, node_id: NodeId, expr: NthExpr) -> 
         return false;
     };
     expr.matches(parent.children.len() - pos)
+}
+
+/// The `*-of-type` family (`:nth-of-type` / `:nth-last-of-type` and their
+/// index-1 decompositions): count only siblings with the same element type
+/// as `node_id` — text / comment children never join the list (the CSS "of
+/// its type" semantics). `from_end` counts 1-based from the last same-type
+/// sibling instead of the first.
+fn nth_of_type_matches(arena: &NodeArena, node_id: NodeId, expr: NthExpr, from_end: bool) -> bool {
+    let Some(node) = arena.get(node_id) else {
+        return false;
+    };
+    let Some(parent_id) = node.parent else {
+        // Detached node — no sibling list, decline to match.
+        return false;
+    };
+    let node_type = node.node_type;
+    let parent = &arena[parent_id];
+    let typed: Vec<NodeId> = parent
+        .children
+        .iter()
+        .copied()
+        .filter(|&c| arena.get(c).is_some_and(|n| n.node_type == node_type))
+        .collect();
+    let Some(pos) = typed.iter().position(|&c| c == node_id) else {
+        return false;
+    };
+    let index = if from_end { typed.len() - pos } else { pos + 1 };
+    expr.matches(index)
 }
 
 /// `:root` — the element whose parent is the `Document` node (`<html>` in a
