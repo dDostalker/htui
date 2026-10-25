@@ -411,6 +411,11 @@ pub const INHERITED_PROPS: &[&str] = &[
 ];
 
 fn inherit_css(arena: &mut NodeArena, root_id: NodeId) {
+    /// The value `initial` (and `inherit` without a parent value) resolves
+    /// to: unparseable by every getter, so reads fall back to the built-in
+    /// default, while occupying the cascade slot so the inherited merge
+    /// cannot refill it.
+    const INITIAL_SENTINEL: &str = "\u{1}initial";
     type InheritedMap = IndexMap<Arc<str>, Arc<str>>;
     // Iterative pre-order walk with an explicit stack. An implicit-recursive
     // version would clone each node's `children` `Vec` on the way down
@@ -420,6 +425,51 @@ fn inherit_css(arena: &mut NodeArena, root_id: NodeId) {
     let mut stack: Vec<(NodeId, Arc<InheritedMap>)> =
         vec![(root_id, Arc::new(InheritedMap::new()))];
     while let Some((node_id, parent_attrs)) = stack.pop() {
+        // Explicit global keywords, resolved before the inherited merge so
+        // the literal value cannot squat on the slot:
+        // - `inherit` takes the parent's **computed** value (any property —
+        //   the non-inherited set reads the parent node's css_attr directly);
+        //   with no parent value it falls to the initial sentinel below.
+        // - `initial` swaps the declaration for the [`INITIAL_SENTINEL`]
+        //   value: getters fail to parse it and fall back to their built-in
+        //   default (the engine's initial-value analogue), and the sentinel
+        //   occupies the slot so the inherited merge cannot refill it —
+        //   which is exactly the keyword's point on inherited properties.
+        // `unset` / `revert` / `revert-layer` are not recognized (no cascade
+        // origin table to revert to).
+        {
+            let parent_id = arena.get(node_id).and_then(|n| n.parent);
+            // Collect (key, parent-value-if-inherit) under shared borrows.
+            let mut resolves: Vec<(Arc<str>, Option<Arc<str>>)> = Vec::new();
+            {
+                let node = &arena[node_id];
+                for (key, value) in node.css_attr.0.iter() {
+                    let text = value.trim();
+                    if text.eq_ignore_ascii_case("inherit") {
+                        let parent_value = parent_id
+                            .and_then(|pid| arena.get(pid))
+                            .and_then(|p| p.css_attr.0.get(key).cloned());
+                        resolves.push((key.clone(), parent_value));
+                    } else if text.eq_ignore_ascii_case("initial") {
+                        resolves.push((key.clone(), None));
+                    }
+                }
+            }
+            if !resolves.is_empty() {
+                let node = &mut arena[node_id];
+                for (key, value) in resolves {
+                    match value {
+                        Some(v) => {
+                            node.css_attr.0.insert(key, v);
+                        }
+                        None => {
+                            node.css_attr.0.insert(key, Arc::from(INITIAL_SENTINEL));
+                        }
+                    }
+                }
+            }
+        }
+
         // Merge parent inheritable attrs into current node (if not already
         // set). `entry` does a single hash probe for the find-or-insert; the
         // eager key allocation is cheaper than a second `contains_key` probe

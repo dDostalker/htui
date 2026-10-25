@@ -96,6 +96,7 @@ fn matches_css(arena: &NodeArena, node_id: NodeId, sel: &Selector, state: &Dynam
         Selector::Checked => checked_matches(arena, node_id),
         Selector::Enabled => enabled_matches(arena, node_id),
         Selector::Disabled => disabled_matches(arena, node_id),
+        Selector::Lang(tag) => lang_matches(arena, node_id, tag),
         Selector::PseudoClass(p) => p.matches(arena, node_id, state),
     }
 }
@@ -254,6 +255,24 @@ fn enabled_matches(arena: &NodeArena, node_id: NodeId) -> bool {
         return false;
     };
     is_form_control(node.node_type) && !disabled_matches(arena, node_id)
+}
+
+/// `:lang(<tag>)` — the nearest `lang` attribute on the element or an
+/// ancestor declares a language whose primary subtag matches `tag`
+/// (ASCII case-insensitive; `:lang(zh)` matches `lang="zh-CN"`).
+fn lang_matches(arena: &NodeArena, node_id: NodeId, tag: &str) -> bool {
+    let mut cur = Some(node_id);
+    while let Some(id) = cur
+        && let Some(node) = arena.get(id)
+    {
+        if let Some(declared) = node.attributes.get("lang") {
+            let declared = declared.trim().to_ascii_lowercase();
+            let primary = declared.split(['-', '_']).next().unwrap_or_default();
+            return primary == tag;
+        }
+        cur = node.parent;
+    }
+    false
 }
 
 /// The element types HTML marks as disable-able (the `:enabled` / `:disabled`

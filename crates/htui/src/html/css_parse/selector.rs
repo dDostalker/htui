@@ -218,6 +218,10 @@ pub enum Selector {
     /// `:disabled` — a form control carrying the `disabled` attribute, or a
     /// descendant of a `<fieldset disabled>` (legend exemption not modelled).
     Disabled,
+    /// `:lang(<tag>)` — the element (or its nearest ancestor with a `lang`
+    /// attribute) declares a language whose primary tag matches (case-
+    /// insensitive; `zh` matches `lang="zh-CN"`).
+    Lang(String),
     /// A dynamic pseudo-class (currently `:hover`).
     PseudoClass(PseudoClass),
 }
@@ -531,6 +535,24 @@ fn parse_compound_inner(
                     "checked" => out.push(Selector::Checked),
                     "enabled" => out.push(Selector::Enabled),
                     "disabled" => out.push(Selector::Disabled),
+                    "lang" => {
+                        if i >= chars.len() || chars[i] != '(' {
+                            return Err(SelectorError::NthOfTypeRequiresParens("lang".to_string()));
+                        }
+                        let Some(arg) = capture_balanced_arg(&chars, &mut i) else {
+                            return Err(SelectorError::NthOfTypeMissingCloseParen(
+                                "lang".to_string(),
+                            ));
+                        };
+                        let tag = arg.trim().to_ascii_lowercase();
+                        if tag.is_empty() || tag.contains(char::is_whitespace) {
+                            return Err(SelectorError::InvalidNthOfTypeArg(
+                                "lang".to_string(),
+                                arg.clone(),
+                            ));
+                        }
+                        out.push(Selector::Lang(tag));
+                    }
                     "not" => {
                         if i >= chars.len() || chars[i] != '(' {
                             return Err(SelectorError::NotRequiresParens);
@@ -657,7 +679,8 @@ fn compound_specificity(compound: &[Selector]) -> (u32, u32, u32) {
             | Selector::Empty
             | Selector::Checked
             | Selector::Enabled
-            | Selector::Disabled => spec.1 += 1,
+            | Selector::Disabled
+            | Selector::Lang(_) => spec.1 += 1,
             Selector::Not(compounds) => {
                 let arg = compounds
                     .iter()

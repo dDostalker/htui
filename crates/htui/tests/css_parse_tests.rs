@@ -3352,3 +3352,86 @@ fn test_table_property_getters() {
         htui::html::css_parse::EmptyCells::Show
     );
 }
+
+#[test]
+fn test_lang_pseudo_class() {
+    init();
+    // The nearest `lang` attribute wins — an ancestor's declaration reaches
+    // descendants that do not override it, and primary-subtag matching
+    // treats `zh-CN` as `zh`.
+    let mut arena = NodeArena::default();
+    let doc = arena.insert(Node::from(NodeType::Document));
+    let html = {
+        let mut n = Node::from(NodeType::Html);
+        n.attributes.insert("lang".to_string(), "zh-CN".to_string());
+        arena.insert(n)
+    };
+    Node::append_child(&mut arena, doc, html);
+    let p = arena.insert(Node::from(NodeType::P));
+    Node::append_child(&mut arena, html, p);
+    let en_child = {
+        let mut n = Node::from(NodeType::Span);
+        n.attributes.insert("lang".to_string(), "EN".to_string());
+        arena.insert(n)
+    };
+    Node::append_child(&mut arena, html, en_child);
+
+    let zh: CssSelector = ":lang(zh)".parse().unwrap();
+    assert!(selector_chain_matches(&arena, html, &zh));
+    assert!(
+        selector_chain_matches(&arena, p, &zh),
+        "descendant inherits the ancestor lang"
+    );
+    let en: CssSelector = ":lang(en)".parse().unwrap();
+    assert!(
+        selector_chain_matches(&arena, en_child, &en),
+        "nearest lang wins (case-insensitive)"
+    );
+    assert!(!selector_chain_matches(&arena, p, &en));
+    // Exact subtag only: `:lang(zh-cn)` does not match `zh`.
+    let zh_cn: CssSelector = ":lang(zh-cn)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, p, &zh_cn));
+    // Parse errors: missing parens / empty / spaced argument.
+    assert!(":lang".parse::<CssSelector>().is_err());
+    assert!(":lang()".parse::<CssSelector>().is_err());
+    assert!(":lang(zh en)".parse::<CssSelector>().is_err());
+}
+
+#[test]
+fn test_inherit_and_initial_keywords() {
+    init();
+    // `inherit` on an inherited property takes the parent's computed value.
+    let attr = cascaded_node(
+        r#"<div style="color: red"><p style="color: inherit">x</p></div>"#,
+        "p",
+    );
+    assert_eq!(attr.0.get("color").map(|s| s.as_ref()), Some("red"));
+    // `inherit` on a NON-inherited property reads the parent's computed
+    // value too (width here).
+    let attr = cascaded_node(
+        r#"<div style="width: 20ch"><p style="width: inherit">x</p></div>"#,
+        "p",
+    );
+    assert_eq!(attr.0.get("width").map(|s| s.as_ref()), Some("20ch"));
+    // `initial` swaps the declaration for an unparseable sentinel: the
+    // getter falls back to its default AND the inherited red cannot refill
+    // the slot (the keyword's whole point on inherited properties).
+    let attr = cascaded_node(
+        r#"<div style="color: red"><p style="color: initial">x</p></div>"#,
+        "p",
+    );
+    assert_eq!(
+        attr.get_color(),
+        None,
+        "initial beats the inherited value (getter falls back to default)"
+    );
+    // `inherit` without a parent value degrades to the initial sentinel.
+    let attr = cascaded_node(r#"<p style="color: inherit">x</p>"#, "p");
+    assert_eq!(attr.get_color(), None);
+    // Case-insensitive keyword.
+    let attr = cascaded_node(
+        r#"<div style="color: red"><p style="color: INHERIT">x</p></div>"#,
+        "p",
+    );
+    assert_eq!(attr.0.get("color").map(|s| s.as_ref()), Some("red"));
+}
