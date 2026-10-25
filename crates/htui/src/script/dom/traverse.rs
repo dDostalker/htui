@@ -600,3 +600,139 @@ pub(super) fn native_get_next_element_sibling(
         None => Ok(JsValue::null()),
     }
 }
+
+// ============================================================
+// Tree search / connectivity (getElementsByTagName* / Class,
+// isConnected / getRootNode)
+// ============================================================
+
+/// Document-order (pre-order DFS) list of every element under `scope`
+/// satisfying `pred`. Same walk as [`query_selector_nodes`]; scoped to the
+/// caller's subtree.
+fn collect_elements(
+    arena: &NodeArena,
+    scope: NodeId,
+    pred: &dyn Fn(&crate::tdom::node::Node) -> bool,
+) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    let mut stack: Vec<NodeId> = arena[scope].children.iter().rev().copied().collect();
+    while let Some(id) = stack.pop() {
+        if let Some(node) = arena.get(id)
+            && node.node_type_constant() == 1
+            && pred(node)
+        {
+            out.push(id);
+        }
+        stack.extend(arena[id].children.iter().rev().copied());
+    }
+    out
+}
+
+/// Wrap a node-id list as a static JS array (indexable / `.length`, like the
+/// `querySelectorAll` result).
+fn ids_to_array(context: &mut Context, ids: Vec<NodeId>) -> JsResult<JsValue> {
+    let arr = boa_engine::object::builtins::JsArray::new(context);
+    for id in ids {
+        arr.push(node_wrapper(context, id)?, context)?;
+    }
+    Ok(arr.into())
+}
+
+/// `getElementsByTagName(name)` — tag lookup scoped to the caller (document
+/// or element). Tag names are ASCII-case-insensitive; `*` matches every
+/// element. Returns a static array in document order (not a live
+/// HTMLCollection).
+pub(super) fn native_get_elements_by_tag_name(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let scope = this_node_id(this, context)?;
+    let err = JsNativeError::typ().with_message("getElementsByTagName expects a string");
+    let name = args
+        .first()
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_std_string_lossy().to_ascii_lowercase())
+        .ok_or(err)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let st = rc.borrow();
+    let wildcard = name == "*";
+    let ids = collect_elements(&st.arena, scope, &|n| {
+        wildcard || n.node_type.tag_name().is_some_and(|t| t == name)
+    });
+    drop(st);
+    ids_to_array(context, ids)
+}
+
+/// `getElementsByClassName(classes)` — elements under the caller carrying
+/// **every** whitespace-separated class token, in document order (static
+/// array).
+pub(super) fn native_get_elements_by_class_name(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let scope = this_node_id(this, context)?;
+    let err = JsNativeError::typ().with_message("getElementsByClassName expects a string");
+    let classes = args
+        .first()
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_std_string_lossy())
+        .ok_or(err)?;
+    let tokens: Vec<String> = classes.split_whitespace().map(str::to_string).collect();
+    if tokens.is_empty() {
+        return Ok(boa_engine::object::builtins::JsArray::new(context).into());
+    }
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let st = rc.borrow();
+    let ids = collect_elements(&st.arena, scope, &|n| tokens.iter().all(|t| n.has_class(t)));
+    drop(st);
+    ids_to_array(context, ids)
+}
+
+/// `node.isConnected` — whether the node is attached to the document root
+/// (the chain of parents from the node reaches the session root). The
+/// document itself reports `true`.
+pub(super) fn native_get_is_connected(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let connected = with_state().is_some_and(|rc| {
+        let st = rc.borrow();
+        let mut cur = Some(node_id);
+        while let Some(id) = cur {
+            if id == st.root_id {
+                return true;
+            }
+            cur = st.arena.get(id).and_then(|n| n.parent);
+        }
+        false
+    });
+    Ok(JsValue::from(connected))
+}
+
+/// `node.getRootNode()` — the top of the node's parent chain: the document
+/// root for attached nodes, the outermost ancestor for detached subtrees.
+pub(super) fn native_get_root_node(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::null());
+    };
+    let st = rc.borrow();
+    let mut top = node_id;
+    while let Some(parent) = st.arena.get(top).and_then(|n| n.parent) {
+        top = parent;
+    }
+    drop(st);
+    node_wrapper(context, top)
+}
