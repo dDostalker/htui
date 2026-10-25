@@ -14,7 +14,7 @@ use super::{
     selector::CssSelector,
     values::{
         alignment_longhand_valid, expand_place_shorthand, is_alignment_longhand,
-        is_place_shorthand_name,
+        is_list_style_type_keyword, is_place_shorthand_name,
     },
 };
 
@@ -344,23 +344,41 @@ fn parse_declarations_into<'i, 't>(
             } else {
                 &mut normal.0
             };
-            if expand_place && is_place_shorthand_name(&name) {
-                // An invalid `place-*` value drops the whole declaration
-                // (a browser parse error emits no longhands).
-                if let Some(pairs) = expand_place_shorthand(&name, &cleaned) {
-                    for (prop, value) in pairs {
+            // Shorthands that expand at declaration-parse time: browsers
+            // cascade shorthands as their expanded longhands (the later
+            // declaration wins regardless of form), and an invalid value
+            // drops the whole declaration instead of overriding an earlier
+            // expansion through the raw-name slot.
+            type Expansion = Vec<(&'static str, Arc<str>)>;
+            let expansion: Option<Option<Expansion>> = if !expand_place {
+                None
+            } else if is_place_shorthand_name(&name) {
+                Some(expand_place_shorthand(&name, &cleaned))
+            } else if name == "list-style" {
+                Some(expand_list_style_shorthand(&cleaned))
+            } else if name == "font" {
+                Some(expand_font_shorthand(&cleaned))
+            } else {
+                None
+            };
+            match expansion {
+                Some(pairs) => {
+                    for (prop, value) in pairs.unwrap_or_default() {
                         target.insert(Arc::from(prop), value);
                     }
                 }
-            } else if expand_place
-                && is_alignment_longhand(&name)
-                && !alignment_longhand_valid(&name, &cleaned)
-            {
-                // An invalid alignment longhand is dropped rather than
-                // stored, so it cannot override an earlier `place-*`
-                // expansion through the per-property cascade.
-            } else {
-                target.insert(Arc::from(name.as_ref()), cleaned);
+                None => {
+                    if expand_place
+                        && is_alignment_longhand(&name)
+                        && !alignment_longhand_valid(&name, &cleaned)
+                    {
+                        // An invalid alignment longhand is dropped rather than
+                        // stored, so it cannot override an earlier `place-*`
+                        // expansion through the per-property cascade.
+                    } else {
+                        target.insert(Arc::from(name.as_ref()), cleaned);
+                    }
+                }
             }
         }
         // Consume the trailing `;` if present. A missing `;` is not an
@@ -368,4 +386,92 @@ fn parse_declarations_into<'i, 't>(
         let _: Result<(), cssparser::BasicParseError<'_>> =
             input.try_parse(|i| i.expect_semicolon().map(|_| ()));
     }
+}
+
+/// Expand a `list-style` shorthand declaration.
+///
+/// Only the `list-style-type` component has a terminal counterpart; the
+/// `position` (`inside` / `outside`) and `image` components are accepted
+/// (they make the declaration valid) but produce no longhand. An empty value
+/// fails the whole declaration.
+fn expand_list_style_shorthand(value: &str) -> Option<Vec<(&'static str, Arc<str>)>> {
+    let words: Vec<&str> = value.split_whitespace().collect();
+    if words.is_empty() {
+        return None;
+    }
+    let mut out = Vec::new();
+    for tok in words {
+        if is_list_style_type_keyword(tok) {
+            out.push(("list-style-type", Arc::from(tok)));
+        }
+    }
+    Some(out)
+}
+
+/// Expand a `font` shorthand declaration (`font: <style>? <weight>?
+/// <size>[/<line-height>?] <family>`).
+///
+/// Terminal-relevant longhands only: `font-style` / `font-weight` /
+/// `font-size` / `line-height`. The font family must be present (any
+/// identifier — there are no font families in a terminal) and the size must
+/// be numeric, mirroring the CSS grammar; `variant` flags like `small-caps`
+/// and the system-font keywords (`caption`, `icon`, …) are not supported and
+/// fail the declaration.
+fn expand_font_shorthand(value: &str) -> Option<Vec<(&'static str, Arc<str>)>> {
+    let tokens: Vec<&str> = value.split_whitespace().collect();
+    let mut style: Option<&str> = None;
+    let mut weight: Option<&str> = None;
+    let mut i = 0usize;
+    // Leading flags: style / weight / variant, any order, each at most once
+    // (a repeat is a grammar error in CSS; here the second occurrence just
+    // stops the scan and then fails the size parse below).
+    while let Some(&tok) = tokens.get(i) {
+        match tok.to_ascii_lowercase().as_str() {
+            "italic" | "oblique" => style = Some(tok),
+            "bold" | "bolder" | "lighter" => weight = Some(tok),
+            // `normal` / `small-caps` reset or set components we do not
+            // track — accepted, produces nothing.
+            "normal" | "small-caps" => {}
+            _ => break,
+        }
+        i += 1;
+    }
+    // Size (with optional `/line-height` attached or space-separated).
+    let size_tok = tokens.get(i)?;
+    let (size, mut line_height) = match size_tok.split_once('/') {
+        Some((s, lh)) => (s.to_string(), Some(lh.to_string())),
+        None => (size_tok.to_string(), None),
+    };
+    let looks_numeric = size
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_digit() || c == '.');
+    if !looks_numeric {
+        return None;
+    }
+    i += 1;
+    if line_height.is_none()
+        && let Some(&tok) = tokens.get(i)
+        && let Some(lh) = tok.strip_prefix('/')
+    {
+        if lh.is_empty() {
+            return None;
+        }
+        line_height = Some(lh.to_string());
+        i += 1;
+    }
+    // The family list is mandatory in CSS (any identifier(s)).
+    tokens.get(i)?;
+    let mut out = Vec::new();
+    if let Some(s) = style {
+        out.push(("font-style", Arc::from(s)));
+    }
+    if let Some(w) = weight {
+        out.push(("font-weight", Arc::from(w)));
+    }
+    out.push(("font-size", Arc::from(size)));
+    if let Some(lh) = line_height {
+        out.push(("line-height", Arc::from(lh)));
+    }
+    Some(out)
 }

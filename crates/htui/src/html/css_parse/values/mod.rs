@@ -2,13 +2,15 @@ mod box_values;
 mod color;
 mod flex;
 mod length;
+mod list;
 mod multicol;
 mod text;
 
 pub(in crate::html::css_parse) use box_values::parse_border_radius;
 pub use box_values::{
-    BoxSizing, CornerRadii, CssDisplay, InsetSides, Overflow, Position, Positioning, Visibility,
-    parse_box_sizing, parse_overflow, parse_position, parse_visibility,
+    BoxSizing, CaptionSide, CornerRadii, CssDisplay, EmptyCells, InsetSides, Overflow, Position,
+    Positioning, TableLayout, Visibility, parse_box_sizing, parse_caption_side, parse_empty_cells,
+    parse_overflow, parse_position, parse_table_layout, parse_visibility,
 };
 pub use color::parse_color_str;
 pub use flex::{
@@ -27,6 +29,7 @@ pub(crate) use length::{
     parse_border_shorthand, parse_border_side, parse_border_style, parse_border_width,
     parse_edge_auto, parse_edge_sizes, parse_margin_sizes,
 };
+pub use list::{ListStyleType, is_list_style_type_keyword, parse_list_style_type};
 pub use multicol::{
     ColumnFill, ColumnsResolved, parse_column_count, parse_column_fill, parse_column_rule,
     parse_columns_shorthand,

@@ -3239,3 +3239,116 @@ fn test_nth_of_type_parse_errors() {
     // Spaces inside the argument survive (paren-aware split).
     assert!("p:nth-of-type(2n + 1)".parse::<CssSelector>().is_ok());
 }
+
+// ============================================================
+// list-style / font / table 新属性与简写
+// ============================================================
+
+/// Parse `html` and cascade an empty stylesheet, returning the first
+/// `tag` element's post-cascade `CssAttr`.
+fn cascaded_node(html: &str, tag: &str) -> CssAttr {
+    let mut parser = html_parse::Parser::new(html);
+    let (root_id, mut arena, _) = parser.parse();
+    let rules = Parser::new("p {}").parse();
+    css_into_node(&mut arena, root_id, &rules);
+    let id = arena
+        .iter()
+        .find(|(_, n)| n.node_type.tag_name().is_some_and(|t| t == tag))
+        .map(|(id, _)| id)
+        .expect("tag present");
+    arena[id].css_attr.clone()
+}
+
+#[test]
+fn test_list_style_type_and_shorthand() {
+    init();
+    use htui::html::css_parse::ListStyleType as L;
+    // Longhand on the list reaches `<li>` through inheritance.
+    let attr = cascaded_node(
+        "<ul style=\"list-style-type: square\"><li>x</li></ul>",
+        "li",
+    );
+    assert_eq!(attr.get_list_style_type(L::Disc), L::Square);
+    // Shorthand expands to the type longhand at parse time.
+    let attr = cascaded_node(
+        "<ul style=\"list-style: lower-alpha\"><li>x</li></ul>",
+        "li",
+    );
+    assert_eq!(attr.get_list_style_type(L::Disc), L::LowerAlpha);
+    // No declaration: the getter echoes the caller's element default (the
+    // `disc`-vs-`decimal` choice is made by the `<li>` layout, not the CSS
+    // cascade).
+    let attr = cascaded_node("<ol><li>x</li></ol>", "li");
+    assert_eq!(attr.get_list_style_type(L::Disc), L::Disc);
+    assert_eq!(attr.get_list_style_type(L::Decimal), L::Decimal);
+    // Marker strings for each family.
+    assert_eq!(L::Circle.marker(1), "○ ");
+    assert_eq!(L::LowerRoman.marker(4), "iv ");
+    assert_eq!(L::UpperRoman.marker(9), "IX ");
+    assert_eq!(L::UpperAlpha.marker(27), "AA. ");
+    assert_eq!(L::None.marker(3), "");
+}
+
+#[test]
+fn test_font_shorthand_expands() {
+    init();
+    let attr = cascaded_node(
+        "<p style=\"font: italic bold 2em/1.5 monospace\">x</p>",
+        "p",
+    );
+    assert_eq!(attr.get_font_weight(), FontWeight::Bold);
+    assert_eq!(attr.get_font_style_kind(), FontStyleKind::Italic);
+    // line-height rides along as its own longhand.
+    assert!(
+        attr.0
+            .get("line-height")
+            .is_some_and(|v| v.as_ref() == "1.5"),
+        "line-height component expanded, got {:?}",
+        attr.0.get("line-height")
+    );
+    // Size-only form without flags still lands.
+    let attr = cascaded_node("<p style=\"font: 12px serif\">x</p>", "p");
+    assert!(
+        attr.0
+            .get("font-size")
+            .is_some_and(|v| v.as_ref() == "12px")
+    );
+    // Missing family fails the whole declaration (no longhands).
+    let attr = cascaded_node("<p style=\"font: 12px\">x</p>", "p");
+    assert!(attr.0.get("font-size").is_none());
+}
+
+#[test]
+fn test_table_property_getters() {
+    init();
+    let attr = cascaded_node(
+        "<table style=\"table-layout: fixed; caption-side: bottom; empty-cells: hide\"><tr><td>a</td></tr></table>",
+        "table",
+    );
+    assert_eq!(
+        attr.get_table_layout(),
+        htui::html::css_parse::TableLayout::Fixed
+    );
+    assert_eq!(
+        attr.get_caption_side(),
+        htui::html::css_parse::CaptionSide::Bottom
+    );
+    assert_eq!(
+        attr.get_empty_cells(),
+        htui::html::css_parse::EmptyCells::Hide
+    );
+    // Defaults.
+    let attr = cascaded_node("<table><tr><td>a</td></tr></table>", "table");
+    assert_eq!(
+        attr.get_table_layout(),
+        htui::html::css_parse::TableLayout::Auto
+    );
+    assert_eq!(
+        attr.get_caption_side(),
+        htui::html::css_parse::CaptionSide::Top
+    );
+    assert_eq!(
+        attr.get_empty_cells(),
+        htui::html::css_parse::EmptyCells::Show
+    );
+}

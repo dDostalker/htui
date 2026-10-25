@@ -368,6 +368,15 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "overflow",
     "overflow-x",
     "overflow-y",
+    // Lists
+    "list-style",
+    "list-style-type",
+    // Tables
+    "table-layout",
+    "caption-side",
+    "empty-cells",
+    // Font shorthand (expanded at parse time into the font-* longhands)
+    "font",
 ];
 
 /// Inheritable subset of [`SUPPORTED_PROPERTIES`]: a child without an explicit
@@ -397,6 +406,8 @@ pub const INHERITED_PROPS: &[&str] = &[
     "white-space",
     "word-break",
     "overflow-wrap",
+    "list-style-type",
+    "empty-cells",
 ];
 
 fn inherit_css(arena: &mut NodeArena, root_id: NodeId) {
