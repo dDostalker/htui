@@ -1,18 +1,214 @@
 //! Event listener natives: `addEventListener` / `removeEventListener`, the
-//! element focus requests and the JS-side listener registry helpers.
+//! element focus requests, the `el.click()` synchronous dispatch and the
+//! JS-side listener registry helpers.
 
 use boa_engine::{
-    Context, JsNativeError, JsResult, JsValue, js_string, object::ObjectInitializer,
-    property::Attribute,
+    Context, JsNativeError, JsResult, JsValue, NativeFunction, js_string,
+    object::ObjectInitializer, property::Attribute,
 };
 
 use crate::{
-    events::EventType,
+    events::{EventType, HtmlEvent},
     tdom::node::{NodeId, NodeType},
     tui::graph_api::RenderCmd,
 };
 
-use super::{node_id_to_f64, this_node_id, with_state};
+use super::{node_id_to_f64, node_wrapper, this_node_id, with_state};
+
+// ============================================================
+// Event object construction + el.click()
+// ============================================================
+
+/// Build the JS event object shared by every dispatch path (the engine's
+/// bubbling dispatch and `el.click()`): `type` / `target` / `currentTarget`
+/// / `x` / `y` / `bubbles` / `defaultPrevented`, the hidden control flags
+/// the dispatch loop reads, and the `stopPropagation` /
+/// `stopImmediatePropagation` / `preventDefault` methods. Keyboard fields
+/// are appended by the engine's key dispatch, which has a
+/// [`KeyEventInfo`](crate::events::KeyEventInfo) payload.
+pub(crate) fn make_event_object(
+    context: &mut Context,
+    event_type: EventType,
+    target: &JsValue,
+    x: u32,
+    y: u32,
+) -> JsResult<JsValue> {
+    let type_str = event_type_str(event_type);
+    let mut init = ObjectInitializer::new(context);
+    init.property(js_string!("type"), js_string!(type_str), Attribute::all())
+        .property(js_string!("target"), target.clone(), Attribute::all())
+        .property(
+            js_string!("currentTarget"),
+            JsValue::null(),
+            Attribute::all(),
+        )
+        .property(js_string!("x"), x as f64, Attribute::all())
+        .property(js_string!("y"), y as f64, Attribute::all())
+        .property(js_string!("bubbles"), true, Attribute::all())
+        .property(js_string!("defaultPrevented"), false, Attribute::all())
+        .property(
+            js_string!("_stopped"),
+            false,
+            Attribute::WRITABLE | Attribute::NON_ENUMERABLE,
+        )
+        .property(
+            js_string!("_stoppedImmediate"),
+            false,
+            Attribute::WRITABLE | Attribute::NON_ENUMERABLE,
+        )
+        .property(
+            js_string!("_prevented"),
+            false,
+            Attribute::WRITABLE | Attribute::NON_ENUMERABLE,
+        )
+        .function(
+            NativeFunction::from_fn_ptr(crate::script::bindings::stop_propagation),
+            js_string!("stopPropagation"),
+            0,
+        )
+        .function(
+            NativeFunction::from_fn_ptr(crate::script::bindings::stop_immediate_propagation),
+            js_string!("stopImmediatePropagation"),
+            0,
+        )
+        .function(
+            NativeFunction::from_fn_ptr(crate::script::bindings::prevent_default),
+            js_string!("preventDefault"),
+            0,
+        );
+    Ok(init.build().into())
+}
+
+/// Read a boolean control flag off an event object.
+fn event_flag(context: &mut Context, event: &JsValue, name: &str) -> bool {
+    event
+        .as_object()
+        .and_then(|obj| obj.get(js_string!(name), context).ok())
+        .is_some_and(|v| v.is_boolean() && v.to_boolean())
+}
+
+/// The disable-able form controls — `el.click()` on a disabled one fires
+/// nothing (browser behavior; matches the pointer path's disabled gate).
+fn is_form_control(node_type: NodeType) -> bool {
+    matches!(
+        node_type,
+        NodeType::Input
+            | NodeType::Textarea
+            | NodeType::Select
+            | NodeType::Button
+            | NodeType::Optgroup
+            | NodeType::HtmlOption
+            | NodeType::Fieldset
+    )
+}
+
+/// `el.click()` — synchronously dispatch a `click` event on this element
+/// along its DOM ancestor chain, honouring `stopPropagation` /
+/// `stopImmediatePropagation`, exactly like the engine's own bubbling
+/// dispatch. Renders commands host functions push during the dispatch stay
+/// in the session's render queue and travel with the next response. No
+/// default actions run (no form submit / checkbox toggle) — JS listeners
+/// only, the documented htui approximation.
+pub(super) fn native_click(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+
+    // Bubbling path: target first, then ancestors (like `region_for`).
+    let (path, target_id_attr) = {
+        let st = rc.borrow();
+        let Some(node) = st.arena.get(node_id) else {
+            return Ok(JsValue::undefined());
+        };
+        if is_form_control(node.node_type) && node.attributes.contains_key("disabled") {
+            return Ok(JsValue::undefined());
+        }
+        let target_id_attr = node.get_id().cloned();
+        let mut path = vec![node_id];
+        let mut cur = node.parent;
+        while let Some(id) = cur
+            && let Some(n) = st.arena.get(id)
+        {
+            path.push(id);
+            cur = n.parent;
+        }
+        (path, target_id_attr)
+    };
+
+    let target = node_wrapper(context, node_id)?;
+    let event = make_event_object(context, EventType::Click, &target, 0, 0)?;
+
+    // Host functions running inside a listener read the in-flight event
+    // through `ScriptState.current_event` — populate it for this dispatch.
+    {
+        let mut st = rc.borrow_mut();
+        st.current_event = Some(HtmlEvent {
+            event_type: EventType::Click,
+            target: target_id_attr,
+            current_target: None,
+            x: 0,
+            y: 0,
+            bubbles: true,
+            key: None,
+        });
+    }
+
+    for &element_id in &path {
+        let Ok(wrapper) = node_wrapper(context, element_id) else {
+            continue;
+        };
+        if let Some(obj) = event.as_object()
+            && let Err(e) = obj.set(js_string!("currentTarget"), wrapper.clone(), false, context)
+        {
+            log::warn!("Failed to set event.currentTarget: {e}");
+        }
+        {
+            let mut st = rc.borrow_mut();
+            let current_target = st.arena.get(element_id).and_then(|n| n.get_id().cloned());
+            if let Some(ev) = st.current_event.as_mut() {
+                ev.current_target = current_target;
+            }
+        }
+
+        let listeners = get_listeners(context, element_id, EventType::Click).unwrap_or_default();
+        let mut immediate = false;
+        for listener in listeners {
+            if let Ok(f) = listener.to_object(context)
+                && let Err(e) = f.call(&wrapper, std::slice::from_ref(&event), context)
+            {
+                log::warn!("click() listener threw: {e}");
+            }
+            if event_flag(context, &event, "_stoppedImmediate") {
+                immediate = true;
+                break;
+            }
+        }
+        if !immediate
+            && let Ok(Some(handler)) = get_attr_handler(context, element_id, EventType::Click)
+        {
+            if let Ok(f) = handler.to_object(context)
+                && let Err(e) = f.call(&wrapper, std::slice::from_ref(&event), context)
+            {
+                log::warn!("click() attribute handler threw: {e}");
+            }
+            if event_flag(context, &event, "_stoppedImmediate") {
+                immediate = true;
+            }
+        }
+        if immediate || event_flag(context, &event, "_stopped") {
+            break;
+        }
+    }
+
+    let mut st = rc.borrow_mut();
+    st.current_event = None;
+    Ok(JsValue::undefined())
+}
 
 pub(super) fn native_add_event_listener(
     this: &JsValue,

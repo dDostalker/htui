@@ -32,7 +32,7 @@ pub(crate) use builtins::install_builtins;
 #[allow(unused_imports)]
 pub(crate) use events::{
     add_listener, clear_attr_handler, clear_node_attr_handler, get_attr_handler, get_listeners,
-    parse_event_type, remove_listener, set_attr_handler,
+    make_event_object, parse_event_type, remove_listener, set_attr_handler,
 };
 pub(crate) use fetch::response_object;
 
