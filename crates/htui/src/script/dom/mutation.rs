@@ -1,11 +1,16 @@
 //! Mutation natives: `appendChild` / `removeChild` / `insertBefore` /
-//! `replaceChild` / `cloneNode` over the live arena.
+//! `replaceChild` / `cloneNode` over the live arena, plus the ChildNode
+//! (`remove` / `before` / `after` / `replaceWith`) and ParentNode
+//! (`append` / `prepend`) mixins.
 
-use boa_engine::{Context, JsNativeError, JsResult, JsValue};
+use boa_engine::{Context, JsNativeError, JsResult, JsValue, js_string};
 
-use crate::{script::ScriptState, tdom::node::NodeId};
+use crate::{
+    script::ScriptState,
+    tdom::node::{Node, NodeId},
+};
 
-use super::{mark_dirty, node_wrapper, this_node_id, with_state};
+use super::{f64_to_node_id, mark_dirty, node_wrapper, this_node_id, with_state};
 
 /// Wire `on*` attribute handlers for a subtree that just entered the
 /// document (`appendChild` / `insertBefore` / `replaceChild`). Compilation
@@ -235,6 +240,322 @@ pub(super) fn native_remove_child(
         crate::script::bindings::clear_attribute_handlers_for_subtree(context, &rc, child_id)
     {
         log::warn!("Failed to clear on* handlers after removeChild: {e}");
+    }
+    Ok(JsValue::undefined())
+}
+
+// ============================================================
+// ChildNode / ParentNode mixins
+// ============================================================
+
+/// One position in a parent's child list where a mixin insertion may land.
+enum InsertPos {
+    /// Insert at the end of the child list.
+    End,
+    /// Insert before `ref_id`; `None` appends at the end.
+    Before(Option<NodeId>),
+    /// Insert at the given index (clamped to the list length) — how
+    /// `prepend(a, b, …)` keeps its argument order.
+    At(usize),
+}
+
+/// Detach `child_id` from any current parent and insert it under
+/// `parent_id` at `position` — the shared insertion core of the ChildNode /
+/// ParentNode mixins (mirrors the `appendChild` mutation pattern: detach,
+/// relink, mark both ends dirty). A stale child id (freed by an `innerHTML`
+/// sweep) must not enter the child list, so the whole insertion is skipped.
+fn detach_and_insert(
+    st: &mut ScriptState,
+    parent_id: NodeId,
+    child_id: NodeId,
+    position: InsertPos,
+) {
+    if !st.arena.contains_key(child_id) {
+        return;
+    }
+    let old_parent = st.arena.get(child_id).and_then(|c| c.parent);
+    if let Some(op) = old_parent
+        && let Some(opn) = st.arena.get_mut(op)
+    {
+        opn.children.retain(|c| *c != child_id);
+    }
+    if let Some(child) = st.arena.get_mut(child_id) {
+        child.parent = Some(parent_id);
+    }
+    if let Some(parent) = st.arena.get_mut(parent_id) {
+        match position {
+            InsertPos::End => parent.children.push(child_id),
+            InsertPos::Before(Some(ref_id)) => {
+                match parent.children.iter().position(|&c| c == ref_id) {
+                    Some(p) => parent.children.insert(p, child_id),
+                    None => parent.children.push(child_id),
+                }
+            }
+            InsertPos::Before(None) => parent.children.push(child_id),
+            InsertPos::At(idx) => {
+                let idx = idx.min(parent.children.len());
+                parent.children.insert(idx, child_id);
+            }
+        }
+        mark_dirty(st, parent_id);
+        mark_dirty(st, child_id);
+    }
+}
+
+/// Convert one mixin argument into a node id: node wrappers pass through
+/// (their `_nodeId`), primitives (strings, numbers, `null`, …) become fresh
+/// Text nodes via their string conversion — the browser's ChildNode /
+/// ParentNode union conversion (`append(null)` inserts the text "null").
+/// Any other object (no `_nodeId`) is a `TypeError`, like the browser's
+/// "parameter is not of type 'Node'".
+fn arg_to_node_id(
+    st: &mut ScriptState,
+    value: &JsValue,
+    context: &mut Context,
+) -> JsResult<NodeId> {
+    if let Some(obj) = value.as_object() {
+        let id = obj.get(js_string!("_nodeId"), context)?;
+        let Some(n) = id.as_number() else {
+            return Err(JsNativeError::typ()
+                .with_message("Failed to execute: parameter is not of type 'Node'")
+                .into());
+        };
+        return Ok(f64_to_node_id(n));
+    }
+    let text = value.to_string(context)?.to_std_string_lossy();
+    Ok(st.arena.insert(Node::text(&text)))
+}
+
+/// Convert every mixin argument up front (ChildNode / ParentNode methods are
+/// all-or-nothing in browsers: a `TypeError` on argument 2 must not leave
+/// argument 1 inserted), then cycle-check every node argument together.
+fn convert_args(
+    st: &mut ScriptState,
+    args: &[JsValue],
+    context: &mut Context,
+    parent_id: NodeId,
+    method: &str,
+) -> JsResult<Vec<NodeId>> {
+    let mut ids = Vec::with_capacity(args.len());
+    for arg in args {
+        ids.push(arg_to_node_id(st, arg, context)?);
+    }
+    for &id in &ids {
+        reject_cycle(st, parent_id, id, method)?;
+    }
+    Ok(ids)
+}
+
+/// `ChildNode.remove()` — detach this node from its parent (a no-op when it
+/// has none, matching the browser). The subtree keeps its arena nodes and
+/// JS wrappers; only its `on*` attribute handlers are unwired, exactly like
+/// `removeChild`.
+pub(super) fn native_remove(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let detached_from = {
+        let mut st = rc.borrow_mut();
+        let parent = st.arena.get(node_id).and_then(|n| n.parent);
+        if let Some(pid) = parent {
+            if let Some(p) = st.arena.get_mut(pid) {
+                p.children.retain(|c| *c != node_id);
+            }
+            if let Some(n) = st.arena.get_mut(node_id) {
+                n.parent = None;
+            }
+            mark_dirty(&mut st, pid);
+            mark_dirty(&mut st, node_id);
+        }
+        parent
+    };
+    if detached_from.is_some()
+        && let Err(e) =
+            crate::script::bindings::clear_attribute_handlers_for_subtree(context, &rc, node_id)
+    {
+        log::warn!("Failed to clear on* handlers after remove: {e}");
+    }
+    Ok(JsValue::undefined())
+}
+
+/// `ParentNode.append(…nodes)` — insert every argument at the end of this
+/// node's child list (strings become Text nodes).
+pub(super) fn native_append(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let parent_id = this_node_id(this, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let inserted = {
+        let mut st = rc.borrow_mut();
+        let inserted = convert_args(&mut st, args, context, parent_id, "append")?;
+        for child_id in &inserted {
+            detach_and_insert(&mut st, parent_id, *child_id, InsertPos::End);
+        }
+        inserted
+    };
+    for id in inserted {
+        wire_inserted_handlers(context, &rc, id);
+    }
+    Ok(JsValue::undefined())
+}
+
+/// `ParentNode.prepend(…nodes)` — insert every argument at the start of this
+/// node's child list, preserving argument order (`prepend(a, b)` yields
+/// `[a, b, …]`).
+pub(super) fn native_prepend(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let parent_id = this_node_id(this, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let inserted = {
+        let mut st = rc.borrow_mut();
+        let inserted = convert_args(&mut st, args, context, parent_id, "prepend")?;
+        for (i, child_id) in inserted.iter().enumerate() {
+            detach_and_insert(&mut st, parent_id, *child_id, InsertPos::At(i));
+        }
+        inserted
+    };
+    for id in inserted {
+        wire_inserted_handlers(context, &rc, id);
+    }
+    Ok(JsValue::undefined())
+}
+
+/// Resolve the parent that a ChildNode mixin (`before` / `after` /
+/// `replaceWith`) would insert into, or `None` when the node is detached
+/// (the whole call degrades to a no-op, matching the browser).
+fn child_node_parent(st: &ScriptState, node_id: NodeId) -> Option<NodeId> {
+    st.arena.get(node_id).and_then(|n| n.parent)
+}
+
+/// `ChildNode.before(…nodes)` — insert every argument immediately before
+/// this node (a no-op when detached).
+pub(super) fn native_before(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let inserted = {
+        let mut st = rc.borrow_mut();
+        let Some(parent_id) = child_node_parent(&st, node_id) else {
+            return Ok(JsValue::undefined());
+        };
+        let inserted = convert_args(&mut st, args, context, parent_id, "before")?;
+        for child_id in &inserted {
+            detach_and_insert(
+                &mut st,
+                parent_id,
+                *child_id,
+                InsertPos::Before(Some(node_id)),
+            );
+        }
+        inserted
+    };
+    for id in inserted {
+        wire_inserted_handlers(context, &rc, id);
+    }
+    Ok(JsValue::undefined())
+}
+
+/// `ChildNode.after(…nodes)` — insert every argument immediately after this
+/// node (a no-op when detached). The insertion reference is this node's
+/// next sibling, captured once so `after(a, b)` keeps argument order.
+pub(super) fn native_after(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let inserted = {
+        let mut st = rc.borrow_mut();
+        let Some(parent_id) = child_node_parent(&st, node_id) else {
+            return Ok(JsValue::undefined());
+        };
+        let inserted = convert_args(&mut st, args, context, parent_id, "after")?;
+        if inserted.is_empty() {
+            return Ok(JsValue::undefined());
+        }
+        let next = {
+            let parent = &st.arena[parent_id];
+            let pos = parent.children.iter().position(|&c| c == node_id);
+            pos.and_then(|p| parent.children.get(p + 1).copied())
+        };
+        for child_id in &inserted {
+            detach_and_insert(&mut st, parent_id, *child_id, InsertPos::Before(next));
+        }
+        inserted
+    };
+    for id in inserted {
+        wire_inserted_handlers(context, &rc, id);
+    }
+    Ok(JsValue::undefined())
+}
+
+/// `ChildNode.replaceWith(…nodes)` — swap this node for the arguments
+/// (strings become Text nodes; a no-op when detached). Every argument is
+/// inserted before this node in order, then this node is removed — so the
+/// arguments land exactly in the original position.
+pub(super) fn native_replace_with(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let inserted = {
+        let mut st = rc.borrow_mut();
+        let Some(parent_id) = child_node_parent(&st, node_id) else {
+            return Ok(JsValue::undefined());
+        };
+        let inserted = convert_args(&mut st, args, context, parent_id, "replaceWith")?;
+        for child_id in &inserted {
+            detach_and_insert(
+                &mut st,
+                parent_id,
+                *child_id,
+                InsertPos::Before(Some(node_id)),
+            );
+        }
+        // Remove this node now that the replacements are in place.
+        if let Some(p) = st.arena.get_mut(parent_id) {
+            p.children.retain(|c| *c != node_id);
+        }
+        if let Some(n) = st.arena.get_mut(node_id) {
+            n.parent = None;
+        }
+        mark_dirty(&mut st, parent_id);
+        mark_dirty(&mut st, node_id);
+        inserted
+    };
+    if let Err(e) =
+        crate::script::bindings::clear_attribute_handlers_for_subtree(context, &rc, node_id)
+    {
+        log::warn!("Failed to clear on* handlers after replaceWith: {e}");
+    }
+    for id in inserted {
+        wire_inserted_handlers(context, &rc, id);
     }
     Ok(JsValue::undefined())
 }
