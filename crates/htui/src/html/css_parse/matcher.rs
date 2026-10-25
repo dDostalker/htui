@@ -85,6 +85,15 @@ fn matches_css(arena: &NodeArena, node_id: NodeId, sel: &Selector, state: &Dynam
             .map(|s| s.as_str() == id.as_str())
             .unwrap_or(false),
         Selector::NthChild(expr) => nth_child_matches(arena, node_id, *expr),
+        Selector::NthLastChild(expr) => nth_last_child_matches(arena, node_id, *expr),
+        Selector::Root => is_root_element(arena, node_id),
+        Selector::Empty => is_empty_element(arena, node_id),
+        Selector::Not(compounds) => !compounds
+            .iter()
+            .any(|c| matches_compound(arena, node_id, c, state)),
+        Selector::Checked => checked_matches(arena, node_id),
+        Selector::Enabled => enabled_matches(arena, node_id),
+        Selector::Disabled => disabled_matches(arena, node_id),
         Selector::PseudoClass(p) => p.matches(arena, node_id, state),
     }
 }
@@ -120,6 +129,116 @@ fn nth_child_matches(arena: &NodeArena, node_id: NodeId, expr: NthExpr) -> bool 
     // `node_id` not listed as a child — should not happen for a well-formed
     // DOM, but treat as no-match rather than panicking.
     false
+}
+
+/// Compute the 1-based sibling index of `node_id` counting from the end of
+/// its parent's children (the last child is index 1). Like
+/// [`nth_child_matches`], text nodes count toward the index (CSS spec).
+fn nth_last_child_matches(arena: &NodeArena, node_id: NodeId, expr: NthExpr) -> bool {
+    let Some(parent_id) = arena.get(node_id).and_then(|n| n.parent) else {
+        // Detached node — no sibling list, decline to match.
+        return false;
+    };
+    let parent = &arena[parent_id];
+    let Some(pos) = parent.children.iter().position(|&c| c == node_id) else {
+        return false;
+    };
+    expr.matches(parent.children.len() - pos)
+}
+
+/// `:root` — the element whose parent is the `Document` node (`<html>` in a
+/// parsed document; an HTML fragment parsed into a fragment has no root).
+fn is_root_element(arena: &NodeArena, node_id: NodeId) -> bool {
+    arena
+        .get(node_id)
+        .and_then(|n| n.parent)
+        .and_then(|pid| arena.get(pid))
+        .is_some_and(|p| p.node_type == NodeType::Document)
+}
+
+/// `:empty` — no children that affect emptiness: element children always do,
+/// text children do when their data is non-empty (whitespace counts), and
+/// comments never do (CSS Selectors semantics, matching browsers).
+fn is_empty_element(arena: &NodeArena, node_id: NodeId) -> bool {
+    let Some(node) = arena.get(node_id) else {
+        return false;
+    };
+    node.children.iter().all(|&c| match arena.get(c) {
+        Some(child) => match child.node_type {
+            NodeType::Comment => true,
+            NodeType::Text => child.data.as_deref().is_none_or(str::is_empty),
+            _ => false,
+        },
+        // A stale child id (node freed outside this walk) is conservative
+        // evidence of content, same as any other element child.
+        None => false,
+    })
+}
+
+/// `:checked` — a checked `<input type=checkbox|radio>` (the engine toggles
+/// the `checked` attribute on click) or a `<option selected>`.
+fn checked_matches(arena: &NodeArena, node_id: NodeId) -> bool {
+    let Some(node) = arena.get(node_id) else {
+        return false;
+    };
+    match node.node_type {
+        NodeType::Input => {
+            let toggle = matches!(
+                node.attributes.get("type").map(String::as_str),
+                Some("checkbox" | "radio")
+            );
+            toggle && node.attributes.contains_key("checked")
+        }
+        NodeType::HtmlOption => node.attributes.contains_key("selected"),
+        _ => false,
+    }
+}
+
+/// `:disabled` — a form control carrying its own `disabled` attribute, or a
+/// descendant of a `<fieldset disabled>`. The spec's exemption for the first
+/// `<legend>`'s descendants is not modelled.
+fn disabled_matches(arena: &NodeArena, node_id: NodeId) -> bool {
+    let Some(node) = arena.get(node_id) else {
+        return false;
+    };
+    if is_form_control(node.node_type) && node.attributes.contains_key("disabled") {
+        return true;
+    }
+    let mut cur = node.parent;
+    while let Some(id) = cur {
+        let Some(n) = arena.get(id) else {
+            break;
+        };
+        if n.node_type == NodeType::Fieldset && n.attributes.contains_key("disabled") {
+            return true;
+        }
+        cur = n.parent;
+    }
+    false
+}
+
+/// `:enabled` — a form control that is not `:disabled`. Non-form-control
+/// elements match neither `:enabled` nor `:disabled` (CSS Selectors spec).
+fn enabled_matches(arena: &NodeArena, node_id: NodeId) -> bool {
+    let Some(node) = arena.get(node_id) else {
+        return false;
+    };
+    is_form_control(node.node_type) && !disabled_matches(arena, node_id)
+}
+
+/// The element types HTML marks as disable-able (the `:enabled` / `:disabled`
+/// domain): input, textarea, select, button, optgroup, option and fieldset.
+fn is_form_control(node_type: NodeType) -> bool {
+    matches!(
+        node_type,
+        NodeType::Input
+            | NodeType::Textarea
+            | NodeType::Select
+            | NodeType::Button
+            | NodeType::Optgroup
+            | NodeType::HtmlOption
+            | NodeType::Fieldset
+    )
 }
 
 /// Check whether a node matches a CSS selector chain, with no `:hover`

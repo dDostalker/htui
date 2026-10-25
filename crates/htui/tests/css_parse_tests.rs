@@ -2857,3 +2857,276 @@ fn stale_node_id_fails_to_match_instead_of_panicking() {
         },
     ));
 }
+
+// ============================================================
+// 结构伪类（:first-child / :last-child / :only-child /
+// :nth-last-child / :root / :empty / :not / 表单状态）
+// ============================================================
+
+/// Build a parent with `n` `<p>` children, returning their ids in order.
+fn children_of(n: usize) -> (NodeArena, NodeId, Vec<NodeId>) {
+    let mut arena = NodeArena::default();
+    let parent = arena.insert(Node::from(NodeType::Div));
+    let children: Vec<_> = (0..n)
+        .map(|_| {
+            let id = arena.insert(Node::from(NodeType::P));
+            Node::append_child(&mut arena, parent, id);
+            id
+        })
+        .collect();
+    (arena, parent, children)
+}
+
+#[test]
+fn test_first_last_only_child_pseudo_classes() {
+    init();
+    let (arena, _parent, kids) = children_of(3);
+
+    let first: CssSelector = "p:first-child".parse().unwrap();
+    assert!(selector_chain_matches(&arena, kids[0], &first));
+    assert!(!selector_chain_matches(&arena, kids[1], &first));
+    assert!(!selector_chain_matches(&arena, kids[2], &first));
+
+    let last: CssSelector = "p:last-child".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, kids[0], &last));
+    assert!(!selector_chain_matches(&arena, kids[1], &last));
+    assert!(selector_chain_matches(&arena, kids[2], &last));
+
+    // `:only-child` = first AND last: matches only on a single-child parent.
+    let only: CssSelector = "p:only-child".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, kids[0], &only));
+    let (arena1, _p1, kids1) = children_of(1);
+    assert!(selector_chain_matches(&arena1, kids1[0], &only));
+
+    // Case-insensitive pseudo-class names, like the existing tag handling.
+    let upper: CssSelector = "p:FIRST-CHILD".parse().unwrap();
+    assert!(selector_chain_matches(&arena, kids[0], &upper));
+}
+
+#[test]
+fn test_nth_last_child_matches_from_end() {
+    init();
+    let (arena, _parent, kids) = children_of(4);
+
+    // `:nth-last-child(2)` — the second-to-last child only.
+    let sel: CssSelector = "p:nth-last-child(2)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, kids[0], &sel));
+    assert!(!selector_chain_matches(&arena, kids[1], &sel));
+    assert!(selector_chain_matches(&arena, kids[2], &sel));
+    assert!(!selector_chain_matches(&arena, kids[3], &sel));
+
+    // `:nth-last-child(odd)` counts 1-based from the end: with four
+    // children, kids[1] is from-end 3 and kids[3] is from-end 1 — the two
+    // odd positions.
+    let odd: CssSelector = "p:nth-last-child(odd)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, kids[0], &odd));
+    assert!(selector_chain_matches(&arena, kids[1], &odd));
+    assert!(!selector_chain_matches(&arena, kids[2], &odd));
+    assert!(selector_chain_matches(&arena, kids[3], &odd));
+}
+
+#[test]
+fn test_root_and_empty_pseudo_classes() {
+    init();
+    // A document-shaped tree: Document → html → body → div.
+    let mut arena = NodeArena::default();
+    let doc = arena.insert(Node::from(NodeType::Document));
+    let html = arena.insert(Node::from(NodeType::Html));
+    Node::append_child(&mut arena, doc, html);
+    let body = arena.insert(Node::from(NodeType::Body));
+    Node::append_child(&mut arena, html, body);
+    let empty_div = arena.insert(Node::from(NodeType::Div));
+    Node::append_child(&mut arena, body, empty_div);
+
+    let root: CssSelector = ":root".parse().unwrap();
+    assert!(selector_chain_matches(&arena, html, &root));
+    // Only the Document's child is the root — nothing deeper, and the
+    // Document node itself is not an element.
+    assert!(!selector_chain_matches(&arena, doc, &root));
+    assert!(!selector_chain_matches(&arena, body, &root));
+
+    let empty: CssSelector = "div:empty".parse().unwrap();
+    assert!(selector_chain_matches(&arena, empty_div, &empty));
+
+    // Any element child kills emptiness.
+    let child = arena.insert(Node::from(NodeType::Span));
+    Node::append_child(&mut arena, empty_div, child);
+    assert!(!selector_chain_matches(&arena, empty_div, &empty));
+
+    // Comments never affect emptiness (CSS Selectors semantics).
+    let mut arena2 = NodeArena::default();
+    let div = arena2.insert(Node::from(NodeType::Div));
+    let mut comment = Node::from(NodeType::Comment);
+    comment.data = Some("note".to_string());
+    let comment_id = arena2.insert(comment);
+    Node::append_child(&mut arena2, div, comment_id);
+    let empty_sel: CssSelector = ":empty".parse().unwrap();
+    assert!(selector_chain_matches(&arena2, div, &empty_sel));
+
+    // Non-empty text (including a lone space) does affect emptiness.
+    let empty_sel: CssSelector = ":empty".parse().unwrap();
+    for data in ["hi", " "] {
+        let mut arena3 = NodeArena::default();
+        let div = arena3.insert(Node::from(NodeType::Div));
+        let text = arena3.insert(Node::text(data));
+        Node::append_child(&mut arena3, div, text);
+        assert!(
+            !selector_chain_matches(&arena3, div, &empty_sel),
+            "text child {data:?} must make :empty fail"
+        );
+    }
+}
+
+#[test]
+fn test_not_pseudo_class_matches() {
+    init();
+    let mut arena = NodeArena::default();
+    let parent = arena.insert(Node::from(NodeType::Div));
+    let attach = |nt: NodeType, class: &str, arena: &mut NodeArena| {
+        let mut node = Node::from(nt);
+        if !class.is_empty() {
+            node.attributes
+                .insert("class".to_string(), class.to_string());
+        }
+        let id = arena.insert(node);
+        Node::append_child(arena, parent, id);
+        id
+    };
+    let p = attach(NodeType::P, "lead", &mut arena);
+    let span = attach(NodeType::Span, "", &mut arena);
+    let div = attach(NodeType::Div, "lead", &mut arena);
+
+    // `:not(.lead)` — excludes both `.lead` children.
+    let sel: CssSelector = ":not(.lead)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, p, &sel));
+    assert!(selector_chain_matches(&arena, span, &sel));
+    assert!(!selector_chain_matches(&arena, div, &sel));
+
+    // Comma-separated argument list: none of the compounds may match.
+    let list: CssSelector = ":not(p, div)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, p, &list));
+    assert!(!selector_chain_matches(&arena, div, &list));
+    assert!(selector_chain_matches(&arena, span, &list));
+
+    // `:not()` composes with other compound parts and combinators.
+    let chained: CssSelector = "div > :not(span)".parse().unwrap();
+    assert!(selector_chain_matches(&arena, p, &chained));
+    assert!(!selector_chain_matches(&arena, span, &chained));
+
+    // Spaces inside the argument list survive parsing.
+    let spaced: CssSelector = ":not( p , div )".parse().unwrap();
+    assert!(selector_chain_matches(&arena, span, &spaced));
+
+    // `:not` chains compose (element must dodge both arguments).
+    let double: CssSelector = ":not(p):not(div)".parse().unwrap();
+    assert!(selector_chain_matches(&arena, span, &double));
+    assert!(!selector_chain_matches(&arena, p, &double));
+}
+
+#[test]
+fn test_not_pseudo_class_parse_errors() {
+    init();
+    // Missing parens / missing close paren / empty argument.
+    assert!(":not".parse::<CssSelector>().is_err());
+    assert!(":not(".parse::<CssSelector>().is_err());
+    assert!(":not()".parse::<CssSelector>().is_err());
+    // Combinators inside `:not` are out of the supported subset — the tag
+    // parse of "p div" fails rather than silently matching wrong.
+    assert!(":not(p div)".parse::<CssSelector>().is_err());
+    // Pathologically deep nesting is rejected instead of recursing.
+    let deep = format!("{}{}", ":not(".repeat(32), ")".repeat(32));
+    assert!(deep.parse::<CssSelector>().is_err());
+}
+
+#[test]
+fn test_form_state_pseudo_classes() {
+    init();
+    let mut arena = NodeArena::default();
+    let mut checkbox = Node::from(NodeType::Input);
+    checkbox
+        .attributes
+        .insert("type".to_string(), "checkbox".to_string());
+    checkbox
+        .attributes
+        .insert("checked".to_string(), String::new());
+    let checked = arena.insert(checkbox);
+
+    let mut unchecked = Node::from(NodeType::Input);
+    unchecked
+        .attributes
+        .insert("type".to_string(), "checkbox".to_string());
+    let unchecked = arena.insert(unchecked);
+
+    // A text input with a stray `checked` attribute is not `:checked` —
+    // only checkbox / radio inputs participate.
+    let mut text_input = Node::from(NodeType::Input);
+    text_input
+        .attributes
+        .insert("checked".to_string(), String::new());
+    let text_input = arena.insert(text_input);
+
+    let mut selected = Node::from(NodeType::HtmlOption);
+    selected
+        .attributes
+        .insert("selected".to_string(), String::new());
+    let selected = arena.insert(selected);
+
+    let checked_sel: CssSelector = ":checked".parse().unwrap();
+    assert!(selector_chain_matches(&arena, checked, &checked_sel));
+    assert!(!selector_chain_matches(&arena, unchecked, &checked_sel));
+    assert!(!selector_chain_matches(&arena, text_input, &checked_sel));
+    assert!(selector_chain_matches(&arena, selected, &checked_sel));
+
+    // `:disabled` via the own attribute…
+    let mut disabled_btn = Node::from(NodeType::Button);
+    disabled_btn
+        .attributes
+        .insert("disabled".to_string(), String::new());
+    let disabled_btn = arena.insert(disabled_btn);
+    let enabled_btn = arena.insert(Node::from(NodeType::Button));
+    let disabled_sel: CssSelector = ":disabled".parse().unwrap();
+    let enabled_sel: CssSelector = ":enabled".parse().unwrap();
+    assert!(selector_chain_matches(&arena, disabled_btn, &disabled_sel));
+    assert!(!selector_chain_matches(&arena, disabled_btn, &enabled_sel));
+    assert!(selector_chain_matches(&arena, enabled_btn, &enabled_sel));
+
+    // …and via a `<fieldset disabled>` ancestor (legend exemption not
+    // modelled — the whole subtree is disabled).
+    let mut fieldset = Node::from(NodeType::Fieldset);
+    fieldset
+        .attributes
+        .insert("disabled".to_string(), String::new());
+    let fieldset = arena.insert(fieldset);
+    let inner = arena.insert(Node::from(NodeType::Input));
+    Node::append_child(&mut arena, fieldset, inner);
+    assert!(selector_chain_matches(&arena, inner, &disabled_sel));
+    assert!(!selector_chain_matches(&arena, inner, &enabled_sel));
+
+    // Non-form-control elements match neither state.
+    let plain = arena.insert(Node::from(NodeType::Div));
+    assert!(!selector_chain_matches(&arena, plain, &enabled_sel));
+    assert!(!selector_chain_matches(&arena, plain, &disabled_sel));
+}
+
+#[test]
+fn test_selector_paren_args_allow_spaces() {
+    // Regression for the paren-unaware compound split: whitespace inside a
+    // function argument used to tear the pseudo-class apart.
+    init();
+    let sel: CssSelector = ":nth-child(2n + 1)".parse().unwrap();
+    let (arena, _parent, kids) = children_of(3);
+    assert!(selector_chain_matches(&arena, kids[0], &sel));
+    assert!(!selector_chain_matches(&arena, kids[1], &sel));
+    assert!(selector_chain_matches(&arena, kids[2], &sel));
+}
+
+#[test]
+fn test_not_specificity_takes_most_specific_argument() {
+    // CSS spec: `:not(...)` contributes the specificity of its most
+    // specific argument — `:not(#a)` outranks a plain class selector.
+    init();
+    let class_sel: CssSelector = "p.leading".parse().unwrap();
+    let not_sel: CssSelector = "p:not(#a)".parse().unwrap();
+    assert_eq!(class_sel.specificity(), (0, 1, 1));
+    assert_eq!(not_sel.specificity(), (1, 0, 1));
+}
