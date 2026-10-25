@@ -203,6 +203,23 @@ pub(super) fn native_get_inner_html(
     Ok(js_string!(html).into())
 }
 
+/// `element.outerHTML` getter — serialization including the element's own
+/// tags (text / comment nodes fall back to their body, per the DOM
+/// serializer's node form).
+pub(super) fn native_get_outer_html(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(js_string!().into());
+    };
+    let st = rc.borrow();
+    let html = crate::html::html_parse::serialize_outer_html(&st.arena, node_id);
+    Ok(js_string!(html).into())
+}
+
 pub(super) fn native_set_inner_html(
     this: &JsValue,
     args: &[JsValue],

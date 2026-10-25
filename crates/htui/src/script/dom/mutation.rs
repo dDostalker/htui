@@ -912,3 +912,80 @@ pub(super) fn native_insert_adjacent_html(
     }
     Ok(JsValue::undefined())
 }
+
+/// `element.outerHTML` setter — replace this element with the parsed
+/// fragment. A detached target is a no-op (browser behavior). The fresh
+/// nodes land in this element's position; `<style>` CSS is injected keyed
+/// by this element and `<script>` blocks never execute.
+pub(super) fn native_set_outer_html(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let html = args
+        .first()
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?
+        .unwrap_or_default();
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let inserted = {
+        let mut st = rc.borrow_mut();
+        let Some(parent_id) = st.arena.get(node_id).and_then(|n| n.parent) else {
+            return Ok(JsValue::undefined());
+        };
+        // Parse into a scratch node typed like the target (keeps the
+        // parser's context tag), then move the result in front of it.
+        let scratch = st
+            .arena
+            .get(node_id)
+            .map(|n| Node::from(n.node_type))
+            .map(|mut s| {
+                s.parent = None;
+                st.arena.insert(s)
+            })
+            .expect("node present");
+        let mut css_sources = Vec::new();
+        crate::html::html_parse::parse_fragment_into(
+            &mut st.arena,
+            scratch,
+            &html,
+            &mut css_sources,
+        );
+        if !css_sources.is_empty() {
+            st.dirty
+                .injected_css
+                .insert(node_id, css_sources.join("\n"));
+        }
+        let fresh: Vec<NodeId> = st
+            .arena
+            .get(scratch)
+            .map(|n| n.children.clone())
+            .unwrap_or_default();
+        for id in &fresh {
+            detach_and_insert(&mut st, parent_id, *id, InsertPos::Before(Some(node_id)));
+        }
+        // Remove the target now that its replacement is in place.
+        if let Some(p) = st.arena.get_mut(parent_id) {
+            p.children.retain(|c| *c != node_id);
+        }
+        if let Some(n) = st.arena.get_mut(node_id) {
+            n.parent = None;
+        }
+        mark_dirty(&mut st, parent_id);
+        mark_dirty(&mut st, node_id);
+        st.arena.remove(scratch);
+        fresh
+    };
+    if let Err(e) =
+        crate::script::bindings::clear_attribute_handlers_for_subtree(context, &rc, node_id)
+    {
+        log::warn!("Failed to clear on* handlers after outerHTML: {e}");
+    }
+    for id in inserted {
+        wire_inserted_handlers(context, &rc, id);
+    }
+    Ok(JsValue::undefined())
+}
