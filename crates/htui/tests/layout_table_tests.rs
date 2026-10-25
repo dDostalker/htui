@@ -207,6 +207,44 @@ fn test_table_th_ua_center_yields_to_author_left() {
 }
 
 #[test]
+fn test_table_td_block_child_feeds_row_height() {
+    init();
+    // A block child inside a `<td>` claims its own rows: the row must grow
+    // to the child's laid-out height, or the child paints over the next
+    // table row. The child (a `width: 4ch` div of ten CJK glyphs, 2 cells
+    // each) wraps to five rows at its own width, while the cell's direct
+    // inline runs fit on one.
+    let html = "<table><tr><td><div style=\"width: 4ch\">一二三四五六七八九十</div></td></tr>\
+                <tr><td>NEXT</td></tr></table>";
+    let (root_id, arena) = setup(html, "");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let cols = term_map.columns as usize;
+    // The invariant under test: the second table row starts BELOW the block
+    // child's last wrapped line, wherever the `ch` unit resolution puts it.
+    let last_child_row = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "十")
+        .expect("the block child's last glyph must render")
+        / cols;
+    let next_row = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "N")
+        .expect("'NEXT' must render")
+        / cols;
+    assert!(
+        next_row > last_child_row,
+        "the second row must start below the wrapped block child (last glyph on \
+         row {last_child_row}), got NEXT on row {next_row} — the child's height \
+         must feed the row height"
+    );
+}
+
+#[test]
 fn test_table_cells_align_in_columns() {
     // Two rows of two cells should align: each row's cell 1 sits on the same
     // starting column, and cell 2's column is shared too.

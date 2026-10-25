@@ -21,12 +21,14 @@ pub struct CellInfo {
     pub is_header: bool,
 }
 
-/// Number of rows a cell needs at the given column width: the wrapped
-/// inline-text height (each visual line takes `font_size_cells` rows) plus
-/// the cell's own vertical border / padding. Row heights drive the table
+/// Number of rows a cell needs at the given column width: the taller of the
+/// wrapped inline-text height (each visual line takes `font_size_cells`
+/// rows) and the laid-out height of the cell's block children, plus the
+/// cell's own vertical border / padding. Row heights drive the table
 /// geometry; without this, a cell whose text wraps (common when the terminal
 /// is narrow enough that the column shrinks) would paint its wrapped lines
-/// over the table's bottom border.
+/// over the table's bottom border, and a `<td><div>…</div></td>` whose block
+/// child stacks several rows would paint the child over the next table row.
 pub fn cell_required_height(
     arena: &NodeArena,
     cell_id: NodeId,
@@ -64,9 +66,44 @@ pub fn cell_required_height(
         .len()
         .max(1)
     };
+    let inline_rows = line_count.saturating_mul(own_font_size_cells.max(1));
 
-    line_count
-        .saturating_mul(own_font_size_cells.max(1))
+    // Block children claim their own rows inside the cell (laid out via
+    // `layout_children`); their real laid-out height must feed the row
+    // height. Measure them with a scratch cursor against the same content
+    // width the real cell layout uses. Detached (absolute / fixed) children
+    // claim no flow space and are excluded, exactly like the block layout.
+    let block_extent = {
+        let mut scratch = Cursor {
+            y: 0,
+            prev_bottom_margin: 0,
+        };
+        let children = layout_children(
+            arena,
+            &node.children,
+            BoxConstraint {
+                x: 0,
+                width: content_width,
+            },
+            &mut scratch,
+            child_context,
+        );
+        children
+            .iter()
+            .filter(|b| {
+                !matches!(
+                    b.positioning.position,
+                    crate::html::css_parse::Position::Absolute
+                        | crate::html::css_parse::Position::Fixed
+                )
+            })
+            .map(|b| b.rect.y.saturating_add(b.rect.height))
+            .max()
+            .unwrap_or(0)
+    };
+
+    inline_rows
+        .max(block_extent)
         .saturating_add(cell_edges.border.top.thickness())
         .saturating_add(cell_edges.padding.top)
         .saturating_add(cell_edges.border.bottom.thickness())
