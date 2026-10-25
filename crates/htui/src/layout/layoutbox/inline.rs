@@ -13,7 +13,7 @@ use super::InlineRun;
 use super::generation::visible_children;
 use crate::{
     graphics::{FontStyle, block_style},
-    html::css_parse::{TextTransform, WhiteSpace},
+    html::css_parse::{TextTransform, WhiteSpace, parse_color_str},
     tdom::node::{Node, NodeArena, NodeId, NodeType},
 };
 
@@ -130,6 +130,18 @@ fn walk_runs(
         {
             continue;
         }
+        // A block-level child is dispatched as its own `LayoutBox` by the
+        // layout registry — folding it into the parent's runs would
+        // double-render it (the documented contract of `collect_runs`).
+        // `<a>` has always enforced this; the same rule now covers every
+        // inline tag the author blockified (`<em style="display:block">`).
+        if child
+            .css_attr
+            .display()
+            .is_some_and(|d| d.is_block_level())
+        {
+            continue;
+        }
         match &child.node_type {
             NodeType::Text => {
                 // Keep every non-empty text node (including whitespace-only
@@ -144,193 +156,19 @@ fn walk_runs(
                     runs.push(InlineRun::owned(text, style, fg, bg, owner));
                 }
             }
-            NodeType::Span => {
-                // Span inherits parent's fg/bg unless explicit overrides exist.
-                let span_fg = child.css_attr.get_color().or(fg);
-                let span_bg = child.css_attr.get_bg_color().or(bg);
-                let span_style = style | block_style(&child.css_attr);
-                let span_transform = child.css_attr.get_text_transform();
-                let span_ws = child.white_space_or(white_space);
-                walk_runs(
-                    arena,
-                    child_id,
-                    child,
-                    span_fg,
-                    span_bg,
-                    span_style,
-                    span_transform,
-                    span_ws,
-                    owner,
-                    runs,
-                );
-            }
-            NodeType::A => {
-                // A block-level anchor is painted by its own `LayoutBox`
-                // and must not have its text folded into the parent's
-                // inline runs. A direct anchor child of a flex
-                // container is likewise a flex item. Either way, the
-                // anchor does not belong here.
-                if child.css_attr.display().is_some_and(|d| d.is_block_level())
-                    || node.css_attr.display().is_some_and(|d| d.is_flex())
-                {
-                    continue;
-                }
-
-                // User-agent defaults: unstyled links are blue and
-                // underlined, matching browser behaviour. Both defaults
-                // yield to anything the author (or an ancestor CSS rule)
-                // has already declared for the matching property, so
-                // `a { text-decoration: none }` or `a { color: green }`
-                // take effect normally.
-                let a_fg = if child.css_attr.is_set("color") {
-                    child.css_attr.get_color().or(fg)
-                } else {
-                    // Standard blue (#0000FF) — must match the block-<a>
-                    // UA default, which inserts the CSS name `blue` into
-                    // `css_attr` and resolves it through `parse_color_str`.
-                    Some(Color::Rgb {
-                        r: 0x00,
-                        g: 0x00,
-                        b: 0xFF,
-                    })
-                };
-                let a_bg = child.css_attr.get_bg_color().or(bg);
-                let mut a_style = style | block_style(&child.css_attr);
-                if !child.css_attr.is_set("text-decoration") {
-                    a_style |= FontStyle::UNDERLINED;
-                }
-                let a_transform = child.css_attr.get_text_transform();
-                let a_ws = child.white_space_or(white_space);
-                walk_runs(
-                    arena,
-                    child_id,
-                    child,
-                    a_fg,
-                    a_bg,
-                    a_style,
-                    a_transform,
-                    a_ws,
-                    Some(child_id),
-                    runs,
-                );
-            }
-            NodeType::Em => {
-                // User-agent default: `<em>` renders italic. Anything the
-                // author (or an ancestor rule) declared for `font-style`
-                // takes precedence — `em { font-style: normal }` or
-                // `em { font-style: oblique }` are honoured.
-                let em_fg = child.css_attr.get_color().or(fg);
-                let em_bg = child.css_attr.get_bg_color().or(bg);
-                let mut em_style = style | block_style(&child.css_attr);
-                if !child.css_attr.is_set("font-style") {
-                    em_style |= FontStyle::ITALIC;
-                }
-                let em_transform = child.css_attr.get_text_transform();
-                let em_ws = child.white_space_or(white_space);
-                walk_runs(
-                    arena,
-                    child_id,
-                    child,
-                    em_fg,
-                    em_bg,
-                    em_style,
-                    em_transform,
-                    em_ws,
-                    owner,
-                    runs,
-                );
-            }
-            NodeType::Strong | NodeType::B => {
-                // User-agent default: bold. Anything the author (or an
-                // ancestor rule) declared for `font-weight` takes precedence.
-                let mut st = style | block_style(&child.css_attr);
-                if !child.css_attr.is_set("font-weight") {
-                    st |= FontStyle::BOLD;
-                }
-                walk_inline_children(arena, child_id, child, fg, bg, st, white_space, owner, runs);
-            }
-            NodeType::I | NodeType::Cite | NodeType::Dfn | NodeType::Var => {
-                // User-agent default: italic (same precedence rule as `<em>`).
-                let mut st = style | block_style(&child.css_attr);
-                if !child.css_attr.is_set("font-style") {
-                    st |= FontStyle::ITALIC;
-                }
-                walk_inline_children(arena, child_id, child, fg, bg, st, white_space, owner, runs);
-            }
-            NodeType::Label => {
-                // `<label>` is a plain inline container (like `<span>`), but
-                // its runs carry the label's node id so the hit map can give
-                // the label text its own region — the click-delegation target
-                // for `<label for>` / wrapped controls.
-                let label_fg = child.css_attr.get_color().or(fg);
-                let label_bg = child.css_attr.get_bg_color().or(bg);
-                walk_inline_children(
-                    arena,
-                    child_id,
-                    child,
-                    label_fg,
-                    label_bg,
-                    style | block_style(&child.css_attr),
-                    white_space,
-                    Some(child_id),
-                    runs,
-                );
-            }
-            NodeType::U | NodeType::Ins => {
-                // User-agent default: underline. An explicit
-                // `text-decoration` (author or inherited) wins.
-                let mut st = style | block_style(&child.css_attr);
-                if !child.css_attr.is_set("text-decoration") {
-                    st |= FontStyle::UNDERLINED;
-                }
-                walk_inline_children(arena, child_id, child, fg, bg, st, white_space, owner, runs);
-            }
-            NodeType::S | NodeType::Del => {
-                // User-agent default: line-through. An explicit
-                // `text-decoration` (author or inherited) wins.
-                let mut st = style | block_style(&child.css_attr);
-                if !child.css_attr.is_set("text-decoration") {
-                    st |= FontStyle::CROSSED_OUT;
-                }
-                walk_inline_children(arena, child_id, child, fg, bg, st, white_space, owner, runs);
-            }
-            NodeType::Mark => {
-                // User-agent default: yellow background + black foreground
-                // (the highlight). Explicit declarations win.
-                let child_fg = child.css_attr.get_color().or(fg);
-                let child_bg = child.css_attr.get_bg_color().or(bg);
-                let mark_fg = if child.css_attr.is_set("color") {
-                    child_fg
-                } else {
-                    Some(Color::Black)
-                };
-                let mark_bg = if child.css_attr.is_set("background-color") {
-                    child_bg
-                } else {
-                    Some(Color::Yellow)
-                };
-                let st = style | block_style(&child.css_attr);
-                walk_inline_children(
-                    arena,
-                    child_id,
-                    child,
-                    mark_fg,
-                    mark_bg,
-                    st,
-                    white_space,
-                    owner,
-                    runs,
-                );
+            NodeType::Br => {
+                // `<br>` forces a line break in every `white-space` mode.
+                runs.push(InlineRun::forced_break(style, fg, bg));
             }
             NodeType::Q => {
                 // User-agent default: `<q>` wraps its content in generated
                 // quote marks (`q::before { content: open-quote }` /
                 // `::after { content: close-quote }`). The pair alternates
                 // with nesting depth like the CSS `quotes` property: even
-                // depth uses double quotes, odd depth single quotes.
-                let q_fg = child.css_attr.get_color().or(fg);
-                let q_bg = child.css_attr.get_bg_color().or(bg);
-                let q_style = style | block_style(&child.css_attr);
+                // depth uses double quotes, odd depth single quotes. The
+                // quotes are not CSS declarations, so they are generated here
+                // rather than carried in the UA table.
+                let (q_fg, q_bg, q_style) = merge_inline_ua(child, fg, bg, style);
                 let (open, close) = q_quote_pair(arena, child_id);
                 runs.push(InlineRun::owned(
                     open.to_string(),
@@ -339,19 +177,8 @@ fn walk_runs(
                     q_bg,
                     owner,
                 ));
-                let q_transform = child.css_attr.get_text_transform();
-                let q_ws = child.white_space_or(white_space);
-                walk_runs(
-                    arena,
-                    child_id,
-                    child,
-                    q_fg,
-                    q_bg,
-                    q_style,
-                    q_transform,
-                    q_ws,
-                    owner,
-                    runs,
+                walk_inline_children(
+                    arena, child_id, child, q_fg, q_bg, q_style, white_space, owner, runs,
                 );
                 runs.push(InlineRun::owned(
                     close.to_string(),
@@ -365,57 +192,62 @@ fn walk_runs(
                 // User-agent default: `abbr[title]` carries a dotted underline
                 // as a tooltip affordance. The terminal has no dotted
                 // underline primitive, so the approximation is a solid
-                // underline; an explicit `text-decoration` (author or
+                // underline. Conditional on the `title` attribute, so it is
+                // applied here instead of the shared UA table (see its doc
+                // comment); an explicit `text-decoration` (author or
                 // inherited) wins.
-                let fg = child.css_attr.get_color().or(fg);
-                let bg = child.css_attr.get_bg_color().or(bg);
-                let mut st = style | block_style(&child.css_attr);
+                let (a_fg, a_bg, mut a_style) = merge_inline_ua(child, fg, bg, style);
                 if child.attributes.get("title").is_some()
                     && !child.css_attr.is_set("text-decoration")
                 {
-                    st |= FontStyle::UNDERLINED;
+                    a_style |= FontStyle::UNDERLINED;
                 }
-                walk_inline_children(arena, child_id, child, fg, bg, st, white_space, owner, runs);
-            }
-            NodeType::Code | NodeType::Kbd | NodeType::Samp => {
-                // User-agent default `font-family: monospace` is already the
-                // terminal's native font, so no style bit applies — the
-                // element is kept for CSS / DOM addressing.
-                let fg = child.css_attr.get_color().or(fg);
-                let bg = child.css_attr.get_bg_color().or(bg);
                 walk_inline_children(
-                    arena,
-                    child_id,
-                    child,
-                    fg,
-                    bg,
-                    style | block_style(&child.css_attr),
-                    white_space,
-                    owner,
-                    runs,
+                    arena, child_id, child, a_fg, a_bg, a_style, white_space, owner, runs,
                 );
             }
-            NodeType::Data | NodeType::Time | NodeType::Output => {
-                // No UA visual default: plain inline containers like `<span>`.
-                // The `value` / `datetime` attributes are machine-readable
-                // only and carry no visual effect, matching browsers.
-                let fg = child.css_attr.get_color().or(fg);
-                let bg = child.css_attr.get_bg_color().or(bg);
+            // Every remaining inline container (`<span>` / `<a>` / `<em>` /
+            // `<strong>` / `<b>` / `<i>` / `<cite>` / `<dfn>` / `<var>` /
+            // `<label>` / `<u>` / `<ins>` / `<s>` / `<del>` / `<mark>` /
+            // `<code>` / `<kbd>` / `<samp>` / `<data>` / `<time>` /
+            // `<output>`): merge the authored CSS with the user-agent
+            // defaults from the shared [`NodeType::inline_ua_declarations`]
+            // table — the same table the block-level layout path injects
+            // into `css_attr` — instead of per-type hardcoded colours and
+            // flag guards. `<a>` / `<label>` runs additionally carry the
+            // element's node id so the hit map gives their text its own
+            // region (the click-delegation target).
+            NodeType::Span
+            | NodeType::A
+            | NodeType::Em
+            | NodeType::Strong
+            | NodeType::B
+            | NodeType::I
+            | NodeType::Cite
+            | NodeType::Dfn
+            | NodeType::Var
+            | NodeType::Label
+            | NodeType::U
+            | NodeType::Ins
+            | NodeType::S
+            | NodeType::Del
+            | NodeType::Mark
+            | NodeType::Code
+            | NodeType::Kbd
+            | NodeType::Samp
+            | NodeType::Data
+            | NodeType::Time
+            | NodeType::Output => {
+                let (child_fg, child_bg, child_style) = merge_inline_ua(child, fg, bg, style);
+                let owner = if matches!(child.node_type, NodeType::A | NodeType::Label) {
+                    Some(child_id)
+                } else {
+                    owner
+                };
                 walk_inline_children(
-                    arena,
-                    child_id,
-                    child,
-                    fg,
-                    bg,
-                    style | block_style(&child.css_attr),
-                    white_space,
-                    owner,
+                    arena, child_id, child, child_fg, child_bg, child_style, white_space, owner,
                     runs,
                 );
-            }
-            NodeType::Br => {
-                // `<br>` forces a line break in every `white-space` mode.
-                runs.push(InlineRun::forced_break(style, fg, bg));
             }
             // Block-level nested elements live in their own LayoutBox;
             // unknown inline tags are flattened by the HTML parser so they
@@ -423,6 +255,49 @@ fn walk_runs(
             _ => {}
         }
     }
+}
+
+/// Merge an inline element's authored CSS with its user-agent defaults from
+/// the shared [`NodeType::inline_ua_declarations`] table — the same table the
+/// block-level layout path injects into `css_attr`
+/// (`apply_a_ua_defaults` / `apply_inline_ua_defaults` in
+/// `inner_formatting_context::flow`), so the inline-runs path and the
+/// block path derive the browser defaults from one source instead of two
+/// independently maintained copies.
+///
+/// Per-property precedence mirrors the cascade of a browser's UA stylesheet:
+/// author declaration > UA default > inherited value.
+fn merge_inline_ua(
+    child: &Node,
+    parent_fg: Option<Color>,
+    parent_bg: Option<Color>,
+    parent_style: FontStyle,
+) -> (Option<Color>, Option<Color>, FontStyle) {
+    let css = &child.css_attr;
+    // Authored declarations first.
+    let mut fg = css.get_color();
+    let mut bg = css.get_bg_color();
+    let mut style = parent_style | block_style(css);
+    // UA defaults fill the gaps and never override an authored value —
+    // the same `!is_set` guards the block path's injectors use.
+    for &(prop, value) in child.node_type.inline_ua_declarations() {
+        match prop {
+            "color" if fg.is_none() => fg = parse_color_str(value),
+            "background-color" if bg.is_none() => bg = parse_color_str(value),
+            "font-style" if !css.is_set("font-style") => style |= FontStyle::ITALIC,
+            "font-weight" if !css.is_set("font-weight") => style |= FontStyle::BOLD,
+            "text-decoration" if !css.is_set("text-decoration") => {
+                style |= match value {
+                    "underline" => FontStyle::UNDERLINED,
+                    "line-through" => FontStyle::CROSSED_OUT,
+                    _ => FontStyle::empty(),
+                };
+            }
+            _ => {}
+        }
+    }
+    // Neither an author rule nor a UA default: keep the inherited colour.
+    (fg.or(parent_fg), bg.or(parent_bg), style)
 }
 
 /// Recurse into an inline element's children, carrying the resolved `fg` /

@@ -757,14 +757,24 @@ fn test_layout_text_semantics_styles() {
         "<s> must be line-through"
     );
     let mark_idx = find("m");
+    // The UA default for `<mark>` resolves through the shared
+    // `inline_ua_declarations` table (`background-color: yellow` → the named
+    // colour's RGB value), the same source the block-level path injects into
+    // `css_attr` — inline and block `<mark>` paint the identical yellow.
+    // (The inline path used to hardcode the ANSI `Color::Yellow` variant,
+    // diverging from the block path's truecolour yellow.)
     assert_eq!(
         tl.layout[mark_idx].bcolor,
-        Some(Color::Yellow),
-        "<mark> must paint a yellow background"
+        Some(Color::Rgb {
+            r: 255,
+            g: 255,
+            b: 0
+        }),
+        "<mark> must paint the UA yellow background"
     );
     assert_eq!(
         tl.layout[mark_idx].fcolor,
-        Some(Color::Black),
+        Some(Color::Rgb { r: 0, g: 0, b: 0 }),
         "<mark> must paint black foreground"
     );
 }
