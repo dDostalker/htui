@@ -45,23 +45,23 @@ pub(super) fn incremental_region(
         let mut found = false;
         let mut cur = Some(node_id);
         while let Some(id) = cur {
-            if let Some(rects) = new_index.get(&id) {
-                if !rects.is_empty() {
-                    found = true;
-                    let old_rects = old_index.get(&id);
-                    for rect in rects {
-                        match old_rects {
-                            Some(old) if old.contains(rect) => {
-                                region = Some(match region {
-                                    Some(r) => union_rect(r, *rect),
-                                    None => *rect,
-                                });
-                            }
-                            _ => return None,
+            if let Some(rects) = new_index.get(&id)
+                && !rects.is_empty()
+            {
+                found = true;
+                let old_rects = old_index.get(&id);
+                for rect in rects {
+                    match old_rects {
+                        Some(old) if old.contains(rect) => {
+                            region = Some(match region {
+                                Some(r) => union_rect(r, *rect),
+                                None => *rect,
+                            });
                         }
+                        _ => return None,
                     }
-                    break;
                 }
+                break;
             }
             cur = arena.get(id).and_then(|n| n.parent);
         }
