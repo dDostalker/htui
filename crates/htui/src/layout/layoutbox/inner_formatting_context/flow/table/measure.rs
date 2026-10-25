@@ -155,3 +155,33 @@ pub(super) fn compute_column_widths(
     }
     widths
 }
+
+/// `table-layout: fixed` column widths: the available width is shared
+/// evenly across the first row's cell count, the division remainder going
+/// to the leading columns one cell at a time. Cell content never influences
+/// the widths (the spec's first-row-driven layout — the terminal take skips
+/// `<col>` widths and first-row `width` declarations).
+pub(super) fn fixed_column_widths(
+    row_cells: &[Vec<CellInfo>],
+    available_width: usize,
+) -> Vec<usize> {
+    let count = row_cells
+        .first()
+        .map(|r| r.len())
+        .filter(|&n| n > 0)
+        .or_else(|| row_cells.iter().map(|r| r.len()).max())
+        .unwrap_or(0);
+    if count == 0 {
+        return Vec::new();
+    }
+    let base = (available_width / count).max(1);
+    let mut widths = vec![base; count];
+    let mut remainder = available_width.saturating_sub(base * count);
+    let mut idx = 0usize;
+    while remainder > 0 {
+        widths[idx % count] += 1;
+        remainder -= 1;
+        idx += 1;
+    }
+    widths
+}

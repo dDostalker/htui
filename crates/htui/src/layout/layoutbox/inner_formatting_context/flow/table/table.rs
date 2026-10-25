@@ -1,13 +1,18 @@
 //! Layout the `<table>` element itself.
 
 use crate::{
-    layout::{BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext, PaintStyle, Rect},
+    graphics::block_style,
+    html::css_parse::{CaptionSide, EmptyCells, TableLayout, TextAlign},
+    layout::{
+        BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext, PaintStyle, Rect,
+        layoutbox::{collect_runs, wrap_runs},
+    },
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
 };
 use std::collections::HashMap;
 
 use super::cell::{CellInfo, layout_cell, measure_cell};
-use super::measure::{collect_cells, collect_rows, compute_column_widths};
+use super::measure::{collect_cells, collect_rows, compute_column_widths, fixed_column_widths};
 
 /// Build a [`LayoutBox`] for a `<table>` element.
 pub fn layout_table(
@@ -68,7 +73,11 @@ pub fn layout_table(
         .collect();
 
     let inner_width = block_width.saturating_sub(edges.inner_horizontal()).max(1);
-    let column_widths = compute_column_widths(arena, &row_cells, inner_width);
+    let column_widths = if node.css_attr.get_table_layout() == TableLayout::Fixed {
+        fixed_column_widths(&row_cells, inner_width)
+    } else {
+        compute_column_widths(arena, &row_cells, inner_width)
+    };
 
     let total_columns_width: usize = column_widths.iter().sum();
     let total_table_width = total_columns_width
@@ -108,6 +117,69 @@ pub fn layout_table(
     let mut current_y = outer_y_top + edges.border.top.thickness() + edges.padding.top;
     let content_x = x + edges.border.left.thickness() + edges.padding.left;
 
+    // `<caption>` renders as one text block above (the default) or below the
+    // rows per `caption-side`; the UA default centers it, author
+    // `text-align` wins. Its text wraps to the table's inner width.
+    let caption_side = node.css_attr.get_caption_side();
+    let caption_id = node
+        .children
+        .iter()
+        .copied()
+        .find(|&c| arena[c].node_type == NodeType::Caption);
+    let caption_lines: Vec<Vec<InlineRun>> = caption_id
+        .map(|cid| {
+            let cnode = &arena[cid];
+            let runs = collect_runs(
+                arena,
+                cid,
+                cnode,
+                cnode.css_attr.get_color(),
+                cnode.css_attr.get_bg_color(),
+                block_style(&cnode.css_attr),
+            );
+            wrap_runs(
+                &runs,
+                inner_width.max(1),
+                own_font_size_cells,
+                cnode.css_attr.get_white_space(&cnode.node_type),
+                cnode.css_attr.get_word_break(),
+                cnode.css_attr.get_overflow_wrap(),
+            )
+        })
+        .unwrap_or_default();
+    let caption_rows = caption_lines
+        .len()
+        .saturating_mul(own_font_size_cells.max(1));
+    if let (Some(cid), 0..) = (caption_id, caption_rows)
+        && caption_side == CaptionSide::Top
+    {
+        let cnode = &arena[cid];
+        let text_align = if cnode.css_attr.is_set("text-align") {
+            cnode.css_attr.get_text_align()
+        } else {
+            TextAlign::Center
+        };
+        table_children.push(LayoutBox::new_normal(
+            cid,
+            Rect::new(content_x, current_y, inner_width, caption_rows),
+            PaintStyle {
+                box_edges: crate::html::box_edges::BoxEdges::default(),
+                runs: Some(caption_lines.clone()),
+                column_layout: None,
+                font_size_cells: own_font_size_cells,
+                line_height_cells: own_font_size_cells.max(1),
+                border_radius: crate::html::css_parse::CornerRadii::default(),
+                fill_bg: cnode.css_attr.get_bg_color().is_some(),
+                spacing_after: 0,
+                text_align,
+            },
+            cnode.css_attr.outer_display(&cnode.node_type),
+            Vec::new(),
+        ));
+        current_y = current_y.saturating_add(caption_rows);
+    }
+
+    let hide_empty_cells = node.css_attr.get_empty_cells() == EmptyCells::Hide;
     for (row_idx, row) in row_cells.iter().enumerate() {
         let row_height = row_heights[row_idx];
         let mut current_x = content_x;
@@ -122,11 +194,41 @@ pub fn layout_table(
                 cell.is_header,
                 child_context,
                 wrapped_lines,
+                hide_empty_cells,
             );
             table_children.push(cell_box);
             current_x = current_x.saturating_add(col_w);
         }
         current_y = current_y.saturating_add(row_height);
+    }
+
+    if let (Some(cid), 0..) = (caption_id, caption_rows)
+        && caption_side == CaptionSide::Bottom
+    {
+        let cnode = &arena[cid];
+        let text_align = if cnode.css_attr.is_set("text-align") {
+            cnode.css_attr.get_text_align()
+        } else {
+            TextAlign::Center
+        };
+        table_children.push(LayoutBox::new_normal(
+            cid,
+            Rect::new(content_x, current_y, inner_width, caption_rows),
+            PaintStyle {
+                box_edges: crate::html::box_edges::BoxEdges::default(),
+                runs: Some(caption_lines),
+                column_layout: None,
+                font_size_cells: own_font_size_cells,
+                line_height_cells: own_font_size_cells.max(1),
+                border_radius: crate::html::css_parse::CornerRadii::default(),
+                fill_bg: cnode.css_attr.get_bg_color().is_some(),
+                spacing_after: 0,
+                text_align,
+            },
+            cnode.css_attr.outer_display(&cnode.node_type),
+            Vec::new(),
+        ));
+        current_y = current_y.saturating_add(caption_rows);
     }
 
     let total_height = preallocated_height.unwrap_or_else(|| {
