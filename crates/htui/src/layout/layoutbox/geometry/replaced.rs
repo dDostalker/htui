@@ -69,6 +69,7 @@ pub(super) fn layout_replaced(
             generated,
             containing,
             cursor,
+            context,
             pre_allocated_rect,
             src,
         ),
@@ -413,6 +414,7 @@ fn layout_image(
     generated: &GeneratedBox,
     containing: BoxConstraint,
     cursor: &mut Cursor,
+    context: LayoutContext,
     pre_allocated_rect: Option<Rect>,
     src: &str,
 ) -> Option<LayoutBox> {
@@ -431,10 +433,32 @@ fn layout_image(
                 image_intrinsic_size(&src),
                 containing.width,
             );
-            let block_width = img_cols.min(containing.width).max(1);
-            let x = centered_left(containing, block_width);
-            let y = cursor.allocate(img_rows);
-            (x, y, block_width, img_rows)
+            // Placement goes through the shared replaced-control path so CSS
+            // `width` / `height` / `min-*` / `max-*` and — critically — the
+            // box edges apply: `<img style="margin-left: 10px">` used to be
+            // ignored and the image forced-centred, diverging from both the
+            // browser (an `img` is inline-level: left-aligned in its flow,
+            // margins active) and the other replaced controls. Border /
+            // padding participate in the box size like any control; painting
+            // them on the pixels stays future work (`paint_image` fills the
+            // rect).
+            let edges =
+                node.css_attr
+                    .get_box_edges(containing.width, context.font, context.viewport);
+            let (x, y, block_width, block_height) = control_placement(
+                arena,
+                generated,
+                containing,
+                context,
+                cursor,
+                &edges,
+                (
+                    edges.border.horizontal_thickness(),
+                    edges.border.vertical_thickness(),
+                ),
+                (img_cols, img_rows),
+            );
+            (x, y, block_width, block_height)
         }
     };
 
@@ -448,10 +472,6 @@ fn layout_image(
         },
         PaintStyle::default(),
     ))
-}
-
-fn centered_left(containing: BoxConstraint, block_width: usize) -> usize {
-    containing.x + containing.width.saturating_sub(block_width) / 2
 }
 
 /// Resolve the natural `<img>` display size in cells from the HTML `width` /
