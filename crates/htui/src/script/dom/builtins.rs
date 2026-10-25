@@ -14,8 +14,10 @@ use super::{
     document::{
         native_create_comment, native_create_document_fragment, native_create_element,
         native_create_text_node, native_get_document_body, native_get_document_doctype,
-        native_get_document_element, native_get_document_head, native_get_element_by_id,
+        native_get_document_element, native_get_document_head, native_get_document_title,
+        native_get_element_by_id, native_set_document_title,
     },
+    events::{custom_event_constructor, event_constructor},
     fetch::native_fetch,
     js_fn, node_wrapper,
     timers::{
@@ -111,6 +113,21 @@ pub(crate) fn install_builtins(context: &mut Context) -> JsResult<()> {
             .build();
         doc_obj.define_property_or_throw(js_string!(name), desc, context)?;
     }
+    // `title` is the one document member with a setter (rewrites the first
+    // `<title>`'s text; the render thread picks it up on the next repaint).
+    let title_desc = PropertyDescriptorBuilder::new()
+        .get(js_fn(
+            context,
+            NativeFunction::from_fn_ptr(native_get_document_title),
+        ))
+        .set(js_fn(
+            context,
+            NativeFunction::from_fn_ptr(native_set_document_title),
+        ))
+        .enumerable(true)
+        .configurable(true)
+        .build();
+    doc_obj.define_property_or_throw(js_string!("title"), title_desc, context)?;
     context.register_global_property(js_string!("document"), document, Attribute::all())?;
 
     // console
@@ -187,6 +204,28 @@ pub(crate) fn install_builtins(context: &mut Context) -> JsResult<()> {
     // is no separate window identity in htui.
     let global_obj = context.global_object();
     context.register_global_property(js_string!("window"), global_obj, Attribute::all())?;
+
+    // Event / CustomEvent constructors (plain objects carrying the flags
+    // and stop / prevent methods `dispatchEvent` reads). Built with the
+    // constructor flag so `new Event(...)` works.
+    let event_ctor = boa_engine::object::FunctionObjectBuilder::new(
+        context.realm(),
+        NativeFunction::from_fn_ptr(event_constructor),
+    )
+    .name(js_string!("Event"))
+    .length(1)
+    .constructor(true)
+    .build();
+    context.register_global_property(js_string!("Event"), event_ctor, Attribute::all())?;
+    let custom_ctor = boa_engine::object::FunctionObjectBuilder::new(
+        context.realm(),
+        NativeFunction::from_fn_ptr(custom_event_constructor),
+    )
+    .name(js_string!("CustomEvent"))
+    .length(1)
+    .constructor(true)
+    .build();
+    context.register_global_property(js_string!("CustomEvent"), custom_ctor, Attribute::all())?;
     Ok(())
 }
 

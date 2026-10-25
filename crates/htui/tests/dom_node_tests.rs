@@ -839,3 +839,143 @@ fn window_aliases_global_this() {
         "function"
     );
 }
+
+#[test]
+fn outer_html_read_and_write() {
+    let mut e = engine(r#"<div id="wrap"><p class="lead">hi <b>bold</b></p></div>"#);
+    assert_eq!(
+        eval_str(&mut e, "document.querySelector('p').outerHTML"),
+        r#"<p class="lead">hi <b>bold</b></p>"#,
+        "outerHTML includes the element's own tags"
+    );
+    // Writing replaces the element in place with the parsed fragment.
+    eval(
+        &mut e,
+        "document.querySelector('p').outerHTML = '<span id=\"s\">new</span>'",
+    );
+    assert_eq!(
+        eval_str(&mut e, "String(document.querySelector('p'))"),
+        "null",
+        "the original element is gone"
+    );
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('s').textContent"),
+        "new"
+    );
+    // Writing on a detached element is a no-op.
+    eval(&mut e, "var loose = document.createElement('div')");
+    eval(&mut e, "loose.outerHTML = '<i>x</i>'");
+    assert_eq!(eval_str(&mut e, "String(loose.parentNode)"), "null");
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('wrap').textContent"),
+        "new"
+    );
+}
+
+#[test]
+fn document_title_read_and_write() {
+    let mut e =
+        engine(r#"<!DOCTYPE html><html><head><title>Old</title></head><body></body></html>"#);
+    assert_eq!(eval_str(&mut e, "document.title"), "Old");
+    eval(&mut e, "document.title = 'New Title'");
+    assert_eq!(eval_str(&mut e, "document.title"), "New Title");
+    // A document without a title creates one on write and reads back.
+    let mut e2 = engine(r#"<html><head></head><body><div>d</div></body></html>"#);
+    assert_eq!(eval_str(&mut e2, "document.title"), "");
+    eval(&mut e2, "document.title = 'Made'");
+    assert_eq!(eval_str(&mut e2, "document.title"), "Made");
+    eval(&mut e2, "document.title = 'Second'");
+    assert_eq!(eval_str(&mut e2, "document.title"), "Second");
+}
+
+#[test]
+fn custom_event_dispatch() {
+    let mut e = engine(r#"<div id="p"><span id="s">x</span></div>"#);
+    eval(
+        &mut e,
+        r#"globalThis.log = [];
+           var s = document.getElementById('s');
+           s.addEventListener('ping', function (ev) {
+             log.push('s:' + ev.type + ':' + JSON.stringify(ev.detail) + ':' + (ev.target === s));
+           });
+           document.getElementById('p').addEventListener('ping', function () {
+             log.push('p');
+           });
+           var ev = new CustomEvent('ping', { detail: { n: 1 }, bubbles: true });
+           s.dispatchEvent(ev);"#,
+    );
+    assert_eq!(
+        eval_str(&mut e, "log.join(',')"),
+        r#"s:ping:{"n":1}:true,p"#,
+        "custom type fires the target listener with detail, then bubbles"
+    );
+    // removeEventListener drops the handler by identity.
+    eval(
+        &mut e,
+        r#"log.length = 0;
+           globalThis.h = function () { log.push('again') };
+           s.addEventListener('ping', h);
+           s.removeEventListener('ping', h);
+           s.dispatchEvent(new Event('ping', { bubbles: true }));"#,
+    );
+    assert_eq!(
+        eval_str(&mut e, "log.join(',')"),
+        "s:ping:undefined:true,p",
+        "the by-identity removal dropped h; the anonymous listener still fires and bubbles"
+    );
+}
+
+#[test]
+fn event_constructor_and_non_bubbling_dispatch() {
+    let mut e = engine(r#"<div id="p"><span id="s">x</span></div>"#);
+    // Default init: bubbles = false → target-only dispatch.
+    eval(
+        &mut e,
+        r#"globalThis.log = [];
+           var s = document.getElementById('s');
+           s.addEventListener('e1', function () { log.push('s'); });
+           document.getElementById('p').addEventListener('e1', function () { log.push('p'); });
+           s.dispatchEvent(new Event('e1'));"#,
+    );
+    assert_eq!(eval_str(&mut e, "log.join(',')"), "s");
+    // dispatchEvent returns false after preventDefault.
+    eval(
+        &mut e,
+        r#"globalThis.h2 = function (ev) { ev.preventDefault(); };
+           s.addEventListener('e2', h2);
+           globalThis.r = String(s.dispatchEvent(new Event('e2')));"#,
+    );
+    assert_eq!(eval_str(&mut e, "r"), "false");
+    // Built-in types also flow through dispatchEvent (shared key space).
+    eval(
+        &mut e,
+        r#"globalThis.log2 = [];
+           s.addEventListener('click', function () { log2.push('c') });
+           s.dispatchEvent(new Event('click'));"#,
+    );
+    assert_eq!(eval_str(&mut e, "log2.join(',')"), "c");
+}
+
+#[test]
+fn attributes_snapshot_object() {
+    let mut e = engine(r#"<input id="i" type="text" value="v" placeholder="p">"#);
+    eval(&mut e, "var a = document.getElementById('i').attributes");
+    assert_eq!(eval_str(&mut e, "a.length"), "4");
+    assert_eq!(eval_str(&mut e, "a[0].name"), "id");
+    assert_eq!(eval_str(&mut e, "a[0].value"), "i");
+    assert_eq!(eval_str(&mut e, "a.getNamedItem('type').value"), "text");
+    assert_eq!(eval_str(&mut e, "String(a.getNamedItem('nope'))"), "null");
+    assert_eq!(
+        eval_str(&mut e, "a.value"),
+        "v",
+        "named form reads the value"
+    );
+    // The snapshot is static: later setAttribute is not reflected.
+    eval(
+        &mut e,
+        "document.getElementById('i').setAttribute('value', 'w')",
+    );
+    assert_eq!(eval_str(&mut e, "a.value"), "v");
+    let fresh = eval_str(&mut e, "document.getElementById('i').attributes.value");
+    assert_eq!(fresh, "w", "a fresh read picks up the change");
+}

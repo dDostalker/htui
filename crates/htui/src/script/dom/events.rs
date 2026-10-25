@@ -216,7 +216,15 @@ pub(super) fn native_add_event_listener(
     context: &mut Context,
 ) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
-    let event_type = parse_event_type(args.first(), context)?;
+    let Some(type_name) = args
+        .first()
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?
+    else {
+        return Err(JsNativeError::typ()
+            .with_message("missing event type")
+            .into());
+    };
     let Some(fn_val) = args.get(1) else {
         return Err(JsNativeError::typ()
             .with_message("addEventListener expects a function")
@@ -227,7 +235,14 @@ pub(super) fn native_add_event_listener(
             .with_message("listener is not a function")
             .into());
     }
-    add_listener(context, node_id, event_type, fn_val)?;
+    // Known engine types register through the typed path (the engine's own
+    // dispatch fires them); any other string registers verbatim so
+    // `dispatchEvent` on a CustomEvent type reaches its listeners, like a
+    // browser's open event-type namespace.
+    match parse_event_type(args.first(), context) {
+        Ok(event_type) => add_listener(context, node_id, event_type, fn_val)?,
+        Err(_) => add_listener_by_name(context, node_id, &type_name, fn_val)?,
+    }
     Ok(JsValue::undefined())
 }
 
@@ -237,8 +252,18 @@ pub(super) fn native_remove_event_listener(
     context: &mut Context,
 ) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
-    let event_type = parse_event_type(args.first(), context)?;
-    remove_listener(context, node_id, event_type, args.get(1))?;
+    let type_name = args
+        .first()
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?;
+    match parse_event_type(args.first(), context) {
+        Ok(event_type) => remove_listener(context, node_id, event_type, args.get(1))?,
+        Err(_) => {
+            if let Some(name) = type_name {
+                remove_listener_by_name(context, node_id, &name, args.get(1))?;
+            }
+        }
+    }
     Ok(JsValue::undefined())
 }
 
@@ -527,4 +552,328 @@ fn call_registry_helper(context: &mut Context, name: &str, args: &[JsValue]) -> 
     let helper = global.get(js_string!(name), context)?.to_object(context)?;
     helper.call(&JsValue::undefined(), args, context)?;
     Ok(())
+}
+
+// ============================================================
+// Name-keyed listeners (CustomEvent types) + dispatchEvent
+// ============================================================
+
+/// Register a listener under an arbitrary type name (the same registry the
+/// typed path uses — known types share one key space, so an engine dispatch
+/// of e.g. `click` reaches a by-name `click` registration too).
+pub(super) fn add_listener_by_name(
+    context: &mut Context,
+    node_id: NodeId,
+    type_name: &str,
+    listener: &JsValue,
+) -> JsResult<()> {
+    call_registry_helper(
+        context,
+        "__htuiAddListener",
+        &[
+            js_string!(node_id_to_f64(node_id).to_string()).into(),
+            js_string!(type_name).into(),
+            listener.clone(),
+        ],
+    )
+}
+
+/// Remove a listener registered under an arbitrary type name (identity
+/// match, mirroring [`remove_listener`]).
+pub(super) fn remove_listener_by_name(
+    context: &mut Context,
+    node_id: NodeId,
+    type_name: &str,
+    listener: Option<&JsValue>,
+) -> JsResult<()> {
+    let key = node_id_to_f64(node_id).to_string();
+    let global = context.global_object();
+    let registry = global
+        .get(js_string!("__htuiListeners"), context)?
+        .to_object(context)?;
+    let node_entry = registry.get(js_string!(key), context)?;
+    if node_entry.is_undefined() {
+        return Ok(());
+    }
+    let node_obj = node_entry.to_object(context)?;
+    let arr = node_obj.get(js_string!(type_name), context)?;
+    if arr.is_undefined() {
+        return Ok(());
+    }
+    let Some(listener) = listener else {
+        // No listener given: drop the whole type slot.
+        node_obj.delete_property_or_throw(js_string!(type_name), context)?;
+        return Ok(());
+    };
+    let arr_obj = arr.to_object(context)?;
+    let len = arr_obj
+        .get(js_string!("length"), context)?
+        .to_u32(context)?;
+    let mut keep = Vec::new();
+    for i in 0..len {
+        let item = arr_obj.get(i, context)?;
+        if !item.strict_equals(listener) {
+            keep.push(item);
+        }
+    }
+    // Rewrite in place: truncate first so removed tail entries cannot
+    // linger past the new length.
+    arr_obj.set(js_string!("length"), JsValue::from(0u32), false, context)?;
+    for (idx, item) in keep.into_iter().enumerate() {
+        arr_obj.set(idx, item, false, context)?;
+    }
+    Ok(())
+}
+
+/// Fetch the listener array registered under an arbitrary type name (empty
+/// when none).
+pub(super) fn get_listeners_by_name(
+    context: &mut Context,
+    node_id: NodeId,
+    type_name: &str,
+) -> JsResult<Vec<JsValue>> {
+    let global = context.global_object();
+    let helper = global
+        .get(js_string!("__htuiGetListeners"), context)?
+        .to_object(context)?;
+    let arr = helper.call(
+        &JsValue::undefined(),
+        &[
+            js_string!(node_id_to_f64(node_id).to_string()).into(),
+            js_string!(type_name).into(),
+        ],
+        context,
+    )?;
+    let arr_obj = arr.to_object(context)?;
+    let len = arr_obj
+        .get(js_string!("length"), context)?
+        .to_u32(context)?;
+    let mut out = Vec::with_capacity(len.min(1024) as usize);
+    for i in 0..len {
+        out.push(arr_obj.get(i, context)?);
+    }
+    Ok(out)
+}
+
+/// `target.dispatchEvent(event)` — synchronously dispatch a JS-built event
+/// (from the `Event` / `CustomEvent` constructors, or any object with a
+/// `type` string) along the target's ancestor chain, honouring
+/// `event.bubbles === false` (target-only) and the stop flags. Returns
+/// `false` only when a listener called `preventDefault()` on a cancelable
+/// event, like the DOM.
+pub(super) fn native_dispatch_event(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let event = args.first().cloned().unwrap_or_default();
+    let event_obj = event
+        .to_object(context)
+        .map_err(|_| JsNativeError::typ().with_message("dispatchEvent expects an Event object"))?;
+    let type_name = event_obj
+        .get(js_string!("type"), context)?
+        .to_string(context)?
+        .to_std_string_lossy();
+    if type_name.is_empty() {
+        return Err(JsNativeError::typ()
+            .with_message("dispatchEvent expects a non-empty event type")
+            .into());
+    }
+    let bubbles = event_obj
+        .get(js_string!("bubbles"), context)
+        .map(|v| v.is_boolean() && v.to_boolean())
+        .unwrap_or(false);
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::from(true));
+    };
+    // Path: target first, then ancestors (bubbling); target-only when the
+    // event says it does not bubble.
+    let path = {
+        let st = rc.borrow();
+        let mut path = vec![node_id];
+        if bubbles {
+            let mut cur = st.arena.get(node_id).and_then(|n| n.parent);
+            while let Some(id) = cur
+                && let Some(n) = st.arena.get(id)
+            {
+                path.push(id);
+                cur = n.parent;
+            }
+        }
+        path
+    };
+    // The DOM sets `target` once at dispatch start (it never changes while
+    // bubbling; only `currentTarget` follows the path).
+    let target_wrapper = node_wrapper(context, node_id)?;
+    if let Err(e) = event_obj.set(js_string!("target"), target_wrapper, false, context) {
+        log::warn!("Failed to set event.target: {e}");
+    }
+    for &element_id in &path {
+        let Ok(wrapper) = node_wrapper(context, element_id) else {
+            continue;
+        };
+        if let Err(e) = event_obj.set(js_string!("currentTarget"), wrapper.clone(), false, context)
+        {
+            log::warn!("Failed to set event.currentTarget: {e}");
+        }
+        let listeners = get_listeners_by_name(context, element_id, &type_name)?;
+        let mut immediate = false;
+        for listener in listeners {
+            if let Ok(f) = listener.to_object(context)
+                && let Err(e) = f.call(&wrapper, std::slice::from_ref(&event), context)
+            {
+                log::warn!("dispatchEvent listener threw: {e}");
+            }
+            if event_flag(context, &event, "_stoppedImmediate") {
+                immediate = true;
+                break;
+            }
+        }
+        if immediate || event_flag(context, &event, "_stopped") {
+            break;
+        }
+    }
+    let not_prevented = !event_flag(context, &event, "_prevented");
+    Ok(JsValue::from(not_prevented))
+}
+
+// ============================================================
+// Event / CustomEvent constructors
+// ============================================================
+
+/// `new Event(type, init?)` — build a plain event object with the control
+/// flags and stop / prevent methods the dispatch loop reads. `init.bubbles`
+/// / `init.cancelable` default to `false` (the DOM defaults); the flags are
+/// still written so `preventDefault()` on a non-cancelable event is the
+/// documented no-op (the dispatch result ignores `_prevented` there —
+/// simplified: cancelability is not tracked separately).
+pub(super) fn event_constructor(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let type_name = args
+        .first()
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?
+        .unwrap_or_default();
+    let (bubbles, cancelable) = read_event_init(args.get(1), context)?;
+    build_event_object(
+        this,
+        context,
+        &type_name,
+        bubbles,
+        cancelable,
+        JsValue::undefined(),
+    )
+}
+
+/// `new CustomEvent(type, init?)` — an `Event` carrying `init.detail`.
+pub(super) fn custom_event_constructor(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let type_name = args
+        .first()
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?
+        .unwrap_or_default();
+    let (bubbles, cancelable) = read_event_init(args.get(1), context)?;
+    let detail = args
+        .get(1)
+        .and_then(|v| v.as_object())
+        .map(|obj| obj.get(js_string!("detail"), context))
+        .transpose()?
+        .unwrap_or(JsValue::undefined());
+    build_event_object(this, context, &type_name, bubbles, cancelable, detail)
+}
+
+/// Read `{ bubbles, cancelable }` off an init object (both default false).
+fn read_event_init(init: Option<&JsValue>, context: &mut Context) -> JsResult<(bool, bool)> {
+    let Some(obj) = init.and_then(|v| v.as_object()) else {
+        return Ok((false, false));
+    };
+    let bubbles = obj
+        .get(js_string!("bubbles"), context)
+        .map(|v| v.is_boolean() && v.to_boolean())
+        .unwrap_or(false);
+    let cancelable = obj
+        .get(js_string!("cancelable"), context)
+        .map(|v| v.is_boolean() && v.to_boolean())
+        .unwrap_or(false);
+    Ok((bubbles, cancelable))
+}
+
+/// Populate `this` (the freshly-constructed object under `new`) with the
+/// event surface and return it.
+fn build_event_object(
+    this: &JsValue,
+    context: &mut Context,
+    type_name: &str,
+    bubbles: bool,
+    cancelable: bool,
+    detail: JsValue,
+) -> JsResult<JsValue> {
+    let obj = this
+        .to_object(context)
+        .map_err(|_| JsNativeError::typ().with_message("Event requires `new`"))?;
+    obj.set(js_string!("type"), js_string!(type_name), false, context)?;
+    obj.set(
+        js_string!("bubbles"),
+        JsValue::from(bubbles),
+        false,
+        context,
+    )?;
+    obj.set(
+        js_string!("cancelable"),
+        JsValue::from(cancelable),
+        false,
+        context,
+    )?;
+    obj.set(js_string!("detail"), detail, false, context)?;
+    obj.set(js_string!("target"), JsValue::null(), false, context)?;
+    obj.set(js_string!("currentTarget"), JsValue::null(), false, context)?;
+    obj.set(
+        js_string!("defaultPrevented"),
+        JsValue::from(false),
+        false,
+        context,
+    )?;
+    obj.set(js_string!("_stopped"), JsValue::from(false), false, context)?;
+    obj.set(
+        js_string!("_stoppedImmediate"),
+        JsValue::from(false),
+        false,
+        context,
+    )?;
+    obj.set(
+        js_string!("_prevented"),
+        JsValue::from(false),
+        false,
+        context,
+    )?;
+    for (name, native) in [
+        (
+            "stopPropagation",
+            crate::script::bindings::stop_propagation
+                as fn(&JsValue, &[JsValue], &mut Context) -> JsResult<JsValue>,
+        ),
+        (
+            "stopImmediatePropagation",
+            crate::script::bindings::stop_immediate_propagation
+                as fn(&JsValue, &[JsValue], &mut Context) -> JsResult<JsValue>,
+        ),
+        (
+            "preventDefault",
+            crate::script::bindings::prevent_default
+                as fn(&JsValue, &[JsValue], &mut Context) -> JsResult<JsValue>,
+        ),
+    ] {
+        let f = super::js_fn(context, NativeFunction::from_fn_ptr(native));
+        let f_val: JsValue = f.into();
+        obj.set(js_string!(name), f_val, false, context)?;
+    }
+    Ok(this.clone())
 }

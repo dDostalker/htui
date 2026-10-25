@@ -9,18 +9,18 @@ use crate::tdom::node::{NodeId, NodeType};
 
 use super::{
     attrs::{
-        native_get_attribute, native_get_id, native_has_attribute, native_remove_attribute,
-        native_set_attribute, native_set_id, native_toggle_attribute,
+        native_get_attribute, native_get_attributes, native_get_id, native_has_attribute,
+        native_remove_attribute, native_set_attribute, native_set_id, native_toggle_attribute,
     },
     content::{
         native_append_data, native_delete_data, native_get_data, native_get_data_length,
-        native_get_inner_html, native_get_node_value, native_get_text, native_get_value,
-        native_insert_data, native_replace_data, native_set_data, native_set_inner_html,
-        native_set_node_value, native_set_text, native_set_value, native_split_text,
-        native_substring_data,
+        native_get_inner_html, native_get_node_value, native_get_outer_html, native_get_text,
+        native_get_value, native_insert_data, native_replace_data, native_set_data,
+        native_set_inner_html, native_set_node_value, native_set_text, native_set_value,
+        native_split_text, native_substring_data,
     },
     events::{
-        native_add_event_listener, native_blur, native_click, native_focus,
+        native_add_event_listener, native_blur, native_click, native_dispatch_event, native_focus,
         native_remove_event_listener,
     },
     global_attrs::{
@@ -32,7 +32,7 @@ use super::{
         native_after, native_append, native_append_child, native_before, native_clone_node,
         native_insert_adjacent_element, native_insert_adjacent_html, native_insert_adjacent_text,
         native_insert_before, native_normalize, native_prepend, native_remove, native_remove_child,
-        native_replace_child, native_replace_children, native_replace_with,
+        native_replace_child, native_replace_children, native_replace_with, native_set_outer_html,
     },
     node_id_to_f64,
     style::native_get_style,
@@ -121,6 +121,9 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
     let set_value = js_fn(context, NativeFunction::from_fn_ptr(native_set_value));
     let get_inner_html = js_fn(context, NativeFunction::from_fn_ptr(native_get_inner_html));
     let set_inner_html = js_fn(context, NativeFunction::from_fn_ptr(native_set_inner_html));
+    let get_outer_html = js_fn(context, NativeFunction::from_fn_ptr(native_get_outer_html));
+    let set_outer_html = js_fn(context, NativeFunction::from_fn_ptr(native_set_outer_html));
+    let get_attributes = js_fn(context, NativeFunction::from_fn_ptr(native_get_attributes));
     let get_hidden = js_fn(context, NativeFunction::from_fn_ptr(native_get_hidden));
     let set_hidden = js_fn(context, NativeFunction::from_fn_ptr(native_set_hidden));
     let get_dataset = js_fn(context, NativeFunction::from_fn_ptr(native_get_dataset));
@@ -275,6 +278,11 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
         js_string!("removeEventListener"),
         2,
     );
+    init.function(
+        NativeFunction::from_fn_ptr(native_dispatch_event),
+        js_string!("dispatchEvent"),
+        1,
+    );
 
     // Node connectivity / structure helpers apply to every node kind.
     init.accessor(
@@ -343,6 +351,18 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
             js_string!("innerHTML"),
             Some(get_inner_html),
             Some(set_inner_html),
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("outerHTML"),
+            Some(get_outer_html),
+            Some(set_outer_html),
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("attributes"),
+            Some(get_attributes),
+            None,
             Attribute::all(),
         );
         init.accessor(
