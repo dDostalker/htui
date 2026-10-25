@@ -374,6 +374,14 @@ impl RenderState {
         let Some(geo) = self.geometry.as_ref() else {
             return;
         };
+        // The hovered / focused id may be stale: the element it names can be
+        // removed by JS between the hit map's snapshot and this repaint (the
+        // music-demo quick-click race). Filter both against the cached
+        // arena — a stale id restyles nothing, and the ancestor-chain walk
+        // below must never see a key the arena does not hold.
+        let in_geo = |id: Option<NodeId>| id.filter(|id| geo.arena.contains_key(*id));
+        let prev = in_geo(prev);
+        let new = in_geo(new);
         let mut arena = geo.arena.clone();
         reset_css_attr(&mut arena, geo.root_id);
         css_into_node_with_state(&mut arena, geo.root_id, &self.css_rules, &self.dynamic);

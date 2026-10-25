@@ -2799,3 +2799,48 @@ fn white_space_inherits_to_inline_children() {
         WhiteSpace::PreWrap
     );
 }
+
+#[test]
+fn stale_node_id_fails_to_match_instead_of_panicking() {
+    // A `NodeId` from a previous arena generation — a node JS removed between
+    // the hit map's snapshot and a hover repaint (the music-demo quick-click
+    // race: hovering a song while its click handler rebuilds the list) —
+    // must fail to match rather than panic with "invalid SlotMap key used".
+    // The public entry points' doc contract promises `arena.get` lookups;
+    // `matches_css` used to index the node parameter directly.
+    let mut p = html_parse::Parser::new(r#"<div class="btn">x</div>"#);
+    let (root_id, mut arena, _) = p.parse();
+    let mut cp = Parser::new(".btn:hover { color: red }");
+    css_into_node(&mut arena, root_id, &cp.parse());
+    let mut cp2 = Parser::new(".btn:hover { color: red }");
+    let rules = cp2.parse();
+    let sel = &rules.0[0].selector;
+
+    // `NodeId::default()` is slotmap's null key — indexing it reproduces the
+    // exact "invalid SlotMap key used" panic the field report showed.
+    let stale = NodeId::default();
+
+    // A stale node id simply fails to match.
+    assert!(!selector_chain_matches_with_state(
+        &arena,
+        stale,
+        sel,
+        &DynamicState::default(),
+    ));
+    // A stale `:hover` target against a real node also fails to match (and
+    // never panics inside the ancestor-chain walk).
+    let real = arena
+        .iter()
+        .find(|(_, n)| n.node_type == NodeType::Div)
+        .map(|(id, _)| id)
+        .expect("div present");
+    assert!(!selector_chain_matches_with_state(
+        &arena,
+        real,
+        sel,
+        &DynamicState {
+            hovered: Some(stale),
+            focused: None,
+        },
+    ));
+}

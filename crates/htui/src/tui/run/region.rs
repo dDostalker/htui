@@ -140,6 +140,12 @@ pub(super) fn pseudo_affected_region(
     let match_state = pseudo.state_with_target(target);
     let mut region: Option<Rect> = None;
     for id in pseudo.affected_candidates(arena, target) {
+        // A stale target — the element JS removed between the hit map's
+        // snapshot and this repaint (the quick-click race) — can contribute
+        // nothing; skip it instead of matching against a missing node.
+        if arena.get(id).is_none() {
+            continue;
+        }
         // Only a selector that contains `pseudo` and matches `id` while the
         // state target is `target` can repaint `id`'s boxes.
         let affected = rules.0.iter().any(|entry| {
