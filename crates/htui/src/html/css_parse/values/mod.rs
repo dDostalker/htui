@@ -7,8 +7,8 @@ mod text;
 
 pub(in crate::html::css_parse) use box_values::parse_border_radius;
 pub use box_values::{
-    BoxSizing, CornerRadii, CssDisplay, InsetSides, Position, Positioning, Visibility,
-    parse_box_sizing, parse_position, parse_visibility,
+    BoxSizing, CornerRadii, CssDisplay, InsetSides, Overflow, Position, Positioning, Visibility,
+    parse_box_sizing, parse_overflow, parse_position, parse_visibility,
 };
 pub use color::parse_color_str;
 pub use flex::{

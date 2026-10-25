@@ -79,6 +79,35 @@ pub fn parse_visibility(s: &str) -> Option<Visibility> {
     }
 }
 
+/// CSS `overflow` for a box's content, resolved to the two behaviours the
+/// terminal can express.
+///
+/// `visible` (the CSS default) lets content paint beyond the box's content
+/// area, exactly like a browser; `hidden` clips it there. The
+/// container-scroll keywords (`auto` / `scroll`) have no terminal
+/// counterpart — the engine scrolls the whole document, not boxes — so they
+/// degenerate to [`Overflow::Clip`] (see 能力差异清单 "overflow").
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Overflow {
+    /// Content paints beyond the content box (the browser default).
+    #[default]
+    Visible,
+    /// `hidden` / `auto` / `scroll` / `clip` — content is clipped to the
+    /// content box.
+    Clip,
+}
+
+#[doc(hidden)]
+/// Parse an `overflow` keyword (`auto` / `scroll` / `clip` all clip; the
+/// terminal has no container-level scrolling).
+pub fn parse_overflow(s: &str) -> Option<Overflow> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "visible" => Some(Overflow::Visible),
+        "hidden" | "auto" | "scroll" | "clip" => Some(Overflow::Clip),
+        _ => None,
+    }
+}
+
 /// CSS `top` / `right` / `bottom` / `left`, resolved to cells.
 ///
 /// Each side is `None` when the property is unset / `auto`, in which case

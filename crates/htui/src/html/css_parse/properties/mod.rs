@@ -254,6 +254,29 @@ impl CssAttr {
             .and_then(|s| parse_visibility(s.as_ref()))
             .unwrap_or_default()
     }
+    /// Resolved CSS `overflow` for the box's content. `visible` (the CSS
+    /// default) lets content paint beyond the content box; `hidden`,
+    /// `auto`, `scroll` and `clip` clip it there — the container-scroll
+    /// keywords have no terminal counterpart (the engine scrolls the whole
+    /// document), so they degenerate to clipping. When the two axes
+    /// disagree, the clipping axis wins (`overflow-x: hidden` alone clips).
+    pub fn get_overflow(&self) -> crate::html::css_parse::Overflow {
+        use crate::html::css_parse::{Overflow, parse_overflow};
+        let axis = |key: &str| {
+            self.0
+                .get(key)
+                .and_then(|s| parse_overflow(s.as_ref()))
+                .unwrap_or(Overflow::Visible)
+        };
+        if axis("overflow") == Overflow::Clip
+            || axis("overflow-x") == Overflow::Clip
+            || axis("overflow-y") == Overflow::Clip
+        {
+            Overflow::Clip
+        } else {
+            Overflow::Visible
+        }
+    }
     /// Element width (CSS `width`).
     ///
     /// - `auto` / missing / unsupported unit → `None` (fill available)
