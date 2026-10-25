@@ -96,6 +96,71 @@ pub fn is_cjk_break_opportunity(c: char) -> bool {
     )
 }
 
+/// `true` when `c` is forbidden from starting a visual line (simple CJK
+/// kinsoku shori). Closing punctuation, prolonged-sound marks and the
+/// small kana cannot detach from the word before them: the tokenizer
+/// attaches such graphemes to the pending word instead of emitting a
+/// break opportunity, so a line never opens with `。` / `、` / `」` / `っ`.
+///
+/// This is the terminal-sized subset of the browser's line-break rules
+/// (`line-break: strict` is a documented reject): it covers the closing
+/// side only — an opening bracket that cannot END a line would need a
+/// look-ahead in the wrap phase and is not modelled.
+fn is_forbidden_line_start(c: char) -> bool {
+    matches!(
+        c,
+        '、' | '。'
+            | '，'
+            | '．'
+            | '：'
+            | '；'
+            | '？'
+            | '！'
+            | '・'
+            | 'ー'
+            | '」'
+            | '』'
+            | '）'
+            | '］'
+            | '｝'
+            | '〉'
+            | '》'
+            | '】'
+            | '〗'
+            | '〙'
+            | '〛'
+            | '’'
+            | '”'
+            | '…'
+            | '～'
+            | '％'
+            | '‰'
+            | '°'
+            | '゛'
+            | '゜'
+            | 'ぁ'
+            | 'ぃ'
+            | 'ぅ'
+            | 'ぇ'
+            | 'ぉ'
+            | 'っ'
+            | 'ゃ'
+            | 'ゅ'
+            | 'ょ'
+            | 'ゎ'
+            | 'ァ'
+            | 'ィ'
+            | 'ゥ'
+            | 'ェ'
+            | 'ォ'
+            | 'ッ'
+            | 'ャ'
+            | 'ュ'
+            | 'ョ'
+            | 'ヮ'
+    )
+}
+
 /// Tokenize one `InlineRun`'s text into a flat sequence of `Token`s
 /// appended to `out`. Words preserve the source run's styling; the
 /// `Space` token only stores total cell width and grapheme count.
@@ -202,7 +267,9 @@ fn tokenize_run(
             pending_count += 1;
             pending_width += w;
         } else if word_break != WordBreak::KeepAll
-            && g.chars().next().is_some_and(is_cjk_break_opportunity)
+            && g.chars()
+                .next()
+                .is_some_and(|c| is_cjk_break_opportunity(c) && !is_forbidden_line_start(c))
         {
             // CJK (or full-width) grapheme under `normal` / `break-all`:
             // flush whatever is pending so the boundary before this
@@ -225,6 +292,56 @@ fn tokenize_run(
                 bg: run.bg,
                 node_id: run.node_id,
             });
+        } else if word_break != WordBreak::KeepAll
+            && g.chars()
+                .next()
+                .is_some_and(|c| is_cjk_break_opportunity(c) && is_forbidden_line_start(c))
+        {
+            // Kinsoku: a closing mark must never open a visual line, so it
+            // attaches to the word before it. The previous standalone CJK
+            // glyph is already on `out` (the branch above bypasses the
+            // pending buffer), so an unbroken same-style Word there absorbs
+            // the mark; otherwise the mark starts a pending accumulation the
+            // following glyphs can extend.
+            let merged = if let Some(Token::Word {
+                text,
+                width: tok_width,
+                style: tok_style,
+                fg: tok_fg,
+                bg: tok_bg,
+                node_id: tok_node,
+            }) = out.last_mut()
+            {
+                if *tok_style == run.style
+                    && *tok_fg == run.fg
+                    && *tok_bg == run.bg
+                    && *tok_node == run.node_id
+                {
+                    text.push_str(g);
+                    *tok_width += w;
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            if !merged {
+                if pending_kind != Some(1) {
+                    flush(
+                        pending_kind,
+                        &mut pending_text,
+                        &mut pending_count,
+                        &mut pending_width,
+                        run,
+                        out,
+                    );
+                    pending_kind = Some(1);
+                }
+                pending_text.push_str(g);
+                pending_count += 1;
+                pending_width += w;
+            }
         } else {
             // Non-CJK, or CJK under `keep-all`: accumulate as one word
             // so the wrap phase treats the run as unbreakable.
