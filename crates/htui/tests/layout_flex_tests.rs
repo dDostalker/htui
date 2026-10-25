@@ -2393,6 +2393,29 @@ fn test_flex_column_item_percentage_margin_top_resolves_against_width() {
 }
 
 #[test]
+fn test_flex_percentage_gap_degenerates_to_zero() {
+    init();
+    // Percentage gap is unsupported: the container's resolved axis size is
+    // not in scope at parse time, and the old sentinel resolution turned
+    // `gap: 50%` into billion-cell gaps that pushed every item off the
+    // canvas. A percentage gap now degenerates to 0 — both items render
+    // side by side instead of vanishing.
+    let html = r#"<div class="c"><div class="a">A</div><div class="b">B</div></div>"#;
+    let css = ".c { display: flex; gap: 50%; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(
+        rows[0].contains('A') && rows[0].contains('B'),
+        "a percentage gap must not blow the layout up: {:?}",
+        rows[0]
+    );
+    assert!(
+        rows[0].find('B') == rows[0].find('A').map(|a| a + 1),
+        "with the gap at 0 the items sit adjacent: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
 fn test_align_content_center_moves_item_subtrees() {
     init();
     // A multi-line flex container with `align-content: center` shifts the

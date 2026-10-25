@@ -476,26 +476,30 @@ pub struct GapSizes {
 pub fn parse_gap_shorthand(s: &str, font_ctx: FontContext, viewport: Viewport) -> Option<GapSizes> {
     // 1- or 2-value gap grammar. Each value is a length; unparseable
     // tokens become 0 so a single bad component doesn't kill the rule.
-    // `containing` is fixed to `usize::MAX` because the flex container's
-    // actual axis size is not in scope here — `vw` / `vh` still resolve
-    // correctly via the viewport baked into `font_ctx`. Percentage gap is
-    // intentionally broken (see doc/layout.md "百分比 gap").
+    // The flex container's actual axis size is not in scope at parse time,
+    // so non-percentage lengths resolve against a zero containing width
+    // (`vw` / `vh` still resolve via the viewport baked into `font_ctx`).
+    // Percentage gap is unsupported: resolving it against a sentinel
+    // produced billion-cell gaps that pushed every flex item off the
+    // canvas, so it degenerates to 0 (see 能力差异清单 "row-gap").
+    fn resolve_gap(len: Length, font_ctx: FontContext, viewport: Viewport) -> usize {
+        match len {
+            Length::Pct(_) => 0,
+            len => len.resolve(LengthContext {
+                containing: 0,
+                font: font_ctx,
+                viewport,
+            }),
+        }
+    }
     let mut parts = s.split_whitespace();
     let first = parts.next()?;
     let first_len = Length::parse(first);
     let Some(second) = parts.next() else {
         let v = first_len?;
         return Some(GapSizes {
-            row: v.resolve(LengthContext {
-                containing: usize::MAX,
-                font: font_ctx,
-                viewport,
-            }),
-            column: v.resolve(LengthContext {
-                containing: usize::MAX,
-                font: font_ctx,
-                viewport,
-            }),
+            row: resolve_gap(v, font_ctx, viewport),
+            column: resolve_gap(v, font_ctx, viewport),
         });
     };
     // CSS allows more than two values for row-gap-style properties, but the
@@ -508,15 +512,7 @@ pub fn parse_gap_shorthand(s: &str, font_ctx: FontContext, viewport: Viewport) -
     let row = first_len?;
     let column = second_len?;
     Some(GapSizes {
-        row: row.resolve(LengthContext {
-            containing: usize::MAX,
-            font: font_ctx,
-            viewport,
-        }),
-        column: column.resolve(LengthContext {
-            containing: usize::MAX,
-            font: font_ctx,
-            viewport,
-        }),
+        row: resolve_gap(row, font_ctx, viewport),
+        column: resolve_gap(column, font_ctx, viewport),
     })
 }
