@@ -1,8 +1,16 @@
-//! DOM-to-box generation for the layout pipeline.
+//! DOM-to-box classification for the layout pipeline.
 //!
-//! This phase classifies DOM nodes and builds a geometry-free box tree. It
-//! does not allocate rows or columns; geometry is assigned by the geometry
-//! pass. The classifier mirrors the browser CSS display model:
+//! This phase classifies ONE DOM node at a time into a geometry-free
+//! [`GeneratedBox`]: the `BoxKind` / [`OuterDisplay`] / [`FormattingContext`]
+//! triple the geometry dispatch runs on, plus tag-specific payload data. It
+//! does not allocate rows or columns, and it does **not** recurse into the
+//! subtree — the geometry phase re-walks the DOM through
+//! [`visible_children`] / [`flatten_contents_children`] and calls
+//! [`generate_node`] per child, so every node is classified exactly once per
+//! layout pass. (A full recursive tree build here would be wasted work:
+//! nothing consumes the child boxes.)
+//!
+//! The classifier mirrors the browser CSS display model:
 //!
 //! - `BoxKind` — the box's content shape.
 //! - [`OuterDisplay`] — how the box participates
@@ -10,8 +18,8 @@
 //! - [`FormattingContext`] — how the box
 //!   arranges its own children.
 //!
-//! After generation, the geometry pass dispatches exclusively on those three
-//! classification axes; element tag is read inside an algorithm only when the
+//! After classification, the geometry pass dispatches exclusively on those
+//! three axes; element tag is read inside an algorithm only when the
 //! algorithm truly needs tag-specific data (e.g. resolving `<img src>`).
 
 use crate::{
@@ -46,8 +54,6 @@ pub struct GeneratedBox {
     pub inner_formatting_context: FormattingContext,
     /// Tag-specific data required by the geometry algorithm.
     pub payload: GeneratedPayload,
-    /// Generated child boxes in document order.
-    pub children: Vec<GeneratedBox>,
 }
 
 /// Optional payload attached to a [`GeneratedBox`] when the element carries
@@ -74,13 +80,15 @@ pub enum GeneratedPayload {
     /// frame; the geometry pass sizes it from the text width.
     Button,
     /// Marker produced by [`generate_node`] for a `display: contents`
-    /// element. The `generate_children` walker detects it and
-    /// substitutes the contents element's own children in its place; the
-    /// marker itself never reaches the geometry phase.
+    /// element: no box of its own, and its children splice into the parent's
+    /// sibling list via [`flatten_contents_children`] before the layout walk
+    /// visits them.
     Transparent,
 }
 
-/// Generate a geometry-free forest for the children of `root_id`.
+/// Generate a shallow classifier forest for the children of `root_id` — one
+/// [`GeneratedBox`] per rendered child, in document order, without
+/// descending into any subtree.
 pub fn generate_box_tree(arena: &NodeArena, root_id: NodeId) -> Vec<GeneratedBox> {
     arena[root_id]
         .children
@@ -110,7 +118,6 @@ pub fn generate_node(arena: &NodeArena, node_id: NodeId) -> Option<GeneratedBox>
             outer_display: OuterDisplay::Inline { block: false },
             inner_formatting_context: FormattingContext::Flow,
             payload: GeneratedPayload::None,
-            children: Vec::new(),
         });
     }
 
@@ -146,8 +153,8 @@ pub fn generate_node(arena: &NodeArena, node_id: NodeId) -> Option<GeneratedBox>
 
     // `display: contents` flattens the element's children into the parent
     // instead of producing a box. We can't do that here (we only own one
-    // node), so we emit a `Transparent` marker; `generate_children` will
-    // detect it and substitute the contents element's own children.
+    // node), so we emit a `Transparent` marker; the layout walks splice the
+    // contents element's own children in via [`flatten_contents_children`].
     if display.is_transparent() {
         return Some(GeneratedBox {
             node_id,
@@ -155,7 +162,6 @@ pub fn generate_node(arena: &NodeArena, node_id: NodeId) -> Option<GeneratedBox>
             outer_display: OuterDisplay::Inline { block: false },
             inner_formatting_context: FormattingContext::Flow,
             payload: GeneratedPayload::Transparent,
-            children: Vec::new(),
         });
     }
 
@@ -215,7 +221,6 @@ pub fn generate_node(arena: &NodeArena, node_id: NodeId) -> Option<GeneratedBox>
         outer_display,
         inner_formatting_context,
         payload,
-        children: generate_children(arena, node_id),
     })
 }
 
@@ -268,71 +273,6 @@ pub fn flatten_contents_children(arena: &NodeArena, children: &[NodeId]) -> Vec<
         }
     }
     out
-}
-
-fn generate_children(arena: &NodeArena, parent_id: NodeId) -> Vec<GeneratedBox> {
-    let mut children = Vec::new();
-    let mut inline_group = Vec::new();
-
-    for &child_id in visible_children(arena, parent_id).iter() {
-        // `display: contents` flattens the element's own children into
-        // `parent_id`. We can't do that inside `generate_node` because
-        // the wrapper is needed to *detect* the case here.
-        let child_node = &arena[child_id];
-        if let Some(d) = child_node.css_attr.display()
-            && d.is_transparent()
-        {
-            for &grandchild_id in &child_node.children {
-                append_child_box(
-                    arena,
-                    parent_id,
-                    grandchild_id,
-                    &mut inline_group,
-                    &mut children,
-                );
-            }
-            continue;
-        }
-        append_child_box(arena, parent_id, child_id, &mut inline_group, &mut children);
-    }
-    flush_inline_group(parent_id, &mut inline_group, &mut children);
-    children
-}
-
-fn append_child_box(
-    arena: &NodeArena,
-    parent_id: NodeId,
-    child_id: NodeId,
-    inline_group: &mut Vec<GeneratedBox>,
-    children: &mut Vec<GeneratedBox>,
-) {
-    let Some(child) = generate_node(arena, child_id) else {
-        return;
-    };
-    if child.kind == GeneratedBoxKind::Text || child.outer_display.is_inline() {
-        inline_group.push(child);
-        return;
-    }
-    flush_inline_group(parent_id, inline_group, children);
-    children.push(child);
-}
-
-fn flush_inline_group(
-    parent_id: NodeId,
-    inline_group: &mut Vec<GeneratedBox>,
-    children: &mut Vec<GeneratedBox>,
-) {
-    if inline_group.is_empty() {
-        return;
-    }
-    children.push(GeneratedBox {
-        node_id: parent_id,
-        kind: GeneratedBoxKind::Anonymous,
-        outer_display: OuterDisplay::BlockLevel { container: true },
-        inner_formatting_context: FormattingContext::Flow,
-        payload: GeneratedPayload::None,
-        children: std::mem::take(inline_group),
-    });
 }
 
 fn is_non_rendered(node_type: &NodeType) -> bool {

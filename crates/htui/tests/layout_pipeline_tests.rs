@@ -1,8 +1,8 @@
 use htui::{
     html::{css_parse, html_parse},
     layout::{
-        BoxConstraint, Cursor, FormattingContext, GeneratedBox, GeneratedBoxKind, LayoutBox,
-        generate_box_tree, inner_formatting_context::flow::layout_tree, layout::TermMap,
+        BoxConstraint, Cursor, FormattingContext, GeneratedBoxKind, LayoutBox,
+        inner_formatting_context::flow::layout_tree, layout::TermMap,
     },
     tdom::node::{Node, NodeArena, NodeId, NodeType},
     tui::graph_api::TermLayout,
@@ -26,18 +26,18 @@ fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     (root_id, arena)
 }
 
-fn find_generated<'a>(
-    boxes: &'a [GeneratedBox],
-    arena: &NodeArena,
-    predicate: impl Fn(&NodeType) -> bool + Copy,
-) -> Option<&'a GeneratedBox> {
-    boxes.iter().find_map(|generated| {
-        if predicate(&arena[generated.node_id].node_type) {
-            Some(generated)
-        } else {
-            find_generated(&generated.children, arena, predicate)
-        }
-    })
+/// `NodeId` of the first node matching `predicate`, in document order.
+fn find_node(arena: &NodeArena, predicate: impl Fn(&NodeType) -> bool + Copy) -> NodeId {
+    arena
+        .iter()
+        .find(|(_, n)| predicate(&n.node_type))
+        .map(|(id, _)| id)
+        .expect("node exists in document")
+}
+
+/// Classify one node through the shallow generation entry point.
+fn classify(arena: &NodeArena, id: NodeId) -> htui::layout::GeneratedBox {
+    htui::layout::generate_node(arena, id).expect("node should generate a box")
 }
 
 fn find_layout<'a>(
@@ -67,37 +67,26 @@ fn box_generation_classifies_flow_flex_table_and_replaced_boxes() {
                 <section><p>item</p></section>\
                 <table><tr><td>cell</td></tr></table>\
                 <img src='missing.png' width='8' height='8'>";
-    let (root_id, arena) = setup(html, "section { display: flex; }");
-    let generated = generate_box_tree(&arena, root_id);
+    let (_root_id, arena) = setup(html, "section { display: flex; }");
 
-    let div = find_generated(&generated, &arena, |node_type| {
-        matches!(node_type, NodeType::Div)
-    })
-    .expect("div should generate a box");
+    // Generation is a shallow per-node classifier: each element classifies
+    // into its (kind, outer display, formatting context) triple exactly once.
+    let div = classify(&arena, find_node(&arena, |nt| matches!(nt, NodeType::Div)));
     assert_eq!(div.inner_formatting_context, FormattingContext::Flow);
-    assert!(
-        div.children
-            .iter()
-            .any(|child| child.kind == GeneratedBoxKind::Anonymous),
-        "inline and text children should be grouped in an anonymous box"
-    );
 
-    let section = find_generated(&generated, &arena, |node_type| {
-        matches!(node_type, NodeType::Section)
-    })
-    .expect("section should generate a box");
+    let section = classify(
+        &arena,
+        find_node(&arena, |nt| matches!(nt, NodeType::Section)),
+    );
     assert_eq!(section.inner_formatting_context, FormattingContext::Flex);
 
-    let table = find_generated(&generated, &arena, |node_type| {
-        matches!(node_type, NodeType::Table)
-    })
-    .expect("table should generate a box");
+    let table = classify(
+        &arena,
+        find_node(&arena, |nt| matches!(nt, NodeType::Table)),
+    );
     assert_eq!(table.inner_formatting_context, FormattingContext::Table);
 
-    let image = find_generated(&generated, &arena, |node_type| {
-        matches!(node_type, NodeType::Img)
-    })
-    .expect("image should generate a box");
+    let image = classify(&arena, find_node(&arena, |nt| matches!(nt, NodeType::Img)));
     assert_eq!(image.kind, GeneratedBoxKind::Replaced);
 }
 

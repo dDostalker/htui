@@ -99,8 +99,8 @@ htui/
 │   │   │   │   │   ├── mod.rs      # LayoutBox struct + 三个轴分类 re-exports
 │   │   │   │   │   ├── rect.rs, paint_style.rs, inline_run.rs, cursor.rs, inline.rs, wrap.rs
 │   │   │   │   │   ├── position.rs  # CSS 定位后处理（resolve_positioned_rects / pin_fixed_boxes，absolute/fixed 包含块解析）
-│   │   │   │   │   ├── generation/  # styled DOM → geometry-free GeneratedBox tree
-│   │   │   │   │   │   └── mod.rs  # normal/text/anonymous/replaced + display classification
+│   │   │   │   │   ├── generation/  # styled DOM → 逐节点浅分类（geometry 按 DOM 重走）
+│   │   │   │   │   │   └── mod.rs  # normal/text/replaced 分类 + visible_children / contents 展平
 │   │   │   │   │   ├── geometry/    # GeneratedBox → positioned LayoutBox tree
 │   │   │   │   │   │   ├── mod.rs           # BoxKind × OuterDisplay × FormattingContext dispatch
 │   │   │   │   │   │   ├── replaced.rs      # layout_replaced（img/input/textarea/button/select）
@@ -276,10 +276,10 @@ CSS 字符串 ───► css_parse::Parser ──► CssRule
                               layout::TermLayout::draw()
                                     │
                                     ▼
-                         generation::generate_box_tree()
+                         generation::generate_node()（逐节点浅分类）
                                     │
                                     ▼
-                    Vec<GeneratedBox>（无坐标、统一盒分类树）
+                    Vec<GeneratedBox>（无坐标、单节点分类，不递归子树）
                                     │
                                     ▼
                          geometry::layout_generated_tree()
@@ -305,12 +305,14 @@ CSS 字符串 ───► css_parse::Parser ──► CssRule
                               终端输出（ANSI 转义序列）
 ```
 
-`generation` 统一从 styled DOM 生成不含几何坐标的 `GeneratedBox` 树，负责
-normal/text/anonymous/replaced 盒语义和 `OuterDisplay` / `FormattingContext`
-分类。`geometry` 再按 `BoxKind`、`OuterDisplay` 和 `FormattingContext` 分派
-flow/flex/table 算法并生成统一的 `LayoutBox` 树，最终由
-`paint::paint_layout_tree()` 绘制。现有标签级 `LayoutFn` 仅作为 normal flow
-内部适配器保留；flex、table 和 `<img>` 不再通过 `DEFAULT_LAYOUT` 抢占分派。
+`generation` 对 styled DOM 做逐节点浅分类（`generate_node` 不递归子树），
+产出不含几何坐标的 `GeneratedBox`（normal/text/replaced 盒语义 +
+`OuterDisplay` / `FormattingContext` 分类）。`geometry` 按 DOM 逐层重走、
+对每个子节点调用 `generate_node`（每节点每次布局恰好分类一次），再按
+`BoxKind`、`OuterDisplay` 和 `FormattingContext` 分派 flow/flex/table
+算法并生成统一的 `LayoutBox` 树，最终由 `paint::paint_layout_tree()`
+绘制。现有标签级 `LayoutFn` 仅作为 normal flow 内部适配器保留；flex、
+table 和 `<img>` 不再通过 `DEFAULT_LAYOUT` 抢占分派。
 
 ## 事件系统（旁路，不参与上述管线）
 

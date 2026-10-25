@@ -16,7 +16,7 @@ use crate::{
     layout::{
         BoxConstraint, Cursor, DEFAULT_LAYOUT, LayoutBox, LayoutContext, OuterDisplay, Rect,
         layoutbox::{
-            GeneratedBoxKind, flatten_contents_children, generate_box_tree, generate_node,
+            GeneratedBox, GeneratedBoxKind, flatten_contents_children, generate_node,
             layout_generated_box, layout_generated_tree, resolve_positioned_rects,
         },
     },
@@ -37,7 +37,15 @@ pub fn layout_tree(
     viewport_cols: usize,
     viewport_rows: usize,
 ) -> Vec<LayoutBox> {
-    let generated = generate_box_tree(arena, root_id);
+    // The top level dispatches one box per rendered root child. Root-level
+    // `display: contents` elements splice their children into the sibling
+    // list first — the same flatten every block walk applies — and each
+    // survivor is classified shallowly (no subtree recursion: the geometry
+    // phase re-walks the DOM per box).
+    let generated: Vec<GeneratedBox> = flatten_contents_children(arena, &arena[root_id].children)
+        .iter()
+        .filter_map(|&id| generate_node(arena, id))
+        .collect();
     let mut boxes = layout_generated_tree(
         arena,
         &generated,
