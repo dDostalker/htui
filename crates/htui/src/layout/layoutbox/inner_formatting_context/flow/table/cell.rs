@@ -79,7 +79,7 @@ pub fn layout_cell(
     arena: &NodeArena,
     cell_id: NodeId,
     rect: Rect,
-    _is_header: bool,
+    is_header: bool,
     context: LayoutContext,
 ) -> LayoutBox {
     let node = &arena[cell_id];
@@ -94,7 +94,23 @@ pub fn layout_cell(
 
     let block_fg = node.css_attr.get_color();
     let block_bg = node.css_attr.get_bg_color();
-    let block_font_style = block_style(&node.css_attr);
+    let mut block_font_style = block_style(&node.css_attr);
+    // Browser UA stylesheet: `th { font-weight: bold; text-align: center }` —
+    // resolved from the shared UA declaration table, each pair yielding to
+    // any author declaration / inherited value (`th { text-align: left }`
+    // wins, same cascade the other UA defaults follow).
+    let mut text_align = node.css_attr.get_text_align();
+    if is_header {
+        for &(prop, value) in node.node_type.inline_ua_declarations() {
+            match (prop, node.css_attr.is_set(prop)) {
+                ("font-weight", false) => block_font_style |= crate::graphics::FontStyle::BOLD,
+                ("text-align", false) if value == "center" => {
+                    text_align = crate::html::css_parse::TextAlign::Center;
+                }
+                _ => {}
+            }
+        }
+    }
     // The block's own background is resolved from the fresh cascade at paint
     // time (`effective_bg`), not baked into the runs (see the block layout
     // counterpart — a `:hover` re-cascade must not reuse stale run colours).
@@ -154,6 +170,7 @@ pub fn layout_cell(
         border_radius: crate::html::css_parse::CornerRadii::default(),
         fill_bg,
         spacing_after: 0,
+        text_align,
     };
 
     LayoutBox::new_normal(

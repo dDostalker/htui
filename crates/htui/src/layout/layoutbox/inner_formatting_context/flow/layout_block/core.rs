@@ -430,6 +430,7 @@ pub fn layout_block(
         ),
         fill_bg,
         spacing_after: effective_spacing_after,
+        text_align: node.css_attr.get_text_align(),
     };
 
     LayoutBox::new_normal(

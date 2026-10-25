@@ -138,6 +138,75 @@ fn test_table_th_text_marks_bold() {
 }
 
 #[test]
+fn test_table_th_ua_defaults_bold_and_centered() {
+    init();
+    // Browser UA stylesheet: `th { font-weight: bold; text-align: center }`.
+    // Both defaults resolve from the shared UA declaration table and yield to
+    // author declarations — the cell used to render identical to `<td>`, so
+    // a header did not look like one.
+    let html = "<table><tr><th>Hdr</th></tr><tr><td>D</td></tr></table>";
+    let (root_id, arena) = setup(html, "");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let bold_letters: String = tl
+        .layout
+        .iter()
+        .filter(|b| b.style.contains(htui::tui::graph_api::FontStyle::BOLD))
+        .map(|b| b.word.as_str())
+        .collect();
+    for ch in "Hdr".chars() {
+        assert!(
+            bold_letters.contains(ch),
+            "the UA default must bold the header text; got {bold_letters:?}"
+        );
+    }
+    // Data cells carry no UA bold default.
+    assert!(
+        !bold_letters.contains('D'),
+        "data cells must not pick up the header default; got {bold_letters:?}"
+    );
+}
+
+#[test]
+fn test_table_th_ua_center_yields_to_author_left() {
+    init();
+    // The UA `text-align: center` is a cascade default: an author
+    // `text-align: left` wins, like any other UA-vs-author rule.
+    let (root_id, arena) = setup(
+        "<table><tr><th>ab</th></tr></table>",
+        "th { width: 20ch; text-align: left; }",
+    );
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let cols = term_map.columns as usize;
+    let a_col = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "a")
+        .expect("'a' must render");
+    assert_eq!(
+        a_col % cols,
+        0,
+        "author left alignment must beat the UA center (cell content starts at column 0)"
+    );
+
+    // Control: without the author rule the same header centres.
+    let (root2, arena2) = setup("<table><tr><th>ab</th></tr></table>", "th { width: 20ch; }");
+    let mut tl2 = TermLayout::new(&term_map, 1.0);
+    tl2.draw(&arena2, root2, &term_map);
+    let a2 = tl2
+        .layout
+        .iter()
+        .position(|b| b.word == "a")
+        .expect("'a' must render");
+    assert_ne!(a2 % cols, 0, "the UA default must centre the header");
+}
+
+#[test]
 fn test_table_cells_align_in_columns() {
     // Two rows of two cells should align: each row's cell 1 sits on the same
     // starting column, and cell 2's column is shared too.

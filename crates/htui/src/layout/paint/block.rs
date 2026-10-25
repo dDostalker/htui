@@ -20,7 +20,11 @@ pub(crate) fn paint_block(
     let node = &arena[lb.node_id];
     let fg = node.css_attr.get_color();
     let style = block_style(&node.css_attr);
-    let align = node.css_attr.get_text_align();
+    // The resolved alignment comes from the paint style, not the cascade:
+    // user-agent defaults the layout phase resolved (`<th>`'s `center`) are
+    // not stored in the node's `css_attr`, so the paint style is the single
+    // source the paint phase may consult.
+    let align = lb.paint_style.text_align;
 
     // Effective bg: own bg wins; otherwise inherit the parent's bg so child
     // text appears on the rect's background rather than the terminal default.

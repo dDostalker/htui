@@ -147,6 +147,7 @@ pub fn layout_table(
         border_radius: crate::html::css_parse::CornerRadii::default(),
         fill_bg,
         spacing_after: 0,
+        text_align: node.css_attr.get_text_align(),
     };
 
     let table_box = LayoutBox::new_normal(
