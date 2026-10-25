@@ -117,6 +117,19 @@ fn walk_runs(
         {
             continue;
         }
+        // `display: grid` / `inline-grid` produce no box (the grid layout
+        // algorithm is a documented reject), so the element contributes no
+        // inline runs either — otherwise an inline-grid element's text would
+        // leak into the parent's runs as plain text while its block-level
+        // grid sibling's content vanishes entirely. Both variants fall back
+        // to the same "skipped box" behaviour.
+        if child
+            .css_attr
+            .display()
+            .is_some_and(|d| d.is_grid())
+        {
+            continue;
+        }
         match &child.node_type {
             NodeType::Text => {
                 // Keep every non-empty text node (including whitespace-only

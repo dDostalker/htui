@@ -331,3 +331,29 @@ fn display_contents_children_become_flex_items() {
         "the contents element's children must become flex items, not vanish"
     );
 }
+
+// --- grid fallback consistency -------------------------------------------
+//
+// The grid layout algorithm is a documented reject: `display: grid` /
+// `inline-grid` produce no box. The fallback must be the same for both
+// variants — the box is skipped and the element contributes no content at
+// all. An `inline-grid` element used to leak its text into the parent's
+// inline runs as plain text while a block-level grid sibling's content
+// vanished silently.
+
+#[test]
+fn grid_fallback_is_uniform_between_block_and_inline_variants() {
+    let canvas = layout_canvas(
+        "<div>a<div style=\"display: grid\">G</div>b<span style=\"display: inline-grid\">H</span>c</div>",
+        "",
+    );
+    assert!(
+        canvas.contains("a") && canvas.contains("b") && canvas.contains("c"),
+        "the surrounding text must render: {canvas:?}"
+    );
+    assert!(
+        !canvas.contains('G') && !canvas.contains('H'),
+        "grid content must not render in either variant — and the inline-grid \
+         text must not leak into the parent's inline runs: {canvas:?}"
+    );
+}

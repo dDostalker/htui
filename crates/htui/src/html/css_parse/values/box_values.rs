@@ -401,6 +401,15 @@ impl CssDisplay {
         matches!(self, CssDisplay::Flex | CssDisplay::InlineFlex)
     }
 
+    /// `true` for `display: grid` and `display: inline-grid`. The grid
+    /// layout algorithm is on the reject list, so both variants produce no
+    /// box — and (via the inline-runs walker) no inline runs either, so an
+    /// inline-grid element's text cannot leak into its parent while a
+    /// block-level grid sibling's content vanishes.
+    pub fn is_grid(self) -> bool {
+        matches!(self, CssDisplay::Grid | CssDisplay::InlineGrid)
+    }
+
     /// `true` for `display: table`, `inline-table`, and table-internal
     /// keywords that should route through the table formatting context.
     pub fn is_table_family(self) -> bool {
