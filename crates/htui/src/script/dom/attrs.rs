@@ -1,5 +1,5 @@
 //! Attribute natives: `getAttribute` / `setAttribute` / `removeAttribute`
-//! and the `id` property accessors.
+//! / `hasAttribute` / `toggleAttribute` and the `id` property accessors.
 
 use boa_engine::{Context, JsNativeError, JsResult, JsValue, js_string};
 
@@ -103,6 +103,86 @@ pub(super) fn native_remove_attribute(
         super::events::clear_attr_handler(context, node_id, event_type)?;
     }
     Ok(JsValue::undefined())
+}
+
+/// Parse the attribute-name argument of an attribute native (lowercased,
+/// like HTML attribute names). Missing or non-string input is a TypeError.
+fn attr_name_arg(args: &[JsValue], method: &str) -> JsResult<String> {
+    args.first()
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_std_string_lossy().to_ascii_lowercase())
+        .ok_or_else(|| {
+            JsNativeError::typ()
+                .with_message(format!("{method} expects a string"))
+                .into()
+        })
+}
+
+/// `element.hasAttribute(name)` — whether the attribute is present at all
+/// (an empty value still counts).
+pub(super) fn native_has_attribute(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let name = attr_name_arg(args, "hasAttribute")?;
+    let has = with_state()
+        .map(|rc| {
+            rc.borrow()
+                .arena
+                .get(node_id)
+                .map(|n| n.attributes.contains_key(&name))
+                .unwrap_or(false)
+        })
+        .unwrap_or(false);
+    Ok(JsValue::from(has))
+}
+
+/// `element.toggleAttribute(name, force?)` — flip the attribute's presence.
+/// With `force`, add / remove unconditionally; without it, add when absent
+/// and remove when present. Returns whether the attribute is present after
+/// the call. Toggling an `on*` attribute (un)wires its handler, mirroring
+/// `setAttribute` / `removeAttribute`.
+pub(super) fn native_toggle_attribute(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let name = attr_name_arg(args, "toggleAttribute")?;
+    let force = args.get(1).and_then(|v| v.as_boolean());
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::from(false));
+    };
+    let added;
+    {
+        let mut st = rc.borrow_mut();
+        let Some(node) = st.arena.get_mut(node_id) else {
+            return Ok(JsValue::from(false));
+        };
+        let present = node.attributes.contains_key(&name);
+        added = force.unwrap_or(!present);
+        if added == present {
+            return Ok(JsValue::from(present));
+        }
+        if added {
+            node.attributes.insert(name.clone(), String::new());
+        } else {
+            node.attributes.shift_remove(&name);
+        }
+        mark_dirty(&mut st, node_id);
+    }
+    match crate::script::bindings::attribute_event_type(&name) {
+        Some(_) if added => {
+            crate::script::bindings::compile_node_attribute_listeners(context, &rc, node_id)?;
+        }
+        Some(event_type) => {
+            super::events::clear_attr_handler(context, node_id, event_type)?;
+        }
+        None => {}
+    }
+    Ok(JsValue::from(added))
 }
 
 pub(super) fn native_get_id(

@@ -505,3 +505,98 @@ pub(super) fn native_query_selector_all(
     }
     Ok(arr.into())
 }
+
+/// `element.matches(sel)` — whether this element itself matches the selector.
+/// Invalid selectors throw a JS `SyntaxError` like `querySelector`; `:hover`
+/// never matches (no pointer context).
+pub(super) fn native_matches(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let selector = parse_query_selector(args, context)?;
+    let node_id = this_node_id(this, context)?;
+    let matched = with_state()
+        .map(|rc| selector_chain_matches(&rc.borrow().arena, node_id, &selector))
+        .unwrap_or(false);
+    Ok(JsValue::from(matched))
+}
+
+/// `element.closest(sel)` — the nearest ancestor-or-self matching the
+/// selector, or `null`. The walk is the DOM ancestor chain; a removed
+/// (stale) node simply finds nothing.
+pub(super) fn native_closest(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let selector = parse_query_selector(args, context)?;
+    let node_id = this_node_id(this, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::null());
+    };
+    let st = rc.borrow();
+    let mut cur = Some(node_id);
+    while let Some(id) = cur {
+        if selector_chain_matches(&st.arena, id, &selector) {
+            drop(st);
+            return node_wrapper(context, id);
+        }
+        cur = st.arena.get(id).and_then(|n| n.parent);
+    }
+    Ok(JsValue::null())
+}
+
+// ============================================================
+// Element-sibling accessors (Element / CharacterData mixin)
+// ============================================================
+
+/// The nearest sibling of `node_id` on `side` (before or after it in the
+/// parent's child list) that is an element node, ignoring text and comment
+/// siblings. `None` when detached or when every sibling on that side is
+/// non-element.
+fn adjacent_element_sibling(arena: &NodeArena, node_id: NodeId, after: bool) -> Option<NodeId> {
+    let parent_id = arena.get(node_id)?.parent?;
+    let children = &arena[parent_id].children;
+    let pos = children.iter().position(|&c| c == node_id)?;
+    let range: Box<dyn Iterator<Item = &NodeId>> = if after {
+        Box::new(children[pos + 1..].iter())
+    } else {
+        Box::new(children[..pos].iter().rev())
+    };
+    range
+        .copied()
+        .find(|&c| arena.get(c).is_some_and(|n| n.node_type_constant() == 1))
+}
+
+pub(super) fn native_get_prev_element_sibling(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let prev = with_state().and_then(|rc| {
+        let st = rc.borrow();
+        adjacent_element_sibling(&st.arena, node_id, false)
+    });
+    match prev {
+        Some(id) => node_wrapper(context, id),
+        None => Ok(JsValue::null()),
+    }
+}
+
+pub(super) fn native_get_next_element_sibling(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let next = with_state().and_then(|rc| {
+        let st = rc.borrow();
+        adjacent_element_sibling(&st.arena, node_id, true)
+    });
+    match next {
+        Some(id) => node_wrapper(context, id),
+        None => Ok(JsValue::null()),
+    }
+}
