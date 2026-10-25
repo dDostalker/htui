@@ -458,8 +458,9 @@ fn test_table_nth_child_even_stripes_td_bg() {
 }
 
 #[test]
-fn test_table_caption_silently_dropped() {
-    // <caption> is parsed but not rendered — its text must not appear.
+fn test_table_caption_renders_above_rows() {
+    // `<caption>` renders as a (centered) text block above the table rows —
+    // the CSS default `caption-side: top`.
     init();
     let html = "<table><caption>Hidden</caption><tr><td>Visible</td></tr></table>";
     let (root_id, arena) = setup(html, "");
@@ -470,8 +471,49 @@ fn test_table_caption_silently_dropped() {
     let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
     assert!(canvas.contains("Visible"), "td text should render");
     assert!(
-        !canvas.contains("Hidden"),
-        "caption text should not appear in render"
+        canvas.contains("Hidden"),
+        "caption text should render above the rows"
+    );
+    // The caption row sits above the first table row: its first glyph's
+    // canvas row is smaller than any cell text's row (the layout is a flat
+    // cell array, row = index / columns).
+    let row_of = |needle: &str| -> usize {
+        tl.layout
+            .iter()
+            .enumerate()
+            .find(|(_, b)| b.word == needle)
+            .map(|(idx, _)| idx / COLS as usize)
+            .unwrap_or(usize::MAX)
+    };
+    let caption_row = row_of("H");
+    let cell_row = row_of("V");
+    assert!(caption_row < cell_row, "caption paints above the first row");
+}
+
+#[test]
+fn test_table_caption_side_bottom_moves_below_rows() {
+    init();
+    let (root_id, arena) = setup(
+        "<table><caption>Tail</caption><tr><td>Cell</td></tr></table>",
+        "table { caption-side: bottom; }",
+    );
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let row_of = |needle: &str| -> usize {
+        tl.layout
+            .iter()
+            .enumerate()
+            .find(|(_, b)| b.word == needle)
+            .map(|(idx, _)| idx / COLS as usize)
+            .unwrap_or(usize::MAX)
+    };
+    let caption_row = row_of("T");
+    let cell_row = row_of("C");
+    assert!(
+        caption_row > cell_row,
+        "caption-side: bottom paints the caption below the rows"
     );
 }
 
