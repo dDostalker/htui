@@ -123,11 +123,7 @@ fn walk_runs(
         // leak into the parent's runs as plain text while its block-level
         // grid sibling's content vanishes entirely. Both variants fall back
         // to the same "skipped box" behaviour.
-        if child
-            .css_attr
-            .display()
-            .is_some_and(|d| d.is_grid())
-        {
+        if child.css_attr.display().is_some_and(|d| d.is_grid()) {
             continue;
         }
         // A block-level child is dispatched as its own `LayoutBox` by the
@@ -135,11 +131,7 @@ fn walk_runs(
         // double-render it (the documented contract of `collect_runs`).
         // `<a>` has always enforced this; the same rule now covers every
         // inline tag the author blockified (`<em style="display:block">`).
-        if child
-            .css_attr
-            .display()
-            .is_some_and(|d| d.is_block_level())
-        {
+        if child.css_attr.display().is_some_and(|d| d.is_block_level()) {
             continue;
         }
         match &child.node_type {
@@ -178,7 +170,15 @@ fn walk_runs(
                     owner,
                 ));
                 walk_inline_children(
-                    arena, child_id, child, q_fg, q_bg, q_style, white_space, owner, runs,
+                    arena,
+                    child_id,
+                    child,
+                    q_fg,
+                    q_bg,
+                    q_style,
+                    white_space,
+                    owner,
+                    runs,
                 );
                 runs.push(InlineRun::owned(
                     close.to_string(),
@@ -203,7 +203,15 @@ fn walk_runs(
                     a_style |= FontStyle::UNDERLINED;
                 }
                 walk_inline_children(
-                    arena, child_id, child, a_fg, a_bg, a_style, white_space, owner, runs,
+                    arena,
+                    child_id,
+                    child,
+                    a_fg,
+                    a_bg,
+                    a_style,
+                    white_space,
+                    owner,
+                    runs,
                 );
             }
             // Every remaining inline container (`<span>` / `<a>` / `<em>` /
@@ -245,7 +253,14 @@ fn walk_runs(
                     owner
                 };
                 walk_inline_children(
-                    arena, child_id, child, child_fg, child_bg, child_style, white_space, owner,
+                    arena,
+                    child_id,
+                    child,
+                    child_fg,
+                    child_bg,
+                    child_style,
+                    white_space,
+                    owner,
                     runs,
                 );
             }

@@ -126,7 +126,11 @@ impl OpenSelect {
     /// Returns `false` when the select no longer produces a box (the
     /// document was replaced or the field is hidden) — the caller must drop
     /// the overlay instead of painting it into nowhere.
-    pub(super) fn reanchor(&mut self, arena: &NodeArena, boxes: &[crate::layout::LayoutBox]) -> bool {
+    pub(super) fn reanchor(
+        &mut self,
+        arena: &NodeArena,
+        boxes: &[crate::layout::LayoutBox],
+    ) -> bool {
         let Some(select_rect) = find_box_rect(boxes, self.node_id) else {
             return false;
         };
