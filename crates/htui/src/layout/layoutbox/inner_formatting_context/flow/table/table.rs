@@ -1,11 +1,12 @@
 //! Layout the `<table>` element itself.
 
 use crate::{
-    layout::{BoxConstraint, Cursor, LayoutBox, LayoutContext, PaintStyle, Rect},
+    layout::{BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext, PaintStyle, Rect},
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
 };
+use std::collections::HashMap;
 
-use super::cell::{CellInfo, cell_required_height, layout_cell};
+use super::cell::{CellInfo, layout_cell, measure_cell};
 use super::measure::{collect_cells, collect_rows, compute_column_widths};
 
 /// Build a [`LayoutBox`] for a `<table>` element.
@@ -77,14 +78,25 @@ pub fn layout_table(
     // Each row is as tall as its tallest cell. Column widths are already
     // clamped to the available width, so at narrow terminal widths a
     // cell's text wraps to several lines and the row must grow to keep
-    // those lines above the table's bottom border.
+    // those lines above the table's bottom border. The measurement also
+    // produces each cell's wrapped runs, which `layout_cell` reuses — the
+    // collect + wrap pipeline runs exactly once per cell per layout pass.
+    let mut cell_runs: HashMap<NodeId, Vec<Vec<InlineRun>>> = HashMap::new();
     let row_heights: Vec<usize> = row_cells
         .iter()
         .map(|row| {
             row.iter()
                 .enumerate()
                 .map(|(col_idx, cell)| {
-                    cell_required_height(arena, cell.node_id, column_widths[col_idx], child_context)
+                    let (height, runs) = measure_cell(
+                        arena,
+                        cell.node_id,
+                        column_widths[col_idx],
+                        cell.is_header,
+                        child_context,
+                    );
+                    cell_runs.insert(cell.node_id, runs);
+                    height
                 })
                 .max()
                 .unwrap_or(1)
@@ -102,12 +114,14 @@ pub fn layout_table(
         for (col_idx, cell) in row.iter().enumerate() {
             let col_w = column_widths[col_idx];
             let cell_rect = Rect::new(current_x, current_y, col_w, row_height);
+            let wrapped_lines = cell_runs.remove(&cell.node_id).unwrap_or_default();
             let cell_box = layout_cell(
                 arena,
                 cell.node_id,
                 cell_rect,
                 cell.is_header,
                 child_context,
+                wrapped_lines,
             );
             table_children.push(cell_box);
             current_x = current_x.saturating_add(col_w);
