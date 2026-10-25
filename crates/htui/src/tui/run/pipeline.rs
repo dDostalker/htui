@@ -248,9 +248,29 @@ impl RenderState {
             let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
             tl.apply_text_selection(&lines, SELECTION_BG);
         }
-        // Re-apply an open dropdown overlay (a repaint would clear it).
-        if let Some(open) = &self.open_select {
-            apply_select_overlay(tl, open);
+        // Re-apply an open dropdown overlay (a repaint would clear it). The
+        // overlay re-anchors against the FRESH geometry first: this pass may
+        // have re-laid-out the document (moved the field, changed the option
+        // list), and painting the rect cached at open time would float the
+        // dropdown at a stale position. A field that no longer produces a box
+        // (document replaced / hidden) closes the overlay instead of painting
+        // it into nowhere.
+        let overlay_alive = match self.open_select.as_mut() {
+            Some(open) => {
+                let alive = open.reanchor(&geo.arena, &geo.boxes);
+                if !alive {
+                    self.open_select = None;
+                }
+                alive
+            }
+            None => false,
+        };
+        if overlay_alive {
+            if let Some(open) = &self.open_select {
+                apply_select_overlay(tl, open);
+            }
+        } else {
+            tl.open_select = None;
         }
 
         // The incremental renderer emits only the changed cells (and a
@@ -446,7 +466,12 @@ impl RenderState {
             let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
             tl.apply_text_selection(&lines, SELECTION_BG);
         }
-        if let Some(open) = &self.open_select {
+        // The dropdown re-anchors first: the re-pin above may have moved a
+        // fixed / sticky field the overlay hangs from, so the cached rect
+        // would float.
+        if let Some(open) = self.open_select.as_mut()
+            && open.reanchor(&fresh.arena, &fresh.boxes)
+        {
             apply_select_overlay(tl, open);
         }
     }
