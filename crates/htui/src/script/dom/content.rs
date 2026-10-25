@@ -1,11 +1,16 @@
 //! Content natives: `value` / `textContent` / `innerHTML` / `nodeValue` /
-//! `data` accessors and their shared write paths.
+//! `data` accessors and their shared write paths, plus the CharacterData
+//! methods (`substringData` / `appendData` / `insertData` / `deleteData` /
+//! `replaceData`, `length` and `Text.splitText`).
 
-use boa_engine::{Context, JsResult, JsValue, js_string};
+use boa_engine::{Context, JsNativeError, JsResult, JsValue, js_string};
 
 use crate::tdom::node::{Node, NodeId, NodeType};
 
-use super::{ScriptState, collect_text, mark_dirty, this_node_id, with_state, wrapper_is_cached};
+use super::{
+    ScriptState, collect_text, mark_dirty, node_wrapper, this_node_id, with_state,
+    wrapper_is_cached,
+};
 
 /// `el.value` getter — the DOM `value` attribute (the field's committed
 /// content; the active edit buffer while focused is engine-side state).
@@ -395,4 +400,239 @@ pub(super) fn native_set_data(
         mark_dirty(&mut st, node_id);
     }
     Ok(JsValue::undefined())
+}
+
+// ============================================================
+// CharacterData methods (substringData / insertData / …)
+// ============================================================
+
+/// Character-offset check shared by the CharacterData methods. Offsets count
+/// Unicode scalar values (chars) rather than UTF-16 code units — the natural
+/// unit for a char-grid renderer. `offset > length` is the DOM's
+/// IndexSizeError, surfaced as a JS `RangeError`.
+fn checked_char_offset(data: &str, offset: u32) -> JsResult<usize> {
+    let len = data.chars().count();
+    let offset = offset as usize;
+    if offset > len {
+        return Err(JsNativeError::range()
+            .with_message(format!(
+                "IndexSizeError: offset {offset} exceeds data length {len}"
+            ))
+            .into());
+    }
+    Ok(offset)
+}
+
+/// Replace `count` characters starting at `offset` with `insert` (the shared
+/// core of insert / append / delete / replace: an empty `insert` deletes and
+/// a zero `count` inserts).
+fn replace_char_range(data: &str, offset: usize, count: u32, insert: &str) -> String {
+    let mut chars: Vec<char> = data.chars().collect();
+    let end = (offset + count as usize).min(chars.len());
+    chars.splice(offset..end, insert.chars());
+    chars.into_iter().collect()
+}
+
+/// Unsigned-argument read with the DOM's `unsigned long` conversion (negative
+/// input wraps modulo 2³², matching browser behavior for e.g.
+/// `substringData(-1, 1)`).
+fn uint_arg(args: &[JsValue], index: usize, context: &mut Context) -> JsResult<u32> {
+    match args.get(index) {
+        Some(v) => v.to_u32(context),
+        None => Ok(0),
+    }
+}
+
+/// String-argument read (missing argument is the empty string, matching the
+/// loose call style the other content natives tolerate).
+fn string_arg(args: &[JsValue], index: usize, context: &mut Context) -> JsResult<String> {
+    match args.get(index) {
+        Some(v) => Ok(v.to_string(context)?.to_std_string_lossy()),
+        None => Ok(String::new()),
+    }
+}
+
+/// Read the `data` of a text-like node (empty for anything else).
+fn text_data(arena: &crate::tdom::node::NodeArena, node_id: NodeId) -> String {
+    arena
+        .get(node_id)
+        .and_then(|n| n.data.clone())
+        .unwrap_or_default()
+}
+
+/// Write back the `data` of a text-like node, short-circuiting when the value
+/// did not change (no dirty, no re-render — the same contract as the `data`
+/// setter).
+fn store_data(st: &mut ScriptState, node_id: NodeId, new: String) {
+    let Some(node) = st.arena.get_mut(node_id) else {
+        return;
+    };
+    let changed = node.data.as_deref() != Some(new.as_str());
+    node.data = Some(new);
+    if changed {
+        mark_dirty(st, node_id);
+    }
+}
+
+/// `CharacterData.substringData(offset, count)` — the `count` characters
+/// starting at `offset`.
+pub(super) fn native_substring_data(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let offset = uint_arg(args, 0, context)?;
+    let count = uint_arg(args, 1, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(js_string!().into());
+    };
+    let st = rc.borrow();
+    let data = text_data(&st.arena, node_id);
+    let offset = checked_char_offset(&data, offset)?;
+    Ok(js_string!(
+        data.chars()
+            .skip(offset)
+            .take(count as usize)
+            .collect::<String>()
+    )
+    .into())
+}
+
+/// `CharacterData.appendData(text)` — add `text` at the end of `data`.
+pub(super) fn native_append_data(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let text = string_arg(args, 0, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let mut st = rc.borrow_mut();
+    let data = text_data(&st.arena, node_id);
+    let new = format!("{data}{text}");
+    store_data(&mut st, node_id, new);
+    Ok(JsValue::undefined())
+}
+
+/// `CharacterData.insertData(offset, text)` — insert `text` at `offset`.
+pub(super) fn native_insert_data(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let offset = uint_arg(args, 0, context)?;
+    let text = string_arg(args, 1, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let mut st = rc.borrow_mut();
+    let data = text_data(&st.arena, node_id);
+    let offset = checked_char_offset(&data, offset)?;
+    let new = replace_char_range(&data, offset, 0, &text);
+    store_data(&mut st, node_id, new);
+    Ok(JsValue::undefined())
+}
+
+/// `CharacterData.deleteData(offset, count)` — remove `count` characters
+/// starting at `offset` (count clamps to the remaining length).
+pub(super) fn native_delete_data(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let offset = uint_arg(args, 0, context)?;
+    let count = uint_arg(args, 1, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let mut st = rc.borrow_mut();
+    let data = text_data(&st.arena, node_id);
+    let offset = checked_char_offset(&data, offset)?;
+    let new = replace_char_range(&data, offset, count, "");
+    store_data(&mut st, node_id, new);
+    Ok(JsValue::undefined())
+}
+
+/// `CharacterData.replaceData(offset, count, text)` — swap the `count`
+/// characters starting at `offset` for `text`.
+pub(super) fn native_replace_data(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let offset = uint_arg(args, 0, context)?;
+    let count = uint_arg(args, 1, context)?;
+    let text = string_arg(args, 2, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let mut st = rc.borrow_mut();
+    let data = text_data(&st.arena, node_id);
+    let offset = checked_char_offset(&data, offset)?;
+    let new = replace_char_range(&data, offset, count, &text);
+    store_data(&mut st, node_id, new);
+    Ok(JsValue::undefined())
+}
+
+/// `CharacterData.length` — the number of characters in `data` (the same
+/// char-counting contract as the CharacterData methods above).
+pub(super) fn native_get_data_length(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let len = with_state()
+        .map(|rc| {
+            let st = rc.borrow();
+            text_data(&st.arena, node_id).chars().count()
+        })
+        .unwrap_or(0);
+    Ok(JsValue::from(len as u32))
+}
+
+/// `Text.splitText(offset)` — split the node at `offset` characters: this
+/// node keeps the leading text and a fresh Text node holding the tail is
+/// inserted as the next sibling (detached when the node has no parent).
+/// Text nodes only — `Comment` has no `splitText` (browser behavior).
+pub(super) fn native_split_text(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let offset = uint_arg(args, 0, context)?;
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::null());
+    };
+    let mut st = rc.borrow_mut();
+    let data = text_data(&st.arena, node_id);
+    let offset = checked_char_offset(&data, offset)?;
+    let head: String = data.chars().take(offset).collect();
+    let tail: String = data.chars().skip(offset).collect();
+    let parent = st.arena.get(node_id).and_then(|n| n.parent);
+    store_data(&mut st, node_id, head);
+    let tail_id = st.arena.insert(Node::text(&tail));
+    if let Some(pid) = parent {
+        if let Some(pnode) = st.arena.get_mut(pid) {
+            let pos = pnode
+                .children
+                .iter()
+                .position(|&c| c == node_id)
+                .map_or(pnode.children.len(), |p| p + 1);
+            pnode.children.insert(pos, tail_id);
+        }
+        if let Some(t) = st.arena.get_mut(tail_id) {
+            t.parent = Some(pid);
+        }
+        mark_dirty(&mut st, pid);
+    }
+    drop(st);
+    node_wrapper(context, tail_id)
 }
