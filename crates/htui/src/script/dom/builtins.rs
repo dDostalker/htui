@@ -1,8 +1,10 @@
 //! Global builtin installation: the `document` / `console` objects, `alert`
-//! / `quit`, timers and `fetch`.
+//! / `quit`, timers, `queueMicrotask` and `fetch`.
 
 use boa_engine::{
-    Context, JsNativeError, JsResult, NativeFunction, js_string,
+    Context, JsNativeError, JsResult, JsValue, NativeFunction,
+    job::PromiseJob,
+    js_string,
     object::ObjectInitializer,
     property::{Attribute, PropertyDescriptorBuilder},
 };
@@ -159,5 +161,44 @@ pub(crate) fn install_builtins(context: &mut Context) -> JsResult<()> {
         1,
         NativeFunction::from_fn_ptr(native_fetch),
     )?;
+
+    // queueMicrotask (runs on the script thread's microtask queue — the same
+    // `run_jobs` pass that drains `.then` / `await` continuations)
+    context.register_global_builtin_callable(
+        js_string!("queueMicrotask"),
+        1,
+        NativeFunction::from_fn_ptr(native_queue_microtask),
+    )?;
     Ok(())
+}
+
+/// `queueMicrotask(callback)` — schedule `callback` on the engine's microtask
+/// queue. The job runs when the current script / event dispatch finishes,
+/// before the next timer or message (`ScriptEngine::run_jobs` drains it).
+/// Errors thrown by the callback surface as job errors, logged by the event
+/// loop like a failed `.then` handler.
+pub(super) fn native_queue_microtask(
+    _this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let Some(callback) = args.first().cloned() else {
+        return Err(JsNativeError::typ()
+            .with_message("queueMicrotask expects a function")
+            .into());
+    };
+    if !callback.is_callable() {
+        return Err(JsNativeError::typ()
+            .with_message("queueMicrotask expects a function")
+            .into());
+    }
+    // `PromiseJob` takes an `FnOnce` closure, so moving the callback in is
+    // safe without `unsafe` (the `Copy` bound only applies to reusable
+    // `NativeFunction` closures). Boa roots the captured function while the
+    // job sits in the queue — the same mechanism promise reactions use.
+    let callable = callback.as_object().expect("is_callable implies an object");
+    context.enqueue_job(
+        PromiseJob::new(move |ctx| callable.call(&JsValue::undefined(), &[], ctx)).into(),
+    );
+    Ok(JsValue::undefined())
 }

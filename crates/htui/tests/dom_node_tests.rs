@@ -413,3 +413,177 @@ fn style_camel_case_flex_and_order_props() {
     assert_eq!(eval_str(&mut e, "el.style.alignSelf"), "flex-end");
     assert!(eval_str(&mut e, "el.getAttribute('style')").contains("align-self: flex-end"));
 }
+
+#[test]
+fn child_node_mixin_remove_before_after_replace_with() {
+    let mut e = engine(
+        r#"<div id="list"><span id="a">a</span><span id="b">b</span><span id="c">c</span></div>"#,
+    );
+    // `remove()` detaches the node (no parent afterwards, siblings close in).
+    eval(&mut e, "document.getElementById('b').remove()");
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('list').textContent"),
+        "ac"
+    );
+    assert_eq!(
+        eval_str(&mut e, "String(document.getElementById('b').parentNode)"),
+        "null"
+    );
+    // Removing a detached node is a no-op.
+    eval(&mut e, "document.getElementById('b').remove()");
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('list').textContent"),
+        "ac"
+    );
+
+    // `before()` inserts before the node; a string argument becomes a Text
+    // node (browser conversion).
+    eval(&mut e, "var c = document.getElementById('c')");
+    eval(&mut e, "c.before('<x>')");
+    assert_eq!(
+        eval_str(&mut e, "c.previousSibling.nodeType"),
+        "3",
+        "string argument converted to a Text node"
+    );
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('list').textContent"),
+        "a<x>c"
+    );
+
+    // `after()` inserts after the node, argument order preserved.
+    eval(&mut e, "var a = document.getElementById('a')");
+    eval(&mut e, "a.after(document.createTextNode('1'), '2')");
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('list').textContent"),
+        "a12<x>c"
+    );
+
+    // `replaceWith()` swaps the node for its arguments in place.
+    eval(&mut e, "c.replaceWith('C', document.createElement('em'))");
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('list').textContent"),
+        "a12<x>C"
+    );
+    assert_eq!(
+        eval_str(&mut e, "String(document.getElementById('c') != null)"),
+        "true"
+    );
+    assert_eq!(
+        eval_str(&mut e, "String(document.getElementById('c').parentNode)"),
+        "null"
+    );
+
+    // A plain object argument is a TypeError (not a Node, not a string).
+    eval(&mut e, "globalThis.__err = ''");
+    eval(
+        &mut e,
+        "try { document.getElementById('a').after({}) } catch (x) { globalThis.__err = x.name }",
+    );
+    assert_eq!(eval_str(&mut e, "__err"), "TypeError");
+}
+
+#[test]
+fn parent_node_mixin_append_prepend() {
+    let mut e = engine(r#"<div id="host">old</div>"#);
+    eval(&mut e, "var host = document.getElementById('host')");
+    // `append()` at the end, mixed nodes and strings.
+    eval(&mut e, "host.append(' tail', document.createTextNode('!'))");
+    assert_eq!(eval_str(&mut e, "host.textContent"), "old tail!");
+    // `prepend()` at the start, argument order preserved.
+    eval(&mut e, "host.prepend('a', document.createElement('span'))");
+    assert_eq!(eval_str(&mut e, "host.textContent"), "aold tail!");
+    assert_eq!(
+        eval_str(&mut e, "host.firstChild.nodeType"),
+        "3",
+        "prepend's string argument landed first"
+    );
+    // `document` is a ParentNode too.
+    eval(
+        &mut e,
+        "document.append(document.createTextNode('doc-tail'))",
+    );
+    let arena = e.arena();
+    let root = e.root_id();
+    assert!(
+        arena[root]
+            .children
+            .iter()
+            .any(|&c| arena.get(c).map(|n| n.node_type) == Some(NodeType::Text)),
+        "document.append inserted a text node under the root"
+    );
+    // `appendChild(el)` returns the node; `append` returns undefined.
+    eval(&mut e, "globalThis.__ret = host.append('q')");
+    assert_eq!(eval_str(&mut e, "String(globalThis.__ret)"), "undefined");
+}
+
+#[test]
+fn character_data_methods() {
+    let mut e = engine(r#"<div id="d">hello world</div>"#);
+    eval(&mut e, "var t = document.getElementById('d').childNodes[0]");
+    assert_eq!(eval_str(&mut e, "t.length"), "11");
+    assert_eq!(eval_str(&mut e, "t.substringData(6, 5)"), "world");
+    assert_eq!(eval_str(&mut e, "t.substringData(6, 999)"), "world");
+    // appendData / insertData / deleteData / replaceData mutate in place.
+    eval(&mut e, "t.appendData('!')");
+    assert_eq!(eval_str(&mut e, "t.data"), "hello world!");
+    eval(&mut e, "t.insertData(5, ',')");
+    assert_eq!(eval_str(&mut e, "t.data"), "hello, world!");
+    eval(&mut e, "t.deleteData(0, 7)");
+    assert_eq!(eval_str(&mut e, "t.data"), "world!");
+    eval(&mut e, "t.replaceData(0, 5, 'bye')");
+    assert_eq!(eval_str(&mut e, "t.data"), "bye!");
+    // Out-of-range offset is an IndexSizeError (surfaced as RangeError).
+    eval(&mut e, "globalThis.__err = ''");
+    eval(
+        &mut e,
+        "try { t.substringData(99, 1) } catch (x) { globalThis.__err = x.name }",
+    );
+    assert_eq!(eval_str(&mut e, "__err"), "RangeError");
+}
+
+#[test]
+fn text_split_text() {
+    let mut e = engine(r#"<div id="d">hello world</div>"#);
+    eval(&mut e, "var t = document.getElementById('d').childNodes[0]");
+    eval(&mut e, "var tail = t.splitText(5)");
+    // The original keeps the head; the tail is a fresh Text sibling.
+    assert_eq!(eval_str(&mut e, "t.data"), "hello");
+    assert_eq!(eval_str(&mut e, "tail.data"), " world");
+    assert_eq!(eval_str(&mut e, "tail.nodeType"), "3");
+    assert_eq!(eval_str(&mut e, "String(t.nextSibling === tail)"), "true");
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('d').textContent"),
+        "hello world"
+    );
+    // Splitting a detached text node yields a detached tail (no crash).
+    eval(&mut e, "var loose = document.createTextNode('ab')");
+    eval(&mut e, "var lt = loose.splitText(1)");
+    assert_eq!(eval_str(&mut e, "lt.data"), "b");
+    assert_eq!(eval_str(&mut e, "String(lt.parentNode)"), "null");
+}
+
+#[test]
+fn queue_microtask_runs_after_script() {
+    let mut e = engine(r#"<div id="d">x</div>"#);
+    // The callback must not run synchronously — the flag flips only after
+    // the microtask queue drains (`poll_fetches` → `run_jobs`).
+    eval(&mut e, "globalThis.__ran = 'no'");
+    eval(
+        &mut e,
+        "queueMicrotask(function () { globalThis.__ran = 'yes'; document.getElementById('d').textContent = 'done' })",
+    );
+    assert_eq!(eval_str(&mut e, "__ran"), "no");
+    e.poll_fetches();
+    assert_eq!(eval_str(&mut e, "__ran"), "yes");
+    assert_eq!(
+        eval_str(&mut e, "document.getElementById('d').textContent"),
+        "done"
+    );
+    // Non-callable argument is a TypeError.
+    eval(&mut e, "globalThis.__err = ''");
+    eval(
+        &mut e,
+        "try { queueMicrotask(1) } catch (x) { globalThis.__err = x.name }",
+    );
+    assert_eq!(eval_str(&mut e, "__err"), "TypeError");
+}
