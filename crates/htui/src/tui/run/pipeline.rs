@@ -11,7 +11,8 @@ use indexmap::IndexMap;
 
 use crate::events::Geometry;
 use crate::html::css_parse::{
-    self, CssRule, PseudoClass, css_into_node_with_state, css_pseudo_rule_set, reset_css_attr,
+    self, CssRule, DynamicState, PseudoClass, css_into_node_with_state, css_pseudo_rule_set,
+    reset_css_attr,
 };
 use crate::layout::Rect;
 use crate::layout::layout::TermMap;
@@ -247,9 +248,29 @@ impl RenderState {
             let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
             tl.apply_text_selection(&lines, SELECTION_BG);
         }
-        // Re-apply an open dropdown overlay (a repaint would clear it).
-        if let Some(open) = &self.open_select {
-            apply_select_overlay(tl, open);
+        // Re-apply an open dropdown overlay (a repaint would clear it). The
+        // overlay re-anchors against the FRESH geometry first: this pass may
+        // have re-laid-out the document (moved the field, changed the option
+        // list), and painting the rect cached at open time would float the
+        // dropdown at a stale position. A field that no longer produces a box
+        // (document replaced / hidden) closes the overlay instead of painting
+        // it into nowhere.
+        let overlay_alive = match self.open_select.as_mut() {
+            Some(open) => {
+                let alive = open.reanchor(&geo.arena, &geo.boxes);
+                if !alive {
+                    self.open_select = None;
+                }
+                alive
+            }
+            None => false,
+        };
+        if overlay_alive {
+            if let Some(open) = &self.open_select {
+                apply_select_overlay(tl, open);
+            }
+        } else {
+            tl.open_select = None;
         }
 
         // The incremental renderer emits only the changed cells (and a
@@ -353,6 +374,14 @@ impl RenderState {
         let Some(geo) = self.geometry.as_ref() else {
             return;
         };
+        // The hovered / focused id may be stale: the element it names can be
+        // removed by JS between the hit map's snapshot and this repaint (the
+        // music-demo quick-click race). Filter both against the cached
+        // arena — a stale id restyles nothing, and the ancestor-chain walk
+        // below must never see a key the arena does not hold.
+        let in_geo = |id: Option<NodeId>| id.filter(|id| geo.arena.contains_key(*id));
+        let prev = in_geo(prev);
+        let new = in_geo(new);
         let mut arena = geo.arena.clone();
         reset_css_attr(&mut arena, geo.root_id);
         css_into_node_with_state(&mut arena, geo.root_id, &self.css_rules, &self.dynamic);
@@ -445,7 +474,12 @@ impl RenderState {
             let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
             tl.apply_text_selection(&lines, SELECTION_BG);
         }
-        if let Some(open) = &self.open_select {
+        // The dropdown re-anchors first: the re-pin above may have moved a
+        // fixed / sticky field the overlay hangs from, so the cached rect
+        // would float.
+        if let Some(open) = self.open_select.as_mut()
+            && open.reanchor(&fresh.arena, &fresh.boxes)
+        {
             apply_select_overlay(tl, open);
         }
     }
@@ -471,6 +505,16 @@ impl RenderState {
         self.html = html;
         // A fresh document discards any `innerHTML`-injected CSS.
         self.extra_css = String::new();
+        // The old document's interaction state is meaningless here: its
+        // selection / open dropdown / hover / focus node ids belong to the
+        // replaced arena, and carrying them over would re-apply stale
+        // overlays (or style wrong nodes) on the fresh document.
+        self.text_selection = None;
+        self.open_select = None;
+        self.dynamic = DynamicState::default();
+        if let Ok(mut guard) = self.selection_text.lock() {
+            guard.clear();
+        }
         let rules = parse_css_source(&self.base_css);
         self.pseudo_rules = css_pseudo_rule_set(&rules);
         self.css_rules = Arc::new(rules);

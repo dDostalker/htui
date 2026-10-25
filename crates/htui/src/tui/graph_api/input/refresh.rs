@@ -5,7 +5,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseButton, MouseEve
 use crate::events::HitMap;
 use crate::layout::layoutbox::geometry::select_item_indices;
 use crate::script::ScriptMsg;
-use crate::tdom::node::NodeArena;
+use crate::tdom::node::{NodeArena, NodeId};
 
 use super::InputState;
 use super::cmd::RenderCmd;
@@ -14,8 +14,8 @@ use super::edit::{
     is_input_field_key, paste_into_field,
 };
 use super::field::{
-    KeyGate, apply_textarea_key, focused_form, is_number_input, is_readonly_input,
-    number_input_allows_char, textarea_content_width,
+    KeyGate, apply_textarea_key, focused_form, is_disabled_control, is_number_input,
+    is_readonly_input, number_input_allows_char, textarea_content_width,
 };
 use super::focus::{blur_input, push_input_render};
 use super::key_info::key_event_info;
@@ -23,6 +23,15 @@ use super::mouse::{canvas_pos, handle_mouse_down, handle_mouse_move, handle_mous
 use super::page::page_level_builtins;
 use super::select::{OverlayKind, close_select, refresh_datalist};
 use super::{SCROLL_LINES_PER_TICK, reapply_console_modes};
+
+/// Whether keystrokes must not mutate the focused field: it is readonly, or
+/// it is disabled. A disabled control can never legitimately hold keyboard
+/// focus (mouse presses and `Tab` cycling both skip it); if JS `el.focus()`
+/// targeted one anyway, navigation keys keep working but nothing mutates —
+/// the same posture a readonly field takes.
+fn is_edit_blocked(arena: Option<&NodeArena>, node_id: NodeId) -> bool {
+    is_readonly_input(arena, node_id) || is_disabled_control(arena, node_id)
+}
 
 /// Wait for the next input event and translate it into render commands.
 ///
@@ -227,7 +236,7 @@ pub fn trigger_refresh(
                     )
                 {
                     let mut code = key.code;
-                    if is_readonly_input(arena, focused)
+                    if is_edit_blocked(arena, focused)
                         && matches!(code, KeyCode::Backspace | KeyCode::Delete)
                     {
                         code = KeyCode::Null;
@@ -254,7 +263,7 @@ pub fn trigger_refresh(
                 // drops cut / paste.
                 if key.modifiers.contains(event::KeyModifiers::CONTROL) {
                     let mut code = key.code;
-                    if is_readonly_input(arena, focused)
+                    if is_edit_blocked(arena, focused)
                         && matches!(code, KeyCode::Char('x') | KeyCode::Char('v'))
                     {
                         code = KeyCode::Null;
@@ -315,7 +324,7 @@ pub fn trigger_refresh(
                     }
                     // A readonly field keeps caret navigation but rejects the
                     // editing keys (insert / delete) — its value is fixed.
-                    if is_readonly_input(arena, focused)
+                    if is_edit_blocked(arena, focused)
                         && matches!(
                             code,
                             KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete
@@ -509,7 +518,7 @@ pub fn trigger_refresh(
             // field is focused (the terminal already showed the pasted text)
             // or the field is readonly.
             if let Some(focused) = state.focused_input
-                && !is_readonly_input(arena, focused)
+                && !is_edit_blocked(arena, focused)
                 && paste_into_field(state, &pasted, focused, &mut cmds)
                 && arena.is_some()
             {

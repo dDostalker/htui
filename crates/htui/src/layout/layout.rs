@@ -248,18 +248,26 @@ impl TermLayout {
 
     /// Blank every cell inside `region` (the incremental-repaint analogue of
     /// [`reset_canvas`](Self::reset_canvas), scoped to one rectangle).
+    ///
+    /// The x range is clamped to the canvas width: a region rect derived from
+    /// a box wider than the terminal (a flex overflow, a positioned child off
+    /// the right edge) would otherwise wrap its x offsets into the following
+    /// rows of the flat buffer and blank cells the paint pass never rewrites
+    /// (they sit outside the region), leaving visible holes until the next
+    /// full repaint.
     fn clear_region(&mut self, region: Rect) {
         let cols = self.columns as usize;
         let max = self.layout.len();
-        let x_end = region.x.saturating_add(region.width);
+        let x_start = region.x.min(cols);
+        let x_end = region.x.saturating_add(region.width).min(cols);
         let y_end = region.y.saturating_add(region.height);
         for y in region.y..y_end {
             let row_start = y.saturating_mul(cols);
             if row_start >= max {
                 break;
             }
-            for x in region.x..x_end {
-                let idx = row_start.saturating_add(x);
+            for x in x_start..x_end {
+                let idx = row_start + x;
                 if idx >= max {
                     break;
                 }

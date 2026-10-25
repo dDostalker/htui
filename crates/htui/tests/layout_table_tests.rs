@@ -138,6 +138,113 @@ fn test_table_th_text_marks_bold() {
 }
 
 #[test]
+fn test_table_th_ua_defaults_bold_and_centered() {
+    init();
+    // Browser UA stylesheet: `th { font-weight: bold; text-align: center }`.
+    // Both defaults resolve from the shared UA declaration table and yield to
+    // author declarations — the cell used to render identical to `<td>`, so
+    // a header did not look like one.
+    let html = "<table><tr><th>Hdr</th></tr><tr><td>D</td></tr></table>";
+    let (root_id, arena) = setup(html, "");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let bold_letters: String = tl
+        .layout
+        .iter()
+        .filter(|b| b.style.contains(htui::tui::graph_api::FontStyle::BOLD))
+        .map(|b| b.word.as_str())
+        .collect();
+    for ch in "Hdr".chars() {
+        assert!(
+            bold_letters.contains(ch),
+            "the UA default must bold the header text; got {bold_letters:?}"
+        );
+    }
+    // Data cells carry no UA bold default.
+    assert!(
+        !bold_letters.contains('D'),
+        "data cells must not pick up the header default; got {bold_letters:?}"
+    );
+}
+
+#[test]
+fn test_table_th_ua_center_yields_to_author_left() {
+    init();
+    // The UA `text-align: center` is a cascade default: an author
+    // `text-align: left` wins, like any other UA-vs-author rule.
+    let (root_id, arena) = setup(
+        "<table><tr><th>ab</th></tr></table>",
+        "th { width: 20ch; text-align: left; }",
+    );
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let cols = term_map.columns as usize;
+    let a_col = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "a")
+        .expect("'a' must render");
+    assert_eq!(
+        a_col % cols,
+        0,
+        "author left alignment must beat the UA center (cell content starts at column 0)"
+    );
+
+    // Control: without the author rule the same header centres.
+    let (root2, arena2) = setup("<table><tr><th>ab</th></tr></table>", "th { width: 20ch; }");
+    let mut tl2 = TermLayout::new(&term_map, 1.0);
+    tl2.draw(&arena2, root2, &term_map);
+    let a2 = tl2
+        .layout
+        .iter()
+        .position(|b| b.word == "a")
+        .expect("'a' must render");
+    assert_ne!(a2 % cols, 0, "the UA default must centre the header");
+}
+
+#[test]
+fn test_table_td_block_child_feeds_row_height() {
+    init();
+    // A block child inside a `<td>` claims its own rows: the row must grow
+    // to the child's laid-out height, or the child paints over the next
+    // table row. The child (a `width: 4ch` div of ten CJK glyphs, 2 cells
+    // each) wraps to five rows at its own width, while the cell's direct
+    // inline runs fit on one.
+    let html = "<table><tr><td><div style=\"width: 4ch\">一二三四五六七八九十</div></td></tr>\
+                <tr><td>NEXT</td></tr></table>";
+    let (root_id, arena) = setup(html, "");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let cols = term_map.columns as usize;
+    // The invariant under test: the second table row starts BELOW the block
+    // child's last wrapped line, wherever the `ch` unit resolution puts it.
+    let last_child_row = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "十")
+        .expect("the block child's last glyph must render")
+        / cols;
+    let next_row = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "N")
+        .expect("'NEXT' must render")
+        / cols;
+    assert!(
+        next_row > last_child_row,
+        "the second row must start below the wrapped block child (last glyph on \
+         row {last_child_row}), got NEXT on row {next_row} — the child's height \
+         must feed the row height"
+    );
+}
+
+#[test]
 fn test_table_cells_align_in_columns() {
     // Two rows of two cells should align: each row's cell 1 sits on the same
     // starting column, and cell 2's column is shared too.
@@ -564,5 +671,47 @@ fn test_table_outside_table_falls_back_to_block() {
     assert!(
         canvas.contains("stray"),
         "stray <td> text should still render via fallback block"
+    );
+}
+
+#[test]
+fn scaled_columns_never_collapse_to_zero_width() {
+    init();
+    // When one dominant column drives the total far past the available
+    // width, the narrow columns' proportional share used to round down to 0
+    // — a zero-width column is skipped by the paint phase and its content
+    // vanished silently. Every scaled column keeps a 1-cell floor, so each
+    // narrow column still shows at least its first character.
+    let long_word = "0123456789".repeat(33); // 330 chars
+    let html = format!("<table><tr><td>a1</td><td>b2</td><td>{long_word}</td></tr></table>");
+    let (root_id, arena) = setup(&html, "");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
+    assert!(
+        canvas.contains('a') && canvas.contains('b'),
+        "the narrow columns must keep at least one visible cell after scaling: {canvas:?}"
+    );
+}
+
+#[test]
+fn cell_column_width_counts_inline_descendant_text() {
+    init();
+    // A `<td><b>…</b></td>` cell's column must size to the bold text: the
+    // inline descendants' text folds into the cell's own runs at layout
+    // time, so the column width must count it too — the old direct-text-only
+    // measurement reported 0 and the column collapsed to the 3-cell minimum,
+    // wrapping the content over many rows.
+    let html = "<table><tr><td><b>tenchars!!</b></td><td>x</td></tr></table>";
+    let (root_id, arena) = setup(html, "");
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let row0: String = tl.layout[..80].iter().map(|b| b.word.as_str()).collect();
+    assert!(
+        row0.contains("tenchars!!"),
+        "the bold cell's text must fit on one row (column sized to the inline \
+         descendant's text, not the 3-cell minimum): {row0:?}"
     );
 }

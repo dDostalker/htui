@@ -386,7 +386,7 @@ impl NodeType {
         }
     }
 
-    /// Browser user-agent declarations for inline text-level elements.
+    /// Browser user-agent declarations for styled elements.
     ///
     /// Returns the CSS `(property, value)` pairs the UA stylesheet applies when
     /// neither an author rule nor an inherited value has set the property. The
@@ -394,7 +394,8 @@ impl NodeType {
     ///
     /// `<abbr>`'s underline additionally depends on a `title` attribute and is
     /// handled by the caller; `<q>`'s generated quotes are not CSS declarations
-    /// and are handled by the layout code.
+    /// and are handled by the layout code. Despite the name, the table also
+    /// carries `<th>`'s UA defaults (bold + centred) for the table-cell path.
     pub fn inline_ua_declarations(&self) -> &'static [(&'static str, &'static str)] {
         match self {
             NodeType::Em | NodeType::I | NodeType::Cite | NodeType::Dfn | NodeType::Var => {
@@ -405,6 +406,8 @@ impl NodeType {
             NodeType::S | NodeType::Del => &[("text-decoration", "line-through")],
             NodeType::Mark => &[("color", "black"), ("background-color", "yellow")],
             NodeType::A => &[("color", "blue"), ("text-decoration", "underline")],
+            // Browser UA stylesheet: `th { font-weight: bold; text-align: center }`.
+            NodeType::Th => &[("font-weight", "bold"), ("text-align", "center")],
             _ => &[],
         }
     }

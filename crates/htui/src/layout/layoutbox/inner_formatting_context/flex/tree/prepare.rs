@@ -4,19 +4,17 @@
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    graphics::{FontStyle, char_width, grapheme_width},
+    graphics::{char_width, grapheme_width},
     html::css_parse::{
         AlignItems, AlignSelf, CssDisplay, FlexDirection, Length, LengthContext, WhiteSpace,
     },
     layout::{
         InlineRun, LayoutContext,
-        layoutbox::collect_runs,
         layoutbox::generation::{GeneratedBoxKind, generate_node},
         layoutbox::geometry::select_options,
+        layoutbox::inline_tree_has_forced_break,
     },
-    tdom::node::{
-        NodeArena, NodeId, NodeType, effective_font_size_cells, is_collapsible_whitespace,
-    },
+    tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
 };
 
 use super::container::{AnonymousTextItem, FLEX_ITEM_MIN_CROSS, FlexItemPrep, FlexItemSource};
@@ -25,9 +23,11 @@ use super::container::{AnonymousTextItem, FLEX_ITEM_MIN_CROSS, FlexItemPrep, Fle
 /// read `flex-grow` / `flex-shrink` / `align-self` / `order`, and capture
 /// the resolved main-axis size.
 ///
-/// `containing_main` is the definite containing main-axis size (row: the
-/// container's content width; column: its definite content height, or the
-/// `usize::MAX` sentinel when the column's main size is indefinite).
+/// `containing_main` is the flex container's content width — the axis
+/// percentage margins / paddings resolve against (CSS resolves percentage
+/// margins and paddings against the containing block's *inline size* in both
+/// directions), as well as the row-direction main-axis percentages and the
+/// column-direction cross-size percentages.
 /// `containing_height` is the container's definite content *height* — the
 /// axis percentage heights resolve against — or `None` when indefinite.
 pub(super) fn prepare_flex_item(
@@ -41,7 +41,11 @@ pub(super) fn prepare_flex_item(
 ) -> FlexItemPrep {
     let node = &arena[item_id];
     let css = &node.css_attr;
-    let natural = natural_intrinsic_size(arena, item_id, context);
+    // The item's containing block (the flex container) has a definite inline
+    // size here, so percentage margins / paddings resolve against it even in
+    // the intrinsic measurement (CSS Flexbox §9.9.1: the container's main
+    // size is definite for base-size calculation).
+    let natural = natural_intrinsic_size(arena, item_id, context, Some(containing_main));
     // Percentage bases resolve against the axis they are declared on: the
     // main axis — definite width for rows, definite height (when known) for
     // columns.
@@ -132,7 +136,11 @@ pub(super) fn prepare_flex_item(
     } else {
         (font - 1) / 2
     };
-    let edges = css.get_box_edges(usize::MAX, context.font, context.viewport);
+    // Percentage margins / paddings resolve against the container's content
+    // width (CSS inline-size axis, both directions) — resolving them against
+    // the `usize::MAX` sentinel used to turn `margin: 5%` into ~9.2e17 cells
+    // and blow up the whole line layout.
+    let edges = css.get_box_edges(containing_main, context.font, context.viewport);
     let margin = edges.margin;
     // Flex-item margins are clamped to 0 when negative: the item-sizing /
     // line-placement algorithm keeps its non-negative space model, so a
@@ -380,6 +388,12 @@ fn intrinsic_len(raw: Option<&str>, context: LayoutContext) -> Option<usize> {
 /// [`crate::html::css_parse::properties::CssAttr::get_box_edges`] is
 /// applied in the layout functions.
 ///
+/// `containing_width` is the measured node's own containing-block width when
+/// it is definite (`Some` — the direct flex-item case, where the container's
+/// content width drives percentage margins / paddings) and `None` for the
+/// recursive descent (a nested node's containing block is indefinite during
+/// pre-layout measurement, so percentage edges contribute 0).
+///
 /// Behaviour:
 ///
 /// - For a non-flex block leaf, falls back to the existing logic: an
@@ -394,6 +408,7 @@ fn natural_intrinsic_size(
     arena: &NodeArena,
     node_id: NodeId,
     context: LayoutContext,
+    containing_width: Option<usize>,
 ) -> NaturalIntrinsicSize {
     let node = &arena[node_id];
     let css = &node.css_attr;
@@ -414,7 +429,9 @@ fn natural_intrinsic_size(
         let is_toggle = node
             .get_type()
             .is_some_and(|t| matches!(t.to_ascii_lowercase().as_str(), "checkbox" | "radio"));
-        let edges = css.get_box_edges(usize::MAX, child_context.font, child_context.viewport);
+        // Only border thicknesses are read here and `border-width` cannot be a
+        // percentage, so the containing width is irrelevant — 0 is exact.
+        let edges = css.get_box_edges(0, child_context.font, child_context.viewport);
         let (border_h, border_v) = if is_toggle {
             (0, 0)
         } else {
@@ -439,7 +456,7 @@ fn natural_intrinsic_size(
             .map(|opt| opt.label.chars().map(char_width).sum::<usize>())
             .max()
             .unwrap_or(0);
-        let edges = css.get_box_edges(usize::MAX, child_context.font, child_context.viewport);
+        let edges = css.get_box_edges(0, child_context.font, child_context.viewport);
         let w = node
             .get_width()
             .map(|w| w as usize)
@@ -454,13 +471,17 @@ fn natural_intrinsic_size(
         };
     }
 
-    // We pass `usize::MAX` as the containing width so percentage-based
-    // edges resolve to their full length. We only read padding /
-    // border thicknesses, which are unaffected by the containing width
-    // for non-percentage values, and at worst become the maximum for
-    // percentage-based values — a safe upper bound for an intrinsic
-    // measurement.
-    let edges = css.get_box_edges(usize::MAX, child_context.font, child_context.viewport);
+    // Intrinsic measurement resolves percentage margins / paddings against
+    // the containing-block width when it is definite (the direct flex-item
+    // case) and to 0 when it is indefinite (the recursive descent — CSS
+    // resolves a cyclic percentage to zero). The old `usize::MAX` "safe
+    // upper bound" instead inflated the basis by billions of cells.
+    // Non-percentage edges are unaffected by the containing width.
+    let edges = css.get_box_edges(
+        containing_width.unwrap_or(0),
+        child_context.font,
+        child_context.viewport,
+    );
 
     let generated = generate_node(arena, node_id);
     let is_flex_box = generated
@@ -481,7 +502,9 @@ fn natural_intrinsic_size(
                 continue;
             };
             if child_generated.kind == GeneratedBoxKind::Normal {
-                child_sizes.push(natural_intrinsic_size(arena, child_id, child_context));
+                // A nested node's containing block is indefinite during the
+                // measurement: percentage edges contribute 0.
+                child_sizes.push(natural_intrinsic_size(arena, child_id, child_context, None));
             }
         }
 
@@ -566,7 +589,7 @@ fn natural_intrinsic_size(
             let is_block =
                 child_gen.kind == GeneratedBoxKind::Normal && !child_gen.outer_display.is_inline();
             if is_block {
-                let cs = natural_intrinsic_size(arena, child_id, child_context);
+                let cs = natural_intrinsic_size(arena, child_id, child_context, None);
                 content_w = content_w.max(cs.width);
                 content_h = content_h.saturating_add(cs.height);
             }
@@ -578,11 +601,12 @@ fn natural_intrinsic_size(
         content_w = content_w.max(text_w);
         // Inline content adds one intrinsic row, but a run made purely of
         // collapsible whitespace must not (it collapses away at a line edge).
-        // NBSP is intentionally *not* collapsible, so it still counts.
-        let has_inline = collect_runs(arena, node_id, node, None, None, FontStyle::empty())
-            .iter()
-            .any(|r| r.force_break || r.text.chars().any(|c| !is_collapsible_whitespace(c)))
-            || text_w > 0;
+        // NBSP is intentionally *not* collapsible, so it still counts — and
+        // it is painted, so it already made `text_w > 0`. With `text_w == 0`
+        // the subtree has no painted text at all, so the only thing that can
+        // still force a row is a `<br>`: a cheap boolean scan replaces
+        // building the full run list here.
+        let has_inline = text_w > 0 || inline_tree_has_forced_break(arena, node_id);
         if has_inline {
             // Intrinsic (max-content) measurement does not wrap, so a
             // single line of inline content contributes one row scaled by

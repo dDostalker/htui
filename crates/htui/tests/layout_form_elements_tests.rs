@@ -569,3 +569,44 @@ fn test_select_option_shape() {
     assert_eq!(opt.value, "v");
     assert_eq!(opt.label, "l");
 }
+
+// ============================================================
+// disabled controls swallow presses
+// ============================================================
+
+#[test]
+fn disabled_select_press_does_not_open_dropdown() {
+    init();
+    // The mousedown path used to check `disabled` only in `handle_click`: a
+    // press on a disabled `<select>` still opened its dropdown. The press
+    // must swallow like the click does.
+    let (engine, geo) = build_geometry(
+        r#"<div><select disabled id="s"><option value="a">Alpha</option></select></div>"#,
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("s").expect("select region");
+    let (sx, sy) = center(region.rect);
+    let mut state = InputState::new();
+    let _ = mouse_down(&mut state, &engine, &map, sx, sy, MouseButton::Left);
+    assert!(
+        state.open_select.is_none(),
+        "a press on a disabled <select> must not open its dropdown"
+    );
+}
+
+#[test]
+fn disabled_input_press_does_not_focus() {
+    init();
+    // A press on a disabled text field must not focus it (no caret, no edit
+    // session), matching the click-path swallow rule.
+    let (engine, geo) = build_geometry(r#"<div><input disabled id="f" value="x"></div>"#);
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("f").expect("input region");
+    let (sx, sy) = center(region.rect);
+    let mut state = InputState::new();
+    let _ = mouse_down(&mut state, &engine, &map, sx, sy, MouseButton::Left);
+    assert!(
+        state.focused_input.is_none(),
+        "a press on a disabled <input> must not focus it"
+    );
+}

@@ -16,8 +16,8 @@ use crate::{
     layout::{
         BoxConstraint, Cursor, DEFAULT_LAYOUT, LayoutBox, LayoutContext, OuterDisplay, Rect,
         layoutbox::{
-            GeneratedBoxKind, generate_box_tree, generate_node, layout_generated_box,
-            layout_generated_tree, resolve_positioned_rects,
+            GeneratedBox, GeneratedBoxKind, flatten_contents_children, generate_node,
+            layout_generated_box, layout_generated_tree, resolve_positioned_rects,
         },
     },
     tdom::node::{Node, NodeArena, NodeId, NodeType, is_collapsible_whitespace},
@@ -37,7 +37,15 @@ pub fn layout_tree(
     viewport_cols: usize,
     viewport_rows: usize,
 ) -> Vec<LayoutBox> {
-    let generated = generate_box_tree(arena, root_id);
+    // The top level dispatches one box per rendered root child. Root-level
+    // `display: contents` elements splice their children into the sibling
+    // list first — the same flatten every block walk applies — and each
+    // survivor is classified shallowly (no subtree recursion: the geometry
+    // phase re-walks the DOM per box).
+    let generated: Vec<GeneratedBox> = flatten_contents_children(arena, &arena[root_id].children)
+        .iter()
+        .filter_map(|&id| generate_node(arena, id))
+        .collect();
     let mut boxes = layout_generated_tree(
         arena,
         &generated,
@@ -99,11 +107,28 @@ fn collapsed_interitem_space(node: &Node, parent_white_space: WhiteSpace) -> usi
 /// Lay out a sequence of sibling node IDs under `containing`.
 pub fn layout_children(
     arena: &NodeArena,
-    children: &[NodeId],
+    dom_children: &[NodeId],
     containing: BoxConstraint,
     cursor: &mut Cursor,
     context: LayoutContext,
 ) -> Vec<LayoutBox> {
+    // The `white-space` mode governing inter-element whitespace: the parent
+    // element's own declaration when it has one (default `normal`). The
+    // cascade does not inherit `white-space`, matching `white_space_or`.
+    // Read from the *un-expanded* sibling list — a spliced `display: contents`
+    // grandchild's parent is the contents element, not the block being filled.
+    let parent_white_space = dom_children
+        .first()
+        .and_then(|&first| arena.get(first))
+        .and_then(|first| first.parent)
+        .map(|pid| arena[pid].css_attr.get_white_space(&arena[pid].node_type))
+        .unwrap_or(WhiteSpace::Normal);
+    // `display: contents` elements are spliced out of the sibling list
+    // (recursively) before the walk: the walker visits one DOM level and a
+    // contents element produces no box, so without the splice its entire
+    // subtree would be silently dropped.
+    let children = flatten_contents_children(arena, dom_children);
+    let children = &children;
     let mut boxes = Vec::new();
     // Consecutive inline-level boxes (`display: inline-block`) share one
     // line: they flow left-to-right and wrap at the containing width, like
@@ -113,15 +138,6 @@ pub fn layout_children(
     // Collapsed whitespace accumulated since the last inline-level item,
     // waiting to be attached as the next item's `leading_space`.
     let mut pending_space: usize = 0;
-    // The `white-space` mode governing inter-element whitespace: the parent
-    // element's own declaration when it has one (default `normal`). The
-    // cascade does not inherit `white-space`, matching `white_space_or`.
-    let parent_white_space = children
-        .first()
-        .and_then(|&first| arena.get(first))
-        .and_then(|first| first.parent)
-        .map(|pid| arena[pid].css_attr.get_white_space(&arena[pid].node_type))
-        .unwrap_or(WhiteSpace::Normal);
     for &child_id in children {
         let Some(generated) = generate_node(arena, child_id) else {
             continue;
@@ -227,7 +243,11 @@ fn layout_inline_row(
     cursor: &mut Cursor,
     context: LayoutContext,
 ) -> Vec<LayoutBox> {
-    // Pass 1: measure widths / heights / horizontal margins.
+    // Pass 1: measure widths / heights / horizontal margins. One slot per
+    // item (an item whose box generation or geometry dispatch fails — e.g.
+    // `display: inline-grid`, unimplemented — stays `None`): the placement
+    // pass below indexes by the *items* position, so a compacted push-only
+    // vec would hand every later sibling the previous item's measurements.
     struct Measured {
         width: usize,
         height: usize,
@@ -235,8 +255,8 @@ fn layout_inline_row(
         margin_after: usize,
         leading_space: usize,
     }
-    let mut measured: Vec<Measured> = Vec::new();
-    for item in items {
+    let mut measured: Vec<Option<Measured>> = items.iter().map(|_| None).collect();
+    for (idx, item) in items.iter().enumerate() {
         let Some(generated) = generate_node(arena, item.id) else {
             continue;
         };
@@ -248,7 +268,7 @@ fn layout_inline_row(
             layout_generated_box(arena, &generated, containing, &mut scratch, context, None)
         {
             let edges = &b.paint_style.box_edges;
-            measured.push(Measured {
+            measured[idx] = Some(Measured {
                 width: b.rect.width,
                 height: b.rect.height,
                 margin_before: edges.margin.left.max(0) as usize,
@@ -257,7 +277,11 @@ fn layout_inline_row(
             });
         }
     }
-    let max_h = measured.iter().map(|m| m.height).max().unwrap_or(1);
+    let max_h = measured
+        .iter()
+        .filter_map(|m| m.as_ref().map(|m| m.height))
+        .max()
+        .unwrap_or(1);
     let max_x = containing.x.saturating_add(containing.width);
 
     // Pass 2: place left-to-right, wrapping when the next item (with its
@@ -266,7 +290,7 @@ fn layout_inline_row(
     let mut y = cursor.y;
     let mut out: Vec<LayoutBox> = Vec::new();
     for (idx, item) in items.iter().enumerate() {
-        let Some(m) = measured.get(idx) else {
+        let Some(Some(m)) = measured.get(idx) else {
             continue;
         };
         // A space at the start of a line is removed (browser collapsing

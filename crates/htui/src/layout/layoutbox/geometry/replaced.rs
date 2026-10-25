@@ -69,6 +69,7 @@ pub(super) fn layout_replaced(
             generated,
             containing,
             cursor,
+            context,
             pre_allocated_rect,
             src,
         ),
@@ -116,7 +117,15 @@ fn layout_input(
                 (2, 1)
             } else if let Some(label) = node.input_button_label() {
                 let text_w: usize = label.chars().map(|c| char_width(c).max(1)).sum();
-                ((text_w.saturating_add(4)).min(containing.width).max(4), 1)
+                // The `.max(4)` floor exists for legibility, but a container
+                // narrower than 4 cells must win — the floor may not push the
+                // control past its containing block.
+                (
+                    (text_w.saturating_add(4))
+                        .min(containing.width)
+                        .max(containing.width.min(4)),
+                    1,
+                )
             } else {
                 let attr_w = node
                     .get_width()
@@ -326,7 +335,11 @@ fn layout_button(
                 cursor,
                 &style.0.box_edges,
                 (style.1, style.2),
-                (text_w.saturating_add(4), 1),
+                // Cap to the containing block like the `<input>` button and
+                // `<select>` paths: a long label must not hand the box a
+                // rect wider than the terminal (the paint phase then skips
+                // or truncates it).
+                ((text_w.saturating_add(4)).min(containing.width).max(1), 1),
             )
         }
     };
@@ -364,7 +377,13 @@ fn layout_select(
             let natural_w = node
                 .get_width()
                 .map(|w| (w as usize).min(containing.width).max(1))
-                .unwrap_or((text_w.saturating_add(4)).min(containing.width).max(4));
+                .unwrap_or({
+                    // Same rule as the `<input>` button: the 4-cell
+                    // legibility floor never exceeds the containing block.
+                    (text_w.saturating_add(4))
+                        .min(containing.width)
+                        .max(containing.width.min(4))
+                });
             control_placement(
                 arena,
                 generated,
@@ -395,6 +414,7 @@ fn layout_image(
     generated: &GeneratedBox,
     containing: BoxConstraint,
     cursor: &mut Cursor,
+    context: LayoutContext,
     pre_allocated_rect: Option<Rect>,
     src: &str,
 ) -> Option<LayoutBox> {
@@ -413,10 +433,32 @@ fn layout_image(
                 image_intrinsic_size(&src),
                 containing.width,
             );
-            let block_width = img_cols.min(containing.width).max(1);
-            let x = centered_left(containing, block_width);
-            let y = cursor.allocate(img_rows);
-            (x, y, block_width, img_rows)
+            // Placement goes through the shared replaced-control path so CSS
+            // `width` / `height` / `min-*` / `max-*` and — critically — the
+            // box edges apply: `<img style="margin-left: 10px">` used to be
+            // ignored and the image forced-centred, diverging from both the
+            // browser (an `img` is inline-level: left-aligned in its flow,
+            // margins active) and the other replaced controls. Border /
+            // padding participate in the box size like any control; painting
+            // them on the pixels stays future work (`paint_image` fills the
+            // rect).
+            let edges =
+                node.css_attr
+                    .get_box_edges(containing.width, context.font, context.viewport);
+            let (x, y, block_width, block_height) = control_placement(
+                arena,
+                generated,
+                containing,
+                context,
+                cursor,
+                &edges,
+                (
+                    edges.border.horizontal_thickness(),
+                    edges.border.vertical_thickness(),
+                ),
+                (img_cols, img_rows),
+            );
+            (x, y, block_width, block_height)
         }
     };
 
@@ -430,10 +472,6 @@ fn layout_image(
         },
         PaintStyle::default(),
     ))
-}
-
-fn centered_left(containing: BoxConstraint, block_width: usize) -> usize {
-    containing.x + containing.width.saturating_sub(block_width) / 2
 }
 
 /// Resolve the natural `<img>` display size in cells from the HTML `width` /
@@ -469,5 +507,11 @@ fn resolve_image_cell_size(
     };
     let img_cols = pixel_w.div_ceil(IMAGE_PIXELS_PER_CELL_COL).max(1) as usize;
     let img_rows = pixel_h.div_ceil(IMAGE_PIXELS_PER_CELL_ROW).max(1) as usize;
-    (img_cols, img_rows)
+    // An explicit `height` attribute has no upper bound: a bogus value
+    // (e.g. `height="4000000000"`) reserved billions of rows, pushing every
+    // element after the image past the canvas cap (1000 × 500 cells) and
+    // making the rest of the document unreachable. Real terminal images
+    // stay far below this bound.
+    const MAX_ATTR_ROWS: usize = 10_000;
+    (img_cols, img_rows.min(MAX_ATTR_ROWS))
 }

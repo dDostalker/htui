@@ -35,9 +35,10 @@ pub use crate::html::css_parse::{FontContext, Viewport};
 pub use layoutbox::inner_formatting_context;
 pub use layoutbox::inner_formatting_context::{flex::layout_flex_dispatch, flow::layout_tree};
 pub use layoutbox::{
-    BoxKind, ColumnLayout, Cursor, FormattingContext, GeneratedBox, GeneratedBoxKind, InlineRun,
-    LayoutBox, OuterDisplay, PaintStyle, Rect, ReplacedContent, generate_box_tree, generate_node,
-    layout_generated_box, layout_generated_tree,
+    BoxKind, ColumnLayout, Cursor, FormattingContext, GeneratedBox, GeneratedBoxKind,
+    GeneratedPayload, InlineRun, LayoutBox, OuterDisplay, PaintStyle, Rect, ReplacedContent,
+    flatten_contents_children, generate_box_tree, generate_node, layout_generated_box,
+    layout_generated_tree,
 };
 
 /// Context propagated by the layout phase.

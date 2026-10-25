@@ -176,3 +176,45 @@ fn nbsp_is_not_collapsible() {
     let joined: String = lines[0].iter().map(|r| r.text.as_str()).collect();
     assert_eq!(joined, "a\u{00A0}\u{00A0}\u{00A0}b");
 }
+
+#[test]
+fn cjk_closing_punctuation_never_starts_a_line() {
+    // Simple kinsoku: a closing punctuation mark cannot detach from the word
+    // before it. `甲乙丙丁。` at 4 cells (two 2-cell CJK glyphs per line): the
+    // tokenizer used to emit `。` as its own breakable word, producing
+    // 甲乙 / 丙丁 / 。 — a line opening with the full stop. The mark now
+    // merges into `丁`, so the last line is `丁。` and no line opens with
+    // the mark.
+    let lines = run("甲乙丙丁。", 4);
+    let l2: String = lines[2].iter().map(|r| r.text.as_str()).collect();
+    assert_eq!(l2, "丁。", "the closing mark rides with 丁");
+    assert!(
+        lines
+            .iter()
+            .all(|l| l.first().map(|r| !r.text.starts_with('。')).unwrap_or(true)),
+        "no visual line may open with the closing mark: {lines:?}"
+    );
+}
+
+#[test]
+fn cjk_kinsoku_applies_under_break_all() {
+    // `word-break: break-all` allows breaks between any two CJK glyphs but
+    // still honours the line-start prohibition — the closing mark stays
+    // glued to its predecessor.
+    let lines = wrap_runs(
+        &[InlineRun::new("甲乙丙丁，", FontStyle::empty(), None, None)],
+        4,
+        1,
+        WhiteSpace::Normal,
+        WordBreak::BreakAll,
+        OverflowWrap::Normal,
+    );
+    let l2: String = lines[2].iter().map(|r| r.text.as_str()).collect();
+    assert_eq!(l2, "丁，", "the comma rides with the preceding glyph");
+    assert!(
+        lines
+            .iter()
+            .all(|l| l.first().map(|r| !r.text.starts_with('，')).unwrap_or(true)),
+        "no visual line may open with the comma: {lines:?}"
+    );
+}

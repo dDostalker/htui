@@ -574,3 +574,30 @@ fn absolute_child_with_negative_left_anchors_to_parent_offset() {
         "absolute child must sit at parent_x + (-2) = 6"
     );
 }
+
+#[test]
+fn absolute_insets_anchor_to_the_positioned_ancestors_padding_box() {
+    init();
+    // CSS: an absolutely positioned descendant's insets resolve against the
+    // nearest positioned ancestor's *padding box* — its border-box inset by
+    // the border thickness. The implementation used to hand down the
+    // border-box rect (the module doc already claimed padding-box), so a
+    // bordered positioned parent shifted the child by its own border width.
+    let html = r#"
+        <div class="wrap"><div class="dot">X</div></div>
+    "#;
+    let css = r#"
+        .wrap { position: relative; border-left: 4px solid red; margin-left: 3ch; width: 20ch; height: 3ch; }
+        .dot { position: absolute; left: 0; top: 0; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    // The wrapper starts at column 3 (margin) and carries a 1-cell left
+    // border (4px ≈ half a cell at 8px/cell, rounded to 1): `left: 0`
+    // anchors the child to the padding box at column 4, not to the border
+    // box at column 3.
+    assert_eq!(
+        cell(&rows, 4, 0),
+        Some('X'),
+        "left: 0 must anchor to the padding box (margin 3 + border 1), not the border box"
+    );
+}

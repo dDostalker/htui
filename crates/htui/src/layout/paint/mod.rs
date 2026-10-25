@@ -397,11 +397,19 @@ pub(super) fn clamp_rect_to_canvas(r: Rect, canvas_cols: usize) -> Option<Rect> 
 /// Paint one box (and its subtree) into the canvas.
 ///
 /// `clip` is the box's inherited clip region (absolute canvas coordinates):
-/// the intersection of every ancestor's border-box. Content that would be
-/// painted outside the clip is dropped instead of spilling onto rows below
-/// or beyond the box — on very small terminals the flexible algorithm can
-/// hand a box a rect smaller than its content, and without this clip the
-/// wrapped lines / block children would paint over the next sibling.
+/// the intersection of every clipping ancestor's content box. Content that
+/// would be painted outside the clip is dropped instead of spilling onto
+/// rows below or beyond the box — on very small terminals the flexible
+/// algorithm can hand a box a rect smaller than its content, and without
+/// this clip the wrapped lines / block children would paint over the next
+/// sibling.
+///
+/// The box's own `overflow` decides how much further its subtree is bounded:
+/// `visible` (the CSS default) passes the inherited clip through unchanged —
+/// overflowing lines and children paint beyond this box, exactly like a
+/// browser — while `hidden` / `auto` / `scroll` / `clip` intersect the clip
+/// with the box's content area (the container-scroll keywords have no
+/// terminal counterpart; the engine scrolls the whole document).
 fn paint_box(
     lb: &LayoutBox,
     arena: &NodeArena,
@@ -410,6 +418,8 @@ fn paint_box(
     clip: Option<Rect>,
 ) {
     let canvas_cols = canvas.columns as usize;
+    let overflow_clips =
+        arena[lb.node_id].css_attr.get_overflow() == crate::html::css_parse::Overflow::Clip;
     // A box laid out wider than the terminal (e.g. a flex row whose items
     // overflow the viewport) must not paint past the right edge, where the
     // flat canvas wraps writes into the next row. Clamp the rect once here so
@@ -448,6 +458,18 @@ fn paint_box(
         }
         return;
     }
+    // The clip the box's own painting (background fill / borders / inline
+    // runs) is bounded by. A clipping box bounds its runs at its content
+    // area ([`paint_block`] intersects further); a `visible` box only
+    // inherits its ancestors' clip — at the top level that is the whole
+    // canvas, so overflowing lines paint beyond the box, browser-style.
+    let own_paint_clip = if overflow_clips {
+        own_clip
+    } else {
+        clip.unwrap_or_else(|| {
+            Rect::new(0, 0, canvas_cols, canvas.layout.len() / canvas_cols.max(1))
+        })
+    };
     let my_bg = match &lb.kind {
         BoxKind::Normal => arena[lb.node_id].css_attr.get_bg_color(),
         BoxKind::Replaced(_) => None,
@@ -464,7 +486,7 @@ fn paint_box(
     if !visibility_hidden {
         match &lb.kind {
             BoxKind::Normal => {
-                paint_block(lb, arena, canvas, my_bg, parent_bg, own_clip);
+                paint_block(lb, arena, canvas, my_bg, parent_bg, own_paint_clip);
             }
             BoxKind::Replaced(ReplacedContent::Image { cols, rows, .. }) => {
                 paint_image(lb, canvas, *cols, *rows, own_clip);
@@ -492,13 +514,15 @@ fn paint_box(
     // we inherit. This is what lets `<aside bg=cyan><p>30col</p></aside>`
     // render the text with cyan bg even though `<p>` itself has no bg.
     let effective_bg = my_bg.or(parent_bg);
-    // Children are positioned inside the box's content-box (the rect shrunk
-    // by border + padding); anything that spills out of it — e.g. a squeezed
-    // flex item's wrapped lines — is dropped rather than painted over the
-    // padding / border rows of this box or the sibling below. The content
-    // area is NOT rounded up to 1 cell: when a box is smaller than its
-    // border + padding the true content area is empty and the children are
-    // dropped entirely, so no descendant can ever overwrite a frame cell.
+    // Children of a clipping box are bounded by the content-box (the rect
+    // shrunk by border + padding): anything that spills out of it — e.g. a
+    // squeezed flex item's wrapped lines — is dropped rather than painted
+    // over the padding / border rows of this box or the sibling below. The
+    // content area is NOT rounded up to 1 cell: when a box is smaller than
+    // its border + padding the true content area is empty and the children
+    // are dropped entirely, so no descendant can ever overwrite a frame
+    // cell. Children of a `visible` box only inherit the ancestors' clip —
+    // overflow paints beyond this box, like a browser.
     let edges = &lb.paint_style.box_edges;
     let content_area = Rect::new(
         rect.x
@@ -510,21 +534,24 @@ fn paint_box(
         rect.width.saturating_sub(edges.inner_horizontal()),
         rect.height.saturating_sub(edges.inner_vertical()),
     );
-    let children_clip = intersect_rects(own_clip, content_area);
+    let children_clip = if overflow_clips {
+        Some(intersect_rects(own_clip, content_area).unwrap_or(Rect::new(0, 0, 0, 0)))
+    } else {
+        clip
+    };
     paint_children(lb, arena, canvas, effective_bg, children_clip);
 }
 
 /// Paint `lb`'s children in stacking order.
 ///
-/// `children_clip` is inherited by static / relative children (the parent's
-/// content area). Detached positioned children are not clipped by the parent
-/// — they are anchored to a containing block that may extend beyond it — and
-/// their own rects clip their descendants via [`paint_box`].
-///
-/// When the parent's content area is empty (`children_clip` is `None` — the
-/// box is smaller than its border + padding), static children are dropped via
-/// a zero-area clip so they can never paint over the parent's frame, while
-/// positioned children keep painting unclipped.
+/// `children_clip` is inherited by static children: a clipping parent hands
+/// down its content area (a zero-area rect drops them entirely — the box is
+/// smaller than its border + padding), a `visible` parent hands down its own
+/// inherited clip (`None` at the top level = unrestricted, so overflow
+/// paints beyond the parent). Detached positioned children are not clipped
+/// by the parent — they are anchored to a containing block that may extend
+/// beyond it — and their own rects clip their descendants via
+/// [`paint_box`].
 fn paint_children(
     lb: &LayoutBox,
     arena: &NodeArena,
@@ -539,7 +566,7 @@ fn paint_children(
         // chain. Their own rects still clip their descendants via
         // [`paint_box`]. Static children inherit the parent's clip.
         let clip = match child.positioning.position {
-            Position::Static => children_clip.or(Some(Rect::new(0, 0, 0, 0))),
+            Position::Static => children_clip,
             _ => None,
         };
         paint_box(child, arena, canvas, effective_bg, clip);

@@ -96,6 +96,71 @@ pub fn is_cjk_break_opportunity(c: char) -> bool {
     )
 }
 
+/// `true` when `c` is forbidden from starting a visual line (simple CJK
+/// kinsoku shori). Closing punctuation, prolonged-sound marks and the
+/// small kana cannot detach from the word before them: the tokenizer
+/// attaches such graphemes to the pending word instead of emitting a
+/// break opportunity, so a line never opens with `。` / `、` / `」` / `っ`.
+///
+/// This is the terminal-sized subset of the browser's line-break rules
+/// (`line-break: strict` is a documented reject): it covers the closing
+/// side only — an opening bracket that cannot END a line would need a
+/// look-ahead in the wrap phase and is not modelled.
+fn is_forbidden_line_start(c: char) -> bool {
+    matches!(
+        c,
+        '、' | '。'
+            | '，'
+            | '．'
+            | '：'
+            | '；'
+            | '？'
+            | '！'
+            | '・'
+            | 'ー'
+            | '」'
+            | '』'
+            | '）'
+            | '］'
+            | '｝'
+            | '〉'
+            | '》'
+            | '】'
+            | '〗'
+            | '〙'
+            | '〛'
+            | '’'
+            | '”'
+            | '…'
+            | '～'
+            | '％'
+            | '‰'
+            | '°'
+            | '゛'
+            | '゜'
+            | 'ぁ'
+            | 'ぃ'
+            | 'ぅ'
+            | 'ぇ'
+            | 'ぉ'
+            | 'っ'
+            | 'ゃ'
+            | 'ゅ'
+            | 'ょ'
+            | 'ゎ'
+            | 'ァ'
+            | 'ィ'
+            | 'ゥ'
+            | 'ェ'
+            | 'ォ'
+            | 'ッ'
+            | 'ャ'
+            | 'ュ'
+            | 'ョ'
+            | 'ヮ'
+    )
+}
+
 /// Tokenize one `InlineRun`'s text into a flat sequence of `Token`s
 /// appended to `out`. Words preserve the source run's styling; the
 /// `Space` token only stores total cell width and grapheme count.
@@ -202,7 +267,9 @@ fn tokenize_run(
             pending_count += 1;
             pending_width += w;
         } else if word_break != WordBreak::KeepAll
-            && g.chars().next().is_some_and(is_cjk_break_opportunity)
+            && g.chars()
+                .next()
+                .is_some_and(|c| is_cjk_break_opportunity(c) && !is_forbidden_line_start(c))
         {
             // CJK (or full-width) grapheme under `normal` / `break-all`:
             // flush whatever is pending so the boundary before this
@@ -225,6 +292,56 @@ fn tokenize_run(
                 bg: run.bg,
                 node_id: run.node_id,
             });
+        } else if word_break != WordBreak::KeepAll
+            && g.chars()
+                .next()
+                .is_some_and(|c| is_cjk_break_opportunity(c) && is_forbidden_line_start(c))
+        {
+            // Kinsoku: a closing mark must never open a visual line, so it
+            // attaches to the word before it. The previous standalone CJK
+            // glyph is already on `out` (the branch above bypasses the
+            // pending buffer), so an unbroken same-style Word there absorbs
+            // the mark; otherwise the mark starts a pending accumulation the
+            // following glyphs can extend.
+            let merged = if let Some(Token::Word {
+                text,
+                width: tok_width,
+                style: tok_style,
+                fg: tok_fg,
+                bg: tok_bg,
+                node_id: tok_node,
+            }) = out.last_mut()
+            {
+                if *tok_style == run.style
+                    && *tok_fg == run.fg
+                    && *tok_bg == run.bg
+                    && *tok_node == run.node_id
+                {
+                    text.push_str(g);
+                    *tok_width += w;
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            if !merged {
+                if pending_kind != Some(1) {
+                    flush(
+                        pending_kind,
+                        &mut pending_text,
+                        &mut pending_count,
+                        &mut pending_width,
+                        run,
+                        out,
+                    );
+                    pending_kind = Some(1);
+                }
+                pending_text.push_str(g);
+                pending_count += 1;
+                pending_width += w;
+            }
         } else {
             // Non-CJK, or CJK under `keep-all`: accumulate as one word
             // so the wrap phase treats the run as unbreakable.
@@ -258,7 +375,19 @@ fn tokenize_run(
 /// emit "logical lines": sequences of tokens that must appear on the
 /// same line (unless wrapping kicks in). Forced breaks (`Newline`)
 /// separate logical lines.
-fn apply_white_space(tokens: Vec<Token>, ws: WhiteSpace) -> Vec<Vec<Token>> {
+///
+/// `font_size_cells` is the run's effective font expansion: a collapsed
+/// space occupies one *expanded* slot (`max(grapheme_width, font)`), the
+/// same width the paint phase's `width_at` accounts for the `" "` run —
+/// the wrap accounting and the paint accounting must agree or
+/// `text-align` offsets and the trailing-slot clip diverge once the font
+/// size exceeds 1.
+fn apply_white_space(
+    tokens: Vec<Token>,
+    ws: WhiteSpace,
+    font_size_cells: usize,
+) -> Vec<Vec<Token>> {
+    let space_width = font_size_cells.max(1);
     if ws.preserves_whitespace() {
         // `pre` / `pre-wrap`: every Newline is a forced break; spaces
         // are preserved as-is. `<br>` breaks are unconditional.
@@ -294,7 +423,7 @@ fn apply_white_space(tokens: Vec<Token>, ws: WhiteSpace) -> Vec<Vec<Token>> {
                     let last_is_space = matches!(line.last(), Some(Token::Space { .. }));
                     if !last_is_space {
                         line.push(Token::Space {
-                            width: 1,
+                            width: space_width,
                             _count: 1,
                         });
                     }
@@ -595,7 +724,7 @@ pub fn wrap_runs(
         tokenize_run(r, font_size_cells, word_break, &mut tokens);
     }
     // Phase 2: apply white-space collapsing / forced breaks.
-    let logical_lines = apply_white_space(tokens, white_space);
+    let logical_lines = apply_white_space(tokens, white_space, font_size_cells);
     // Phase 3: greedy wrap each logical line.
     let mut visual_lines: Vec<Vec<InlineRun>> = Vec::new();
     for logical in logical_lines {

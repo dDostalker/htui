@@ -512,6 +512,44 @@ fn inline_block_boxes_flow_side_by_side() {
 }
 
 #[test]
+fn inline_row_skips_unlayouttable_item_without_shifting_siblings() {
+    init();
+    // An inline row containing a `display: inline-grid` item (grid geometry
+    // is unimplemented — its layout dispatch returns `None`) must skip that
+    // item. The measurement pass used to compact successful measurements
+    // while the placement pass indexed by the item position, so every later
+    // sibling consumed the *previous* item's measurements and the last
+    // sibling's box was never placed at all (its text still leaked through
+    // the parent's inline runs, but its box — here the background fill —
+    // went missing).
+    let html = r#"<div><span class="a">AA</span><span class="g" style="display: inline-grid">G</span><span class="b">BBB</span></div>"#;
+    let css = ".a, .b { display: inline-block; } .b { background-color: navy; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let row0: String = tl.layout[..80].iter().map(|b| b.word.as_str()).collect();
+    assert_eq!(
+        row0.find("AA"),
+        Some(0),
+        "the first inline item keeps its own measurements: {row0:?}"
+    );
+    let navy = Color::Rgb {
+        r: 0,
+        g: 0,
+        b: 0x80,
+    };
+    let painted = tl.layout[..80]
+        .iter()
+        .any(|b| b.word == "B" && b.bcolor == Some(navy));
+    assert!(
+        painted,
+        "the sibling after the unlayouttable item must keep its own measurements \
+         and place its box (background fill) on the row: {row0:?}"
+    );
+}
+
+#[test]
 fn inline_block_whitespace_separates_and_collapses() {
     init();
     // Inter-element whitespace between two inline-blocks collapses to one
@@ -719,14 +757,24 @@ fn test_layout_text_semantics_styles() {
         "<s> must be line-through"
     );
     let mark_idx = find("m");
+    // The UA default for `<mark>` resolves through the shared
+    // `inline_ua_declarations` table (`background-color: yellow` → the named
+    // colour's RGB value), the same source the block-level path injects into
+    // `css_attr` — inline and block `<mark>` paint the identical yellow.
+    // (The inline path used to hardcode the ANSI `Color::Yellow` variant,
+    // diverging from the block path's truecolour yellow.)
     assert_eq!(
         tl.layout[mark_idx].bcolor,
-        Some(Color::Yellow),
-        "<mark> must paint a yellow background"
+        Some(Color::Rgb {
+            r: 255,
+            g: 255,
+            b: 0
+        }),
+        "<mark> must paint the UA yellow background"
     );
     assert_eq!(
         tl.layout[mark_idx].fcolor,
-        Some(Color::Black),
+        Some(Color::Rgb { r: 0, g: 0, b: 0 }),
         "<mark> must paint black foreground"
     );
 }
