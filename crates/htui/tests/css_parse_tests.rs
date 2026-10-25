@@ -2808,7 +2808,7 @@ fn stale_node_id_fails_to_match_instead_of_panicking() {
     // must fail to match rather than panic with "invalid SlotMap key used".
     // The public entry points' doc contract promises `arena.get` lookups;
     // `matches_css` used to index the node parameter directly.
-    let mut p = html_parse::Parser::new(r#"<div class="btn">x</div>"#);
+    let mut p = html_parse::Parser::new(r#"<div class="btn"><span class="btn">x</span></div>"#);
     let (root_id, mut arena, _) = p.parse();
     let mut cp = Parser::new(".btn:hover { color: red }");
     css_into_node(&mut arena, root_id, &cp.parse());
@@ -2816,11 +2816,24 @@ fn stale_node_id_fails_to_match_instead_of_panicking() {
     let rules = cp2.parse();
     let sel = &rules.0[0].selector;
 
-    // `NodeId::default()` is slotmap's null key — indexing it reproduces the
+    // Manufacture a *genuinely* stale key: remove the span from the arena.
+    // Its key version is now behind the slot's — indexing it reproduces the
     // exact "invalid SlotMap key used" panic the field report showed.
-    let stale = NodeId::default();
+    // (`NodeId::default()` would NOT do: slotmap's default key happens to be
+    // the first allocated slot, i.e. a live key.)
+    let span = arena
+        .iter()
+        .find(|(_, n)| n.node_type == NodeType::Span)
+        .map(|(id, _)| id)
+        .expect("span present");
+    let stale = span;
+    arena.remove(stale).expect("span removed");
 
     // A stale node id simply fails to match.
+    assert!(
+        arena.get(stale).is_none(),
+        "the removed key must be stale for this arena"
+    );
     assert!(!selector_chain_matches_with_state(
         &arena,
         stale,
