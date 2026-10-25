@@ -587,3 +587,255 @@ fn queue_microtask_runs_after_script() {
     );
     assert_eq!(eval_str(&mut e, "__err"), "TypeError");
 }
+
+#[test]
+fn get_elements_by_tag_and_class_name() {
+    let mut e = engine(
+        r#"<div id="wrap"><p class="lead big">a</p><span class="lead">b</span><p>c</p></div><p>d</p>"#,
+    );
+    eval(&mut e, "var wrap = document.getElementById('wrap')");
+    // Document scope, case-insensitive tags.
+    assert_eq!(
+        eval_str(&mut e, "document.getElementsByTagName('P').length"),
+        "3"
+    );
+    assert_eq!(
+        eval_str(&mut e, "document.getElementsByTagName('p')[0].textContent"),
+        "a"
+    );
+    // `*` matches every element (html/head/body + content).
+    assert!(eval_str(&mut e, "document.getElementsByTagName('*').length") != "0");
+    // Element scope narrows to the subtree.
+    assert_eq!(
+        eval_str(&mut e, "wrap.getElementsByTagName('p').length"),
+        "2"
+    );
+    assert_eq!(
+        eval_str(&mut e, "wrap.getElementsByTagName('span').length"),
+        "1"
+    );
+    // Class queries match every whitespace-separated token.
+    assert_eq!(
+        eval_str(&mut e, "document.getElementsByClassName('lead').length"),
+        "2"
+    );
+    assert_eq!(
+        eval_str(&mut e, "document.getElementsByClassName('lead big').length"),
+        "1",
+        "multi-token query requires every class"
+    );
+    assert_eq!(
+        eval_str(&mut e, "wrap.getElementsByClassName('lead').length"),
+        "2"
+    );
+    // Empty class string yields an empty result, not an error.
+    assert_eq!(
+        eval_str(&mut e, "document.getElementsByClassName('').length"),
+        "0"
+    );
+}
+
+#[test]
+fn is_connected_and_get_root_node() {
+    let mut e = engine(r#"<div id="d"><span>s</span></div>"#);
+    assert_eq!(eval_str(&mut e, "String(document.isConnected)"), "true");
+    assert_eq!(
+        eval_str(&mut e, "String(document.getElementById('d').isConnected)"),
+        "true"
+    );
+    // A detached subtree reports false; its own root is the subtree top.
+    eval(&mut e, "var loose = document.createElement('section')");
+    eval(
+        &mut e,
+        "var kid = document.createElement('p'); loose.appendChild(kid)",
+    );
+    assert_eq!(eval_str(&mut e, "String(loose.isConnected)"), "false");
+    assert_eq!(eval_str(&mut e, "String(kid.isConnected)"), "false");
+    assert_eq!(
+        eval_str(&mut e, "String(kid.getRootNode() === loose)"),
+        "true",
+        "detached node roots at its subtree top"
+    );
+    assert_eq!(
+        eval_str(
+            &mut e,
+            "document.getElementById('d').getRootNode().nodeType"
+        ),
+        "9",
+        "attached node roots at the document"
+    );
+    // After insertion the subtree becomes connected.
+    eval(&mut e, "document.getElementById('d').appendChild(loose)");
+    assert_eq!(eval_str(&mut e, "String(loose.isConnected)"), "true");
+}
+
+#[test]
+fn normalize_merges_adjacent_text() {
+    let mut e = engine(r#"<div id="d"></div>"#);
+    eval(&mut e, "var d = document.getElementById('d')");
+    // Build "ab", "", "cd" — expect one "abcd" child, empty dropped.
+    eval(&mut e, "d.append('ab', document.createTextNode(''), 'cd')");
+    assert_eq!(eval_str(&mut e, "d.childNodes.length"), "3");
+    eval(&mut e, "d.normalize()");
+    assert_eq!(eval_str(&mut e, "d.childNodes.length"), "1");
+    assert_eq!(eval_str(&mut e, "d.textContent"), "abcd");
+    assert_eq!(eval_str(&mut e, "d.childNodes[0].nodeType"), "3");
+    // A comment child breaks the run and stays in place. "ef" merges into
+    // the preceding "abcd" text run; the comment splits it from "gh".
+    eval(&mut e, "d.append('ef', document.createComment('c'), 'gh')");
+    eval(&mut e, "d.normalize()");
+    assert_eq!(eval_str(&mut e, "d.textContent"), "abcdefgh");
+    assert_eq!(
+        eval_str(&mut e, "d.childNodes.length"),
+        "3",
+        "comment splits the text runs"
+    );
+}
+
+#[test]
+fn replace_children_swaps_whole_list() {
+    let mut e = engine(r#"<ul id="u"><li>a</li><li>b</li></ul>"#);
+    eval(&mut e, "var u = document.getElementById('u')");
+    eval(&mut e, "var kept = u.firstChild");
+    eval(
+        &mut e,
+        "u.replaceChildren(document.createElement('li'), 'tail')",
+    );
+    assert_eq!(eval_str(&mut e, "u.childNodes.length"), "2");
+    assert_eq!(
+        eval_str(&mut e, "u.childNodes[0].tagName"),
+        "LI",
+        "node argument inserted as-is"
+    );
+    assert_eq!(
+        eval_str(&mut e, "u.childNodes[1].nodeType"),
+        "3",
+        "string argument converted to Text"
+    );
+    assert_eq!(
+        eval_str(&mut e, "String(kept.parentNode)"),
+        "null",
+        "replaced child detached (wrapper stays valid)"
+    );
+    // No-argument call clears the list.
+    eval(&mut e, "u.replaceChildren()");
+    assert_eq!(eval_str(&mut e, "u.childNodes.length"), "0");
+}
+
+#[test]
+fn insert_adjacent_family() {
+    let mut e = engine(r#"<div id="host"><b id="b">b</b></div>"#);
+    eval(&mut e, "var host = document.getElementById('host')");
+    eval(&mut e, "var b = document.getElementById('b')");
+    // beforeend / afterbegin target the element itself.
+    eval(&mut e, "host.insertAdjacentText('beforeend', 'Z')");
+    assert_eq!(eval_str(&mut e, "host.textContent"), "bZ");
+    eval(&mut e, "host.insertAdjacentText('afterbegin', 'A')");
+    assert_eq!(eval_str(&mut e, "host.textContent"), "AbZ");
+    // beforebegin / afterend target the siblings around it.
+    eval(&mut e, "b.insertAdjacentText('beforebegin', 'x')");
+    eval(&mut e, "b.insertAdjacentText('afterend', 'y')");
+    assert_eq!(eval_str(&mut e, "host.textContent"), "AxbyZ");
+    // Element insertion returns the inserted wrapper.
+    eval(&mut e, "var em = document.createElement('em')");
+    eval(
+        &mut e,
+        "var ret = host.insertAdjacentElement('beforeend', em)",
+    );
+    assert_eq!(eval_str(&mut e, "String(ret === em)"), "true");
+    // HTML parsing inserts parsed nodes at the given position.
+    eval(&mut e, "host.insertAdjacentHTML('beforeend', '<i>it</i>')");
+    assert_eq!(
+        eval_str(&mut e, "host.lastChild.tagName"),
+        "I",
+        "parsed fragment appended at the end"
+    );
+    // Invalid position throws SyntaxError.
+    eval(&mut e, "globalThis.__err = ''");
+    eval(
+        &mut e,
+        "try { host.insertAdjacentText('middle', 'x') } catch (x2) { globalThis.__err = x2.name }",
+    );
+    assert_eq!(eval_str(&mut e, "__err"), "SyntaxError");
+}
+
+#[test]
+fn element_click_dispatches_and_bubbles() {
+    let mut e = engine(
+        r#"<div id="outer"><button id="go">go</button><button id="off" disabled>off</button></div>"#,
+    );
+    eval(
+        &mut e,
+        r#"globalThis.log = [];
+           var go = document.getElementById('go');
+           go.addEventListener('click', function (ev) {
+             log.push('go:' + ev.type + ':' + (ev.target === go));
+           });
+           document.getElementById('outer').addEventListener('click', function () {
+             log.push('outer');
+           });
+           go.click();"#,
+    );
+    assert_eq!(
+        eval_str(&mut e, "log.join(',')"),
+        "go:click:true,outer",
+        "click() fires the target listener then bubbles"
+    );
+    // Disabled controls swallow click() entirely.
+    eval(&mut e, "log.length = 0");
+    eval(&mut e, "document.getElementById('off').click()");
+    assert_eq!(eval_str(&mut e, "log.length"), "0");
+}
+
+#[test]
+fn click_and_event_stop_semantics() {
+    let mut e = engine(r#"<div id="p"><span id="s">x</span></div>"#);
+    // stopPropagation lets the sibling listener on the SAME element run,
+    // only the ancestor leg is cut.
+    eval(
+        &mut e,
+        r#"globalThis.log = [];
+           var s = document.getElementById('s');
+           s.addEventListener('click', function (ev) { log.push('s1'); ev.stopPropagation(); });
+           s.addEventListener('click', function () { log.push('s2'); });
+           document.getElementById('p').addEventListener('click', function () { log.push('p'); });
+           s.click();"#,
+    );
+    assert_eq!(
+        eval_str(&mut e, "log.join(',')"),
+        "s1,s2",
+        "stopPropagation keeps same-element listeners, cuts bubbling"
+    );
+    // stopImmediatePropagation also cuts the same-element remainder. The
+    // second dispatch runs s1/s2 again (fresh event object), then i1 stops
+    // the rest — "never" and the parent never fire.
+    eval(
+        &mut e,
+        r#"s.addEventListener('click', function (ev) { log.push('i1'); ev.stopImmediatePropagation(); });
+           s.addEventListener('click', function () { log.push('never'); });
+           s.click();"#,
+    );
+    assert_eq!(
+        eval_str(&mut e, "log.join(',')"),
+        "s1,s2,s1,s2,i1",
+        "stopImmediatePropagation cuts the remaining same-element listeners"
+    );
+}
+
+#[test]
+fn window_aliases_global_this() {
+    let mut e = engine(r#"<div id="d">x</div>"#);
+    assert_eq!(
+        eval_str(&mut e, "String(window === globalThis)"),
+        "true",
+        "window is the global object itself"
+    );
+    assert_eq!(
+        eval_str(&mut e, "window.document.getElementById('d').textContent"),
+        "x"
+    );
+    assert_eq!(
+        eval_str(&mut e, "String(typeof window.setTimeout)"),
+        "function"
+    );
+}

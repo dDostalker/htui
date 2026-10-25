@@ -19,7 +19,10 @@ use super::{
         native_set_node_value, native_set_text, native_set_value, native_split_text,
         native_substring_data,
     },
-    events::{native_add_event_listener, native_blur, native_focus, native_remove_event_listener},
+    events::{
+        native_add_event_listener, native_blur, native_click, native_focus,
+        native_remove_event_listener,
+    },
     global_attrs::{
         native_get_class, native_get_class_list, native_get_dataset, native_get_hidden,
         native_set_class, native_set_hidden,
@@ -27,19 +30,21 @@ use super::{
     js_fn,
     mutation::{
         native_after, native_append, native_append_child, native_before, native_clone_node,
-        native_insert_before, native_prepend, native_remove, native_remove_child,
-        native_replace_child, native_replace_with,
+        native_insert_adjacent_element, native_insert_adjacent_html, native_insert_adjacent_text,
+        native_insert_before, native_normalize, native_prepend, native_remove, native_remove_child,
+        native_replace_child, native_replace_children, native_replace_with,
     },
     node_id_to_f64,
     style::native_get_style,
     traverse::{
         native_closest, native_contains, native_get_base_uri, native_get_child_nodes,
-        native_get_first_child, native_get_last_child, native_get_next_element_sibling,
+        native_get_elements_by_class_name, native_get_elements_by_tag_name, native_get_first_child,
+        native_get_is_connected, native_get_last_child, native_get_next_element_sibling,
         native_get_next_sibling, native_get_node_name, native_get_node_type,
         native_get_owner_document, native_get_parent, native_get_parent_element,
-        native_get_prev_element_sibling, native_get_prev_sibling, native_get_tag_name,
-        native_has_child_nodes, native_is_equal_node, native_is_same_node, native_matches,
-        native_query_selector, native_query_selector_all,
+        native_get_prev_element_sibling, native_get_prev_sibling, native_get_root_node,
+        native_get_tag_name, native_has_child_nodes, native_is_equal_node, native_is_same_node,
+        native_matches, native_query_selector, native_query_selector_all,
     },
     with_state,
 };
@@ -126,6 +131,10 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
     let get_next_elem_sibling = js_fn(
         context,
         NativeFunction::from_fn_ptr(native_get_next_element_sibling),
+    );
+    let get_is_connected = js_fn(
+        context,
+        NativeFunction::from_fn_ptr(native_get_is_connected),
     );
 
     let mut init = ObjectInitializer::new(context);
@@ -267,6 +276,24 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
         2,
     );
 
+    // Node connectivity / structure helpers apply to every node kind.
+    init.accessor(
+        js_string!("isConnected"),
+        Some(get_is_connected),
+        None,
+        Attribute::all(),
+    );
+    init.function(
+        NativeFunction::from_fn_ptr(native_get_root_node),
+        js_string!("getRootNode"),
+        0,
+    );
+    init.function(
+        NativeFunction::from_fn_ptr(native_normalize),
+        js_string!("normalize"),
+        0,
+    );
+
     // `previousElementSibling` / `nextElementSibling` belong to the Element
     // and CharacterData mixins — exposed on element and text-like wrappers
     // only, never on the document root or fragments.
@@ -385,6 +412,26 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
             js_string!("blur"),
             0,
         );
+        init.function(
+            NativeFunction::from_fn_ptr(native_click),
+            js_string!("click"),
+            0,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_insert_adjacent_element),
+            js_string!("insertAdjacentElement"),
+            2,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_insert_adjacent_text),
+            js_string!("insertAdjacentText"),
+            2,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_insert_adjacent_html),
+            js_string!("insertAdjacentHTML"),
+            2,
+        );
     }
     if is_text_like {
         init.accessor(
@@ -467,6 +514,21 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
         init.function(
             NativeFunction::from_fn_ptr(native_prepend),
             js_string!("prepend"),
+            1,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_replace_children),
+            js_string!("replaceChildren"),
+            0,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_get_elements_by_tag_name),
+            js_string!("getElementsByTagName"),
+            1,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_get_elements_by_class_name),
+            js_string!("getElementsByClassName"),
             1,
         );
     }

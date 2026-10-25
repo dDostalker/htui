@@ -21,7 +21,10 @@ use super::{
     timers::{
         native_clear_interval, native_clear_timeout, native_set_interval, native_set_timeout,
     },
-    traverse::{native_query_selector, native_query_selector_all},
+    traverse::{
+        native_get_elements_by_class_name, native_get_elements_by_tag_name, native_query_selector,
+        native_query_selector_all,
+    },
     with_state,
 };
 
@@ -71,6 +74,14 @@ pub(crate) fn install_builtins(context: &mut Context) -> JsResult<()> {
         (
             "createDocumentFragment",
             NativeFunction::from_fn_ptr(native_create_document_fragment),
+        ),
+        (
+            "getElementsByTagName",
+            NativeFunction::from_fn_ptr(native_get_elements_by_tag_name),
+        ),
+        (
+            "getElementsByClassName",
+            NativeFunction::from_fn_ptr(native_get_elements_by_class_name),
         ),
     ] {
         doc_obj.set(js_string!(name), js_fn(context, native), false, context)?;
@@ -169,6 +180,13 @@ pub(crate) fn install_builtins(context: &mut Context) -> JsResult<()> {
         1,
         NativeFunction::from_fn_ptr(native_queue_microtask),
     )?;
+
+    // `window` — an alias of the global object (`window === globalThis`), so
+    // the common `window.document` / `window.setTimeout` / `window.title`
+    // spellings work unchanged. No window-specific members are added; there
+    // is no separate window identity in htui.
+    let global_obj = context.global_object();
+    context.register_global_property(js_string!("window"), global_obj, Attribute::all())?;
     Ok(())
 }
 
