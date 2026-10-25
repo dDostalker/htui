@@ -315,6 +315,62 @@ fn merge_inline_ua(
     (fg.or(parent_fg), bg.or(parent_bg), style)
 }
 
+/// Whether the node's inline content contains a `<br>` — the cheap boolean
+/// scan `natural_intrinsic_size` uses instead of building the full run list:
+/// when the measured text width is zero, a forced break is the only thing
+/// that can still reserve an intrinsic row.
+///
+/// Mirrors [`walk_runs`]'s recursion exactly — keep the inline-container
+/// list in sync with its generic arm: inline containers only,
+/// author-blockified subtrees paint via their own `LayoutBox`, and a flex
+/// container folds only raw text into its own runs (a `<br>` child of one
+/// is not a run).
+pub(crate) fn inline_tree_has_forced_break(arena: &NodeArena, node_id: NodeId) -> bool {
+    let node = &arena[node_id];
+    if node.css_attr.display().is_some_and(|d| d.is_flex()) {
+        return false;
+    }
+    for &child_id in visible_children(arena, node_id).iter() {
+        let child = &arena[child_id];
+        if child.css_attr.display().is_some_and(|d| d.is_block_level()) {
+            continue;
+        }
+        if child.node_type == NodeType::Br {
+            return true;
+        }
+        if matches!(
+            child.node_type,
+            NodeType::Span
+                | NodeType::A
+                | NodeType::Em
+                | NodeType::Strong
+                | NodeType::B
+                | NodeType::I
+                | NodeType::Cite
+                | NodeType::Dfn
+                | NodeType::Var
+                | NodeType::Label
+                | NodeType::U
+                | NodeType::Ins
+                | NodeType::S
+                | NodeType::Del
+                | NodeType::Mark
+                | NodeType::Code
+                | NodeType::Kbd
+                | NodeType::Samp
+                | NodeType::Data
+                | NodeType::Time
+                | NodeType::Output
+                | NodeType::Q
+                | NodeType::Abbr
+        ) && inline_tree_has_forced_break(arena, child_id)
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// Recurse into an inline element's children, carrying the resolved `fg` /
 /// `bg` / `style` (already merged with the element's own CSS), the element's
 /// own `text-transform` / `white-space` overrides, and the owning inline

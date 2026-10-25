@@ -4,19 +4,17 @@
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    graphics::{FontStyle, char_width, grapheme_width},
+    graphics::{char_width, grapheme_width},
     html::css_parse::{
         AlignItems, AlignSelf, CssDisplay, FlexDirection, Length, LengthContext, WhiteSpace,
     },
     layout::{
         InlineRun, LayoutContext,
-        layoutbox::collect_runs,
         layoutbox::generation::{GeneratedBoxKind, generate_node},
         layoutbox::geometry::select_options,
+        layoutbox::inline_tree_has_forced_break,
     },
-    tdom::node::{
-        NodeArena, NodeId, NodeType, effective_font_size_cells, is_collapsible_whitespace,
-    },
+    tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
 };
 
 use super::container::{AnonymousTextItem, FLEX_ITEM_MIN_CROSS, FlexItemPrep, FlexItemSource};
@@ -603,11 +601,12 @@ fn natural_intrinsic_size(
         content_w = content_w.max(text_w);
         // Inline content adds one intrinsic row, but a run made purely of
         // collapsible whitespace must not (it collapses away at a line edge).
-        // NBSP is intentionally *not* collapsible, so it still counts.
-        let has_inline = collect_runs(arena, node_id, node, None, None, FontStyle::empty())
-            .iter()
-            .any(|r| r.force_break || r.text.chars().any(|c| !is_collapsible_whitespace(c)))
-            || text_w > 0;
+        // NBSP is intentionally *not* collapsible, so it still counts — and
+        // it is painted, so it already made `text_w > 0`. With `text_w == 0`
+        // the subtree has no painted text at all, so the only thing that can
+        // still force a row is a `<br>`: a cheap boolean scan replaces
+        // building the full run list here.
+        let has_inline = text_w > 0 || inline_tree_has_forced_break(arena, node_id);
         if has_inline {
             // Intrinsic (max-content) measurement does not wrap, so a
             // single line of inline content contributes one row scaled by
