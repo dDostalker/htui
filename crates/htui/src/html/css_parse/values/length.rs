@@ -927,7 +927,7 @@ fn parse_math_function(s: &str) -> Option<MathFn> {
     for name in ["calc", "min", "max", "clamp"] {
         let prefix = format!("{name}(");
         if let Some(rest) = lower.strip_prefix(&prefix)
-            && let Some(body) = rest.strip_suffix(')')
+            && rest.ends_with(')')
         {
             // Re-slice the original string so escapes / case survive.
             let body = &s[name.len() + 1..s.len() - 1];
