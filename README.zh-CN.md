@@ -58,8 +58,10 @@ fn main() {
 ```
 
 debug 构建会监听这些源文件：保存 HTML 触发整文档重载，保存 CSS 替换会话级
-CSS，保存 JS 替换并重新执行会话级 JS。release 构建只嵌入源码，不包含 watcher
-和源码路径。路径相对当前 Cargo package 根目录。
+CSS，保存 JS 替换并重新执行会话级 JS。debug 下注册或删除 `mem://` 资源也会使当前
+文档失效；输入循环会重新解析当前 HTML，让 `<script src>`、`<link>`、图片和
+`fetch` 重新读取更新后的注册表。release 构建只嵌入源码，不包含 watcher 和源码
+路径。路径相对当前 Cargo package 根目录。
 
 ## 示例：终端音乐播放器
 

@@ -68,8 +68,11 @@ fn main() {
 
 In debug builds, htui watches each source. Saving HTML reloads the whole
 document, saving CSS replaces session CSS, and saving JS replaces/re-runs
-session JS. Release builds embed the sources only: no watcher and no source
-paths are included. Paths are relative to the current Cargo package root.
+session JS. Registering or removing a `mem://` resource also invalidates the
+running document in debug: the input loop re-parses the current HTML so
+`<script src>`, `<link>`, images, and `fetch` resolve against the updated
+registry. Release builds embed the sources only: no watcher and no source paths
+are included. Paths are relative to the current Cargo package root.
 
 ## Example: terminal music player
 

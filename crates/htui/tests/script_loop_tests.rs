@@ -454,6 +454,42 @@ fn reload_js_keeps_the_dom_and_reports_mutations() {
 }
 
 #[test]
+fn reload_html_after_mem_change_resolves_the_new_resource() {
+    let registry = Arc::new(ResourceRegistry::new());
+    registry
+        .register("mem-change.js", b"globalThis.__mem = \"old\";".to_vec())
+        .expect("register initial resource");
+
+    let result = with_registry(Arc::clone(&registry), || {
+        let mut parser =
+            htui::html::html_parse::Parser::new(r#"<script src="mem-change.js"></script><p>x</p>"#);
+        let document = parser.parse_with_scripts();
+        let mut engine =
+            ScriptEngine::new_from_document_with_js(document, "", EventBindings::default())
+                .expect("engine initializes");
+        assert_eq!(eval_str(&mut engine, "globalThis.__mem"), "old");
+
+        registry
+            .register("mem-change.js", b"globalThis.__mem = \"new\";".to_vec())
+            .expect("register changed resource");
+
+        let mut hover = HoverState::new();
+        let map = HitMap::new();
+        let event = apply_message(
+            &mut engine,
+            &mut hover,
+            &map,
+            ScriptMsg::ReloadHtml {
+                html: Arc::from(r#"<script src="mem-change.js"></script><p id="fresh">fresh</p>"#),
+            },
+        );
+        assert!(event.dirty.is_some(), "a mem-driven reparse must repaint");
+        eval_str(&mut engine, "globalThis.__mem")
+    });
+    assert_eq!(result, "new", "reparse must read the changed mem resource");
+}
+
+#[test]
 fn reload_html_message_reports_document_css_and_clears_hover() {
     let (mut engine, geo) = build_geometry(r#"<div id="old">old</div>"#, EventBindings::default());
     let map = HitMap::build(&geo);

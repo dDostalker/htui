@@ -135,9 +135,12 @@ fn run_inner(
     //
     TERMINAL_ACTIVE.store(true, Ordering::SeqCst);
 
-    // load source
+    // Keep the original HTML available for debug `mem://` re-parses. A
+    // registry change cannot carry the document text, so this source is sent
+    // back through the script engine to resolve every resource again.
+    let html_source: Arc<str> = Arc::from(html);
     let document = session.with_registry(|| {
-        let mut parser = Parser::new(html);
+        let mut parser = Parser::new(&html_source);
         parser.parse_with_scripts()
     });
     let session_css: Arc<str> = Arc::from(css);
@@ -212,6 +215,13 @@ fn run_inner(
         let hit_map_thread = Arc::clone(&hit_map);
         std::thread::spawn(move || hit_test_thread(geo_rx, hit_map_thread));
     }
+
+    // Subscribe after the engine is ready so debug `mem://` invalidation only
+    // runs when a script engine exists to perform the whole-document reparse.
+    #[cfg(debug_assertions)]
+    let mem_reload_rx = events_active.then(|| registry.subscribe_reloads());
+    #[cfg(debug_assertions)]
+    let mut mem_reload;
 
     // Text of the current page selection, refreshed by the render thread and
     // read by the input loop on `Ctrl+C` (shared through `Arc<Mutex<_>>`).
@@ -333,6 +343,21 @@ fn run_inner(
         }
 
         let mut msgs: Vec<ScriptMsg> = Vec::new();
+        // Coalesce mem:// invalidations into one reparse. Resource registration
+        // may happen from a host callback thread while the input loop sleeps.
+        #[cfg(debug_assertions)]
+        if let Some(rx) = &mem_reload_rx {
+            mem_reload = false;
+            while rx.try_recv().is_ok() {
+                mem_reload = true;
+            }
+            if mem_reload {
+                log::info!("Hot reloading mem:// resources by re-parsing HTML");
+                msgs.push(ScriptMsg::ReloadHtml {
+                    html: Arc::clone(&html_source),
+                });
+            }
+        }
         // Coalesce every watcher update that arrived while the input loop was
         // blocked / processing into the latest HTML. Rapid saves produce one
         // script-thread reload rather than a queue of obsolete documents.

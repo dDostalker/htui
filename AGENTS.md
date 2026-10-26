@@ -30,7 +30,7 @@ htui/
 │   │   │   ├── session.rs          # Session：渲染会话（mem:// 注册表 + Config + EventBindings，render(html/css/js) 主入口）
 │   │   │   ├── config.rs           # Config：渲染设置（zoom / events / frame_gap / copy_flow / copy_block）
 │   │   │   ├── source.rs           # HtmlSource/CssSource/JsSource + include_html!/include_css!/include_js!（debug 携带源路径）
-│   │   │   ├── resources.rs        # 资源层：mem:// 内存注册表（前缀可选），供 <script>/<link>/<img>/fetch
+│   │   │   ├── resources.rs        # 资源层：mem:// 内存注册表（前缀可选；debug 注册/删除通知会话重解析），供 <script>/<link>/<img>/fetch
 │   │   │   ├── graphics/           # 终端图形原语层（依赖方向：layout → graphics → tui）
 │   │   │   │   ├── mod.rs          # 入口：显式 re-export（Block / TermLayout / Img / char_width / ...）
 │   │   │   │   ├── canvas.rs       # TermLayout 画布（layout/last_frame/image_cache/input_states）+ InputRenderState
