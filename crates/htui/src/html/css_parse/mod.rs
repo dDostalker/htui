@@ -19,7 +19,7 @@ pub(crate) use properties::clamp_min_max;
 pub use properties::{AlignSelf, CssAttr};
 pub use selector::{
     Combinator, CompoundSelector, CssSelector, DynamicState, NthExpr, PseudoClass, PseudoClassSet,
-    Selector, SelectorError,
+    PseudoElement, Selector, SelectorError,
 };
 pub use stylesheet::{CssRule, CssRuleEntry, Parser, parse_declaration_text};
 pub use values::{

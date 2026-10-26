@@ -123,6 +123,23 @@ impl CascadeIndex {
     }
 }
 
+/// Insert every declaration under its pseudo-element-prefixed key
+/// (`color` → `color::before`), the slot namespace generated content reads.
+fn add_prefixed(
+    target: &mut crate::html::css_parse::properties::CssAttr,
+    css: &crate::html::css_parse::properties::CssAttr,
+    pe: crate::html::css_parse::PseudoElement,
+) {
+    let suffix = match pe {
+        crate::html::css_parse::PseudoElement::Before => "::before",
+        crate::html::css_parse::PseudoElement::After => "::after",
+    };
+    for (k, v) in &css.0 {
+        let key: Arc<str> = Arc::from(format!("{k}{suffix}"));
+        target.0.insert(key, Arc::clone(v));
+    }
+}
+
 /// Apply the `style` attribute of one node, restricted to the `important`
 /// subset when `important` is true the per-node form of the cascade's
 /// inline passes (inline normal beats stylesheet normal, inline `!important`
@@ -182,7 +199,15 @@ pub fn css_into_node_with_state(
                 continue;
             }
             if selector_chain_matches_with_state(arena, node_id, &entry.selector, state) {
-                arena[node_id].css_attr.add(&entry.normal);
+                if let Some(pe) = entry.selector.pseudo_element {
+                    // Pseudo-element declarations live under key-prefixed
+                    // slots (`content::before`, `color::before`, …) so they
+                    // cascade among themselves without touching the origin
+                    // element's own properties.
+                    add_prefixed(&mut arena[node_id].css_attr, &entry.normal, pe);
+                } else {
+                    arena[node_id].css_attr.add(&entry.normal);
+                }
             }
         }
         // 2. Inline `style` attributes, normal declarations.
@@ -194,7 +219,11 @@ pub fn css_into_node_with_state(
                 continue;
             }
             if selector_chain_matches_with_state(arena, node_id, &entry.selector, state) {
-                arena[node_id].css_attr.add(&entry.important);
+                if let Some(pe) = entry.selector.pseudo_element {
+                    add_prefixed(&mut arena[node_id].css_attr, &entry.important, pe);
+                } else {
+                    arena[node_id].css_attr.add(&entry.important);
+                }
             }
         }
         // 4. Inline `style` attributes, `!important` declarations (highest).

@@ -240,6 +240,11 @@ pub type CompoundSelector = Vec<Selector>;
 pub struct CssSelector {
     pub compounds: Vec<CompoundSelector>,
     pub combinators: Vec<Combinator>,
+    /// A trailing `::before` / `::after` pseudo-element. The compounds match
+    /// the origin element; the pseudo-element's declarations are stored
+    /// key-prefixed by the cascade (`content::before` …) and turned into
+    /// generated runs by the inline collector.
+    pub pseudo_element: Option<PseudoElement>,
 }
 
 impl FromStr for CssSelector {
@@ -258,6 +263,28 @@ impl FromStr for CssSelector {
         if segments.is_empty() {
             return Err(SelectorError::EmptySelector);
         }
+        // A trailing `::before` / `::after` pseudo-element (inside the last
+        // segment) is lifted off the chain: the chain itself matches the
+        // origin element and the pseudo-element rides along as a flag.
+        // Only `::before` / `::after` are recognized (single-`:` legacy
+        // spellings included); anything else after `::` stays the
+        // unsupported pseudo-class error it has always been.
+        let mut pseudo_element = None;
+        let mut segments: Vec<String> = segments.iter().map(|s| s.to_string()).collect();
+        if let Some(last) = segments.last_mut() {
+            if let Some((trimmed, element)) = strip_pseudo_element(last) {
+                pseudo_element = Some(element);
+                if trimmed.trim().is_empty() {
+                    // The pseudo-element was the entire segment — a bare
+                    // `::before` has no origin to match.
+                    return Err(SelectorError::UnsupportedPseudoClass(match element {
+                        PseudoElement::Before => "::before".to_string(),
+                        PseudoElement::After => "::after".to_string(),
+                    }));
+                }
+                *last = trimmed.trim().to_string();
+            }
+        }
         let mut compounds = Vec::with_capacity(segments.len());
         for seg in &segments {
             // A segment is one compound selector whose parts all apply to the
@@ -273,8 +300,34 @@ impl FromStr for CssSelector {
         Ok(CssSelector {
             compounds,
             combinators,
+            pseudo_element,
         })
     }
+}
+
+/// The pseudo-elements the engine generates content for (CSS
+/// `::before` / `::after`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PseudoElement {
+    Before,
+    After,
+}
+
+/// If `seg` ends with a `::before` / `::after` pseudo-element suffix, return
+/// the segment with the suffix stripped plus the element kind.
+fn strip_pseudo_element(seg: &str) -> Option<(String, PseudoElement)> {
+    let lower = seg.to_ascii_lowercase();
+    for (suffix, element) in [
+        ("::before", PseudoElement::Before),
+        (":before", PseudoElement::Before),
+        ("::after", PseudoElement::After),
+        (":after", PseudoElement::After),
+    ] {
+        if let Some(stripped) = lower.strip_suffix(suffix) {
+            return Some((seg[..stripped.len()].to_string(), element));
+        }
+    }
+    None
 }
 
 impl CssSelector {

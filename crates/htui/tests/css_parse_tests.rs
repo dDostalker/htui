@@ -3497,3 +3497,82 @@ fn test_math_functions_flow_through_properties() {
         .expect("calc width survives the cascade");
     assert_eq!(len.resolve(length_ctx(80, font_ctx(1, 1))), 76);
 }
+
+#[test]
+fn test_pseudo_element_selector_parses() {
+    init();
+    // The pseudo-element is lifted off the chain; the chain matches the
+    // origin element.
+    let sel: CssSelector = "p.note::before".parse().expect("::before parses");
+    assert_eq!(
+        sel.pseudo_element,
+        Some(htui::html::css_parse::PseudoElement::Before)
+    );
+    assert_eq!(sel.compounds.len(), 1);
+    let sel: CssSelector = "div > a:after".parse().expect("legacy :after parses");
+    assert_eq!(
+        sel.pseudo_element,
+        Some(htui::html::css_parse::PseudoElement::After)
+    );
+    assert_eq!(sel.compounds.len(), 2, "combinator chain survives");
+    // Other pseudo-elements stay unsupported.
+    assert!("p::first-line".parse::<CssSelector>().is_err());
+    assert!(
+        "::before".parse::<CssSelector>().is_err(),
+        "bare pseudo-element has no origin"
+    );
+}
+
+#[test]
+fn test_generated_content_renders_before_and_after() {
+    init();
+    // End-to-end through the render pipeline: the generated runs surround
+    // the element's real text and carry their own styles.
+    let (root_id, mut arena, _) = {
+        let mut parser = html_parse::Parser::new("<p>mid</p>");
+        parser.parse()
+    };
+    let rules = Parser::new(
+        "p::before { content: \"[\"; color: red; } p::after { content: \"]\"; font-weight: bold; }",
+    )
+    .parse();
+    css_into_node(&mut arena, root_id, &rules);
+    let term_map = htui::layout::layout::TermMap {
+        columns: 80,
+        rows: 24,
+    };
+    let mut tl = htui::tui::graph_api::TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
+    assert!(
+        canvas.contains("[mid]"),
+        "generated ::before/::after runs surround the text, got {canvas:?}"
+    );
+    assert!(
+        tl.layout.iter().any(|b| {
+            b.word == "["
+                && b.fcolor
+                    == Some(Color::Rgb {
+                        r: 0xFF,
+                        g: 0,
+                        b: 0,
+                    })
+        }),
+        "::before colour applies to the generated run"
+    );
+
+    // content: none generates nothing.
+    let (root2, mut arena2, _) = {
+        let mut parser = html_parse::Parser::new("<p>mid</p>");
+        parser.parse()
+    };
+    let rules = Parser::new("p::before { content: none; }").parse();
+    css_into_node(&mut arena2, root2, &rules);
+    let mut tl2 = htui::tui::graph_api::TermLayout::new(&term_map, 1.0);
+    tl2.draw(&arena2, root2, &term_map);
+    let canvas2: String = tl2.layout.iter().map(|b| b.word.as_str()).collect();
+    assert!(
+        canvas2.contains("mid") && !canvas2.contains('['),
+        "content: none generates nothing"
+    );
+}
