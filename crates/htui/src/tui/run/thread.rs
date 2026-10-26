@@ -109,6 +109,19 @@ pub(super) fn render_thread(
             state.handle_select(&mut out, sel_cmd);
         }
 
+        for css_cmd in batch.drain_css_reloads() {
+            if let RenderCmd::ReloadCss { css } = css_cmd {
+                let term_map = match TermMap::get_ter_map() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        log::error!("Failed to get terminal size: {}", e);
+                        break 'frame;
+                    }
+                };
+                state.reload_css(&mut out, &geo_tx, &term_map, css);
+            }
+        }
+
         // Publish the frame-completion heartbeat *before* processing: the
         // input loop's watchdog uses it to tell a *stuck* render thread
         // (infinite layout loop, an enormous canvas allocation, a blocked
@@ -316,6 +329,10 @@ pub(super) fn render_thread(
                     // JS `el.focus()` / `el.blur()` requests are intercepted by the
                     // input loop (they mutate input-loop state); if one ever reaches
                     // the render thread it is stale — drop it.
+                    // Session-CSS reloads are drained statefully before the
+                    // snapshot; the compiler still needs this arm for
+                    // exhaustiveness if a command is manually constructed.
+                    RenderCmd::ReloadCss { .. } => {}
                     RenderCmd::FocusRequest { .. } | RenderCmd::BlurRequest { .. } => {
                         log::debug!("Focus request reached the render thread — dropping");
                     }

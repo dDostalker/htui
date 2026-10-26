@@ -50,6 +50,7 @@ pub use engine::ScriptEngine;
 pub use host::{HostCtx, HostFn, host_fn};
 pub use msg::{
     ScriptDirty, ScriptEvent, ScriptMsg, ScriptResponse, apply_message, run_script_thread,
+    run_script_thread_with_js,
 };
 pub(crate) use state::{ENGINE_STATE, ScriptState, TimerEntry};
 

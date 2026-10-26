@@ -532,6 +532,26 @@ impl RenderState {
         self.redraw(out, geo_tx, term_map, scroll_y, zoom);
     }
 
+    /// Replace session-level CSS and fully redraw the same document.
+    ///
+    /// Unlike `RenderDocument`, this does not reset interaction state: node
+    /// ids and viewport state still belong to the live document.
+    pub(super) fn reload_css<W: Write>(
+        &mut self,
+        out: &mut BufWriter<W>,
+        geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>,
+        term_map: &TermMap,
+        css: Arc<str>,
+    ) {
+        self.session_css = css;
+        self.rebuild_css_rules();
+        let (scroll_y, zoom) = match &self.term_layout {
+            Some(tl) => (tl.scroll_y, tl.zoom),
+            None => (0, 1.0),
+        };
+        self.redraw(out, geo_tx, term_map, scroll_y, zoom);
+    }
+
     /// Render a whole-document replacement produced by `ScriptEngine::reload`.
     ///
     /// The arena and document CSS arrive from the script engine, preserving
@@ -597,6 +617,31 @@ mod tests {
             open_select: None,
             max_scroll: Arc::new(AtomicU32::new(0)),
         }
+    }
+
+    #[test]
+    fn reload_css_replaces_session_css_without_replacing_document_css() {
+        let mut parser = Parser::new("<p>same</p>");
+        let document = parser.parse_with_scripts();
+        let mut render_state = state(document, Arc::from("p { color: red; }"));
+
+        let mut out = BufWriter::new(Vec::new());
+        let term_map = TermMap {
+            columns: 80,
+            rows: 24,
+        };
+        render_state.reload_css(&mut out, &None, &term_map, Arc::from("p { color: blue; }"));
+
+        let rule = render_state
+            .css_rules
+            .0
+            .first()
+            .expect("session CSS contributes a rule");
+        assert_eq!(
+            rule.normal.get_color(),
+            Some(Color::Rgb { r: 0, g: 0, b: 255 })
+        );
+        assert_eq!(render_state.session_css, Arc::from("p { color: blue; }"));
     }
 
     #[test]

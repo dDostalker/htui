@@ -38,7 +38,8 @@ use crate::{
     html::{css_parse::DynamicState, html_parse::Parser},
     layout::layout::{MAX_TERM_COLS, MAX_TERM_ROWS, TermMap},
     resources,
-    script::{ScriptMsg, ScriptResponse, run_script_thread},
+    script::{ScriptMsg, ScriptResponse, run_script_thread_with_js},
+    source::SourceKind,
     tdom::node::{NodeArena, NodeId},
     tui::graph_api::{
         DirtyInfo, InputState, KEY_GATE_TIMEOUT, RenderCmd, apply_focus_requests,
@@ -53,22 +54,63 @@ static TERMINAL_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// thread. Extra moves are dropped.
 const MAX_IN_FLIGHT_MOVES: usize = 8;
 
-pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
-    run_inner(html, css, session, None);
+/// Debug source paths retained by `include_html!` / `include_css!` /
+/// `include_js!`. Release sources carry no paths.
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct HotReloadPaths<'a> {
+    pub html: Option<&'a str>,
+    pub css: Option<&'a str>,
+    pub js: Option<&'a str>,
 }
 
-/// Start a debug render with whole-document hot reload for `path`.
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+impl<'a> HotReloadPaths<'a> {
+    fn watches(self) -> Vec<(SourceKind, &'a str)> {
+        [
+            self.html.map(|path| (SourceKind::Html, path)),
+            self.css.map(|path| (SourceKind::Css, path)),
+            self.js.map(|path| (SourceKind::Js, path)),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+
+    pub(crate) fn any(self) -> bool {
+        self.html.is_some() || self.css.is_some() || self.js.is_some()
+    }
+}
+
+pub(crate) fn run(html: &str, css: &str, js: &str, session: &mut Session) {
+    run_inner(html, css, js, session, HotReloadPaths::default());
+}
+
+/// Start a debug render with hot reload for every source that has a path.
 ///
 /// The watcher is part of the debug-only branch: release binaries never
 /// reference this entry point.
 #[cfg(debug_assertions)]
-pub(crate) fn run_hot(path: &str, html: &str, css: &str, session: &mut Session) {
-    run_inner(html, css, session, Some(path));
+pub(crate) fn run_hot(
+    paths: HotReloadPaths<'_>,
+    html: &str,
+    css: &str,
+    js: &str,
+    session: &mut Session,
+) {
+    run_inner(html, css, js, session, paths);
 }
 
-fn run_inner(html: &str, css: &str, session: &mut Session, hot_reload_path: Option<&str>) {
-    // The parameter is consumed only by the debug watcher below.
-    let _ = hot_reload_path;
+fn run_inner(
+    html: &str,
+    css: &str,
+    js: &str,
+    session: &mut Session,
+    hot_reload_paths: HotReloadPaths<'_>,
+) {
+    // The paths are consumed only by the debug watcher below.
+    #[cfg(not(debug_assertions))]
+    let _ = hot_reload_paths;
     // register log hook
     install_panic_hook();
 
@@ -99,16 +141,17 @@ fn run_inner(html: &str, css: &str, session: &mut Session, hot_reload_path: Opti
         parser.parse_with_scripts()
     });
     let session_css: Arc<str> = Arc::from(css);
+    let session_js: Arc<str> = Arc::from(js);
     let config = *session.config();
 
-    // A debug-only side channel reads stable HTML edits and sends them to the
-    // script thread through the input loop. Release builds compile this to no
-    // receiver and no watcher.
+    // A debug-only side channel reads stable source edits. HTML goes to the
+    // script thread, JS re-evaluates in the script thread, and CSS is applied
+    // by the render thread. Release builds compile this to no watcher.
     #[cfg(debug_assertions)]
-    let hot_reload = match hot_reload_path {
-        Some(path) if config.events => Some(hot_reload::spawn(path)),
-        _ => None,
-    };
+    let hot_reload = (config.events && hot_reload_paths.any())
+        .then(|| hot_reload::spawn(hot_reload_paths.watches()));
+    #[cfg(debug_assertions)]
+    let mut hot_css: Option<String> = None;
 
     let registry = session.registry_handle();
     let bindings = if config.events {
@@ -136,9 +179,10 @@ fn run_inner(html: &str, css: &str, session: &mut Session, hot_reload_path: Opti
         let script_registry = Arc::clone(&registry);
         std::thread::spawn(move || {
             resources::with_registry(script_registry, || {
-                run_script_thread(
+                run_script_thread_with_js(
                     script_document,
                     bindings,
+                    Arc::clone(&session_js),
                     script_rx,
                     script_out_tx,
                     hit_map_thread,
@@ -295,13 +339,24 @@ fn run_inner(html: &str, css: &str, session: &mut Session, hot_reload_path: Opti
         #[cfg(debug_assertions)]
         if let Some(watcher) = &hot_reload {
             let mut latest_html: Option<String> = None;
-            while let Ok(html) = watcher.receiver().try_recv() {
-                latest_html = Some(html);
+            let mut latest_js: Option<String> = None;
+            while let Ok(event) = watcher.receiver().try_recv() {
+                match event {
+                    hot_reload::HotReloadEvent::Html(html) => latest_html = Some(html),
+                    hot_reload::HotReloadEvent::Css(css) => hot_css = Some(css),
+                    hot_reload::HotReloadEvent::Js(js) => latest_js = Some(js),
+                }
             }
             if let Some(html) = latest_html {
                 log::info!("Hot reloading HTML document");
                 msgs.push(ScriptMsg::ReloadHtml {
                     html: Arc::from(html.as_str()),
+                });
+            }
+            if let Some(js) = latest_js {
+                log::info!("Hot reloading session JS");
+                msgs.push(ScriptMsg::ReloadJs {
+                    js: Arc::from(js.as_str()),
                 });
             }
         }
@@ -396,6 +451,16 @@ fn run_inner(html: &str, css: &str, session: &mut Session, hot_reload_path: Opti
         // overlay would paint wrong cells.
         if size_changed {
             state.invalidate_viewport(&mut cmds);
+        }
+
+        // Queue a CSS source replacement after any viewport invalidation, but
+        // before a forced redraw so both changes merge into the same frame.
+        #[cfg(debug_assertions)]
+        if let Some(css) = hot_css.take() {
+            log::info!("Hot reloading session CSS");
+            cmds.push(RenderCmd::ReloadCss {
+                css: Arc::from(css.as_str()),
+            });
         }
 
         // Force a re-layout against the new viewport. When the script engine

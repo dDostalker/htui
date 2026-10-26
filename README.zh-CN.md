@@ -25,22 +25,41 @@ cargo add htui
 ```
 
 ```rust
-use htui::Session;
+use htui::{CssSource, HtmlSource, JsSource, Session};
 
 fn main() {
-    let mut session = Session::new();
-    session.render(
+    let html = HtmlSource::inline(
         r#"
         <h1 style="color: steelblue">Hello, htui</h1>
         <p>按 <b>Esc</b> 退出。</p>
         "#,
-        "",
     );
+    let css = CssSource::inline("");
+    let js = JsSource::inline("console.log('htui ready')");
+    let mut session = Session::new();
+    session.render(&html, &css, &js);
 }
 ```
 
-交互只需一个属性——`<button onclick="greet()">`，背后是一个
-`#[htui::command]` 的 Rust 函数。见下方教程。
+## Debug 源码热加载
+
+用配套宏加载 HTML、CSS 和初始 JS：
+
+```rust
+use htui::{Session, include_css, include_html, include_js};
+
+fn main() {
+    let page = include_html!("src/page.html");
+    let style = include_css!("src/page.css");
+    let script = include_js!("src/page.js");
+    let mut session = Session::new();
+    session.render(&page, &style, &script);
+}
+```
+
+debug 构建会监听这些源文件：保存 HTML 触发整文档重载，保存 CSS 替换会话级
+CSS，保存 JS 替换并重新执行会话级 JS。release 构建只嵌入源码，不包含 watcher
+和源码路径。路径相对当前 Cargo package 根目录。
 
 ## 示例：终端音乐播放器
 

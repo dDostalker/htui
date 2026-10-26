@@ -152,7 +152,7 @@ impl OpenSelect {
 
 pub(super) struct RenderState {
     pub(super) document: ParsedDocument,
-    /// CSS supplied through `Session::render(html, css)` / `render_source`.
+    /// CSS supplied through `Session::render`.
     ///
     /// This source is session-scoped and is not replaced by a document reload.
     pub(super) session_css: Arc<str>,

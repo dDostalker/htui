@@ -95,11 +95,13 @@ fn main() {
         }),
     );
 
-    let html = include_str!("page/index.html");
-    let css = include_str!("page/style.css");
+    let html = htui::include_html!("page/index.html");
+    let css = htui::include_css!("page/style.css");
+    let js = htui::include_js!("page/init.js");
     let mut session = htui::Session::new();
     session.set_bindings(bindings);
-    session.render(html, css); // 事件默认开启（Config::events）
+    // 会话 JS 在 HTML 内嵌 <script> 之后执行。
+    session.render(&html, &css, &js);
 }
 ```
 

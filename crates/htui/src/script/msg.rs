@@ -83,6 +83,11 @@ pub enum ScriptMsg {
     /// runs its scripts, and reports a fresh arena plus the new document CSS;
     /// the render thread never independently parses this source.
     ReloadHtml { html: Arc<str> },
+    /// Replace and re-run session-level JS while retaining the live DOM.
+    ///
+    /// The DOM arena is not replaced, so node ids and interaction state stay
+    /// valid; any DOM writes performed by the source are reported as dirty.
+    ReloadJs { js: Arc<str> },
     /// Shut the script thread down.
     Quit,
 }
@@ -409,6 +414,12 @@ pub fn apply_message(
             }
             (Vec::new(), None)
         }
+        ScriptMsg::ReloadJs { js } => {
+            if let Err(e) = engine.reload_js(js) {
+                log::error!("JS hot reload failed: {e}");
+            }
+            (Vec::new(), None)
+        }
         ScriptMsg::Quit => (Vec::new(), None),
     };
 
@@ -455,7 +466,20 @@ pub fn run_script_thread(
     tx: Sender<ScriptResponse>,
     hit_map: Arc<Mutex<Arc<HitMap>>>,
 ) {
-    let mut engine = match ScriptEngine::new_from_document(document, bindings) {
+    run_script_thread_with_js(document, bindings, Arc::from(""), rx, tx, hit_map);
+}
+
+/// Run the page's JS engine with initial session-level JS on its own thread.
+pub fn run_script_thread_with_js(
+    document: ParsedDocument,
+    bindings: EventBindings,
+    session_js: Arc<str>,
+    rx: Receiver<ScriptMsg>,
+    tx: Sender<ScriptResponse>,
+    hit_map: Arc<Mutex<Arc<HitMap>>>,
+) {
+    let mut engine = match ScriptEngine::new_from_document_with_js(document, &session_js, bindings)
+    {
         Ok(engine) => engine,
         Err(err) => {
             log::error!("Failed to initialize script engine: {err}");

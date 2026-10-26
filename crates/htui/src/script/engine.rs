@@ -37,15 +37,16 @@ impl ScriptEngine {
     /// Errors are returned as Boa errors ,
     /// individual script failures log a warning and continue.
     pub fn new(html: &str, bindings: EventBindings) -> JsResult<Self> {
+        Self::new_with_js(html, "", bindings)
+    }
+
+    /// Create an engine from HTML plus session-level JS.
+    pub fn new_with_js(html: &str, session_js: &str, bindings: EventBindings) -> JsResult<Self> {
         let document = {
             let mut parser = Parser::new(html);
             parser.parse_with_scripts()
         };
-        let (context, state) = match Self::build_engine(document, bindings.host) {
-            Ok(v) => v,
-            Err((e, _)) => return Err(e),
-        };
-        Ok(ScriptEngine { context, state })
+        Self::new_from_document_with_js(document, session_js, bindings)
     }
 
     /// Create an engine from an already-parsed document.
@@ -54,10 +55,20 @@ impl ScriptEngine {
     /// once and distribute independent document snapshots to the script and
     /// render threads.
     pub fn new_from_document(document: ParsedDocument, bindings: EventBindings) -> JsResult<Self> {
-        let (context, state) = match Self::build_engine(document, bindings.host) {
-            Ok(v) => v,
-            Err((e, _)) => return Err(e),
-        };
+        Self::new_from_document_with_js(document, "", bindings)
+    }
+
+    /// Create an engine from an already-parsed document plus session-level JS.
+    pub fn new_from_document_with_js(
+        document: ParsedDocument,
+        session_js: &str,
+        bindings: EventBindings,
+    ) -> JsResult<Self> {
+        let (context, state) =
+            match Self::build_engine(document, bindings.host, Arc::from(session_js)) {
+                Ok(v) => v,
+                Err((e, _)) => return Err(e),
+            };
         Ok(ScriptEngine { context, state })
     }
 
@@ -70,12 +81,15 @@ impl ScriptEngine {
     /// independent re-parse on the render side. On failure the previous
     /// document is left intact and the error is returned.
     pub fn reload(&mut self, html: &str) -> JsResult<()> {
-        let host_fns = std::mem::take(&mut self.state.borrow_mut().host_fns);
+        let (host_fns, session_js) = {
+            let mut st = self.state.borrow_mut();
+            (std::mem::take(&mut st.host_fns), Arc::clone(&st.session_js))
+        };
         let document = {
             let mut parser = Parser::new(html);
             parser.parse_with_scripts()
         };
-        let (context, state) = match Self::build_engine(document, host_fns) {
+        let (context, state) = match Self::build_engine(document, host_fns, session_js) {
             Ok(v) => v,
             Err((e, host_fns)) => {
                 // Restore the previous session so a failed reload leaves it
@@ -107,14 +121,17 @@ impl ScriptEngine {
     fn build_engine(
         document: ParsedDocument,
         host_fns: HashMap<String, HostFn>,
+        session_js: Arc<str>,
     ) -> Result<EngineParts, EngineBuildError> {
         let doc = document;
+        let run_session_js = Arc::clone(&session_js);
         let (fetch_tx, fetch_rx) = ScriptState::fetch_channel();
         let state = Rc::new(RefCell::new(ScriptState {
             arena: (*doc.arena).clone(),
             root_id: doc.root_id,
             document_css: Arc::clone(&doc.css),
             document_reload: false,
+            session_js,
             render_cmds: Vec::new(),
             dirty: DirtyInfo::default(),
             current_event: None,
@@ -155,8 +172,15 @@ impl ScriptEngine {
             return Err((e, std::mem::take(&mut state.borrow_mut().host_fns)));
         }
 
-        // Run the document's `<script>` blocks.
-        for script in doc.scripts.iter() {
+        // Run the document's `<script>` blocks, then session-level JS from
+        // `include_js!` / `Session::render`. Session JS intentionally executes
+        // after inline scripts, just like a script injected at the end of body.
+        let mut scripts: Vec<&str> = doc.scripts.iter().map(String::as_str).collect();
+        scripts.push(run_session_js.as_ref());
+        for script in scripts {
+            if script.is_empty() {
+                continue;
+            }
             if let Err(e) = context.eval(Source::from_bytes(script.as_bytes())) {
                 log::warn!("Script execution failed: {e}");
             }
@@ -208,6 +232,28 @@ impl ScriptEngine {
     /// Root node id of the live DOM.
     pub fn root_id(&self) -> NodeId {
         self.state.borrow().root_id
+    }
+
+    /// Replace session-level JS and evaluate it against the current DOM.
+    ///
+    /// Unlike [`reload`](Self::reload), this keeps the live arena and node ids.
+    /// DOM writes made by the new source are reported through the normal dirty
+    /// set. If evaluation fails, the previous source is restored for a future
+    /// whole-document reload; runtime side effects already performed by the
+    /// failed script cannot be rolled back (matching JS semantics).
+    pub fn reload_js(&mut self, js: &str) -> JsResult<()> {
+        let source: Arc<str> = Arc::from(js);
+        let previous = {
+            let mut st = self.state.borrow_mut();
+            std::mem::replace(&mut st.session_js, Arc::clone(&source))
+        };
+        match self.context.eval(Source::from_bytes(source.as_bytes())) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                self.state.borrow_mut().session_js = previous;
+                Err(e)
+            }
+        }
     }
 
     /// CSS extracted from the engine's current document.

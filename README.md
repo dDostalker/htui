@@ -30,22 +30,45 @@ cargo add htui
 ```
 
 ```rust
-use htui::Session;
+use htui::{CssSource, HtmlSource, JsSource, Session};
 
 fn main() {
-    let mut session = Session::new();
-    session.render(
+    let html = HtmlSource::inline(
         r#"
         <h1 style="color: steelblue">Hello, htui</h1>
         <p>Press <b>Esc</b> to quit.</p>
         "#,
-        "",
     );
+    let css = CssSource::inline("");
+    let js = JsSource::inline("console.log('htui ready')");
+    let mut session = Session::new();
+    session.render(&html, &css, &js);
 }
 ```
 
 Interactivity is one attribute away — `<button onclick="greet()">`, backed by
 a `#[htui::command]` Rust function. See the tutorials below.
+
+## Debug source hot reload
+
+Load HTML, CSS, and initial JS with the matching macros:
+
+```rust
+use htui::{Session, include_css, include_html, include_js};
+
+fn main() {
+    let page = include_html!("src/page.html");
+    let style = include_css!("src/page.css");
+    let script = include_js!("src/page.js");
+    let mut session = Session::new();
+    session.render(&page, &style, &script);
+}
+```
+
+In debug builds, htui watches each source. Saving HTML reloads the whole
+document, saving CSS replaces session CSS, and saving JS replaces/re-runs
+session JS. Release builds embed the sources only: no watcher and no source
+paths are included. Paths are relative to the current Cargo package root.
 
 ## Example: terminal music player
 

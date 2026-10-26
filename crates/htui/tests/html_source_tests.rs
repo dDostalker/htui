@@ -1,25 +1,37 @@
-//! Tests for the compile-time HTML source loader used by debug hot reload.
+//! Tests for compile-time HTML / CSS / JS source loading used by hot reload.
 
-use htui::include_html;
+use htui::{include_css, include_html, include_js};
 
 #[test]
-fn include_html_embeds_content_and_tracks_the_source_in_debug() {
-    let source = include_html!("tests/fixtures/hot_reload.html");
+fn include_sources_embed_content_and_track_paths_in_debug() {
+    let html = include_html!("tests/fixtures/hot_reload.html");
+    let css = include_css!("tests/fixtures/hot_reload.css");
+    let js = include_js!("tests/fixtures/hot_reload.js");
 
-    assert!(
-        source.as_str().contains("hot-reload-fixture"),
-        "the fixture must be embedded at compile time"
-    );
+    assert!(html.as_str().contains("hot-reload-fixture"));
+    assert!(css.as_str().contains("color: initial"));
+    assert!(js.as_str().contains("__htuiJsFixture"));
 
     #[cfg(debug_assertions)]
     {
-        let path = source.path().expect("debug builds carry the source path");
         assert!(
-            path.ends_with("tests/fixtures/hot_reload.html"),
-            "debug path must point at the fixture: {path}"
+            html.path()
+                .is_some_and(|path| path.ends_with("tests/fixtures/hot_reload.html"))
+        );
+        assert!(
+            css.path()
+                .is_some_and(|path| path.ends_with("tests/fixtures/hot_reload.css"))
+        );
+        assert!(
+            js.path()
+                .is_some_and(|path| path.ends_with("tests/fixtures/hot_reload.js"))
         );
     }
 
     #[cfg(not(debug_assertions))]
-    assert_eq!(source.path(), None, "release builds omit the source path");
+    {
+        assert_eq!(html.path(), None);
+        assert_eq!(css.path(), None);
+        assert_eq!(js.path(), None);
+    }
 }

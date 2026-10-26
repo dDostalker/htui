@@ -27,9 +27,9 @@ htui/
 │   │   ├── Cargo.toml
 │   │   ├── src/
 │   │   │   ├── lib.rs              # 入口：模块声明 + 公共 re-export（Session / Config / Parser / 宏 / boa_engine）
-│   │   │   ├── session.rs          # Session：渲染会话（mem:// 注册表 + Config + EventBindings，render()/render_source() 主入口）
+│   │   │   ├── session.rs          # Session：渲染会话（mem:// 注册表 + Config + EventBindings，render(html/css/js) 主入口）
 │   │   │   ├── config.rs           # Config：渲染设置（zoom / events / frame_gap / copy_flow / copy_block）
-│   │   │   ├── html_source.rs      # HtmlSource + include_html!（编译期嵌入 HTML；debug 携带源路径供热加载）
+│   │   │   ├── source.rs           # HtmlSource/CssSource/JsSource + include_html!/include_css!/include_js!（debug 携带源路径）
 │   │   │   ├── resources.rs        # 资源层：mem:// 内存注册表（前缀可选），供 <script>/<link>/<img>/fetch
 │   │   │   ├── graphics/           # 终端图形原语层（依赖方向：layout → graphics → tui）
 │   │   │   │   ├── mod.rs          # 入口：显式 re-export（Block / TermLayout / Img / char_width / ...）
@@ -155,7 +155,7 @@ htui/
 │   │   │       ├── mod.rs
 │   │   │       ├── run/          # 引擎驱动：run()/run_hot() 输入循环 + panic hook（mod.rs）+ 渲染/命中/脚本线程 + 增量重绘辅助
 │   │   │           ├── mod.rs     # run()/run_hot() 输入主循环 + install_panic_hook
-│   │   │           ├── hot_reload.rs # debug-only HTML 轮询 watcher（稳定两次读取后发送整文档 reload）
+│   │   │           ├── hot_reload.rs # debug-only HTML/CSS/JS 轮询 watcher（稳定两次读取后发送 source reload）
 │   │   │           ├── state.rs     # RenderState + handle_input/handle_select/TextSel/OpenSelect + 配色常量
 │   │   │           ├── pipeline.rs  # redraw/layout_and_paint/render_arena/render_html/render_document/repaint_dynamic/pin_fixed_and_repaint
 │   │   │           ├── thread.rs    # render_thread / hit_test_thread / fold_script_event / PendingInput
@@ -177,9 +177,11 @@ htui/
 │   │   │                   └── page.rs      # page_level_builtins（页面级滚动/缩放/复制）
 │   │   ├── tests/               # 集成测试（跟随主库）
 │   │   │   ├── fixtures/
-│   │   │   │   └── hot_reload.html # include_html! 编译期加载测试夹具
+│   │   │   │   ├── hot_reload.html # include_html! 编译期加载测试夹具
+│   │   │   │   ├── hot_reload.css  # include_css! 编译期加载测试夹具
+│   │   │   │   └── hot_reload.js   # include_js! 编译期加载测试夹具
 │   │   │   ├── html_parse_tests.rs
-│   │   │   ├── html_source_tests.rs # include_html! / HtmlSource 测试（编译期内容 + debug 路径，纯内存）
+│   │   │   ├── html_source_tests.rs # include_html/css/js! 与 Source wrapper 测试（编译期内容 + debug 路径，纯内存）
 │   │   │   ├── css_parse_tests.rs
 │   │   │   ├── dom_node_tests.rs    # DOM 节点 API 测试（insertBefore/replaceChild/cloneNode + Text·Comment·Fragment + document 访问器，纯内存）
 │   │   │   ├── resources_tests.rs   # mem:// 资源层测试（注册 / 读取 / 前缀，纯内存）
@@ -257,8 +259,10 @@ htui/
 ├── example/                # 音乐播放器示例（cd example && cargo run；纯界面 + 交互演示，无音频）
 │   ├── Cargo.toml          # 空 [workspace] 表脱离根 workspace，可独立运行
 │   └── src/
-│       ├── main.rs         # 入口：加载 player.html 并 Session::render
-│       └── player.html     # 完整界面 + 交互（标准 HTML/CSS/JS，浏览器可直接打开）
+│       ├── main.rs         # 入口：include_html/css/js 并调用 Session::render
+│       ├── player.html     # 完整界面 + 交互（标准 HTML/CSS/JS，浏览器可直接打开）
+│       ├── player.css      # 会话级终端 CSS 示例
+│       └── player.init.js  # 会话级初始 JS 示例
 sg/                       # ast-grep 配套目录（sgconfig.yml 在仓库根）
 └── rules/                # ast-grep 规则定义（每个 .yml 一条规则）
 ```

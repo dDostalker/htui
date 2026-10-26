@@ -35,6 +35,10 @@ pub(crate) struct ScriptState {
     /// Set by `ScriptEngine::reload` and consumed by the script-thread bridge;
     /// ordinary DOM mutations leave it false.
     pub document_reload: bool,
+    /// Session-level JS supplied beside the HTML source. It runs after the
+    /// document's inline `<script>` blocks and is re-run after whole-document
+    /// reloads; `ReloadJs` can replace it without replacing the DOM.
+    pub session_js: Arc<str>,
     /// Render commands pushed by host functions during JS execution.
     pub render_cmds: Vec<RenderCmd>,
     /// Nodes whose content or attributes JS changed since the last render.

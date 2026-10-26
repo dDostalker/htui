@@ -92,6 +92,14 @@ pub enum RenderCmd {
         zoom: f32,
         dirty: DirtyInfo,
     },
+    /// Replace session-level CSS and fully re-render the same document.
+    ///
+    /// This is a stateful reload, not a snapshot: it can be ordered before or
+    /// after a `RenderDocument`, so both a CSS save and an HTML save in the
+    /// same batch are applied.
+    ReloadCss {
+        css: Arc<str>,
+    },
     /// Re-style the cached document for the CSS `:hover` pseudo-class with the
     /// given session-local node (`None` clears any hover), then repaint. With
     /// no `:hover` rules in the stylesheet this repaints to the same pixels.
@@ -226,6 +234,7 @@ fn merge_dirty(target: &mut DirtyInfo, source: DirtyInfo) {
 #[derive(Debug, Default)]
 pub struct DrainedBatch {
     inputs: Vec<RenderCmd>,
+    css_reloads: Vec<RenderCmd>,
     selects: Vec<RenderCmd>,
     text_selection: Option<RenderCmd>,
     hover: Option<RenderCmd>,
@@ -248,6 +257,7 @@ impl DrainedBatch {
             sel @ (RenderCmd::SelectOpen { .. }
             | RenderCmd::SelectClose { .. }
             | RenderCmd::SelectMove { .. }) => self.selects.push(sel),
+            css @ RenderCmd::ReloadCss { .. } => self.css_reloads.push(css),
             other @ RenderCmd::TextSelection { .. } => {
                 // Only the latest selection matters; earlier ones in the
                 // same batch are intermediates.
@@ -389,6 +399,11 @@ impl DrainedBatch {
     /// Drain the `RenderInput` commands in arrival order.
     pub fn drain_inputs(&mut self) -> impl Iterator<Item = RenderCmd> {
         std::mem::take(&mut self.inputs).into_iter()
+    }
+
+    /// Drain session-CSS reload commands in arrival order.
+    pub fn drain_css_reloads(&mut self) -> impl Iterator<Item = RenderCmd> {
+        std::mem::take(&mut self.css_reloads).into_iter()
     }
 
     /// Drain the `Select*` commands in arrival order.

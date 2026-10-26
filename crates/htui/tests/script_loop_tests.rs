@@ -419,6 +419,41 @@ fn host_render_html_reloads_in_engine_instead_of_render_thread() {
 }
 
 #[test]
+fn initial_session_js_runs_after_document_scripts() {
+    let mut engine = ScriptEngine::new_with_js(
+        r#"<script>globalThis.__order = ["inline"];</script><p>x</p>"#,
+        r#"globalThis.__order.push("session")"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__order.join(',')"),
+        "inline,session"
+    );
+}
+
+#[test]
+fn reload_js_keeps_the_dom_and_reports_mutations() {
+    let (mut engine, _geo) = build_geometry(r#"<p id="value">old</p>"#, EventBindings::default());
+    engine
+        .reload_js(r#"document.getElementById('value').textContent = "fresh";"#)
+        .expect("session JS reloads");
+
+    let dirty = engine.take_dirty();
+    assert!(
+        !dirty.is_empty(),
+        "DOM writes from reloaded JS must report a repaint"
+    );
+    let arena = engine.arena();
+    assert!(
+        arena
+            .iter()
+            .any(|(_, n)| n.text_content(&arena).contains("fresh")),
+        "the live DOM must survive and reflect the reloaded JS"
+    );
+}
+
+#[test]
 fn reload_html_message_reports_document_css_and_clears_hover() {
     let (mut engine, geo) = build_geometry(r#"<div id="old">old</div>"#, EventBindings::default());
     let map = HitMap::build(&geo);
