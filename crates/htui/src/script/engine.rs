@@ -12,7 +12,9 @@ use crate::{
 };
 
 use super::bindings::{compile_attribute_listeners, register_host_global};
-use super::dom::{get_attr_handler, get_listeners, install_builtins, node_wrapper};
+use super::dom::{
+    get_attr_handler, get_listeners, install_builtins, make_event_object, node_wrapper,
+};
 use super::host::HostFn;
 use super::state::{ENGINE_STATE, ScriptState};
 use super::{EngineBuildError, EngineParts};
@@ -628,7 +630,7 @@ impl ScriptEngine {
             Some(el) => node_wrapper(&mut self.context, el.node_id)?,
             None => JsValue::null(),
         };
-        let event = super::dom::make_event_object(&mut self.context, event_type, &target, x, y)?;
+        let event = make_event_object(&mut self.context, event_type, &target, x, y)?;
         if let Some(k) = key
             && let Some(obj) = event.as_object()
         {
