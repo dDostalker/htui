@@ -3435,3 +3435,65 @@ fn test_inherit_and_initial_keywords() {
     );
     assert_eq!(attr.0.get("color").map(|s| s.as_ref()), Some("red"));
 }
+
+#[test]
+fn test_math_functions_parse_and_resolve() {
+    init();
+    let ctx = length_ctx(80, font_ctx(1, 1));
+
+    // calc(100% - 4ch): 80 - 4 = 76 cells.
+    let len = Length::parse("calc(100% - 4ch)").expect("calc parses");
+    assert_eq!(len.resolve(ctx), 76);
+    // calc(2 * 10px): 20px / 8 = 2.5 → round 3, min 1.
+    let len = Length::parse("calc(2 * 10px)").expect("calc with * parses");
+    assert_eq!(len.resolve(ctx), 3);
+    // calc(10ch / 2) = 5.
+    let len = Length::parse("calc(10ch / 2)").expect("calc with / parses");
+    assert_eq!(len.resolve(ctx), 5);
+    // A lone term inside calc.
+    let len = Length::parse("calc(6ch)").expect("lone term parses");
+    assert_eq!(len.resolve(ctx), 6);
+
+    // min / max pick per resolve-context.
+    let len = Length::parse("min(50%, 30ch)").expect("min parses");
+    assert_eq!(len.resolve(ctx), 30, "30ch < 50% of 80");
+    let len = Length::parse("max(50%, 30ch)").expect("max parses");
+    assert_eq!(len.resolve(ctx), 40, "50% of 80 > 30ch");
+
+    // clamp(min, val, max).
+    let len = Length::parse("clamp(10ch, 50%, 30ch)").expect("clamp parses");
+    assert_eq!(len.resolve(ctx), 30, "50% of 80 clamps down to 30ch");
+    let len = Length::parse("clamp(10ch, 2ch, 30ch)").expect("clamp parses");
+    assert_eq!(len.resolve(ctx), 10, "2ch clamps up to 10ch");
+
+    // resolve_signed keeps the sign through calc.
+    let len = Length::parse_signed("calc(2ch - 10ch)").expect("signed calc parses");
+    assert_eq!(len.resolve_signed(ctx), -8);
+
+    // Unsupported forms fail cleanly.
+    assert!(Length::parse("calc(4ch").is_none(), "missing )");
+    assert!(Length::parse("calc()").is_none(), "empty body");
+    assert!(Length::parse("min(1ch)").is_none(), "min needs 2 terms");
+    assert!(Length::parse("clamp(1ch, 2ch)").is_none(), "clamp needs 3");
+    assert!(
+        Length::parse("calc(10pt + 2ch)").is_none(),
+        "unsupported unit"
+    );
+}
+
+#[test]
+fn test_math_functions_flow_through_properties() {
+    init();
+    // Through a real cascade: `width: calc(100% - 4ch)` on a fixed-width
+    // parent resolves through the layout getters.
+    let attr = cascaded_node(
+        r#"<div style="width: 80ch"><p style="width: calc(100% - 4ch)">x</p></div>"#,
+        "p",
+    );
+    let len = attr
+        .0
+        .get("width")
+        .and_then(|raw| Length::parse(raw))
+        .expect("calc width survives the cascade");
+    assert_eq!(len.resolve(length_ctx(80, font_ctx(1, 1))), 76);
+}
