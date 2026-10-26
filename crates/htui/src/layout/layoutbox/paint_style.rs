@@ -76,6 +76,10 @@ pub struct PaintStyle {
     /// the layout phase resolved — `<th>`'s `center` — participate even
     /// though they are not stored in the node's `css_attr`.
     pub text_align: TextAlign,
+    /// First-line indent (CSS `text-indent`) in cells: the first visual
+    /// line's wrap budget shrank by this many columns at layout time, and
+    /// the paint phase shifts its origin right accordingly.
+    pub text_indent: usize,
 }
 
 impl Default for PaintStyle {
@@ -90,6 +94,7 @@ impl Default for PaintStyle {
             fill_bg: false,
             spacing_after: 0,
             text_align: TextAlign::Left,
+            text_indent: 0,
         }
     }
 }

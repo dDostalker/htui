@@ -129,6 +129,14 @@ pub fn layout_table(
     let caption_lines: Vec<Vec<InlineRun>> = caption_id
         .map(|cid| {
             let cnode = &arena[cid];
+            let spacing = (
+                cnode
+                    .css_attr
+                    .get_letter_spacing(child_context.font, child_context.viewport),
+                cnode
+                    .css_attr
+                    .get_word_spacing(child_context.font, child_context.viewport),
+            );
             let runs = collect_runs(
                 arena,
                 cid,
@@ -136,6 +144,7 @@ pub fn layout_table(
                 cnode.css_attr.get_color(),
                 cnode.css_attr.get_bg_color(),
                 block_style(&cnode.css_attr),
+                spacing,
             );
             wrap_runs(
                 &runs,
@@ -144,6 +153,7 @@ pub fn layout_table(
                 cnode.css_attr.get_white_space(&cnode.node_type),
                 cnode.css_attr.get_word_break(),
                 cnode.css_attr.get_overflow_wrap(),
+                0,
             )
         })
         .unwrap_or_default();
@@ -172,6 +182,7 @@ pub fn layout_table(
                 fill_bg: cnode.css_attr.get_bg_color().is_some(),
                 spacing_after: 0,
                 text_align,
+                text_indent: 0,
             },
             cnode.css_attr.outer_display(&cnode.node_type),
             Vec::new(),
@@ -224,6 +235,7 @@ pub fn layout_table(
                 fill_bg: cnode.css_attr.get_bg_color().is_some(),
                 spacing_after: 0,
                 text_align,
+                text_indent: 0,
             },
             cnode.css_attr.outer_display(&cnode.node_type),
             Vec::new(),
@@ -264,6 +276,7 @@ pub fn layout_table(
         fill_bg,
         spacing_after: 0,
         text_align: node.css_attr.get_text_align(),
+        text_indent: 0,
     };
 
     let table_box = LayoutBox::new_normal(

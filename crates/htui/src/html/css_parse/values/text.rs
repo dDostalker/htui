@@ -254,3 +254,23 @@ pub fn parse_overflow_wrap(s: &str) -> Option<OverflowWrap> {
         _ => None,
     }
 }
+
+/// Text-overflow behaviour for a clipped (`overflow: hidden`-family) box
+/// whose content still exceeds the content width (CSS `text-overflow`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TextOverflow {
+    /// `clip` (the default) — the overflow simply stops at the clip edge.
+    #[default]
+    Clip,
+    /// `ellipsis` — the clipped line ends in a `…` glyph.
+    Ellipsis,
+}
+
+/// Parse a `text-overflow` keyword (`string` values are not supported).
+pub fn parse_text_overflow(s: &str) -> Option<TextOverflow> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "clip" => Some(TextOverflow::Clip),
+        "ellipsis" => Some(TextOverflow::Ellipsis),
+        _ => None,
+    }
+}

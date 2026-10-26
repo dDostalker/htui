@@ -70,7 +70,21 @@ pub fn measure_cell(
     // The block's own background is resolved from the fresh cascade at paint
     // time (`effective_bg`), not baked into the runs (see the block layout
     // counterpart — a `:hover` re-cascade must not reuse stale run colours).
-    let body_runs = collect_runs(arena, cell_id, node, block_fg, None, block_font_style);
+    let spacing = (
+        node.css_attr
+            .get_letter_spacing(child_context.font, child_context.viewport),
+        node.css_attr
+            .get_word_spacing(child_context.font, child_context.viewport),
+    );
+    let body_runs = collect_runs(
+        arena,
+        cell_id,
+        node,
+        block_fg,
+        None,
+        block_font_style,
+        spacing,
+    );
     let wrapped_lines = if body_runs.is_empty() {
         Vec::new()
     } else {
@@ -81,6 +95,7 @@ pub fn measure_cell(
             node.css_attr.get_white_space(&node.node_type),
             node.css_attr.get_word_break(),
             node.css_attr.get_overflow_wrap(),
+            0,
         )
     };
     // Whitespace-only runs collapse away (wrap_runs returns no visual lines),
@@ -233,6 +248,7 @@ pub fn layout_cell(
         fill_bg,
         spacing_after: 0,
         text_align,
+        text_indent: 0,
     };
 
     LayoutBox::new_normal(

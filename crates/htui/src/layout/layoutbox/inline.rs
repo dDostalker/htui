@@ -40,6 +40,7 @@ pub fn collect_runs(
     fg: Option<Color>,
     bg: Option<Color>,
     style: FontStyle,
+    spacing: (usize, isize),
 ) -> Vec<InlineRun> {
     let transform = node.css_attr.get_text_transform();
     let white_space = node.css_attr.get_white_space(&node.node_type);
@@ -54,6 +55,7 @@ pub fn collect_runs(
         transform,
         white_space,
         None,
+        spacing,
         &mut runs,
     );
     runs
@@ -98,6 +100,7 @@ fn walk_runs(
     transform: TextTransform,
     white_space: WhiteSpace,
     owner: Option<NodeId>,
+    spacing: (usize, isize),
     runs: &mut Vec<InlineRun>,
 ) {
     // A closed `<details>` shows only its first `<summary>` child, so its own
@@ -145,7 +148,9 @@ fn walk_runs(
                     && !s.is_empty()
                 {
                     let text = apply_text_transform(s, transform);
-                    runs.push(InlineRun::owned(text, style, fg, bg, owner));
+                    runs.push(InlineRun::owned_spaced(
+                        text, style, fg, bg, owner, spacing.0, spacing.1,
+                    ));
                 }
             }
             NodeType::Br => {
@@ -162,12 +167,14 @@ fn walk_runs(
                 // rather than carried in the UA table.
                 let (q_fg, q_bg, q_style) = merge_inline_ua(child, fg, bg, style);
                 let (open, close) = q_quote_pair(arena, child_id);
-                runs.push(InlineRun::owned(
+                runs.push(InlineRun::owned_spaced(
                     open.to_string(),
                     q_style,
                     q_fg,
                     q_bg,
                     owner,
+                    spacing.0,
+                    spacing.1,
                 ));
                 walk_inline_children(
                     arena,
@@ -178,14 +185,17 @@ fn walk_runs(
                     q_style,
                     white_space,
                     owner,
+                    spacing,
                     runs,
                 );
-                runs.push(InlineRun::owned(
+                runs.push(InlineRun::owned_spaced(
                     close.to_string(),
                     q_style,
                     q_fg,
                     q_bg,
                     owner,
+                    spacing.0,
+                    spacing.1,
                 ));
             }
             NodeType::Abbr => {
@@ -211,6 +221,7 @@ fn walk_runs(
                     a_style,
                     white_space,
                     owner,
+                    spacing,
                     runs,
                 );
             }
@@ -261,6 +272,7 @@ fn walk_runs(
                     child_style,
                     white_space,
                     owner,
+                    spacing,
                     runs,
                 );
             }
@@ -384,12 +396,13 @@ fn walk_inline_children(
     style: FontStyle,
     parent_ws: WhiteSpace,
     owner: Option<NodeId>,
+    spacing: (usize, isize),
     runs: &mut Vec<InlineRun>,
 ) {
     let transform = child.css_attr.get_text_transform();
     let ws = child.white_space_or(parent_ws);
     walk_runs(
-        arena, child_id, child, fg, bg, style, transform, ws, owner, runs,
+        arena, child_id, child, fg, bg, style, transform, ws, owner, spacing, runs,
     );
 }
 

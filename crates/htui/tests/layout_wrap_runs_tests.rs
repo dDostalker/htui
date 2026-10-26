@@ -16,6 +16,7 @@ fn run(s: &str, width: usize) -> Vec<Vec<InlineRun>> {
         WhiteSpace::Normal,
         WordBreak::Normal,
         OverflowWrap::Normal,
+        0,
     )
 }
 
@@ -27,6 +28,7 @@ fn run_ws(s: &str, width: usize, ws: WhiteSpace) -> Vec<Vec<InlineRun>> {
         ws,
         WordBreak::Normal,
         OverflowWrap::Normal,
+        0,
     )
 }
 
@@ -88,6 +90,7 @@ fn break_all_splits_long_word() {
         WhiteSpace::Normal,
         WordBreak::BreakAll,
         OverflowWrap::Normal,
+        0,
     );
     assert!(lines.len() >= 2, "got {} lines", lines.len());
 }
@@ -101,6 +104,7 @@ fn keep_all_keeps_cjk_intact() {
         WhiteSpace::Normal,
         WordBreak::KeepAll,
         OverflowWrap::Normal,
+        0,
     );
     assert_eq!(lines.len(), 1);
 }
@@ -114,6 +118,7 @@ fn break_word_splits_unbreakable() {
         WhiteSpace::Normal,
         WordBreak::Normal,
         OverflowWrap::BreakWord,
+        0,
     );
     assert!(lines.len() >= 2, "got {} lines", lines.len());
 }
@@ -127,6 +132,7 @@ fn overflow_normal_does_not_split() {
         WhiteSpace::Normal,
         WordBreak::Normal,
         OverflowWrap::Normal,
+        0,
     );
     assert_eq!(lines.len(), 1);
 }
@@ -140,6 +146,7 @@ fn empty_input_yields_one_empty_line() {
         WhiteSpace::Normal,
         WordBreak::Normal,
         OverflowWrap::Normal,
+        0,
     );
     assert_eq!(lines.len(), 1);
     assert!(lines[0].is_empty());
@@ -208,6 +215,7 @@ fn cjk_kinsoku_applies_under_break_all() {
         WhiteSpace::Normal,
         WordBreak::BreakAll,
         OverflowWrap::Normal,
+        0,
     );
     let l2: String = lines[2].iter().map(|r| r.text.as_str()).collect();
     assert_eq!(l2, "丁，", "the comma rides with the preceding glyph");

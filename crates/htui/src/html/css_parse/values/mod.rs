@@ -39,7 +39,8 @@ pub use multicol::{
 #[allow(unused_imports)]
 pub use multicol::ColumnsShorthand;
 pub use text::{
-    FontStyleKind, FontWeight, LineHeight, OverflowWrap, TextAlign, TextDecoration, TextTransform,
-    WhiteSpace, WordBreak, parse_line_height, parse_overflow_wrap, parse_text_transform,
-    parse_white_space, parse_word_break, resolve_line_height_cells,
+    FontStyleKind, FontWeight, LineHeight, OverflowWrap, TextAlign, TextDecoration, TextOverflow,
+    TextTransform, WhiteSpace, WordBreak, parse_line_height, parse_overflow_wrap,
+    parse_text_overflow, parse_text_transform, parse_white_space, parse_word_break,
+    resolve_line_height_cells,
 };

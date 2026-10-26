@@ -625,6 +625,7 @@ fn layout_anonymous_text(
         text.white_space,
         text.word_break,
         text.overflow_wrap,
+        0,
     );
     let has_lines = !wrapped.is_empty() && wrapped.iter().any(|l| !l.is_empty());
     let inline_rows = if has_lines {

@@ -48,6 +48,7 @@ pub(crate) fn paint_runs(
     line_height_cells: usize,
     clip: Rect,
     overflow_visible: bool,
+    first_line_indent: usize,
 ) {
     if lines.is_empty() {
         return;
@@ -76,11 +77,15 @@ pub(crate) fn paint_runs(
         }
         let line_start =
             cell_start.saturating_add(line_idx.saturating_mul(line_h).saturating_mul(cols));
+        // `text-indent` shifts the first visual line right and narrows its
+        // alignment basis (the wrap pass already reserved the budget).
+        let indent = if line_idx == 0 { first_line_indent } else { 0 };
+        let indent = indent.min(block_width);
         paint_one_line(
             canvas,
             line_runs,
-            line_start,
-            block_width,
+            line_start.saturating_add(indent),
+            block_width.saturating_sub(indent),
             align,
             effective_bg,
             font_size_cells,
@@ -139,11 +144,14 @@ fn paint_one_line(
             run.style,
             font_size_cells,
             row_end,
+            run.letter_spacing,
+            run.word_spacing,
         );
         index = index.saturating_add(run.width_at(font_size_cells));
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_text_row(
     canvas: &mut PaintCanvas<'_>,
     start: usize,
@@ -153,17 +161,27 @@ fn paint_text_row(
     style: FontStyle,
     font_size_cells: usize,
     row_end: usize,
+    letter_spacing: usize,
+    word_spacing: isize,
 ) {
     let max = canvas.layout.len();
     let mut idx = start;
     let font_size = font_size_cells.max(1);
     for g in text.graphemes(true) {
         let w = grapheme_width(g);
+        // Same advance formula as `InlineRun::grapheme_advance` so the
+        // painted cells line up with every width measurement: the glyph's
+        // expanded slot plus word spacing on spaces plus letter spacing.
+        let word_extra = if g == " " {
+            word_spacing.max(0) as usize
+        } else {
+            0
+        };
+        let slot_width = w.max(font_size) + word_extra + letter_spacing;
         // Stop when the next cluster + its background padding would step
         // past the content-box right edge or the canvas boundary. Without
         // this, a long `<p>` would spill its overflow into the rows below
         // and corrupt the cells of subsequent boxes.
-        let slot_width = w.max(font_size);
         if idx.saturating_add(slot_width) > row_end {
             break;
         }

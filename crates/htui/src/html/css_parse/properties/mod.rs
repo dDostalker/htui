@@ -1072,6 +1072,70 @@ impl CssAttr {
         self.parse_or("table-layout", parse_table_layout, TableLayout::default())
     }
 
+    /// Letter spacing in cells (CSS `letter-spacing`) — added after every
+    /// grapheme of the node's inline runs. Negative values clamp to 0
+    /// (terminal cells cannot overlap).
+    pub fn get_letter_spacing(&self, font_ctx: FontContext, viewport: Viewport) -> usize {
+        self.0
+            .get("letter-spacing")
+            .and_then(|raw| Length::parse(raw))
+            .map(|len| {
+                len.resolve(LengthContext {
+                    containing: 0,
+                    font: font_ctx,
+                    viewport,
+                })
+            })
+            .unwrap_or(0)
+    }
+
+    /// Extra spacing inserted at each word boundary (CSS `word-spacing`) —
+    /// added to every space grapheme. Signed: a negative value tightens
+    /// words (each space shrinks, floored at a zero-width join).
+    pub fn get_word_spacing(&self, font_ctx: FontContext, viewport: Viewport) -> isize {
+        self.0
+            .get("word-spacing")
+            .and_then(|raw| Length::parse(raw))
+            .map(|len| {
+                len.resolve(LengthContext {
+                    containing: 0,
+                    font: font_ctx,
+                    viewport,
+                }) as isize
+            })
+            .unwrap_or(0)
+    }
+
+    /// First-line indent in cells (CSS `text-indent`) — narrows the first
+    /// visual line's wrap width and shifts its paint origin right.
+    pub fn get_text_indent(
+        &self,
+        containing: usize,
+        font_ctx: FontContext,
+        viewport: Viewport,
+    ) -> usize {
+        self.0
+            .get("text-indent")
+            .and_then(|raw| Length::parse(raw))
+            .map(|len| {
+                len.resolve(LengthContext {
+                    containing,
+                    font: font_ctx,
+                    viewport,
+                })
+            })
+            .unwrap_or(0)
+    }
+
+    /// Clipped-line ending (CSS `text-overflow`).
+    pub fn get_text_overflow(&self) -> crate::html::css_parse::TextOverflow {
+        self.parse_or(
+            "text-overflow",
+            crate::html::css_parse::parse_text_overflow,
+            crate::html::css_parse::TextOverflow::default(),
+        )
+    }
+
     /// Which side of the table the `<caption>` row renders on
     /// (CSS `caption-side`).
     pub fn get_caption_side(&self) -> CaptionSide {

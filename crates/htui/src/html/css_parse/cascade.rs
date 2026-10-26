@@ -346,6 +346,11 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "word-break",
     "overflow-wrap",
     "word-wrap",
+    // Text spacing / clipping
+    "letter-spacing",
+    "word-spacing",
+    "text-indent",
+    "text-overflow",
     // Positioning (CSS Positioned Layout)
     "position",
     "z-index",
@@ -408,6 +413,9 @@ pub const INHERITED_PROPS: &[&str] = &[
     "overflow-wrap",
     "list-style-type",
     "empty-cells",
+    "letter-spacing",
+    "word-spacing",
+    "text-indent",
 ];
 
 fn inherit_css(arena: &mut NodeArena, root_id: NodeId) {
