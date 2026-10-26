@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use crate::config::Config;
 use crate::events::{Geometry, HitMap};
 use crate::html::css_parse::{DynamicState, PseudoClass, css_pseudo_rule_set};
+use crate::html::html_parse::ParsedDocument;
 use crate::layout::layout::TermMap;
 use crate::tdom::node::{NodeArena, NodeId};
 use crate::tui::graph_api::{DrainedBatch, InputState, RenderCmd};
@@ -20,7 +21,7 @@ use super::state::RenderState;
 
 pub(super) fn render_thread(
     rx: mpsc::Receiver<RenderCmd>,
-    html: Arc<str>,
+    document: ParsedDocument,
     base_css: Arc<str>,
     max_scroll: Arc<AtomicU32>,
     geo_tx: Option<mpsc::Sender<Arc<Geometry>>>,
@@ -35,7 +36,7 @@ pub(super) fn render_thread(
     let css_rules = Arc::new(parse_css_source(&base_css));
     let pseudo_rules = css_pseudo_rule_set(&css_rules);
     let mut state = RenderState {
-        html,
+        document,
         base_css,
         extra_css: String::new(),
         css_rules,

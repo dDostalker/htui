@@ -23,7 +23,7 @@ use crate::tui::graph_api::{DirtyInfo, TermLayout};
 use super::overlay::apply_select_overlay;
 use super::region::{incremental_region, pinned_boxes_rects, pseudo_affected_region, union_rect};
 use super::selection::{highlight_lines, lines_bounds};
-use super::state::{RenderState, SELECTION_BG};
+use super::state::{RenderState, SELECTION_BG, cascade_document};
 
 /// Flush one rendered frame from the session's `BufWriter`, skipping the
 /// syscall entirely when the frame wrote nothing (an unchanged viewport).
@@ -36,12 +36,9 @@ pub(super) fn flush_frame<W: Write>(out: &mut BufWriter<W>) {
     }
 }
 
-pub(super) fn combined_css_source(html: &str, css: &str) -> String {
-    let mut html_parser = crate::html::html_parse::Parser::new(html);
-    let (_root_id, _arena, embedded_css) = html_parser.parse();
-
+pub(super) fn combined_css_source(embedded_css: &str, css: &str) -> String {
     if css.is_empty() {
-        embedded_css
+        embedded_css.to_string()
     } else {
         format!("{}\n{}", embedded_css, css)
     }
@@ -89,7 +86,7 @@ fn extract_title(arena: &NodeArena, root_id: NodeId) -> Option<String> {
 }
 
 impl RenderState {
-    /// Re-parse, re-layout, re-paint, publish the geometry and flush a frame.
+    /// Re-layout, re-paint, publish the geometry and flush a frame.
     ///
     /// Shared by `Redraw` (same document) and `RenderHtml` (new document).
     /// `out` is generic so tests can drive the pipeline against an in-memory
@@ -102,7 +99,7 @@ impl RenderState {
         scroll_y: u32,
         zoom: f32,
     ) {
-        let (root_id, arena) = self.parse_and_apply();
+        let (root_id, arena) = cascade_document(&self.document, &self.css_rules);
         self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom, None);
     }
 
@@ -294,7 +291,7 @@ impl RenderState {
         out: &mut BufWriter<W>,
         geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>,
         term_map: &TermMap,
-        arena: &NodeArena,
+        arena: &Arc<NodeArena>,
         root_id: NodeId,
         scroll_y: u32,
         zoom: f32,
@@ -308,9 +305,12 @@ impl RenderState {
         if css_changed {
             self.apply_injected_css(&dirty.injected_css);
         }
-        let mut arena = arena.clone();
+        let source_arena = Arc::clone(arena);
+        let mut arena = (*source_arena).clone();
         reset_css_attr(&mut arena, root_id);
         css_into_node_with_state(&mut arena, root_id, &self.css_rules, &self.dynamic);
+        self.document.arena = source_arena;
+        self.document.root_id = root_id;
         let dirty = if state_changed || css_changed {
             None
         } else {
@@ -502,7 +502,10 @@ impl RenderState {
             Some(tl) => (tl.scroll_y, tl.zoom),
             None => (0, 1.0),
         };
-        self.html = html;
+        self.document = {
+            let mut parser = crate::html::html_parse::Parser::new(&html);
+            parser.parse_with_scripts()
+        };
         // A fresh document discards any `innerHTML`-injected CSS.
         self.extra_css = String::new();
         // The old document's interaction state is meaningless here: its

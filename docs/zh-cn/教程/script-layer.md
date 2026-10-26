@@ -227,8 +227,9 @@ button/checkbox 的默认动作一致）。`close` 由引擎原生的 `<dialog>`
 - `hidden`：读写 `hidden` 属性（UA `[hidden]{display:none}`）。`el.hidden = true` 隐藏元素及其子树、
   `= false` 恢复；不变时（重复设同一值）不触发重渲染
 - `dataset`：live `DOMStringMap`，读写 `data-*` 属性：`dataset.foo` ↔ `data-foo`，
-  `dataset.maxCount` ↔ `data-max-count`（camelCase ↔ kebab-case）；赋空串 / `null` /
-  `undefined` 删除属性；`delete dataset.key` 删除；`'key' in dataset` 判断存在；
+  `dataset.maxCount` ↔ `data-max-count`（camelCase ↔ kebab-case）；赋值按 WebIDL
+  `DOMString` 转换（`null` → `"null"`，`undefined` → `"undefined"`，空串 → 空值属性），
+  赋值不删除属性；`delete dataset.key` 删除；`'key' in dataset` 判断存在；
   `Object.keys(dataset)` 按属性顺序枚举 kebab 名；held 引用保持 live
 - 方法：`getAttribute(name)` / `setAttribute(name, value)` / `removeAttribute(name)`
 - `querySelector(sel)` / `querySelectorAll(sel)`：限定在元素子树内查询（不含元素自身）

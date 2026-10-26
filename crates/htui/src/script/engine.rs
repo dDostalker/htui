@@ -6,13 +6,15 @@ use boa_engine::{Context, JsResult, JsValue, Source, js_string};
 
 use crate::{
     events::{EventBindings, EventType, HitRegion, HtmlEvent, KeyEventInfo},
-    html::html_parse::Parser,
+    html::html_parse::{ParsedDocument, Parser},
     tdom::node::{Node, NodeArena, NodeId, NodeType},
     tui::graph_api::{DirtyInfo, RenderCmd},
 };
 
 use super::bindings::{compile_attribute_listeners, register_host_global};
-use super::dom::{get_attr_handler, get_listeners, install_builtins, node_wrapper};
+use super::dom::{
+    get_attr_handler, get_listeners, install_builtins, make_event_object, node_wrapper,
+};
 use super::host::HostFn;
 use super::state::{ENGINE_STATE, ScriptState};
 use super::{EngineBuildError, EngineParts};
@@ -29,12 +31,29 @@ const BOOTSTRAP: &str = include_str!("bootstrap.js");
 impl ScriptEngine {
     /// Create an engine from an HTML document and the application bindings.
     ///
-    /// Parses the document (arena + `<script>` sources), installs the DOM
-    /// globals and host functions, compiles `on*` attribute bodies into
-    /// listeners, then runs every `<script>` block. Errors are returned as
-    /// Boa errors; individual script failures log a warning and continue.
+    /// Parses the document , installs the DOM globals and host functions,
+    /// compiles on* attribute bodies into listeners, then runs every <script> block.
+    /// Errors are returned as Boa errors ,
+    /// individual script failures log a warning and continue.
     pub fn new(html: &str, bindings: EventBindings) -> JsResult<Self> {
-        let (context, state) = match Self::build_engine(html, bindings.host) {
+        let document = {
+            let mut parser = Parser::new(html);
+            parser.parse_with_scripts()
+        };
+        let (context, state) = match Self::build_engine(document, bindings.host) {
+            Ok(v) => v,
+            Err((e, _)) => return Err(e),
+        };
+        Ok(ScriptEngine { context, state })
+    }
+
+    /// Create an engine from an already-parsed document.
+    ///
+    /// This is the startup path used when the caller wants to parse the HTML
+    /// once and distribute independent document snapshots to the script and
+    /// render threads.
+    pub fn new_from_document(document: ParsedDocument, bindings: EventBindings) -> JsResult<Self> {
+        let (context, state) = match Self::build_engine(document, bindings.host) {
             Ok(v) => v,
             Err((e, _)) => return Err(e),
         };
@@ -51,7 +70,11 @@ impl ScriptEngine {
     /// document is left intact and the error is returned.
     pub fn reload(&mut self, html: &str) -> JsResult<()> {
         let host_fns = std::mem::take(&mut self.state.borrow_mut().host_fns);
-        let (context, state) = match Self::build_engine(html, host_fns) {
+        let document = {
+            let mut parser = Parser::new(html);
+            parser.parse_with_scripts()
+        };
+        let (context, state) = match Self::build_engine(document, host_fns) {
             Ok(v) => v,
             Err((e, host_fns)) => {
                 // Restore the previous session so a failed reload leaves it
@@ -80,13 +103,13 @@ impl ScriptEngine {
     /// borrowed it (like [`reload`](Self::reload)) can restore the previous
     /// session.
     fn build_engine(
-        html: &str,
+        document: ParsedDocument,
         host_fns: HashMap<String, HostFn>,
     ) -> Result<EngineParts, EngineBuildError> {
-        let doc = Parser::new(html).parse_with_scripts();
+        let doc = document;
         let (fetch_tx, fetch_rx) = ScriptState::fetch_channel();
         let state = Rc::new(RefCell::new(ScriptState {
-            arena: doc.arena,
+            arena: (*doc.arena).clone(),
             root_id: doc.root_id,
             render_cmds: Vec::new(),
             dirty: DirtyInfo::default(),
@@ -101,18 +124,8 @@ impl ScriptEngine {
         }));
         ENGINE_STATE.with(|s| *s.borrow_mut() = Some(Rc::clone(&state)));
 
+        // run boa，add limits
         let mut context = Context::default();
-
-        // Runtime limits: a runaway page (`while (true) {}` or unbounded
-        // recursion) must throw a JS error instead of hanging the script
-        // thread forever. While hung, every pointer move still queues a
-        // `ScriptMsg::Move` on the unbounded channel — an unbounded memory
-        // growth — so killing the loop is what keeps the whole pipeline
-        // bounded. The iteration budget is generous (a interpreted iteration
-        // costs ~100ns, so the worst stall per loop construct is ~0.1s) and
-        // the thrown error surfaces through the usual per-listener /
-        // per-script `log::warn!` paths, exactly like a page script that
-        // throws.
         let limits = context.runtime_limits_mut();
         limits.set_recursion_limit(512);
         limits.set_loop_iteration_limit(1_000_000);
@@ -139,7 +152,7 @@ impl ScriptEngine {
         }
 
         // Run the document's `<script>` blocks.
-        for script in &doc.scripts {
+        for script in doc.scripts.iter() {
             if let Err(e) = context.eval(Source::from_bytes(script.as_bytes())) {
                 log::warn!("Script execution failed: {e}");
             }
@@ -617,7 +630,7 @@ impl ScriptEngine {
             Some(el) => node_wrapper(&mut self.context, el.node_id)?,
             None => JsValue::null(),
         };
-        let event = super::dom::make_event_object(&mut self.context, event_type, &target, x, y)?;
+        let event = make_event_object(&mut self.context, event_type, &target, x, y)?;
         if let Some(k) = key
             && let Some(obj) = event.as_object()
         {

@@ -1,9 +1,52 @@
 //! Global attribute natives: `className` / `classList` / `hidden` /
 //! `dataset` (live objects over the element's attributes).
 
-use boa_engine::{Context, JsResult, JsValue, NativeFunction, js_string};
+use boa_engine::{
+    Context, JsResult, JsValue, NativeFunction, js_string, object::ObjectInitializer,
+};
 
 use super::{f64_to_node_id, js_fn, mark_dirty, node_id_to_f64, this_node_id, with_state};
+
+const CLASS_LIST_CACHE: &str = "__htuiClassListCache";
+const DATASET_CACHE: &str = "__htuiDatasetCache";
+
+/// Read `globalThis.<registry>[key]`; `None` when the registry or entry is
+/// absent.
+fn registry_get_node(context: &mut Context, registry: &str, key: f64) -> JsResult<Option<JsValue>> {
+    let global = context.global_object();
+    let obj = global.get(js_string!(registry), context)?;
+    if obj.is_undefined() || obj.is_null() {
+        return Ok(None);
+    }
+    let entry = obj
+        .to_object(context)?
+        .get(js_string!(key.to_string()), context)?;
+    Ok((!entry.is_undefined()).then_some(entry))
+}
+
+/// Write `globalThis.<registry>[key] = value`, creating the registry object
+/// on demand.
+fn registry_set_node(
+    context: &mut Context,
+    registry: &str,
+    key: f64,
+    value: &JsValue,
+) -> JsResult<()> {
+    let global = context.global_object();
+    let obj = match global
+        .get(js_string!(registry), context)?
+        .to_object(context)
+    {
+        Ok(o) => o,
+        Err(_) => {
+            let o = ObjectInitializer::new(context).build();
+            global.set(js_string!(registry), o.clone(), false, context)?;
+            o
+        }
+    };
+    obj.set(js_string!(key.to_string()), value.clone(), false, context)?;
+    Ok(())
+}
 
 pub(super) fn native_get_class(
     this: &JsValue,
@@ -45,11 +88,9 @@ pub(super) fn native_set_class(
     Ok(JsValue::undefined())
 }
 
-/// Return a live `DOMTokenList`-like object over the element's `class`
 /// attribute (the `classList` property). The factory's `getAttr` / `setAttr`
 /// closures read / write the attribute through the engine arena, so the
 /// returned object reflects later DOM mutations (browser `classList` is
-/// live).
 pub(super) fn native_get_class_list(
     this: &JsValue,
     _args: &[JsValue],
@@ -57,6 +98,9 @@ pub(super) fn native_get_class_list(
 ) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let node_key = node_id_to_f64(node_id);
+    if let Some(cached) = registry_get_node(context, CLASS_LIST_CACHE, node_key)? {
+        return Ok(cached);
+    }
     let get_attr = js_fn(
         context,
         NativeFunction::from_copy_closure_with_captures(class_list_get, node_key),
@@ -69,11 +113,13 @@ pub(super) fn native_get_class_list(
     let helper = global
         .get(js_string!("__htuiClassList"), context)?
         .to_object(context)?;
-    helper.call(
+    let list = helper.call(
         &JsValue::undefined(),
         &[get_attr.into(), set_attr.into()],
         context,
-    )
+    )?;
+    registry_set_node(context, CLASS_LIST_CACHE, node_key, &list)?;
+    Ok(list)
 }
 
 /// Live `classList` read: the element's `class` attribute value.
@@ -188,6 +234,9 @@ pub(super) fn native_get_dataset(
 ) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let node_key = node_id_to_f64(node_id);
+    if let Some(cached) = registry_get_node(context, DATASET_CACHE, node_key)? {
+        return Ok(cached);
+    }
     let get = js_fn(
         context,
         NativeFunction::from_copy_closure_with_captures(dataset_get, node_key),
@@ -208,11 +257,13 @@ pub(super) fn native_get_dataset(
     let helper = global
         .get(js_string!("__htuiDataset"), context)?
         .to_object(context)?;
-    helper.call(
+    let map = helper.call(
         &JsValue::undefined(),
         &[get.into(), set.into(), remove.into(), keys.into()],
         context,
-    )
+    )?;
+    registry_set_node(context, DATASET_CACHE, node_key, &map)?;
+    Ok(map)
 }
 
 /// Live `dataset` read: the `data-<name>` attribute value (the `name` is the
@@ -241,9 +292,6 @@ fn dataset_get(
     })
 }
 
-/// Live `dataset` write: set `data-<name>` to the value. An empty string
-/// removes the attribute (browser `dataset` semantics); the node is marked
-/// dirty only when the attribute actually changed.
 fn dataset_set(
     _this: &JsValue,
     args: &[JsValue],
@@ -270,12 +318,7 @@ fn dataset_set(
     };
     let key = format!("data-{name}");
     let existing = node.attributes.get(&key).cloned();
-    if value.is_empty() {
-        if existing.is_some() {
-            node.attributes.shift_remove(&key);
-            mark_dirty(&mut st, node_id);
-        }
-    } else if existing.as_deref() != Some(value.as_str()) {
+    if existing.as_deref() != Some(value.as_str()) {
         node.attributes.insert(key, value);
         mark_dirty(&mut st, node_id);
     }

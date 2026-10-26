@@ -482,6 +482,9 @@ fn bg_pad_cells_carry_space_and_bg_into_rendered_output() {
 #[test]
 fn render_to_bytes_includes_bg_sgr_on_pad_cells_for_padded_em_block() {
     init();
+    // This test inspects the raw ANSI byte stream and must not inherit the
+    // host environment's NO_COLOR setting (crossterm honors it globally).
+    crossterm::style::force_color_output(true);
     // End-to-end check using the actual ANSI byte stream. Mirrors the
     // `font_size` visual fixture's `.pad-em` element (`padding: 0.5em 1em;
     // font-size: 2em; background-color: darkgreen`) and verifies the

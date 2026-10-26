@@ -1,9 +1,9 @@
 //! Tests for the `dataset` / `hidden` global attributes on the JS side:
 //! `el.dataset` is a live `DOMStringMap` over the element's `data-*`
-//! attributes (camelCase↔kebab-case mapping, live reads / writes, empty-string
-//! deletes, `Object.keys` enumeration), and `el.hidden` toggles the `hidden`
-//! attribute (the UA `[hidden] { display: none }` rule). Pure in-memory — no
-//! terminal required.
+//! attributes (camelCase↔kebab-case mapping, live reads / writes, WebIDL
+//! `DOMString` conversion on writes, `delete`-only removal, `Object.keys`
+//! enumeration), and `el.hidden` toggles the `hidden` attribute (the UA
+//! `[hidden] { display: none }` rule). Pure in-memory — no terminal required.
 
 use htui::events::EventBindings;
 use htui::layout::layout::TermMap;
@@ -148,20 +148,38 @@ fn dataset_write_sets_the_kebab_cased_attribute() {
 }
 
 #[test]
-fn dataset_empty_string_removes_the_attribute() {
+fn dataset_write_uses_webidl_string_conversion() {
     let mut engine = ScriptEngine::new(
-        r#"<div id="d" data-tmp="x"></div>"#,
+        r#"<div id="d" data-tmp="x" data-n="1" data-u="2"></div>"#,
         EventBindings::default(),
     )
     .expect("engine initializes");
-    eval_str(&mut engine, "document.getElementById('d').dataset.tmp = ''");
+    eval_str(
+        &mut engine,
+        "globalThis.ds = document.getElementById('d').dataset",
+    );
+    // An empty string sets an empty attribute value (a browser keeps the
+    // attribute present); removal is `delete`-only.
+    eval_str(&mut engine, "globalThis.ds.tmp = ''");
+    assert_eq!(data_attr(&engine, "d", "data-tmp"), Some("".into()));
+    assert_eq!(eval_str(&mut engine, "globalThis.ds.tmp"), "");
+    assert_eq!(
+        eval_str(&mut engine, "'tmp' in globalThis.ds"),
+        "true",
+        "an empty-string write must keep the attribute present"
+    );
+    // WebIDL `DOMString` conversion: null / undefined stringify.
+    eval_str(&mut engine, "globalThis.ds.n = null");
+    assert_eq!(data_attr(&engine, "d", "data-n"), Some("null".into()));
+    eval_str(&mut engine, "globalThis.ds.u = undefined");
+    assert_eq!(data_attr(&engine, "d", "data-u"), Some("undefined".into()));
+    // Removal stays `delete`-only.
+    eval_str(&mut engine, "delete globalThis.ds.tmp");
     assert_eq!(data_attr(&engine, "d", "data-tmp"), None);
     assert_eq!(
-        eval_str(
-            &mut engine,
-            "String(document.getElementById('d').dataset.tmp)"
-        ),
-        "undefined"
+        eval_str(&mut engine, "'tmp' in globalThis.ds"),
+        "false",
+        "delete must remove the attribute"
     );
 }
 
@@ -322,5 +340,69 @@ fn hidden_unchanged_write_does_not_mark_dirty() {
     assert!(
         !engine.take_dirty().is_empty(),
         "clearing the hidden attribute must re-render"
+    );
+}
+
+#[test]
+fn dataset_access_returns_the_same_live_instance() {
+    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
+        .expect("engine initializes");
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "document.getElementById('d').dataset === document.getElementById('d').dataset"
+        ),
+        "true",
+        "repeated access returns the same instance (browser identity)"
+    );
+}
+
+#[test]
+fn dataset_proto_keys_keep_object_semantics_and_names_are_validated() {
+    let mut engine = ScriptEngine::new(
+        r#"<div id="d" data-foo="1" data-constructor="x"></div>"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
+    eval_str(
+        &mut engine,
+        "globalThis.ds = document.getElementById('d').dataset",
+    );
+    // WebIDL named-property visibility: Object.prototype's own property
+    // names keep their normal semantics and are never shadowed by data-*.
+    assert_eq!(
+        eval_str(&mut engine, "typeof globalThis.ds.constructor"),
+        "function",
+        "constructor must come from the prototype, not the data-constructor attr"
+    );
+    assert_eq!(eval_str(&mut engine, "'toString' in globalThis.ds"), "true");
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.ds.hasOwnProperty('foo')"),
+        "true",
+        "prototype methods must work and see the data keys"
+    );
+    // The setter validates the transformed candidate name.
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "(function () { try { globalThis.ds['a b'] = 1; return 'no-throw'; } catch (e) { return e.name; } })()"
+        ),
+        "SyntaxError"
+    );
+    assert_eq!(
+        eval_str(
+            &mut engine,
+            "(function () { try { globalThis.ds.UPPER = 1; return 'no-throw'; } catch (e) { return e.name; } })()"
+        ),
+        "SyntaxError",
+        "UPPER transforms to '-u-p-p-e-r', which cannot start a name"
+    );
+    // Valid names still write; the deleter silently ignores invalid names.
+    eval_str(&mut engine, "globalThis.ds['a-b'] = 2");
+    assert_eq!(data_attr(&engine, "d", "data-a-b"), Some("2".into()));
+    assert_eq!(
+        eval_str(&mut engine, "delete globalThis.ds['a b']"),
+        "true",
+        "deleting an invalid name is a no-op, not a throw"
     );
 }

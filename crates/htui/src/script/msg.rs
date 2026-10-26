@@ -22,6 +22,7 @@ use compact_str::CompactString;
 use crate::events::{
     ElementRef, EventBindings, EventType, HitMap, HitRegion, HoverState, KeyEventInfo, interaction,
 };
+use crate::html::html_parse::ParsedDocument;
 use crate::layout::Rect;
 use crate::script::ScriptEngine;
 use crate::tdom::node::{NodeArena, NodeId, NodeType};
@@ -414,21 +415,22 @@ pub fn apply_message(
     }
 }
 
-/// Drive a [`ScriptEngine`] on a dedicated thread.
+/// Run the page's JS engine on its own thread.
 ///
-/// Constructs the engine (running the document's `<script>` blocks), answers
-/// with `ScriptResponse::Ready` (or `Failed`), then processes [`ScriptMsg`]s
-/// from the input loop. When `EventBindings::auto` is set, ticks the periodic
-/// action between messages via `recv_timeout`. Exits on `ScriptMsg::Quit` or
-/// when the input loop drops its sender.
+/// Build the engine and run top-level `<script>` code, then report the
+/// initial DOM with `Ready` or initialization failure with `Failed`. Handle
+/// `ScriptMsg` requests from the input loop, and wake for due JS timers or
+/// completed fetches. Each reply carries render commands, DOM updates, hover
+/// state, and key-gate results. `Quit` or a closed request channel ends the
+/// loop.
 pub fn run_script_thread(
-    html: Arc<str>,
+    document: ParsedDocument,
     bindings: EventBindings,
     rx: Receiver<ScriptMsg>,
     tx: Sender<ScriptResponse>,
     hit_map: Arc<Mutex<Arc<HitMap>>>,
 ) {
-    let mut engine = match ScriptEngine::new(html.as_ref(), bindings) {
+    let mut engine = match ScriptEngine::new_from_document(document, bindings) {
         Ok(engine) => engine,
         Err(err) => {
             log::error!("Failed to initialize script engine: {err}");
@@ -452,17 +454,6 @@ pub fn run_script_thread(
     }
 
     loop {
-        // Block for the next message. The wait is bounded only by real wake
-        // sources:
-        // - the earliest due timer (JS `setTimeout` / `setInterval`) bounds
-        //   it to its deadline;
-        // - a pending `fetch` completion needs a zero wait: loads resolve
-        //   synchronously into the fetch channel at `fetch()` call time, so
-        //   an outstanding fetch id means the result is already queued and
-        //   the loop must drain it now;
-        // - a quiet page (no timers, no fetches) blocks indefinitely — the
-        //   input loop's messages and its drop are the only wake-ups, so an
-        //   idle session costs zero script-thread wake-ups.
         let wait = match engine.next_timer_timeout() {
             Some(deadline) => Some(deadline),
             None if engine.has_pending_fetch() => Some(Duration::ZERO),

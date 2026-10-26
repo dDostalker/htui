@@ -57,9 +57,6 @@ pub use hit_map::{HitMap, HitRegion};
 pub use interaction::{HoverState, on_click, on_move};
 
 /// DOM-like event types supported by the input layer.
-///
-/// Each variant maps 1:1 to the HTML event attribute of the same name
-/// (`onclick` → [`EventType::Click`], …).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventType {
     /// Fired when the left mouse button is pressed and released on the same

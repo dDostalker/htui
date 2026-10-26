@@ -430,6 +430,15 @@ pub(crate) fn clear_node_attr_handler(context: &mut Context, node_id: NodeId) ->
     )
 }
 
+/// Drop every multicast `addEventListener` listener of one node
+pub(crate) fn clear_node_listeners(context: &mut Context, node_id: NodeId) -> JsResult<()> {
+    call_registry_helper(
+        context,
+        "__htuiClearAllListeners",
+        &[js_string!(node_id_to_f64(node_id).to_string()).into()],
+    )
+}
+
 /// Read the current attribute-handler slot for `(node, event_type)`; `None`
 /// when unset.
 pub(crate) fn get_attr_handler(
