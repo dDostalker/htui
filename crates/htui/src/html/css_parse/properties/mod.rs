@@ -41,17 +41,19 @@ use crate::html::box_edges::{
 };
 
 use super::values::{
-    AlignContent, AlignItems, BoxSizing, ColumnFill, ColumnsResolved, CornerRadii, CssDisplay,
-    FlexBasis, FlexDirection, FlexShorthand, FlexWrap, FontStyleKind, FontWeight, GapSizes,
-    JustifyContent, Length, LineHeight, OverflowWrap, TextAlign, TextDecoration, TextTransform,
-    Visibility, WhiteSpace, WordBreak, merge_border_longhand, parse_align_content,
-    parse_align_items, parse_border_radius, parse_border_side, parse_border_style,
-    parse_border_width, parse_box_sizing, parse_color_str, parse_column_count, parse_column_fill,
-    parse_column_rule, parse_columns_shorthand, parse_edge_auto, parse_edge_sizes,
+    AlignContent, AlignItems, BoxSizing, CaptionSide, ColumnFill, ColumnsResolved, CornerRadii,
+    CssDisplay, EmptyCells, FlexBasis, FlexDirection, FlexShorthand, FlexWrap, FontStyleKind,
+    FontWeight, GapSizes, JustifyContent, Length, LineHeight, ListStyleType, OverflowWrap,
+    TableLayout, TextAlign, TextDecoration, TextTransform, Visibility, WhiteSpace, WordBreak,
+    merge_border_longhand, parse_align_content, parse_align_items, parse_border_radius,
+    parse_border_side, parse_border_style, parse_border_width, parse_box_sizing,
+    parse_caption_side, parse_color_str, parse_column_count, parse_column_fill, parse_column_rule,
+    parse_columns_shorthand, parse_edge_auto, parse_edge_sizes, parse_empty_cells,
     parse_flex_basis, parse_flex_direction, parse_flex_flow, parse_flex_shorthand, parse_flex_wrap,
-    parse_gap_shorthand, parse_justify_content, parse_line_height, parse_margin_sizes,
-    parse_non_negative_number, parse_order, parse_overflow_wrap, parse_text_transform,
-    parse_visibility, parse_white_space, parse_word_break, resolve_flex_basis,
+    parse_gap_shorthand, parse_justify_content, parse_line_height, parse_list_style_type,
+    parse_margin_sizes, parse_non_negative_number, parse_order, parse_overflow_wrap,
+    parse_table_layout, parse_text_transform, parse_visibility, parse_white_space,
+    parse_word_break, resolve_flex_basis,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -1052,6 +1054,98 @@ impl CssAttr {
             },
             z_index,
         }
+    }
+
+    /// List marker style (CSS `list-style-type`).
+    ///
+    /// Inherited, so a `list-style-type` on the `<ul>` / `<ol>` reaches the
+    /// `<li>` markers through the cascade. The default is element-driven:
+    /// `disc` under `<ul>` / `<menu>`, `decimal` under `<ol>` — the caller
+    /// (the `<li>` layout) supplies the element default, mirroring
+    /// [`Self::get_white_space`]'s UA-default pattern.
+    pub fn get_list_style_type(&self, default: ListStyleType) -> ListStyleType {
+        self.parse_or("list-style-type", parse_list_style_type, default)
+    }
+
+    /// Table column-sizing algorithm (CSS `table-layout`).
+    pub fn get_table_layout(&self) -> TableLayout {
+        self.parse_or("table-layout", parse_table_layout, TableLayout::default())
+    }
+
+    /// Letter spacing in cells (CSS `letter-spacing`) — added after every
+    /// grapheme of the node's inline runs. Negative values clamp to 0
+    /// (terminal cells cannot overlap).
+    pub fn get_letter_spacing(&self, font_ctx: FontContext, viewport: Viewport) -> usize {
+        self.0
+            .get("letter-spacing")
+            .and_then(|raw| Length::parse(raw))
+            .map(|len| {
+                len.resolve(LengthContext {
+                    containing: 0,
+                    font: font_ctx,
+                    viewport,
+                })
+            })
+            .unwrap_or(0)
+    }
+
+    /// Extra spacing inserted at each word boundary (CSS `word-spacing`) —
+    /// added to every space grapheme. Signed: a negative value tightens
+    /// words (each space shrinks, floored at a zero-width join).
+    pub fn get_word_spacing(&self, font_ctx: FontContext, viewport: Viewport) -> isize {
+        self.0
+            .get("word-spacing")
+            .and_then(|raw| Length::parse(raw))
+            .map(|len| {
+                len.resolve(LengthContext {
+                    containing: 0,
+                    font: font_ctx,
+                    viewport,
+                }) as isize
+            })
+            .unwrap_or(0)
+    }
+
+    /// First-line indent in cells (CSS `text-indent`) — narrows the first
+    /// visual line's wrap width and shifts its paint origin right.
+    pub fn get_text_indent(
+        &self,
+        containing: usize,
+        font_ctx: FontContext,
+        viewport: Viewport,
+    ) -> usize {
+        self.0
+            .get("text-indent")
+            .and_then(|raw| Length::parse(raw))
+            .map(|len| {
+                len.resolve(LengthContext {
+                    containing,
+                    font: font_ctx,
+                    viewport,
+                })
+            })
+            .unwrap_or(0)
+    }
+
+    /// Clipped-line ending (CSS `text-overflow`).
+    pub fn get_text_overflow(&self) -> crate::html::css_parse::TextOverflow {
+        self.parse_or(
+            "text-overflow",
+            crate::html::css_parse::parse_text_overflow,
+            crate::html::css_parse::TextOverflow::default(),
+        )
+    }
+
+    /// Which side of the table the `<caption>` row renders on
+    /// (CSS `caption-side`).
+    pub fn get_caption_side(&self) -> CaptionSide {
+        self.parse_or("caption-side", parse_caption_side, CaptionSide::default())
+    }
+
+    /// Whether cells without visible content paint their chrome
+    /// (CSS `empty-cells`).
+    pub fn get_empty_cells(&self) -> EmptyCells {
+        self.parse_or("empty-cells", parse_empty_cells, EmptyCells::default())
     }
 }
 

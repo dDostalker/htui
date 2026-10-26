@@ -51,6 +51,11 @@ enum Token {
         fg: Option<Color>,
         bg: Option<Color>,
         node_id: Option<NodeId>,
+        /// Source-run letter spacing, replayed onto the reconstructed runs.
+        letter_spacing: usize,
+        /// Source-run word spacing (words never contain spaces, so this is
+        /// carried for completeness / symmetry with the source run).
+        word_spacing: isize,
     },
 }
 
@@ -222,6 +227,8 @@ fn tokenize_run(
                     fg: run.fg,
                     bg: run.bg,
                     node_id: run.node_id,
+                    letter_spacing: run.letter_spacing,
+                    word_spacing: run.word_spacing,
                 });
             }
         }
@@ -250,7 +257,7 @@ fn tokenize_run(
             });
             continue;
         }
-        let w = grapheme_width(g).max(font);
+        let w = run.grapheme_advance(g, font);
         if is_horizontal_ws(g) {
             if pending_kind != Some(0) {
                 flush(
@@ -291,6 +298,8 @@ fn tokenize_run(
                 fg: run.fg,
                 bg: run.bg,
                 node_id: run.node_id,
+                letter_spacing: run.letter_spacing,
+                word_spacing: run.word_spacing,
             });
         } else if word_break != WordBreak::KeepAll
             && g.chars()
@@ -310,12 +319,16 @@ fn tokenize_run(
                 fg: tok_fg,
                 bg: tok_bg,
                 node_id: tok_node,
+                letter_spacing: tok_ls,
+                word_spacing: tok_ws,
             }) = out.last_mut()
             {
                 if *tok_style == run.style
                     && *tok_fg == run.fg
                     && *tok_bg == run.bg
                     && *tok_node == run.node_id
+                    && *tok_ls == run.letter_spacing
+                    && *tok_ws == run.word_spacing
                 {
                     text.push_str(g);
                     *tok_width += w;
@@ -449,10 +462,13 @@ fn wrap_logical_line(
     font_size_cells: usize,
     word_break: WordBreak,
     overflow_wrap: OverflowWrap,
+    first_indent: usize,
     out: &mut Vec<Vec<InlineRun>>,
 ) {
     let mut current_line: Vec<InlineRun> = Vec::new();
-    let mut current_width: usize = 0;
+    // The indent occupies the head of the line: the first token must fit
+    // in `max_width - indent`, exactly like a leading run of blank cells.
+    let mut current_width: usize = first_indent.min(max_width);
     // Carry the previous non-space run's fg / bg / style so a space
     // run inserted between two word runs paints with the same look —
     // the original text node carried the same fg / bg across the
@@ -463,6 +479,7 @@ fn wrap_logical_line(
     let mut last_run_style: (Option<Color>, Option<Color>, FontStyle) =
         (None, None, FontStyle::empty());
     let mut last_run_node_id: Option<NodeId> = None;
+    let mut last_run_spacing: (usize, isize) = (0, 0);
 
     // Try to place `word` on the current line. If it does not fit and
     // the line is non-empty, flush and retry on a fresh line. If the
@@ -481,7 +498,11 @@ fn wrap_logical_line(
                     // output InlineRun (single cell), so the input
                     // width already counts it.
                     let (fg, bg, style) = last_run_style;
-                    current_line.push(InlineRun::owned(" ", style, fg, bg, last_run_node_id));
+                    let (ls, ws) = last_run_spacing;
+                    let mut space_run = InlineRun::owned(" ", style, fg, bg, last_run_node_id);
+                    space_run.letter_spacing = ls;
+                    space_run.word_spacing = ws;
+                    current_line.push(space_run);
                     current_width += width;
                 } else {
                     // The space run does not fit on the current line. Flush
@@ -499,21 +520,30 @@ fn wrap_logical_line(
                 fg,
                 bg,
                 node_id,
+                letter_spacing,
+                word_spacing,
             } => {
                 last_run_style = (fg, bg, style);
                 last_run_node_id = node_id;
+                last_run_spacing = (letter_spacing, word_spacing);
+                let make_run = |text: String| {
+                    let mut r = InlineRun::owned(text, style, fg, bg, node_id);
+                    r.letter_spacing = letter_spacing;
+                    r.word_spacing = word_spacing;
+                    r
+                };
                 if width + current_width <= max_width {
                     // Whole word fits on the current line.
-                    current_line.push(InlineRun::owned(text, style, fg, bg, node_id));
+                    current_line.push(make_run(text));
                     current_width += width;
                 } else if width <= max_width && !current_line.is_empty() {
                     // Word fits on a fresh line; flush current first.
                     out.push(std::mem::take(&mut current_line));
-                    current_line.push(InlineRun::owned(text, style, fg, bg, node_id));
+                    current_line.push(make_run(text));
                     current_width = width;
                 } else if width <= max_width {
                     // Word fits on a fresh line; current is empty.
-                    current_line.push(InlineRun::owned(text, style, fg, bg, node_id));
+                    current_line.push(make_run(text));
                     current_width = width;
                 } else {
                     // Word is wider than a full line. Split it.
@@ -528,7 +558,7 @@ fn wrap_logical_line(
                     };
                     if !should_split {
                         // Word overflows; emit the whole thing.
-                        current_line.push(InlineRun::owned(text, style, fg, bg, node_id));
+                        current_line.push(make_run(text));
                         current_width += width;
                         continue;
                     }
@@ -546,15 +576,26 @@ fn wrap_logical_line(
                     let graphemes: Vec<&str> = text.graphemes(true).collect();
                     let mut buf = String::new();
                     let mut buf_width: usize = 0;
+                    let split_run =
+                        |text: String, style, fg, bg, node_id, letter_spacing, word_spacing| {
+                            let mut r = InlineRun::owned(text, style, fg, bg, node_id);
+                            r.letter_spacing = letter_spacing;
+                            r.word_spacing = word_spacing;
+                            r
+                        };
                     for g in graphemes {
-                        let w = grapheme_width(g).max(font);
+                        // Words contain no spaces, so word spacing never
+                        // applies inside the split; letter spacing does.
+                        let w = grapheme_width(g).max(font) + letter_spacing;
                         if !buf.is_empty() && buf_width + w > max_width {
-                            current_line.push(InlineRun::owned(
+                            current_line.push(split_run(
                                 std::mem::take(&mut buf),
                                 style,
                                 fg,
                                 bg,
                                 node_id,
+                                letter_spacing,
+                                word_spacing,
                             ));
                             out.push(std::mem::take(&mut current_line));
                             buf_width = 0;
@@ -563,7 +604,15 @@ fn wrap_logical_line(
                         buf_width += w;
                     }
                     if !buf.is_empty() {
-                        current_line.push(InlineRun::owned(buf, style, fg, bg, node_id));
+                        current_line.push(split_run(
+                            buf,
+                            style,
+                            fg,
+                            bg,
+                            node_id,
+                            letter_spacing,
+                            word_spacing,
+                        ));
                         current_width = buf_width;
                     }
                 }
@@ -597,6 +646,7 @@ fn emit_preserving_newlines(runs: &[InlineRun]) -> Vec<Vec<InlineRun>> {
     let mut cur_bg: Option<Color> = None;
     let mut cur_style = FontStyle::empty();
     let mut cur_node_id: Option<NodeId> = None;
+    let mut cur_spacing: (usize, isize) = (0, 0);
     let mut buffering = false;
 
     for run in runs {
@@ -606,13 +656,16 @@ fn emit_preserving_newlines(runs: &[InlineRun]) -> Vec<Vec<InlineRun>> {
         for g in run.text.graphemes(true) {
             if g == "\n" {
                 if buffering {
-                    line.push(InlineRun::owned(
+                    let mut flushed = InlineRun::owned(
                         std::mem::take(&mut buf),
                         cur_style,
                         cur_fg,
                         cur_bg,
                         cur_node_id,
-                    ));
+                    );
+                    flushed.letter_spacing = cur_spacing.0;
+                    flushed.word_spacing = cur_spacing.1;
+                    line.push(flushed);
                     buffering = false;
                 }
                 lines.push(std::mem::take(&mut line));
@@ -625,7 +678,8 @@ fn emit_preserving_newlines(runs: &[InlineRun]) -> Vec<Vec<InlineRun>> {
                 && (cur_fg != run.fg
                     || cur_bg != run.bg
                     || cur_style != run.style
-                    || cur_node_id != run.node_id)
+                    || cur_node_id != run.node_id
+                    || cur_spacing != (run.letter_spacing, run.word_spacing))
             {
                 line.push(InlineRun::owned(
                     std::mem::take(&mut buf),
@@ -634,6 +688,10 @@ fn emit_preserving_newlines(runs: &[InlineRun]) -> Vec<Vec<InlineRun>> {
                     cur_bg,
                     cur_node_id,
                 ));
+                if let Some(last) = line.last_mut() {
+                    last.letter_spacing = cur_spacing.0;
+                    last.word_spacing = cur_spacing.1;
+                }
                 buffering = false;
             }
             if !buffering {
@@ -641,19 +699,17 @@ fn emit_preserving_newlines(runs: &[InlineRun]) -> Vec<Vec<InlineRun>> {
                 cur_bg = run.bg;
                 cur_style = run.style;
                 cur_node_id = run.node_id;
+                cur_spacing = (run.letter_spacing, run.word_spacing);
                 buffering = true;
             }
             buf.push_str(g);
         }
     }
     if buffering {
-        line.push(InlineRun::owned(
-            buf,
-            cur_style,
-            cur_fg,
-            cur_bg,
-            cur_node_id,
-        ));
+        let mut tail = InlineRun::owned(buf, cur_style, cur_fg, cur_bg, cur_node_id);
+        tail.letter_spacing = cur_spacing.0;
+        tail.word_spacing = cur_spacing.1;
+        line.push(tail);
     }
     // Always emit a trailing visual line — even an empty one when
     // the input ended on a newline. This keeps callers (which split
@@ -666,6 +722,10 @@ fn emit_preserving_newlines(runs: &[InlineRun]) -> Vec<Vec<InlineRun>> {
 }
 
 /// Wrap inline runs into visual lines according to the white-space, word-break, and overflow-wrap policies.
+///
+/// `first_line_indent` reserves leading columns of the block's first visual
+/// line (CSS `text-indent`): the wrap budget shrinks by that amount — the
+/// paint phase shifts the line's origin to match.
 pub fn wrap_runs(
     runs: &[InlineRun],
     max_width: usize,
@@ -673,6 +733,7 @@ pub fn wrap_runs(
     white_space: WhiteSpace,
     word_break: WordBreak,
     overflow_wrap: OverflowWrap,
+    first_line_indent: usize,
 ) -> Vec<Vec<InlineRun>> {
     if runs.is_empty() {
         return vec![Vec::new()];
@@ -725,15 +786,19 @@ pub fn wrap_runs(
     }
     // Phase 2: apply white-space collapsing / forced breaks.
     let logical_lines = apply_white_space(tokens, white_space, font_size_cells);
-    // Phase 3: greedy wrap each logical line.
+    // Phase 3: greedy wrap each logical line. The block's first visual
+    // line carries the `text-indent` budget (CSS: the first line of the
+    // block's inline content); later logical lines start flush.
     let mut visual_lines: Vec<Vec<InlineRun>> = Vec::new();
-    for logical in logical_lines {
+    for (idx, logical) in logical_lines.into_iter().enumerate() {
+        let indent = if idx == 0 { first_line_indent } else { 0 };
         wrap_logical_line(
             logical,
             max_width,
             font_size_cells,
             word_break,
             overflow_wrap,
+            indent,
             &mut visual_lines,
         );
     }
@@ -745,10 +810,84 @@ pub fn wrap_runs(
     visual_lines
 }
 
+/// `text-overflow: ellipsis` post-pass: any visual line wider than
+/// `max_width` (in practice the single unwrapped `nowrap` line of a clipped
+/// box) is cut to `max_width - 1` columns and terminated with an `…` run in
+/// the cut point's style. Lines that already fit pass through untouched.
+pub fn apply_ellipsis(
+    lines: Vec<Vec<InlineRun>>,
+    max_width: usize,
+    font_size_cells: usize,
+) -> Vec<Vec<InlineRun>> {
+    lines
+        .into_iter()
+        .map(|line| {
+            let total: usize = line.iter().map(|r| r.width_at(font_size_cells)).sum();
+            if total <= max_width || line.is_empty() {
+                return line;
+            }
+            let budget = max_width.saturating_sub(1);
+            let mut out: Vec<InlineRun> = Vec::new();
+            let mut used = 0usize;
+            for run in line {
+                let w = run.width_at(font_size_cells);
+                if used + w <= budget {
+                    out.push(run);
+                    used += w;
+                    continue;
+                }
+                // Cut this run at the remaining budget, grapheme-aligned.
+                let remaining = budget.saturating_sub(used);
+                let mut text = String::new();
+                let mut acc = 0usize;
+                for g in run.text.graphemes(true) {
+                    let gw = run.grapheme_advance(g, font_size_cells);
+                    if acc + gw > remaining {
+                        break;
+                    }
+                    text.push_str(g);
+                    acc += gw;
+                }
+                if !text.is_empty() {
+                    out.push(InlineRun::owned_spaced(
+                        text,
+                        run.style,
+                        run.fg,
+                        run.bg,
+                        run.node_id,
+                        run.letter_spacing,
+                        run.word_spacing,
+                    ));
+                }
+                break;
+            }
+            // The ellipsis inherits the last kept (or cut) run's look.
+            let tail = out.last().map(|r| {
+                (
+                    r.style,
+                    r.fg,
+                    r.bg,
+                    r.node_id,
+                    r.letter_spacing,
+                    r.word_spacing,
+                )
+            });
+            match tail {
+                Some((style, fg, bg, node_id, ls, ws)) => {
+                    out.push(InlineRun::owned_spaced("…", style, fg, bg, node_id, ls, ws));
+                }
+                None => out.push(InlineRun::new("…", FontStyle::empty(), None, None)),
+            }
+            out
+        })
+        .collect()
+}
+
 /// Return `(max_line_width, line_count * font_size_cells)` of
 /// wrapping `runs` to `max_width` under the same rules as
-/// [`wrap_runs`]. Useful for intrinsic measurements where the
-/// caller only needs the dimensions, not the per-line run lists.
+/// [`wrap_runs`] (including the first-line indent's effect on line
+/// count). Useful for intrinsic measurements where the caller only
+/// needs the dimensions, not the per-line run lists.
 pub fn wrapped_size(
     runs: &[InlineRun],
     max_width: usize,
@@ -756,6 +895,7 @@ pub fn wrapped_size(
     white_space: WhiteSpace,
     word_break: WordBreak,
     overflow_wrap: OverflowWrap,
+    first_line_indent: usize,
 ) -> (usize, usize) {
     let lines = wrap_runs(
         runs,
@@ -764,11 +904,17 @@ pub fn wrapped_size(
         white_space,
         word_break,
         overflow_wrap,
+        first_line_indent,
     );
     let font = font_size_cells.max(1);
     let max_line_w = lines
         .iter()
-        .map(|l| l.iter().map(|r| r.width_at(font)).sum::<usize>())
+        .enumerate()
+        .map(|(idx, l)| {
+            let base = l.iter().map(|r| r.width_at(font)).sum::<usize>();
+            let indent = if idx == 0 { first_line_indent } else { 0 };
+            base + indent
+        })
         .max()
         .unwrap_or(0);
     let total_rows = lines.len().saturating_mul(font);

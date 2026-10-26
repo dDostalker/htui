@@ -79,6 +79,70 @@ pub fn parse_visibility(s: &str) -> Option<Visibility> {
     }
 }
 
+/// CSS `table-layout` algorithm selector.
+///
+/// `auto` sizes each column to its widest cell (the existing algorithm);
+/// `fixed` divides the available width evenly across the first row's column
+/// count — the terminal's take on the spec's first-row-driven layout (no
+/// `<col>` width / first-row `width` declaration weighting).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TableLayout {
+    /// `auto` — column widths follow the widest content.
+    #[default]
+    Auto,
+    /// `fixed` — columns share the available width evenly.
+    Fixed,
+}
+
+/// Parse a `table-layout` keyword.
+pub fn parse_table_layout(s: &str) -> Option<TableLayout> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "auto" => Some(TableLayout::Auto),
+        "fixed" => Some(TableLayout::Fixed),
+        _ => None,
+    }
+}
+
+/// CSS `caption-side` — which side of the table the `<caption>` box renders
+/// on. Only the two horizontal sides exist in a terminal grid.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CaptionSide {
+    /// `top` (the default).
+    #[default]
+    Top,
+    /// `bottom`.
+    Bottom,
+}
+
+/// Parse a `caption-side` keyword.
+pub fn parse_caption_side(s: &str) -> Option<CaptionSide> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "top" => Some(CaptionSide::Top),
+        "bottom" => Some(CaptionSide::Bottom),
+        _ => None,
+    }
+}
+
+/// CSS `empty-cells` — whether cells with no visible content paint their
+/// borders / background.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EmptyCells {
+    /// `show` (the default).
+    #[default]
+    Show,
+    /// `hide` — empty cells paint nothing.
+    Hide,
+}
+
+/// Parse an `empty-cells` keyword.
+pub fn parse_empty_cells(s: &str) -> Option<EmptyCells> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "show" => Some(EmptyCells::Show),
+        "hide" => Some(EmptyCells::Hide),
+        _ => None,
+    }
+}
+
 /// CSS `overflow` for a box's content, resolved to the two behaviours the
 /// terminal can express.
 ///

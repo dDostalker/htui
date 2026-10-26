@@ -103,7 +103,7 @@ pub use position::{
     apply_relative_offset, pin_fixed_boxes, pin_sticky_boxes, resolve_positioned_rects,
 };
 pub use rect::Rect;
-pub use wrap::{is_cjk_break_opportunity, wrap_runs, wrapped_size};
+pub use wrap::{apply_ellipsis, is_cjk_break_opportunity, wrap_runs, wrapped_size};
 
 use crate::html::css_parse::Positioning;
 use crate::tdom::node::NodeId;

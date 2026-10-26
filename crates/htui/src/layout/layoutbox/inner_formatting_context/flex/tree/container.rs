@@ -448,6 +448,7 @@ pub(super) fn layout_flex_container(
         fill_bg,
         spacing_after: 0,
         text_align: node.css_attr.get_text_align(),
+        text_indent: 0,
     };
 
     LayoutBox::new_flex_container(

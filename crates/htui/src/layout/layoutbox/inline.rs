@@ -13,7 +13,7 @@ use super::InlineRun;
 use super::generation::visible_children;
 use crate::{
     graphics::{FontStyle, block_style},
-    html::css_parse::{TextTransform, WhiteSpace, parse_color_str},
+    html::css_parse::{PseudoElement, TextTransform, WhiteSpace, parse_color_str},
     tdom::node::{Node, NodeArena, NodeId, NodeType},
 };
 
@@ -40,10 +40,19 @@ pub fn collect_runs(
     fg: Option<Color>,
     bg: Option<Color>,
     style: FontStyle,
+    spacing: (usize, isize),
 ) -> Vec<InlineRun> {
     let transform = node.css_attr.get_text_transform();
     let white_space = node.css_attr.get_white_space(&node.node_type);
     let mut runs = Vec::new();
+    // Generated content: a `::before` run precedes the element's children,
+    // an `::after` run follows them (CSS `content`). The pseudo-element's
+    // own declarations (color / styles / spacing) cascade into
+    // key-prefixed slots (`color::before`); `content: none` / `normal`
+    // produce nothing.
+    if let Some(run) = pseudo_element_run(arena, node_id, PseudoElement::Before, fg, bg, style) {
+        runs.push(run);
+    }
     walk_runs(
         arena,
         node_id,
@@ -54,9 +63,99 @@ pub fn collect_runs(
         transform,
         white_space,
         None,
+        spacing,
         &mut runs,
     );
+    if let Some(run) = pseudo_element_run(arena, node_id, PseudoElement::After, fg, bg, style) {
+        runs.push(run);
+    }
     runs
+}
+
+/// Build the generated inline run of one pseudo-element, or `None` when the
+/// element has no matching `content` declaration (or it is `none` /
+/// `normal` / unquoteable).
+fn pseudo_element_run(
+    arena: &NodeArena,
+    node_id: NodeId,
+    pe: PseudoElement,
+    fg: Option<Color>,
+    bg: Option<Color>,
+    style: FontStyle,
+) -> Option<InlineRun> {
+    let (suffix, content_key) = match pe {
+        PseudoElement::Before => ("::before", "content::before"),
+        PseudoElement::After => ("::after", "content::after"),
+    };
+    let node = &arena[node_id];
+    let raw = node.css_attr.0.get(content_key)?;
+    let raw = raw.as_ref();
+    if raw.eq_ignore_ascii_case("none") || raw.eq_ignore_ascii_case("normal") {
+        return None;
+    }
+    // `content` accepts a double- or single-quoted string; anything else
+    // (attr() / counters / url()) is unsupported and generates nothing.
+    let bytes = raw.trim();
+    let text = if bytes.len() >= 2
+        && ((bytes.starts_with('"') && bytes.ends_with('"'))
+            || (bytes.starts_with('\'') && bytes.ends_with('\'')))
+    {
+        // Unescape \" / \\ minimally.
+        let inner = &bytes[1..bytes.len() - 1];
+        Some(inner.replace("\\\"", "\"").replace("\\\\", "\\"))
+    } else {
+        None
+    }?;
+    if text.is_empty() {
+        return None;
+    }
+    let prefixed = |prop: &str| format!("{prop}{suffix}");
+    // The pseudo-element's own colour / style / decoration override the
+    // inherited look (declared on the origin element under the prefixed key).
+    let pfg = node
+        .css_attr
+        .0
+        .get(prefixed("color").as_str())
+        .and_then(|v| parse_color_str(v))
+        .or(fg);
+    let pbg = node
+        .css_attr
+        .0
+        .get(prefixed("background-color").as_str())
+        .and_then(|v| parse_color_str(v))
+        .or(bg);
+    let mut pstyle = style;
+    if node
+        .css_attr
+        .0
+        .get(prefixed("font-weight").as_str())
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("bold"))
+    {
+        pstyle |= FontStyle::BOLD;
+    }
+    if node
+        .css_attr
+        .0
+        .get(prefixed("font-style").as_str())
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("italic"))
+    {
+        pstyle |= FontStyle::ITALIC;
+    }
+    if node
+        .css_attr
+        .0
+        .get(prefixed("text-decoration").as_str())
+        .is_some_and(|v| v.contains("underline"))
+    {
+        pstyle |= FontStyle::UNDERLINED;
+    }
+    // Pseudo-element spacing uses the origin's declared value with neutral
+    // contexts (px / ch terms resolve identically; only em/vw/vh would
+    // need the layout context, and those degrade to the default grid).
+    let spacing = (0usize, 0isize);
+    Some(InlineRun::owned_spaced(
+        text, pstyle, pfg, pbg, None, spacing.0, spacing.1,
+    ))
 }
 
 /// Collect a single raw text node's inline run (whitespace-collapsed and
@@ -98,6 +197,7 @@ fn walk_runs(
     transform: TextTransform,
     white_space: WhiteSpace,
     owner: Option<NodeId>,
+    spacing: (usize, isize),
     runs: &mut Vec<InlineRun>,
 ) {
     // A closed `<details>` shows only its first `<summary>` child, so its own
@@ -145,7 +245,9 @@ fn walk_runs(
                     && !s.is_empty()
                 {
                     let text = apply_text_transform(s, transform);
-                    runs.push(InlineRun::owned(text, style, fg, bg, owner));
+                    runs.push(InlineRun::owned_spaced(
+                        text, style, fg, bg, owner, spacing.0, spacing.1,
+                    ));
                 }
             }
             NodeType::Br => {
@@ -162,12 +264,14 @@ fn walk_runs(
                 // rather than carried in the UA table.
                 let (q_fg, q_bg, q_style) = merge_inline_ua(child, fg, bg, style);
                 let (open, close) = q_quote_pair(arena, child_id);
-                runs.push(InlineRun::owned(
+                runs.push(InlineRun::owned_spaced(
                     open.to_string(),
                     q_style,
                     q_fg,
                     q_bg,
                     owner,
+                    spacing.0,
+                    spacing.1,
                 ));
                 walk_inline_children(
                     arena,
@@ -178,14 +282,17 @@ fn walk_runs(
                     q_style,
                     white_space,
                     owner,
+                    spacing,
                     runs,
                 );
-                runs.push(InlineRun::owned(
+                runs.push(InlineRun::owned_spaced(
                     close.to_string(),
                     q_style,
                     q_fg,
                     q_bg,
                     owner,
+                    spacing.0,
+                    spacing.1,
                 ));
             }
             NodeType::Abbr => {
@@ -211,6 +318,7 @@ fn walk_runs(
                     a_style,
                     white_space,
                     owner,
+                    spacing,
                     runs,
                 );
             }
@@ -261,6 +369,7 @@ fn walk_runs(
                     child_style,
                     white_space,
                     owner,
+                    spacing,
                     runs,
                 );
             }
@@ -384,12 +493,13 @@ fn walk_inline_children(
     style: FontStyle,
     parent_ws: WhiteSpace,
     owner: Option<NodeId>,
+    spacing: (usize, isize),
     runs: &mut Vec<InlineRun>,
 ) {
     let transform = child.css_attr.get_text_transform();
     let ws = child.white_space_or(parent_ws);
     walk_runs(
-        arena, child_id, child, fg, bg, style, transform, ws, owner, runs,
+        arena, child_id, child, fg, bg, style, transform, ws, owner, spacing, runs,
     );
 }
 

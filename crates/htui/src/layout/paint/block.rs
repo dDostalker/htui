@@ -232,6 +232,7 @@ pub(crate) fn paint_block(
                 lb.paint_style.line_height_cells,
                 clip,
                 true,
+                lb.paint_style.text_indent,
             );
         } else if let Some(runs_clip) = intersect_rects(content_clip, clip) {
             paint_runs(
@@ -245,6 +246,7 @@ pub(crate) fn paint_block(
                 lb.paint_style.line_height_cells,
                 runs_clip,
                 false,
+                lb.paint_style.text_indent,
             );
         }
     }
@@ -317,6 +319,7 @@ fn paint_column_layout(
                 // Multicol fragmentation is intrinsic clipping: each column
                 // bounds its own lines regardless of the box's overflow.
                 false,
+                0,
             );
         }
     }

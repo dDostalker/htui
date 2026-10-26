@@ -28,9 +28,33 @@ pub struct InlineRun {
     /// spans a slice of a block box). `None` for plain text / synthesized
     /// runs.
     pub node_id: Option<NodeId>,
+    /// Cells added after every grapheme (CSS `letter-spacing`, resolved).
+    /// The spacing columns are transparent to the text data — they widen
+    /// every width measurement and the painter emits them as background-
+    /// only columns, so copy / hit geometry stay aligned with the glyphs.
+    pub letter_spacing: usize,
+    /// Signed delta applied to every space grapheme (CSS `word-spacing`).
+    /// A negative value tightens words; each space floors at zero width.
+    pub word_spacing: isize,
 }
 
 impl InlineRun {
+    /// Cells one grapheme of this run advances at `font_size_cells`:
+    /// `max(grapheme_width, font_size)` + letter spacing, with positive word
+    /// spacing riding on spaces (a negative value clamps to zero — the
+    /// painter's cells cannot overlap, so tightening below the natural
+    /// space is not expressible).
+    pub fn grapheme_advance(&self, g: &str, font_size_cells: usize) -> usize {
+        use crate::graphics::grapheme_width;
+        let base = grapheme_width(g).max(font_size_cells.max(1));
+        let word = if g == " " {
+            self.word_spacing.max(0) as usize
+        } else {
+            0
+        };
+        base + word + self.letter_spacing
+    }
+
     /// Create an inline run with the given text, style, and colors.
     pub fn new(
         text: impl Into<String>,
@@ -45,6 +69,8 @@ impl InlineRun {
             bg,
             force_break: false,
             node_id: None,
+            letter_spacing: 0,
+            word_spacing: 0,
         }
     }
 
@@ -64,6 +90,27 @@ impl InlineRun {
             bg,
             force_break: false,
             node_id,
+            letter_spacing: 0,
+            word_spacing: 0,
+        }
+    }
+
+    /// [`Self::owned`] with resolved letter / word spacing attached — the
+    /// collector's form once the block's `letter-spacing` / `word-spacing`
+    /// have been resolved against the font context.
+    pub fn owned_spaced(
+        text: impl Into<String>,
+        style: FontStyle,
+        fg: Option<Color>,
+        bg: Option<Color>,
+        node_id: Option<NodeId>,
+        letter_spacing: usize,
+        word_spacing: isize,
+    ) -> Self {
+        Self {
+            letter_spacing,
+            word_spacing,
+            ..Self::owned(text, style, fg, bg, node_id)
         }
     }
 
@@ -77,6 +124,8 @@ impl InlineRun {
             bg,
             force_break: true,
             node_id: None,
+            letter_spacing: 0,
+            word_spacing: 0,
         }
     }
 
@@ -91,21 +140,22 @@ impl InlineRun {
     /// would either over- or under-count them depending on how many
     /// combining / ZWJ codepoints the cluster contains.
     pub fn width(&self) -> usize {
-        use crate::graphics::grapheme_width;
-        self.text.graphemes(true).map(grapheme_width).sum()
+        self.text
+            .graphemes(true)
+            .map(|g| self.grapheme_advance(g, 1))
+            .sum()
     }
 
     /// Cell width this run occupies at the supplied `font_size_cells`. Each
     /// grapheme is treated as `max(grapheme_width(g), font_size_cells)`
     /// cells wide (matching the expansion the paint phase applies), so a
     /// heading with font-size=2 has its `text-align` measured against the
-    /// expanded width — not the single-cell-per-char default.
+    /// expanded width — not the single-cell-per-char default. Letter / word
+    /// spacing ride along via [`Self::grapheme_advance`].
     pub fn width_at(&self, font_size_cells: usize) -> usize {
-        use crate::graphics::grapheme_width;
-        let font_size = font_size_cells.max(1);
         self.text
             .graphemes(true)
-            .map(|g| grapheme_width(g).max(font_size))
+            .map(|g| self.grapheme_advance(g, font_size_cells))
             .sum()
     }
 

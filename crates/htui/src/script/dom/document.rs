@@ -2,7 +2,7 @@
 //! `createTextNode`, …), lookups (`getElementById`) and the `documentElement`
 //! / `body` / `head` / `doctype` getters.
 
-use boa_engine::{Context, JsResult, JsValue};
+use boa_engine::{Context, JsResult, JsValue, js_string};
 
 use crate::tdom::node::{Node, NodeType};
 
@@ -139,6 +139,100 @@ fn find_descendant_by_type(context: &mut Context, node_type: NodeType) -> JsResu
     }
 }
 
+/// `document.title` getter — the concatenated text of the first `<title>`
+/// element (empty string when the document has none).
+pub(super) fn native_get_document_title(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    let Some(rc) = with_state() else {
+        return Ok(js_string!().into());
+    };
+    let st = rc.borrow();
+    let title = Node::descendants(&st.arena, st.root_id)
+        .find(|(_, n)| n.node_type == NodeType::Title)
+        .map(|(id, _)| {
+            Node::descendants(&st.arena, id)
+                .filter(|(_, n)| n.node_type == NodeType::Text)
+                .map(|(_, n)| n.data.as_deref().unwrap_or_default())
+                .collect::<String>()
+        })
+        .unwrap_or_default();
+    Ok(js_string!(title).into())
+}
+
+/// `document.title` setter — write the first `<title>`'s text; when the
+/// document has no `<title>`, create one under `<head>` (or directly under
+/// the root when there is no head). The render thread re-reads the title on
+/// the next dirty repaint, so the terminal title follows.
+pub(super) fn native_set_document_title(
+    _this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let value = args
+        .first()
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?
+        .unwrap_or_default();
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let mut st = rc.borrow_mut();
+    let title_id = Node::descendants(&st.arena, st.root_id)
+        .find(|(_, n)| n.node_type == NodeType::Title)
+        .map(|(id, _)| id);
+    if let Some(id) = title_id {
+        let text_id = st
+            .arena
+            .get(id)
+            .map(|n| n.children.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .find(|&c| st.arena.get(c).map(|n| n.node_type) == Some(NodeType::Text));
+        match text_id {
+            Some(text_id) => {
+                if let Some(t) = st.arena.get_mut(text_id) {
+                    t.data = Some(value);
+                }
+            }
+            None => {
+                let text_id = st.arena.insert(Node::text(&value));
+                if let Some(title) = st.arena.get_mut(id) {
+                    title.children.push(text_id);
+                }
+                if let Some(t) = st.arena.get_mut(text_id) {
+                    t.parent = Some(id);
+                }
+            }
+        }
+        super::mark_dirty(&mut st, id);
+        return Ok(JsValue::undefined());
+    }
+    // No <title> yet: create one under the first <head> (fallback: the root).
+    let host = Node::descendants(&st.arena, st.root_id)
+        .find(|(_, n)| n.node_type == NodeType::Head)
+        .map(|(id, _)| id)
+        .unwrap_or(st.root_id);
+    let title_id = st.arena.insert(Node::from(NodeType::Title));
+    let text_id = st.arena.insert(Node::text(&value));
+    if let Some(title) = st.arena.get_mut(title_id) {
+        title.children.push(text_id);
+    }
+    if let Some(t) = st.arena.get_mut(text_id) {
+        t.parent = Some(title_id);
+    }
+    if let Some(h) = st.arena.get_mut(host) {
+        h.children.push(title_id);
+    }
+    if let Some(t) = st.arena.get_mut(title_id) {
+        t.parent = Some(host);
+    }
+    super::mark_dirty(&mut st, host);
+    Ok(JsValue::undefined())
+}
+
 pub(super) fn native_create_element(
     _this: &JsValue,
     args: &[JsValue],
@@ -158,4 +252,82 @@ pub(super) fn native_create_element(
     // Not attached to the document yet.
     drop(st);
     node_wrapper(context, node_id)
+}
+
+// ============================================================
+// Document metadata (constant snapshots of the environment)
+// ============================================================
+
+/// `document.characterSet` / `charset` / `inputEncoding` — the parser
+/// always decodes UTF-8.
+pub(super) fn native_get_character_set(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    Ok(js_string!("UTF-8").into())
+}
+
+/// `document.contentType` — always `text/html`.
+pub(super) fn native_get_content_type(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    Ok(js_string!("text/html").into())
+}
+
+/// `document.compatMode` — the engine always lays out in standards mode.
+pub(super) fn native_get_compat_mode(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    Ok(js_string!("CSS1Compat").into())
+}
+
+/// `document.URL` / `document.documentURI` — the `<base href>` when the
+/// document declares one, otherwise an empty string (there is no network
+/// origin in htui).
+pub(super) fn native_get_document_uri(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    let Some(rc) = with_state() else {
+        return Ok(js_string!().into());
+    };
+    let st = rc.borrow();
+    let uri = crate::tdom::node::document_base_href(&st.arena, st.root_id).unwrap_or_default();
+    Ok(js_string!(uri).into())
+}
+
+/// `document.hasFocus()` — always `true`: a terminal UI owns the foreground
+/// for its whole lifetime (the documented approximation; focus of a
+/// specific field is separate, see `focus()`).
+pub(super) fn native_has_focus(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    Ok(JsValue::from(true))
+}
+
+/// `document.visibilityState` — always `"visible"` (a terminal app cannot
+/// be backgrounded by the page).
+pub(super) fn native_get_visibility_state(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    Ok(js_string!("visible").into())
+}
+
+/// `document.hidden` — always `false` (see [`native_get_visibility_state`]).
+pub(super) fn native_get_hidden(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    Ok(JsValue::from(false))
 }

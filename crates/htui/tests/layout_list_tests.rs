@@ -19,11 +19,11 @@ fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     } else {
         format!("{embedded}\n{css}")
     };
-    if !combined.trim().is_empty() {
-        let mut css_parser = css_parse::Parser::new(&combined);
-        let rules = css_parser.parse();
-        css_parse::css_into_node(&mut arena, root_id, &rules);
-    }
+    // Always cascade (an empty stylesheet still applies inline `style`
+    // attributes and inheritance).
+    let mut css_parser = css_parse::Parser::new(&combined);
+    let rules = css_parser.parse();
+    css_parse::css_into_node(&mut arena, root_id, &rules);
     (root_id, arena)
 }
 
@@ -382,5 +382,32 @@ fn test_nested_ul_inside_li_stacks_below_parent_text() {
         li_row < inner_a_row && inner_a_row < inner_b_row && inner_b_row < sibling_row,
         "rows must stack li/{inner_a_row}/{inner_b_row}/{sibling_row}: {:?}",
         rows[li_row]
+    );
+}
+
+#[test]
+fn test_list_style_type_markers_render() {
+    init();
+    let (root_id, arena) = setup(
+        r#"<ul style="list-style-type: square">
+             <li>one</li><li>two</li>
+           </ul>
+           <ol start="3"><li>third</li><li>fourth</li></ol>
+           <ul style="list-style: none"><li>plain</li></ul>"#,
+        "",
+    );
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
+
+    assert!(canvas.contains("▪"), "square marker renders");
+    assert!(
+        canvas.contains("3. third") && canvas.contains("4. fourth"),
+        "ol start=3 offsets ordinals"
+    );
+    assert!(
+        canvas.contains("plain") && !canvas.contains("•"),
+        "list-style: none suppresses the marker"
     );
 }

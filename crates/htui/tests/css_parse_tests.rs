@@ -2808,7 +2808,7 @@ fn stale_node_id_fails_to_match_instead_of_panicking() {
     // must fail to match rather than panic with "invalid SlotMap key used".
     // The public entry points' doc contract promises `arena.get` lookups;
     // `matches_css` used to index the node parameter directly.
-    let mut p = html_parse::Parser::new(r#"<div class="btn">x</div>"#);
+    let mut p = html_parse::Parser::new(r#"<div class="btn"><span class="btn">x</span></div>"#);
     let (root_id, mut arena, _) = p.parse();
     let mut cp = Parser::new(".btn:hover { color: red }");
     css_into_node(&mut arena, root_id, &cp.parse());
@@ -2816,11 +2816,24 @@ fn stale_node_id_fails_to_match_instead_of_panicking() {
     let rules = cp2.parse();
     let sel = &rules.0[0].selector;
 
-    // `NodeId::default()` is slotmap's null key — indexing it reproduces the
+    // Manufacture a *genuinely* stale key: remove the span from the arena.
+    // Its key version is now behind the slot's — indexing it reproduces the
     // exact "invalid SlotMap key used" panic the field report showed.
-    let stale = NodeId::default();
+    // (`NodeId::default()` would NOT do: slotmap's default key happens to be
+    // the first allocated slot, i.e. a live key.)
+    let span = arena
+        .iter()
+        .find(|(_, n)| n.node_type == NodeType::Span)
+        .map(|(id, _)| id)
+        .expect("span present");
+    let stale = span;
+    arena.remove(stale).expect("span removed");
 
     // A stale node id simply fails to match.
+    assert!(
+        arena.get(stale).is_none(),
+        "the removed key must be stale for this arena"
+    );
     assert!(!selector_chain_matches_with_state(
         &arena,
         stale,
@@ -2843,4 +2856,723 @@ fn stale_node_id_fails_to_match_instead_of_panicking() {
             focused: None,
         },
     ));
+}
+
+// ============================================================
+// 结构伪类（:first-child / :last-child / :only-child /
+// :nth-last-child / :root / :empty / :not / 表单状态）
+// ============================================================
+
+/// Build a parent with `n` `<p>` children, returning their ids in order.
+fn children_of(n: usize) -> (NodeArena, NodeId, Vec<NodeId>) {
+    let mut arena = NodeArena::default();
+    let parent = arena.insert(Node::from(NodeType::Div));
+    let children: Vec<_> = (0..n)
+        .map(|_| {
+            let id = arena.insert(Node::from(NodeType::P));
+            Node::append_child(&mut arena, parent, id);
+            id
+        })
+        .collect();
+    (arena, parent, children)
+}
+
+#[test]
+fn test_first_last_only_child_pseudo_classes() {
+    init();
+    let (arena, _parent, kids) = children_of(3);
+
+    let first: CssSelector = "p:first-child".parse().unwrap();
+    assert!(selector_chain_matches(&arena, kids[0], &first));
+    assert!(!selector_chain_matches(&arena, kids[1], &first));
+    assert!(!selector_chain_matches(&arena, kids[2], &first));
+
+    let last: CssSelector = "p:last-child".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, kids[0], &last));
+    assert!(!selector_chain_matches(&arena, kids[1], &last));
+    assert!(selector_chain_matches(&arena, kids[2], &last));
+
+    // `:only-child` = first AND last: matches only on a single-child parent.
+    let only: CssSelector = "p:only-child".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, kids[0], &only));
+    let (arena1, _p1, kids1) = children_of(1);
+    assert!(selector_chain_matches(&arena1, kids1[0], &only));
+
+    // Case-insensitive pseudo-class names, like the existing tag handling.
+    let upper: CssSelector = "p:FIRST-CHILD".parse().unwrap();
+    assert!(selector_chain_matches(&arena, kids[0], &upper));
+}
+
+#[test]
+fn test_nth_last_child_matches_from_end() {
+    init();
+    let (arena, _parent, kids) = children_of(4);
+
+    // `:nth-last-child(2)` — the second-to-last child only.
+    let sel: CssSelector = "p:nth-last-child(2)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, kids[0], &sel));
+    assert!(!selector_chain_matches(&arena, kids[1], &sel));
+    assert!(selector_chain_matches(&arena, kids[2], &sel));
+    assert!(!selector_chain_matches(&arena, kids[3], &sel));
+
+    // `:nth-last-child(odd)` counts 1-based from the end: with four
+    // children, kids[1] is from-end 3 and kids[3] is from-end 1 — the two
+    // odd positions.
+    let odd: CssSelector = "p:nth-last-child(odd)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, kids[0], &odd));
+    assert!(selector_chain_matches(&arena, kids[1], &odd));
+    assert!(!selector_chain_matches(&arena, kids[2], &odd));
+    assert!(selector_chain_matches(&arena, kids[3], &odd));
+}
+
+#[test]
+fn test_root_and_empty_pseudo_classes() {
+    init();
+    // A document-shaped tree: Document → html → body → div.
+    let mut arena = NodeArena::default();
+    let doc = arena.insert(Node::from(NodeType::Document));
+    let html = arena.insert(Node::from(NodeType::Html));
+    Node::append_child(&mut arena, doc, html);
+    let body = arena.insert(Node::from(NodeType::Body));
+    Node::append_child(&mut arena, html, body);
+    let empty_div = arena.insert(Node::from(NodeType::Div));
+    Node::append_child(&mut arena, body, empty_div);
+
+    let root: CssSelector = ":root".parse().unwrap();
+    assert!(selector_chain_matches(&arena, html, &root));
+    // Only the Document's child is the root — nothing deeper, and the
+    // Document node itself is not an element.
+    assert!(!selector_chain_matches(&arena, doc, &root));
+    assert!(!selector_chain_matches(&arena, body, &root));
+
+    let empty: CssSelector = "div:empty".parse().unwrap();
+    assert!(selector_chain_matches(&arena, empty_div, &empty));
+
+    // Any element child kills emptiness.
+    let child = arena.insert(Node::from(NodeType::Span));
+    Node::append_child(&mut arena, empty_div, child);
+    assert!(!selector_chain_matches(&arena, empty_div, &empty));
+
+    // Comments never affect emptiness (CSS Selectors semantics).
+    let mut arena2 = NodeArena::default();
+    let div = arena2.insert(Node::from(NodeType::Div));
+    let mut comment = Node::from(NodeType::Comment);
+    comment.data = Some("note".to_string());
+    let comment_id = arena2.insert(comment);
+    Node::append_child(&mut arena2, div, comment_id);
+    let empty_sel: CssSelector = ":empty".parse().unwrap();
+    assert!(selector_chain_matches(&arena2, div, &empty_sel));
+
+    // Non-empty text (including a lone space) does affect emptiness.
+    let empty_sel: CssSelector = ":empty".parse().unwrap();
+    for data in ["hi", " "] {
+        let mut arena3 = NodeArena::default();
+        let div = arena3.insert(Node::from(NodeType::Div));
+        let text = arena3.insert(Node::text(data));
+        Node::append_child(&mut arena3, div, text);
+        assert!(
+            !selector_chain_matches(&arena3, div, &empty_sel),
+            "text child {data:?} must make :empty fail"
+        );
+    }
+}
+
+#[test]
+fn test_not_pseudo_class_matches() {
+    init();
+    let mut arena = NodeArena::default();
+    let parent = arena.insert(Node::from(NodeType::Div));
+    let attach = |nt: NodeType, class: &str, arena: &mut NodeArena| {
+        let mut node = Node::from(nt);
+        if !class.is_empty() {
+            node.attributes
+                .insert("class".to_string(), class.to_string());
+        }
+        let id = arena.insert(node);
+        Node::append_child(arena, parent, id);
+        id
+    };
+    let p = attach(NodeType::P, "lead", &mut arena);
+    let span = attach(NodeType::Span, "", &mut arena);
+    let div = attach(NodeType::Div, "lead", &mut arena);
+
+    // `:not(.lead)` — excludes both `.lead` children.
+    let sel: CssSelector = ":not(.lead)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, p, &sel));
+    assert!(selector_chain_matches(&arena, span, &sel));
+    assert!(!selector_chain_matches(&arena, div, &sel));
+
+    // Comma-separated argument list: none of the compounds may match.
+    let list: CssSelector = ":not(p, div)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, p, &list));
+    assert!(!selector_chain_matches(&arena, div, &list));
+    assert!(selector_chain_matches(&arena, span, &list));
+
+    // `:not()` composes with other compound parts and combinators.
+    let chained: CssSelector = "div > :not(span)".parse().unwrap();
+    assert!(selector_chain_matches(&arena, p, &chained));
+    assert!(!selector_chain_matches(&arena, span, &chained));
+
+    // Spaces inside the argument list survive parsing.
+    let spaced: CssSelector = ":not( p , div )".parse().unwrap();
+    assert!(selector_chain_matches(&arena, span, &spaced));
+
+    // `:not` chains compose (element must dodge both arguments).
+    let double: CssSelector = ":not(p):not(div)".parse().unwrap();
+    assert!(selector_chain_matches(&arena, span, &double));
+    assert!(!selector_chain_matches(&arena, p, &double));
+}
+
+#[test]
+fn test_not_pseudo_class_parse_errors() {
+    init();
+    // Missing parens / missing close paren / empty argument.
+    assert!(":not".parse::<CssSelector>().is_err());
+    assert!(":not(".parse::<CssSelector>().is_err());
+    assert!(":not()".parse::<CssSelector>().is_err());
+    // Combinators inside `:not` are out of the supported subset — the tag
+    // parse of "p div" fails rather than silently matching wrong.
+    assert!(":not(p div)".parse::<CssSelector>().is_err());
+    // Pathologically deep nesting is rejected instead of recursing.
+    let deep = format!("{}{}", ":not(".repeat(32), ")".repeat(32));
+    assert!(deep.parse::<CssSelector>().is_err());
+}
+
+#[test]
+fn test_form_state_pseudo_classes() {
+    init();
+    let mut arena = NodeArena::default();
+    let mut checkbox = Node::from(NodeType::Input);
+    checkbox
+        .attributes
+        .insert("type".to_string(), "checkbox".to_string());
+    checkbox
+        .attributes
+        .insert("checked".to_string(), String::new());
+    let checked = arena.insert(checkbox);
+
+    let mut unchecked = Node::from(NodeType::Input);
+    unchecked
+        .attributes
+        .insert("type".to_string(), "checkbox".to_string());
+    let unchecked = arena.insert(unchecked);
+
+    // A text input with a stray `checked` attribute is not `:checked` —
+    // only checkbox / radio inputs participate.
+    let mut text_input = Node::from(NodeType::Input);
+    text_input
+        .attributes
+        .insert("checked".to_string(), String::new());
+    let text_input = arena.insert(text_input);
+
+    let mut selected = Node::from(NodeType::HtmlOption);
+    selected
+        .attributes
+        .insert("selected".to_string(), String::new());
+    let selected = arena.insert(selected);
+
+    let checked_sel: CssSelector = ":checked".parse().unwrap();
+    assert!(selector_chain_matches(&arena, checked, &checked_sel));
+    assert!(!selector_chain_matches(&arena, unchecked, &checked_sel));
+    assert!(!selector_chain_matches(&arena, text_input, &checked_sel));
+    assert!(selector_chain_matches(&arena, selected, &checked_sel));
+
+    // `:disabled` via the own attribute…
+    let mut disabled_btn = Node::from(NodeType::Button);
+    disabled_btn
+        .attributes
+        .insert("disabled".to_string(), String::new());
+    let disabled_btn = arena.insert(disabled_btn);
+    let enabled_btn = arena.insert(Node::from(NodeType::Button));
+    let disabled_sel: CssSelector = ":disabled".parse().unwrap();
+    let enabled_sel: CssSelector = ":enabled".parse().unwrap();
+    assert!(selector_chain_matches(&arena, disabled_btn, &disabled_sel));
+    assert!(!selector_chain_matches(&arena, disabled_btn, &enabled_sel));
+    assert!(selector_chain_matches(&arena, enabled_btn, &enabled_sel));
+
+    // …and via a `<fieldset disabled>` ancestor (legend exemption not
+    // modelled — the whole subtree is disabled).
+    let mut fieldset = Node::from(NodeType::Fieldset);
+    fieldset
+        .attributes
+        .insert("disabled".to_string(), String::new());
+    let fieldset = arena.insert(fieldset);
+    let inner = arena.insert(Node::from(NodeType::Input));
+    Node::append_child(&mut arena, fieldset, inner);
+    assert!(selector_chain_matches(&arena, inner, &disabled_sel));
+    assert!(!selector_chain_matches(&arena, inner, &enabled_sel));
+
+    // Non-form-control elements match neither state.
+    let plain = arena.insert(Node::from(NodeType::Div));
+    assert!(!selector_chain_matches(&arena, plain, &enabled_sel));
+    assert!(!selector_chain_matches(&arena, plain, &disabled_sel));
+}
+
+#[test]
+fn test_selector_paren_args_allow_spaces() {
+    // Regression for the paren-unaware compound split: whitespace inside a
+    // function argument used to tear the pseudo-class apart.
+    init();
+    let sel: CssSelector = ":nth-child(2n + 1)".parse().unwrap();
+    let (arena, _parent, kids) = children_of(3);
+    assert!(selector_chain_matches(&arena, kids[0], &sel));
+    assert!(!selector_chain_matches(&arena, kids[1], &sel));
+    assert!(selector_chain_matches(&arena, kids[2], &sel));
+}
+
+#[test]
+fn test_not_specificity_takes_most_specific_argument() {
+    // CSS spec: `:not(...)` contributes the specificity of its most
+    // specific argument — `:not(#a)` outranks a plain class selector.
+    init();
+    let class_sel: CssSelector = "p.leading".parse().unwrap();
+    let not_sel: CssSelector = "p:not(#a)".parse().unwrap();
+    assert_eq!(class_sel.specificity(), (0, 1, 1));
+    assert_eq!(not_sel.specificity(), (1, 0, 1));
+}
+
+/// Mixed-sibling fixture: `text, p, span, p, comment, p, span` — the `*-of-type`
+/// selectors must count per-type while `*-child` counts every node.
+fn mixed_children() -> (NodeArena, NodeId, Vec<NodeId>, Vec<NodeId>) {
+    let mut arena = NodeArena::default();
+    let parent = arena.insert(Node::from(NodeType::Div));
+    let text = arena.insert(Node::text("t"));
+    Node::append_child(&mut arena, parent, text);
+    let mut ps = Vec::new();
+    let mut spans = Vec::new();
+    for (i, nt) in [
+        NodeType::P,
+        NodeType::Span,
+        NodeType::P,
+        NodeType::P,
+        NodeType::Span,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        // A comment before the 3rd `<p>` — of-type indices must ignore it.
+        if i == 3 {
+            let mut comment = Node::from(NodeType::Comment);
+            comment.data = Some("c".to_string());
+            let comment_id = arena.insert(comment);
+            Node::append_child(&mut arena, parent, comment_id);
+        }
+        let id = arena.insert(Node::from(nt));
+        Node::append_child(&mut arena, parent, id);
+        if nt == NodeType::P {
+            ps.push(id);
+        } else {
+            spans.push(id);
+        }
+    }
+    (arena, parent, ps, spans)
+}
+
+#[test]
+fn test_nth_of_type_counts_same_type_only() {
+    init();
+    let (arena, _parent, ps, spans) = mixed_children();
+
+    // `p:nth-of-type(2)` — the second `<p>`, ignoring the text / span /
+    // comment children around it.
+    let sel: CssSelector = "p:nth-of-type(2)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, ps[0], &sel));
+    assert!(selector_chain_matches(&arena, ps[1], &sel));
+    assert!(!selector_chain_matches(&arena, ps[2], &sel));
+
+    // `:nth-of-type(even)` over the span sequence (indices 1, 2).
+    let even: CssSelector = "span:nth-of-type(even)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, spans[0], &even));
+    assert!(selector_chain_matches(&arena, spans[1], &even));
+
+    // `:nth-last-of-type(1)` == `:last-of-type` for the p sequence.
+    let last: CssSelector = "p:nth-last-of-type(1)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, ps[0], &last));
+    assert!(!selector_chain_matches(&arena, ps[1], &last));
+    assert!(selector_chain_matches(&arena, ps[2], &last));
+
+    // `:nth-last-of-type(2)` — the second `<p>` counting from the end.
+    let second_last: CssSelector = "p:nth-last-of-type(2)".parse().unwrap();
+    assert!(selector_chain_matches(&arena, ps[1], &second_last));
+}
+
+#[test]
+fn test_first_last_only_of_type() {
+    init();
+    let (arena, _parent, ps, spans) = mixed_children();
+
+    let first_p: CssSelector = "p:first-of-type".parse().unwrap();
+    assert!(selector_chain_matches(&arena, ps[0], &first_p));
+    assert!(!selector_chain_matches(&arena, ps[1], &first_p));
+
+    let last_span: CssSelector = "span:last-of-type".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, spans[0], &last_span));
+    assert!(selector_chain_matches(&arena, spans[1], &last_span));
+
+    // `:only-of-type` needs exactly one same-type sibling: neither the p
+    // nor span sequences qualify here.
+    let only: CssSelector = ":only-of-type".parse().unwrap();
+    for id in ps.iter().chain(spans.iter()) {
+        assert!(!selector_chain_matches(&arena, *id, &only));
+    }
+    // A lone `<b>` child qualifies.
+    let mut arena2 = NodeArena::default();
+    let parent = arena2.insert(Node::from(NodeType::Div));
+    let b = arena2.insert(Node::from(NodeType::B));
+    Node::append_child(&mut arena2, parent, b);
+    let text = arena2.insert(Node::text("x"));
+    Node::append_child(&mut arena2, parent, text);
+    assert!(selector_chain_matches(&arena2, b, &only));
+
+    // Case-insensitive names, like the other pseudo-classes.
+    let upper: CssSelector = "p:FIRST-OF-TYPE".parse().unwrap();
+    assert!(selector_chain_matches(&arena, ps[0], &upper));
+}
+
+#[test]
+fn test_nth_of_type_parse_errors() {
+    init();
+    assert!("p:nth-of-type".parse::<CssSelector>().is_err());
+    assert!("p:nth-of-type(".parse::<CssSelector>().is_err());
+    assert!("p:nth-of-type(0)".parse::<CssSelector>().is_err());
+    assert!("p:nth-last-of-type(n)".parse::<CssSelector>().is_err());
+    // Spaces inside the argument survive (paren-aware split).
+    assert!("p:nth-of-type(2n + 1)".parse::<CssSelector>().is_ok());
+}
+
+// ============================================================
+// list-style / font / table 新属性与简写
+// ============================================================
+
+/// Parse `html` and cascade an empty stylesheet, returning the first
+/// `tag` element's post-cascade `CssAttr`.
+fn cascaded_node(html: &str, tag: &str) -> CssAttr {
+    let mut parser = html_parse::Parser::new(html);
+    let (root_id, mut arena, _) = parser.parse();
+    let rules = Parser::new("p {}").parse();
+    css_into_node(&mut arena, root_id, &rules);
+    let id = arena
+        .iter()
+        .find(|(_, n)| n.node_type.tag_name().is_some_and(|t| t == tag))
+        .map(|(id, _)| id)
+        .expect("tag present");
+    arena[id].css_attr.clone()
+}
+
+#[test]
+fn test_list_style_type_and_shorthand() {
+    init();
+    use htui::html::css_parse::ListStyleType as L;
+    // Longhand on the list reaches `<li>` through inheritance.
+    let attr = cascaded_node(
+        "<ul style=\"list-style-type: square\"><li>x</li></ul>",
+        "li",
+    );
+    assert_eq!(attr.get_list_style_type(L::Disc), L::Square);
+    // Shorthand expands to the type longhand at parse time.
+    let attr = cascaded_node(
+        "<ul style=\"list-style: lower-alpha\"><li>x</li></ul>",
+        "li",
+    );
+    assert_eq!(attr.get_list_style_type(L::Disc), L::LowerAlpha);
+    // No declaration: the getter echoes the caller's element default (the
+    // `disc`-vs-`decimal` choice is made by the `<li>` layout, not the CSS
+    // cascade).
+    let attr = cascaded_node("<ol><li>x</li></ol>", "li");
+    assert_eq!(attr.get_list_style_type(L::Disc), L::Disc);
+    assert_eq!(attr.get_list_style_type(L::Decimal), L::Decimal);
+    // Marker strings for each family.
+    assert_eq!(L::Circle.marker(1), "○ ");
+    assert_eq!(L::LowerRoman.marker(4), "iv ");
+    assert_eq!(L::UpperRoman.marker(9), "IX ");
+    assert_eq!(L::UpperAlpha.marker(27), "AA. ");
+    assert_eq!(L::None.marker(3), "");
+}
+
+#[test]
+fn test_font_shorthand_expands() {
+    init();
+    let attr = cascaded_node(
+        "<p style=\"font: italic bold 2em/1.5 monospace\">x</p>",
+        "p",
+    );
+    assert_eq!(attr.get_font_weight(), FontWeight::Bold);
+    assert_eq!(attr.get_font_style_kind(), FontStyleKind::Italic);
+    // line-height rides along as its own longhand.
+    assert!(
+        attr.0
+            .get("line-height")
+            .is_some_and(|v| v.as_ref() == "1.5"),
+        "line-height component expanded, got {:?}",
+        attr.0.get("line-height")
+    );
+    // Size-only form without flags still lands.
+    let attr = cascaded_node("<p style=\"font: 12px serif\">x</p>", "p");
+    assert!(
+        attr.0
+            .get("font-size")
+            .is_some_and(|v| v.as_ref() == "12px")
+    );
+    // Missing family fails the whole declaration (no longhands).
+    let attr = cascaded_node("<p style=\"font: 12px\">x</p>", "p");
+    assert!(attr.0.get("font-size").is_none());
+}
+
+#[test]
+fn test_table_property_getters() {
+    init();
+    let attr = cascaded_node(
+        "<table style=\"table-layout: fixed; caption-side: bottom; empty-cells: hide\"><tr><td>a</td></tr></table>",
+        "table",
+    );
+    assert_eq!(
+        attr.get_table_layout(),
+        htui::html::css_parse::TableLayout::Fixed
+    );
+    assert_eq!(
+        attr.get_caption_side(),
+        htui::html::css_parse::CaptionSide::Bottom
+    );
+    assert_eq!(
+        attr.get_empty_cells(),
+        htui::html::css_parse::EmptyCells::Hide
+    );
+    // Defaults.
+    let attr = cascaded_node("<table><tr><td>a</td></tr></table>", "table");
+    assert_eq!(
+        attr.get_table_layout(),
+        htui::html::css_parse::TableLayout::Auto
+    );
+    assert_eq!(
+        attr.get_caption_side(),
+        htui::html::css_parse::CaptionSide::Top
+    );
+    assert_eq!(
+        attr.get_empty_cells(),
+        htui::html::css_parse::EmptyCells::Show
+    );
+}
+
+#[test]
+fn test_lang_pseudo_class() {
+    init();
+    // The nearest `lang` attribute wins — an ancestor's declaration reaches
+    // descendants that do not override it, and primary-subtag matching
+    // treats `zh-CN` as `zh`.
+    let mut arena = NodeArena::default();
+    let doc = arena.insert(Node::from(NodeType::Document));
+    let html = {
+        let mut n = Node::from(NodeType::Html);
+        n.attributes.insert("lang".to_string(), "zh-CN".to_string());
+        arena.insert(n)
+    };
+    Node::append_child(&mut arena, doc, html);
+    let p = arena.insert(Node::from(NodeType::P));
+    Node::append_child(&mut arena, html, p);
+    let en_child = {
+        let mut n = Node::from(NodeType::Span);
+        n.attributes.insert("lang".to_string(), "EN".to_string());
+        arena.insert(n)
+    };
+    Node::append_child(&mut arena, html, en_child);
+
+    let zh: CssSelector = ":lang(zh)".parse().unwrap();
+    assert!(selector_chain_matches(&arena, html, &zh));
+    assert!(
+        selector_chain_matches(&arena, p, &zh),
+        "descendant inherits the ancestor lang"
+    );
+    let en: CssSelector = ":lang(en)".parse().unwrap();
+    assert!(
+        selector_chain_matches(&arena, en_child, &en),
+        "nearest lang wins (case-insensitive)"
+    );
+    assert!(!selector_chain_matches(&arena, p, &en));
+    // Exact subtag only: `:lang(zh-cn)` does not match `zh`.
+    let zh_cn: CssSelector = ":lang(zh-cn)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, p, &zh_cn));
+    // Parse errors: missing parens / empty / spaced argument.
+    assert!(":lang".parse::<CssSelector>().is_err());
+    assert!(":lang()".parse::<CssSelector>().is_err());
+    assert!(":lang(zh en)".parse::<CssSelector>().is_err());
+}
+
+#[test]
+fn test_inherit_and_initial_keywords() {
+    init();
+    // `inherit` on an inherited property takes the parent's computed value.
+    let attr = cascaded_node(
+        r#"<div style="color: red"><p style="color: inherit">x</p></div>"#,
+        "p",
+    );
+    assert_eq!(attr.0.get("color").map(|s| s.as_ref()), Some("red"));
+    // `inherit` on a NON-inherited property reads the parent's computed
+    // value too (width here).
+    let attr = cascaded_node(
+        r#"<div style="width: 20ch"><p style="width: inherit">x</p></div>"#,
+        "p",
+    );
+    assert_eq!(attr.0.get("width").map(|s| s.as_ref()), Some("20ch"));
+    // `initial` swaps the declaration for an unparseable sentinel: the
+    // getter falls back to its default AND the inherited red cannot refill
+    // the slot (the keyword's whole point on inherited properties).
+    let attr = cascaded_node(
+        r#"<div style="color: red"><p style="color: initial">x</p></div>"#,
+        "p",
+    );
+    assert_eq!(
+        attr.get_color(),
+        None,
+        "initial beats the inherited value (getter falls back to default)"
+    );
+    // `inherit` without a parent value degrades to the initial sentinel.
+    let attr = cascaded_node(r#"<p style="color: inherit">x</p>"#, "p");
+    assert_eq!(attr.get_color(), None);
+    // Case-insensitive keyword.
+    let attr = cascaded_node(
+        r#"<div style="color: red"><p style="color: INHERIT">x</p></div>"#,
+        "p",
+    );
+    assert_eq!(attr.0.get("color").map(|s| s.as_ref()), Some("red"));
+}
+
+#[test]
+fn test_math_functions_parse_and_resolve() {
+    init();
+    let ctx = length_ctx(80, font_ctx(1, 1));
+
+    // calc(100% - 4ch): 80 - 4 = 76 cells.
+    let len = Length::parse("calc(100% - 4ch)").expect("calc parses");
+    assert_eq!(len.resolve(ctx), 76);
+    // calc(2 * 10px): 20px / 8 = 2.5 → round 3, min 1.
+    let len = Length::parse("calc(2 * 10px)").expect("calc with * parses");
+    assert_eq!(len.resolve(ctx), 3);
+    // calc(10ch / 2) = 5.
+    let len = Length::parse("calc(10ch / 2)").expect("calc with / parses");
+    assert_eq!(len.resolve(ctx), 5);
+    // A lone term inside calc.
+    let len = Length::parse("calc(6ch)").expect("lone term parses");
+    assert_eq!(len.resolve(ctx), 6);
+
+    // min / max pick per resolve-context.
+    let len = Length::parse("min(50%, 30ch)").expect("min parses");
+    assert_eq!(len.resolve(ctx), 30, "30ch < 50% of 80");
+    let len = Length::parse("max(50%, 30ch)").expect("max parses");
+    assert_eq!(len.resolve(ctx), 40, "50% of 80 > 30ch");
+
+    // clamp(min, val, max).
+    let len = Length::parse("clamp(10ch, 50%, 30ch)").expect("clamp parses");
+    assert_eq!(len.resolve(ctx), 30, "50% of 80 clamps down to 30ch");
+    let len = Length::parse("clamp(10ch, 2ch, 30ch)").expect("clamp parses");
+    assert_eq!(len.resolve(ctx), 10, "2ch clamps up to 10ch");
+
+    // resolve_signed keeps the sign through calc.
+    let len = Length::parse_signed("calc(2ch - 10ch)").expect("signed calc parses");
+    assert_eq!(len.resolve_signed(ctx), -8);
+
+    // Unsupported forms fail cleanly.
+    assert!(Length::parse("calc(4ch").is_none(), "missing )");
+    assert!(Length::parse("calc()").is_none(), "empty body");
+    assert!(Length::parse("min(1ch)").is_none(), "min needs 2 terms");
+    assert!(Length::parse("clamp(1ch, 2ch)").is_none(), "clamp needs 3");
+    assert!(
+        Length::parse("calc(10pt + 2ch)").is_none(),
+        "unsupported unit"
+    );
+}
+
+#[test]
+fn test_math_functions_flow_through_properties() {
+    init();
+    // Through a real cascade: `width: calc(100% - 4ch)` on a fixed-width
+    // parent resolves through the layout getters.
+    let attr = cascaded_node(
+        r#"<div style="width: 80ch"><p style="width: calc(100% - 4ch)">x</p></div>"#,
+        "p",
+    );
+    let len = attr
+        .0
+        .get("width")
+        .and_then(|raw| Length::parse(raw))
+        .expect("calc width survives the cascade");
+    assert_eq!(len.resolve(length_ctx(80, font_ctx(1, 1))), 76);
+}
+
+#[test]
+fn test_pseudo_element_selector_parses() {
+    init();
+    // The pseudo-element is lifted off the chain; the chain matches the
+    // origin element.
+    let sel: CssSelector = "p.note::before".parse().expect("::before parses");
+    assert_eq!(
+        sel.pseudo_element,
+        Some(htui::html::css_parse::PseudoElement::Before)
+    );
+    assert_eq!(sel.compounds.len(), 1);
+    let sel: CssSelector = "div > a:after".parse().expect("legacy :after parses");
+    assert_eq!(
+        sel.pseudo_element,
+        Some(htui::html::css_parse::PseudoElement::After)
+    );
+    assert_eq!(sel.compounds.len(), 2, "combinator chain survives");
+    // Other pseudo-elements stay unsupported.
+    assert!("p::first-line".parse::<CssSelector>().is_err());
+    assert!(
+        "::before".parse::<CssSelector>().is_err(),
+        "bare pseudo-element has no origin"
+    );
+}
+
+#[test]
+fn test_generated_content_renders_before_and_after() {
+    init();
+    // End-to-end through the render pipeline: the generated runs surround
+    // the element's real text and carry their own styles.
+    let (root_id, mut arena, _) = {
+        let mut parser = html_parse::Parser::new("<p>mid</p>");
+        parser.parse()
+    };
+    let rules = Parser::new(
+        "p::before { content: \"[\"; color: red; } p::after { content: \"]\"; font-weight: bold; }",
+    )
+    .parse();
+    css_into_node(&mut arena, root_id, &rules);
+    let term_map = htui::layout::layout::TermMap {
+        columns: 80,
+        rows: 24,
+    };
+    let mut tl = htui::tui::graph_api::TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let canvas: String = tl.layout.iter().map(|b| b.word.as_str()).collect();
+    assert!(
+        canvas.contains("[mid]"),
+        "generated ::before/::after runs surround the text, got {canvas:?}"
+    );
+    assert!(
+        tl.layout.iter().any(|b| {
+            b.word == "["
+                && b.fcolor
+                    == Some(Color::Rgb {
+                        r: 0xFF,
+                        g: 0,
+                        b: 0,
+                    })
+        }),
+        "::before colour applies to the generated run"
+    );
+
+    // content: none generates nothing.
+    let (root2, mut arena2, _) = {
+        let mut parser = html_parse::Parser::new("<p>mid</p>");
+        parser.parse()
+    };
+    let rules = Parser::new("p::before { content: none; }").parse();
+    css_into_node(&mut arena2, root2, &rules);
+    let mut tl2 = htui::tui::graph_api::TermLayout::new(&term_map, 1.0);
+    tl2.draw(&arena2, root2, &term_map);
+    let canvas2: String = tl2.layout.iter().map(|b| b.word.as_str()).collect();
+    assert!(
+        canvas2.contains("mid") && !canvas2.contains('['),
+        "content: none generates nothing"
+    );
 }

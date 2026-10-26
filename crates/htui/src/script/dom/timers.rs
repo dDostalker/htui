@@ -91,6 +91,40 @@ pub(super) fn native_clear_interval(
     clear_timer(context, args)
 }
 
+/// The frame period `requestAnimationFrame` schedules at (~60fps). A fixed
+/// interval is the terminal take: there is no vsync / compositor, so a frame
+/// callback is simply a repeating timer — the documented animation path of
+/// the engine (CSS animation / transition stay out of scope by design).
+const RAF_INTERVAL_MS: f64 = 16.0;
+
+/// `requestAnimationFrame(callback)` — schedule `callback` on every frame.
+/// Implemented as a ~60fps repeating timer (the same timer table
+/// `setInterval` uses), so animations drive DOM updates → repaint through
+/// the normal render pipeline. Returns the timer id (accepted by
+/// `cancelAnimationFrame` and `clearInterval` alike).
+pub(super) fn native_request_animation_frame(
+    _this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let Some(callback) = args.first().cloned() else {
+        return Err(JsNativeError::typ()
+            .with_message("requestAnimationFrame expects a function")
+            .into());
+    };
+    schedule_timer(context, &[callback, JsValue::from(RAF_INTERVAL_MS)], true)
+}
+
+/// `cancelAnimationFrame(id)` — stop a frame callback (same table as
+/// `clearInterval`).
+pub(super) fn native_cancel_animation_frame(
+    _this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    clear_timer(context, args)
+}
+
 /// Remove the timer with `args[0]`'s id from both the Rust table and the JS
 /// registry, if present.
 fn clear_timer(context: &mut Context, args: &[JsValue]) -> JsResult<JsValue> {

@@ -9,7 +9,7 @@ use crate::{
         inner_formatting_context::flow::layout_children,
         layoutbox::{collect_runs, wrap_runs},
     },
-    tdom::node::{NodeArena, NodeId, effective_font_size_cells},
+    tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
 };
 
 /// Information about a single cell inside a row.
@@ -70,7 +70,21 @@ pub fn measure_cell(
     // The block's own background is resolved from the fresh cascade at paint
     // time (`effective_bg`), not baked into the runs (see the block layout
     // counterpart — a `:hover` re-cascade must not reuse stale run colours).
-    let body_runs = collect_runs(arena, cell_id, node, block_fg, None, block_font_style);
+    let spacing = (
+        node.css_attr
+            .get_letter_spacing(child_context.font, child_context.viewport),
+        node.css_attr
+            .get_word_spacing(child_context.font, child_context.viewport),
+    );
+    let body_runs = collect_runs(
+        arena,
+        cell_id,
+        node,
+        block_fg,
+        None,
+        block_font_style,
+        spacing,
+    );
     let wrapped_lines = if body_runs.is_empty() {
         Vec::new()
     } else {
@@ -81,6 +95,7 @@ pub fn measure_cell(
             node.css_attr.get_white_space(&node.node_type),
             node.css_attr.get_word_break(),
             node.css_attr.get_overflow_wrap(),
+            0,
         )
     };
     // Whitespace-only runs collapse away (wrap_runs returns no visual lines),
@@ -147,6 +162,7 @@ pub fn layout_cell(
     is_header: bool,
     context: LayoutContext,
     wrapped_lines: Vec<Vec<InlineRun>>,
+    hide_if_empty: bool,
 ) -> LayoutBox {
     let node = &arena[cell_id];
 
@@ -154,11 +170,31 @@ pub fn layout_cell(
         effective_font_size_cells(arena, cell_id, context.font, context.viewport);
     let child_context = context.child(own_font_size_cells);
 
-    let cell_edges: BoxEdges =
-        node.css_attr
-            .get_box_edges(rect.width, child_context.font, child_context.viewport);
+    // `empty-cells: hide` — a cell with no visible content (no inline runs
+    // and no element children) paints no chrome: borders, padding and
+    // background all drop, exactly like the CSS default-tables behaviour.
+    let cell_is_empty = wrapped_lines.iter().all(|l| l.is_empty())
+        && node.children.iter().all(|&c| {
+            matches!(arena.get(c).map(|n| n.node_type), Some(NodeType::Text))
+                && arena
+                    .get(c)
+                    .and_then(|n| n.data.as_deref())
+                    .is_none_or(str::is_empty)
+        });
+    let suppress_chrome = hide_if_empty && cell_is_empty;
 
-    let block_bg = node.css_attr.get_bg_color();
+    let cell_edges: BoxEdges = if suppress_chrome {
+        BoxEdges::default()
+    } else {
+        node.css_attr
+            .get_box_edges(rect.width, child_context.font, child_context.viewport)
+    };
+
+    let block_bg = if suppress_chrome {
+        None
+    } else {
+        node.css_attr.get_bg_color()
+    };
     // Browser UA stylesheet: `th { font-weight: bold; text-align: center }` —
     // the bold half already rode in on the reused runs (see [`measure_cell`]);
     // the alignment half resolves here for the paint phase, each pair
@@ -212,6 +248,7 @@ pub fn layout_cell(
         fill_bg,
         spacing_after: 0,
         text_align,
+        text_indent: 0,
     };
 
     LayoutBox::new_normal(

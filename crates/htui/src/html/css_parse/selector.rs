@@ -35,12 +35,40 @@ pub enum SelectorError {
     /// The `:nth-child` argument is not a supported `an+b` form.
     #[error("invalid :nth-child arg: {0:?}")]
     InvalidNthChildArg(String),
+    /// `:nth-last-child` is missing its `(...)` argument list.
+    #[error(":nth-last-child requires `(...)`")]
+    NthLastChildRequiresParens,
+    /// `:nth-last-child(...)` is missing the closing `)`.
+    #[error(":nth-last-child(...) missing ')'")]
+    NthLastChildMissingCloseParen,
+    /// The `:nth-last-child` argument is not a supported `an+b` form.
+    #[error("invalid :nth-last-child arg: {0:?}")]
+    InvalidNthLastChildArg(String),
+    /// `:not` is missing its `(...)` argument list.
+    #[error(":not requires `(...)`")]
+    NotRequiresParens,
+    /// `:not(...)` is missing the closing `)`.
+    #[error(":not(...) missing ')'")]
+    NotMissingCloseParen,
+    /// `:not(...)` arguments nest deeper than the supported limit.
+    #[error(":not(...) nesting too deep")]
+    NotNestedTooDeep,
     /// The pseudo-class is not one of the supported set.
     #[error("unsupported pseudo-class: :{0}")]
     UnsupportedPseudoClass(String),
     /// The tag name does not map to any known `NodeType`.
     #[error("unsupported CSS tag: {0:?}")]
     UnsupportedTag(String),
+    /// `:nth-of-type` / `:nth-last-of-type` is missing its `(...)` list.
+    #[error(":{0} requires `(...)`")]
+    NthOfTypeRequiresParens(String),
+    /// `:nth-of-type(...)` / `:nth-last-of-type(...)` is missing the `)`.
+    #[error(":{0}(...) missing ')'")]
+    NthOfTypeMissingCloseParen(String),
+    /// The `:nth-of-type` / `:nth-last-of-type` argument is not a supported
+    /// `an+b` form.
+    #[error("invalid :{0} arg: {1:?}")]
+    InvalidNthOfTypeArg(String, String),
 }
 
 /// `an + b` expression used by the `:nth-child()` pseudo-class.
@@ -161,6 +189,39 @@ pub enum Selector {
     /// `:nth-child(<expr>)` — match when the element is the n-th child of its
     /// parent (counting all siblings, including text nodes, per CSS spec).
     NthChild(NthExpr),
+    /// `:nth-last-child(<expr>)` — the `:nth-child` mirror counting from the
+    /// end of the sibling list (the last child is index 1).
+    NthLastChild(NthExpr),
+    /// `:nth-of-type(<expr>)` — like `:nth-child` but counting only siblings
+    /// of the same element type (same `NodeType`; text / comment siblings
+    /// never count, matching the CSS "of its type" semantics).
+    NthOfType(NthExpr),
+    /// `:nth-last-of-type(<expr>)` — the `:nth-of-type` mirror counting
+    /// same-type siblings from the end.
+    NthLastOfType(NthExpr),
+    /// `:root` — the document's root element (the child of the `Document`
+    /// node, i.e. `<html>` in a parsed document).
+    Root,
+    /// `:empty` — an element with no children that affect emptiness: element
+    /// children always do, text children do when their data is non-empty
+    /// (whitespace counts), comments never do (CSS Selectors semantics).
+    Empty,
+    /// `:not(<compound list>)` — matches when **none** of the argument
+    /// compound selectors match. Arguments are comma-separated compounds
+    /// without combinators (the common L3/L4 subset).
+    Not(Vec<CompoundSelector>),
+    /// `:checked` — a checked `<input type=checkbox|radio>` (the `checked`
+    /// attribute the engine toggles on click) or a `<option selected>`.
+    Checked,
+    /// `:enabled` — a form control that is not `:disabled`.
+    Enabled,
+    /// `:disabled` — a form control carrying the `disabled` attribute, or a
+    /// descendant of a `<fieldset disabled>` (legend exemption not modelled).
+    Disabled,
+    /// `:lang(<tag>)` — the element (or its nearest ancestor with a `lang`
+    /// attribute) declares a language whose primary tag matches (case-
+    /// insensitive; `zh` matches `lang="zh-CN"`).
+    Lang(String),
     /// A dynamic pseudo-class (currently `:hover`).
     PseudoClass(PseudoClass),
 }
@@ -179,6 +240,11 @@ pub type CompoundSelector = Vec<Selector>;
 pub struct CssSelector {
     pub compounds: Vec<CompoundSelector>,
     pub combinators: Vec<Combinator>,
+    /// A trailing `::before` / `::after` pseudo-element. The compounds match
+    /// the origin element; the pseudo-element's declarations are stored
+    /// key-prefixed by the cascade (`content::before` …) and turned into
+    /// generated runs by the inline collector.
+    pub pseudo_element: Option<PseudoElement>,
 }
 
 impl FromStr for CssSelector {
@@ -197,14 +263,36 @@ impl FromStr for CssSelector {
         if segments.is_empty() {
             return Err(SelectorError::EmptySelector);
         }
+        // A trailing `::before` / `::after` pseudo-element (inside the last
+        // segment) is lifted off the chain: the chain itself matches the
+        // origin element and the pseudo-element rides along as a flag.
+        // Only `::before` / `::after` are recognized (single-`:` legacy
+        // spellings included); anything else after `::` stays the
+        // unsupported pseudo-class error it has always been.
+        let mut pseudo_element = None;
+        let mut segments: Vec<String> = segments.iter().map(|s| s.to_string()).collect();
+        if let Some(last) = segments.last_mut()
+            && let Some((trimmed, element)) = strip_pseudo_element(last)
+        {
+            pseudo_element = Some(element);
+            if trimmed.trim().is_empty() {
+                // The pseudo-element was the entire segment — a bare
+                // `::before` has no origin to match.
+                return Err(SelectorError::UnsupportedPseudoClass(match element {
+                    PseudoElement::Before => "::before".to_string(),
+                    PseudoElement::After => "::after".to_string(),
+                }));
+            }
+            *last = trimmed.trim().to_string();
+        }
         let mut compounds = Vec::with_capacity(segments.len());
         for seg in &segments {
             // A segment is one compound selector whose parts all apply to the
-            // same element. Whitespace within a segment is impossible because
-            // `split_by_combinators` already consumed it as a divider, but we
-            // keep the inner split for safety against future callers.
+            // same element. The split is parenthesis-aware so whitespace
+            // inside a function argument (`:nth-child(2n + 1)`,
+            // `:not(p, div)`) never splits the pseudo-class in half.
             let mut compound = CompoundSelector::new();
-            for part in seg.split_whitespace().filter(|p| !p.is_empty()) {
+            for part in split_top_level_whitespace(seg) {
                 compound.extend(parse_compound(part)?);
             }
             compounds.push(compound);
@@ -212,8 +300,34 @@ impl FromStr for CssSelector {
         Ok(CssSelector {
             compounds,
             combinators,
+            pseudo_element,
         })
     }
+}
+
+/// The pseudo-elements the engine generates content for (CSS
+/// `::before` / `::after`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PseudoElement {
+    Before,
+    After,
+}
+
+/// If `seg` ends with a `::before` / `::after` pseudo-element suffix, return
+/// the segment with the suffix stripped plus the element kind.
+fn strip_pseudo_element(seg: &str) -> Option<(String, PseudoElement)> {
+    let lower = seg.to_ascii_lowercase();
+    for (suffix, element) in [
+        ("::before", PseudoElement::Before),
+        (":before", PseudoElement::Before),
+        ("::after", PseudoElement::After),
+        (":after", PseudoElement::After),
+    ] {
+        if let Some(stripped) = lower.strip_suffix(suffix) {
+            return Some((seg[..stripped.len()].to_string(), element));
+        }
+    }
+    None
 }
 
 impl CssSelector {
@@ -230,18 +344,10 @@ impl CssSelector {
     pub fn specificity(&self) -> (u32, u32, u32) {
         let mut spec = (0u32, 0u32, 0u32);
         for compound in &self.compounds {
-            for sel in compound {
-                match sel {
-                    // The universal selector contributes nothing to
-                    // specificity (CSS spec: `*` is worth `(0,0,0)`).
-                    Selector::Universal => {}
-                    Selector::Id(_) => spec.0 += 1,
-                    Selector::Class(_) | Selector::PseudoClass(_) | Selector::NthChild(_) => {
-                        spec.1 += 1
-                    }
-                    Selector::Tag(_) => spec.2 += 1,
-                }
-            }
+            let part = compound_specificity(compound);
+            spec.0 += part.0;
+            spec.1 += part.1;
+            spec.2 += part.2;
         }
         spec
     }
@@ -340,6 +446,18 @@ fn split_by_combinators(s: &str) -> (Vec<&str>, Vec<Combinator>) {
 }
 
 fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, SelectorError> {
+    parse_compound_inner(s, 0)
+}
+
+/// Max supported `:not(...)` nesting depth. Real stylesheets never come close;
+/// the cap stops pathological CSS from recursing the parser to stack
+/// exhaustion.
+const NOT_MAX_NESTING: usize = 8;
+
+fn parse_compound_inner(
+    s: &str,
+    not_depth: usize,
+) -> std::result::Result<CompoundSelector, SelectorError> {
     let s = s.trim();
     if s.is_empty() {
         return Err(SelectorError::EmptyCompound);
@@ -374,9 +492,9 @@ fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, SelectorErro
                 out.push(Selector::Id(name));
             }
             ':' => {
-                // Pseudo-class (currently only `:nth-child(<expr>)` is
-                // recognised). Pull the identifier, expect `(...)`, parse
-                // the argument, and emit the corresponding Selector variant.
+                // Pseudo-class. Pull the identifier, expect `(...)` where the
+                // pseudo-class takes arguments, and emit the corresponding
+                // Selector variant.
                 i += 1;
                 let name_start = i;
                 while i < chars.len()
@@ -388,35 +506,119 @@ fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, SelectorErro
                     i += 1;
                 }
                 let name: String = chars[name_start..i].iter().collect();
-                if name.eq_ignore_ascii_case("hover") {
-                    if i < chars.len() && chars[i] == '(' {
-                        return Err(SelectorError::HoverTakesNoArguments);
+                match name.to_ascii_lowercase().as_str() {
+                    "hover" => {
+                        if i < chars.len() && chars[i] == '(' {
+                            return Err(SelectorError::HoverTakesNoArguments);
+                        }
+                        out.push(Selector::PseudoClass(PseudoClass::Hover));
                     }
-                    out.push(Selector::PseudoClass(PseudoClass::Hover));
-                } else if name.eq_ignore_ascii_case("focus") {
-                    if i < chars.len() && chars[i] == '(' {
-                        return Err(SelectorError::FocusTakesNoArguments);
+                    "focus" => {
+                        if i < chars.len() && chars[i] == '(' {
+                            return Err(SelectorError::FocusTakesNoArguments);
+                        }
+                        out.push(Selector::PseudoClass(PseudoClass::Focus));
                     }
-                    out.push(Selector::PseudoClass(PseudoClass::Focus));
-                } else if name.eq_ignore_ascii_case("nth-child") {
-                    if i >= chars.len() || chars[i] != '(' {
-                        return Err(SelectorError::NthChildRequiresParens);
+                    "nth-child" | "nth-last-child" => {
+                        let from_last = name.eq_ignore_ascii_case("nth-last-child");
+                        if i >= chars.len() || chars[i] != '(' {
+                            return Err(if from_last {
+                                SelectorError::NthLastChildRequiresParens
+                            } else {
+                                SelectorError::NthChildRequiresParens
+                            });
+                        }
+                        let Some(arg) = capture_balanced_arg(&chars, &mut i) else {
+                            return Err(if from_last {
+                                SelectorError::NthLastChildMissingCloseParen
+                            } else {
+                                SelectorError::NthChildMissingCloseParen
+                            });
+                        };
+                        let expr = parse_nth_child_arg(&arg).ok_or_else(|| {
+                            if from_last {
+                                SelectorError::InvalidNthLastChildArg(arg.clone())
+                            } else {
+                                SelectorError::InvalidNthChildArg(arg.clone())
+                            }
+                        })?;
+                        out.push(if from_last {
+                            Selector::NthLastChild(expr)
+                        } else {
+                            Selector::NthChild(expr)
+                        });
                     }
-                    i += 1;
-                    let arg_start = i;
-                    while i < chars.len() && chars[i] != ')' {
-                        i += 1;
+                    "nth-of-type" | "nth-last-of-type" => {
+                        let lower_name = name.to_ascii_lowercase();
+                        if i >= chars.len() || chars[i] != '(' {
+                            return Err(SelectorError::NthOfTypeRequiresParens(lower_name));
+                        }
+                        let Some(arg) = capture_balanced_arg(&chars, &mut i) else {
+                            return Err(SelectorError::NthOfTypeMissingCloseParen(lower_name));
+                        };
+                        let from_last = lower_name == "nth-last-of-type";
+                        let expr = parse_nth_child_arg(&arg).ok_or_else(|| {
+                            SelectorError::InvalidNthOfTypeArg(lower_name, arg.clone())
+                        })?;
+                        out.push(if from_last {
+                            Selector::NthLastOfType(expr)
+                        } else {
+                            Selector::NthOfType(expr)
+                        });
                     }
-                    if i >= chars.len() {
-                        return Err(SelectorError::NthChildMissingCloseParen);
+                    // `:first-child` / `:last-child` / `:only-child` are
+                    // positional special cases of the nth machinery: they
+                    // decompose into index-1-from-start / index-1-from-end
+                    // expressions, so the matcher keeps one code path. The
+                    // `*-of-type` forms do the same over the same-type index.
+                    "first-child" => out.push(Selector::NthChild(FIRST_CHILD_EXPR)),
+                    "last-child" => out.push(Selector::NthLastChild(FIRST_CHILD_EXPR)),
+                    "only-child" => {
+                        out.push(Selector::NthChild(FIRST_CHILD_EXPR));
+                        out.push(Selector::NthLastChild(FIRST_CHILD_EXPR));
                     }
-                    let arg: String = chars[arg_start..i].iter().collect();
-                    i += 1; // consume ')'
-                    let expr = parse_nth_child_arg(&arg)
-                        .ok_or_else(|| SelectorError::InvalidNthChildArg(arg.clone()))?;
-                    out.push(Selector::NthChild(expr));
-                } else {
-                    return Err(SelectorError::UnsupportedPseudoClass(name));
+                    "first-of-type" => out.push(Selector::NthOfType(FIRST_CHILD_EXPR)),
+                    "last-of-type" => out.push(Selector::NthLastOfType(FIRST_CHILD_EXPR)),
+                    "only-of-type" => {
+                        out.push(Selector::NthOfType(FIRST_CHILD_EXPR));
+                        out.push(Selector::NthLastOfType(FIRST_CHILD_EXPR));
+                    }
+                    "root" => out.push(Selector::Root),
+                    "empty" => out.push(Selector::Empty),
+                    "checked" => out.push(Selector::Checked),
+                    "enabled" => out.push(Selector::Enabled),
+                    "disabled" => out.push(Selector::Disabled),
+                    "lang" => {
+                        if i >= chars.len() || chars[i] != '(' {
+                            return Err(SelectorError::NthOfTypeRequiresParens("lang".to_string()));
+                        }
+                        let Some(arg) = capture_balanced_arg(&chars, &mut i) else {
+                            return Err(SelectorError::NthOfTypeMissingCloseParen(
+                                "lang".to_string(),
+                            ));
+                        };
+                        let tag = arg.trim().to_ascii_lowercase();
+                        if tag.is_empty() || tag.contains(char::is_whitespace) {
+                            return Err(SelectorError::InvalidNthOfTypeArg(
+                                "lang".to_string(),
+                                arg.clone(),
+                            ));
+                        }
+                        out.push(Selector::Lang(tag));
+                    }
+                    "not" => {
+                        if i >= chars.len() || chars[i] != '(' {
+                            return Err(SelectorError::NotRequiresParens);
+                        }
+                        let Some(arg) = capture_balanced_arg(&chars, &mut i) else {
+                            return Err(SelectorError::NotMissingCloseParen);
+                        };
+                        if not_depth >= NOT_MAX_NESTING {
+                            return Err(SelectorError::NotNestedTooDeep);
+                        }
+                        out.push(Selector::Not(parse_not_args(&arg, not_depth + 1)?));
+                    }
+                    _ => return Err(SelectorError::UnsupportedPseudoClass(name)),
                 }
             }
             _ => {
@@ -510,9 +712,134 @@ fn parse_nth_child_arg(s: &str) -> Option<NthExpr> {
     })
 }
 
+/// Specificity of one compound selector (the per-compound slice of
+/// [`CssSelector::specificity`]): ids in `a`, classes / pseudo-classes in
+/// `b`, tags in `c`. Used by `:not(...)` which takes its most specific
+/// argument's specificity.
+fn compound_specificity(compound: &[Selector]) -> (u32, u32, u32) {
+    let mut spec = (0u32, 0u32, 0u32);
+    for sel in compound {
+        match sel {
+            Selector::Universal => {}
+            Selector::Id(_) => spec.0 += 1,
+            Selector::Class(_)
+            | Selector::PseudoClass(_)
+            | Selector::NthChild(_)
+            | Selector::NthLastChild(_)
+            | Selector::NthOfType(_)
+            | Selector::NthLastOfType(_)
+            | Selector::Root
+            | Selector::Empty
+            | Selector::Checked
+            | Selector::Enabled
+            | Selector::Disabled
+            | Selector::Lang(_) => spec.1 += 1,
+            Selector::Not(compounds) => {
+                let arg = compounds
+                    .iter()
+                    .map(|c| compound_specificity(c))
+                    .max()
+                    .unwrap_or((0, 0, 0));
+                spec.0 += arg.0;
+                spec.1 += arg.1;
+                spec.2 += arg.2;
+            }
+            Selector::Tag(_) => spec.2 += 1,
+        }
+    }
+    spec
+}
+
 fn tag_str_to_node_type(tag: &str) -> std::result::Result<NodeType, SelectorError> {
     // Reverse lookup against the single tag table on [`NodeType`] — see
     // [`NodeType::from_tag_name`]. Keeps the selector mapping in sync with
     // the HTML parser and the DOM's `tag_name` by construction.
     NodeType::from_tag_name(tag).ok_or_else(|| SelectorError::UnsupportedTag(tag.to_string()))
+}
+
+/// `:first-child` / `:only-child` decompose to "index 1 from the start" —
+/// the same `NthExpr` the nth machinery already evaluates.
+const FIRST_CHILD_EXPR: NthExpr = NthExpr { a: 0, b: 1 };
+
+/// Capture the balanced `(...)` argument whose `(` is at `chars[*i]`,
+/// advancing `*i` past the closing `)`. Unlike the plain scan, nested
+/// parentheses (e.g. the inner `:nth-child(2)` of `:not(:nth-child(2))`)
+/// stay inside the argument. Returns `None` when the `)` never comes.
+fn capture_balanced_arg(chars: &[char], i: &mut usize) -> Option<String> {
+    let arg_start = *i + 1;
+    let mut depth = 0usize;
+    while *i < chars.len() {
+        match chars[*i] {
+            '(' => depth = depth.saturating_add(1),
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    let arg: String = chars[arg_start..*i].iter().collect();
+                    *i += 1;
+                    return Some(arg);
+                }
+            }
+            _ => {}
+        }
+        *i += 1;
+    }
+    None
+}
+
+/// Parse the argument of `:not(...)`: a comma-separated list of compound
+/// selectors without combinators (the common L3/L4 subset). Combinators
+/// inside an argument fail with the argument's own parse error.
+fn parse_not_args(
+    arg: &str,
+    not_depth: usize,
+) -> std::result::Result<Vec<CompoundSelector>, SelectorError> {
+    let parts = split_top_level_commas(arg);
+    if parts.is_empty() {
+        return Err(SelectorError::EmptyCompound);
+    }
+    parts
+        .into_iter()
+        .map(|part| parse_compound_inner(part, not_depth))
+        .collect()
+}
+
+/// Split on whitespace that sits outside `(...)` / `[...]`, so the space
+/// inside a function argument (`:nth-child(2n + 1)`) never splits the
+/// pseudo-class in half.
+fn split_top_level_whitespace(s: &str) -> Vec<&str> {
+    split_top_level(s, char::is_whitespace)
+        .into_iter()
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+/// Split on top-level commas (outside `(...)` / `[...]`), trimming each part
+/// and dropping empties: the `:not( p , div )` argument yields `["p", "div"]`.
+fn split_top_level_commas(s: &str) -> Vec<&str> {
+    split_top_level(s, |c| c == ',')
+        .into_iter()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+/// Shared splitter for `split_top_level_whitespace` / `split_top_level_commas`:
+/// cut at every `is_sep` character not enclosed in parentheses or brackets.
+fn split_top_level(s: &str, is_sep: impl Fn(char) -> bool) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (i, ch) in s.char_indices() {
+        match ch {
+            '(' | '[' => depth = depth.saturating_add(1),
+            ')' | ']' => depth = depth.saturating_sub(1),
+            c if depth == 0 && is_sep(c) => {
+                parts.push(&s[start..i]);
+                start = i + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(&s[start..]);
+    parts
 }
