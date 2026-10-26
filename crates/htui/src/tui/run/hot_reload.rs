@@ -1,8 +1,9 @@
 //! Debug-only source hot reload watcher.
 //!
-//! Each watched source gets a small polling thread. Polling avoids a platform
-//! file-event dependency; a source is emitted only after two identical reads,
-//! which filters the partial writes editors commonly produce.
+//! Each watched source gets a small polling thread. The poll first reads file
+//! metadata; only when its size / modified-time signature changes does it read
+//! the full file. A new payload is emitted after one more poll sees the same
+//! signature, which filters transient states produced by editors.
 
 use std::fs;
 use std::path::PathBuf;
@@ -10,11 +11,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use crate::source::SourceKind;
 
-const POLL_INTERVAL: Duration = Duration::from_millis(100);
+const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
 /// A stable update from one watched source.
 #[derive(Debug)]
@@ -22,6 +23,13 @@ pub(super) enum HotReloadEvent {
     Html(String),
     Css(String),
     Js(String),
+}
+
+/// Cheap file fingerprint used to avoid full reads on every poll.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileSignature {
+    modified: Option<SystemTime>,
+    len: u64,
 }
 
 /// Debug-only watchers owned by the input loop.
@@ -82,41 +90,24 @@ pub(super) fn spawn(watches: Vec<(SourceKind, &str)>) -> HotReloadWatcher {
 }
 
 fn watch(kind: SourceKind, path: PathBuf, tx: Sender<HotReloadEvent>, stop: Arc<AtomicBool>) {
-    let mut last: Option<String> = read(&path).ok();
+    let mut last_signature = signature(&path).ok();
+    let mut last_content: Option<String> = read(&path).ok();
     let mut pending: Option<String> = None;
-    let mut warned_read_error = false;
 
     while !stop.load(Ordering::Relaxed) {
         thread::sleep(POLL_INTERVAL);
         if stop.load(Ordering::Relaxed) {
             break;
         }
-        let current = match read(&path) {
-            Ok(source) => {
-                warned_read_error = false;
-                Some(source)
-            }
-            Err(e) => {
-                if !warned_read_error {
-                    log::warn!("Cannot read hot-reload source {}: {e}", path.display());
-                    warned_read_error = true;
-                }
-                None
-            }
-        };
 
-        if current == last {
-            pending = None;
-            continue;
-        }
-
-        match pending {
-            Some(previous) if Some(&previous) == current.as_ref() => {
-                let Some(current) = current else {
-                    unreachable!("a successful read cannot equal `None`");
-                };
-                last = Some(current.clone());
-                pending = None;
+        // Cheap pre-check: unchanged metadata does not read the payload. The
+        // content comparison is still authoritative because mtime precision
+        // and editor save semantics differ across platforms/filesystems.
+        let current_signature = signature(&path).ok();
+        if current_signature == last_signature {
+            // The new signature stayed stable for one poll, so emit the full
+            // payload that was read when the metadata first changed.
+            if let Some(current) = pending.take() {
                 let event = match kind {
                     SourceKind::Html => HotReloadEvent::Html(current),
                     SourceKind::Css => HotReloadEvent::Css(current),
@@ -126,11 +117,46 @@ fn watch(kind: SourceKind, path: PathBuf, tx: Sender<HotReloadEvent>, stop: Arc<
                     break;
                 }
             }
-            _ => pending = current,
+            continue;
         }
+
+        let current_content = match read(&path) {
+            Ok(source) => Some(source),
+            Err(e) => {
+                log::warn!("Cannot read hot-reload source {}: {e}", path.display());
+                None
+            }
+        };
+
+        match current_content {
+            Some(current) => {
+                let changed = last_content.as_ref() != Some(&current);
+                last_content = Some(current);
+                pending = if changed {
+                    last_content.clone()
+                } else {
+                    // Metadata changed (for example a touch), but the payload
+                    // is identical. Do not reset JS/document state.
+                    None
+                };
+            }
+            None => {
+                last_content = None;
+                pending = None;
+            }
+        }
+        last_signature = current_signature;
     }
 
     log::debug!("Hot-reload watcher exiting");
+}
+
+fn signature(path: &PathBuf) -> std::io::Result<FileSignature> {
+    let metadata = fs::metadata(path)?;
+    Ok(FileSignature {
+        modified: metadata.modified().ok(),
+        len: metadata.len(),
+    })
 }
 
 fn read(path: &PathBuf) -> std::io::Result<String> {
@@ -159,7 +185,7 @@ mod tests {
             path.to_str().expect("temp path is UTF-8"),
         )]);
         let rx = watcher.receiver();
-        // Let the watcher establish the initial contents as its baseline.
+        // Let the watcher establish the initial metadata/content baseline.
         assert!(
             rx.recv_timeout(POLL_INTERVAL * 2).is_err(),
             "startup must not emit an immediate reload"
@@ -170,6 +196,41 @@ mod tests {
             .recv_timeout(Duration::from_secs(2))
             .expect("stable change reaches the watcher channel");
         assert!(matches!(changed, HotReloadEvent::Css(css) if css.contains("blue")));
+
+        let _ = fs::remove_file(path);
+        drop(watcher);
+    }
+
+    #[test]
+    fn metadata_change_with_identical_content_does_not_emit() {
+        let unique = format!(
+            "htui-hot-reload-metadata-{}-{:?}.css",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("system time is after the Unix epoch")
+        );
+        let path = std::env::temp_dir().join(unique);
+        let css = "p { color: teal; }";
+        fs::write(&path, css).expect("write initial fixture");
+
+        let watcher = spawn(vec![(
+            SourceKind::Css,
+            path.to_str().expect("temp path is UTF-8"),
+        )]);
+        let rx = watcher.receiver();
+        assert!(
+            rx.recv_timeout(POLL_INTERVAL * 2).is_err(),
+            "startup must not emit"
+        );
+
+        // Rewrite the identical payload so mtime changes but content does not.
+        thread::sleep(POLL_INTERVAL);
+        fs::write(&path, css).expect("rewrite identical fixture");
+        assert!(
+            rx.recv_timeout(POLL_INTERVAL * 3).is_err(),
+            "metadata-only changes must not reset the page"
+        );
 
         let _ = fs::remove_file(path);
         drop(watcher);

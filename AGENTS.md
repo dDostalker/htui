@@ -155,7 +155,7 @@ htui/
 │   │   │       ├── mod.rs
 │   │   │       ├── run/          # 引擎驱动：run()/run_hot() 输入循环 + panic hook（mod.rs）+ 渲染/命中/脚本线程 + 增量重绘辅助
 │   │   │           ├── mod.rs     # run()/run_hot() 输入主循环 + install_panic_hook
-│   │   │           ├── hot_reload.rs # debug-only HTML/CSS/JS 轮询 watcher（稳定两次读取后发送 source reload）
+│   │   │           ├── hot_reload.rs # debug-only HTML/CSS/JS 轮询 watcher（200ms metadata 预检；signature 稳定后发送 source reload）
 │   │   │           ├── state.rs     # RenderState + handle_input/handle_select/TextSel/OpenSelect + 配色常量
 │   │   │           ├── pipeline.rs  # redraw/layout_and_paint/render_arena/render_html/render_document/repaint_dynamic/pin_fixed_and_repaint
 │   │   │           ├── thread.rs    # render_thread / hit_test_thread / fold_script_event / PendingInput
