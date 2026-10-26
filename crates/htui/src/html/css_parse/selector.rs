@@ -271,19 +271,19 @@ impl FromStr for CssSelector {
         // unsupported pseudo-class error it has always been.
         let mut pseudo_element = None;
         let mut segments: Vec<String> = segments.iter().map(|s| s.to_string()).collect();
-        if let Some(last) = segments.last_mut() {
-            if let Some((trimmed, element)) = strip_pseudo_element(last) {
-                pseudo_element = Some(element);
-                if trimmed.trim().is_empty() {
-                    // The pseudo-element was the entire segment — a bare
-                    // `::before` has no origin to match.
-                    return Err(SelectorError::UnsupportedPseudoClass(match element {
-                        PseudoElement::Before => "::before".to_string(),
-                        PseudoElement::After => "::after".to_string(),
-                    }));
-                }
-                *last = trimmed.trim().to_string();
+        if let Some(last) = segments.last_mut()
+            && let Some((trimmed, element)) = strip_pseudo_element(last)
+        {
+            pseudo_element = Some(element);
+            if trimmed.trim().is_empty() {
+                // The pseudo-element was the entire segment — a bare
+                // `::before` has no origin to match.
+                return Err(SelectorError::UnsupportedPseudoClass(match element {
+                    PseudoElement::Before => "::before".to_string(),
+                    PseudoElement::After => "::after".to_string(),
+                }));
             }
+            *last = trimmed.trim().to_string();
         }
         let mut compounds = Vec::with_capacity(segments.len());
         for seg in &segments {
