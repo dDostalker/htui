@@ -2,6 +2,7 @@ pub mod config;
 pub mod events;
 pub mod graphics;
 pub mod html;
+pub mod html_source;
 pub mod layout;
 pub mod resources;
 pub mod script;
@@ -21,5 +22,6 @@ pub use htui_macros::{FromJs, IntoJs};
 
 pub use config::Config;
 pub use html::html_parse::Parser;
+pub use html_source::HtmlSource;
 pub use layout::layout::TermMap;
 pub use session::Session;

@@ -27,8 +27,9 @@ htui/
 │   │   ├── Cargo.toml
 │   │   ├── src/
 │   │   │   ├── lib.rs              # 入口：模块声明 + 公共 re-export（Session / Config / Parser / 宏 / boa_engine）
-│   │   │   ├── session.rs          # Session：渲染会话（mem:// 注册表 + Config + EventBindings，render() 主入口）
+│   │   │   ├── session.rs          # Session：渲染会话（mem:// 注册表 + Config + EventBindings，render()/render_source() 主入口）
 │   │   │   ├── config.rs           # Config：渲染设置（zoom / events / frame_gap / copy_flow / copy_block）
+│   │   │   ├── html_source.rs      # HtmlSource + include_html!（编译期嵌入 HTML；debug 携带源路径供热加载）
 │   │   │   ├── resources.rs        # 资源层：mem:// 内存注册表（前缀可选），供 <script>/<link>/<img>/fetch
 │   │   │   ├── graphics/           # 终端图形原语层（依赖方向：layout → graphics → tui）
 │   │   │   │   ├── mod.rs          # 入口：显式 re-export（Block / TermLayout / Img / char_width / ...）
@@ -152,10 +153,11 @@ htui/
 │   │   │   │       └── text.rs     # paint_runs
 │   │   │   └── tui/
 │   │   │       ├── mod.rs
-│   │   │       ├── run/          # 引擎驱动：run() 输入循环 + panic hook（mod.rs）+ 渲染/命中/脚本线程 + 增量重绘辅助
-│   │   │           ├── mod.rs     # run() 输入主循环 + install_panic_hook
+│   │   │       ├── run/          # 引擎驱动：run()/run_hot() 输入循环 + panic hook（mod.rs）+ 渲染/命中/脚本线程 + 增量重绘辅助
+│   │   │           ├── mod.rs     # run()/run_hot() 输入主循环 + install_panic_hook
+│   │   │           ├── hot_reload.rs # debug-only HTML 轮询 watcher（稳定两次读取后发送整文档 reload）
 │   │   │           ├── state.rs     # RenderState + handle_input/handle_select/TextSel/OpenSelect + 配色常量
-│   │   │           ├── pipeline.rs  # redraw/layout_and_paint/render_arena/render_html/repaint_dynamic/pin_fixed_and_repaint
+│   │   │           ├── pipeline.rs  # redraw/layout_and_paint/render_arena/render_html/render_document/repaint_dynamic/pin_fixed_and_repaint
 │   │   │           ├── thread.rs    # render_thread / hit_test_thread / fold_script_event / PendingInput
 │   │   │           ├── region.rs    # incremental_region / union_rect / collect_box_rects / pseudo_affected_region
 │   │   │           ├── selection.rs # selection_lines / lines_bounds / extract_selection / highlight_lines
@@ -164,7 +166,7 @@ htui/
 │   │   │           └── graph_api/  # 子模块目录（与 graph_api.rs 同模块）
 │   │   │               ├── render.rs   # TermLayout::render（增量） / render_diff_to_bytes / render_to_bytes
 │   │   │               └── input/  # 输入层（mod.rs = InputState + 常量 + re-exports）
-│   │   │                   ├── cmd.rs       # RenderCmd（含 RenderArena）/ DirtyInfo / SelectionMode / DrainedBatch（渲染线程命令合并）
+│   │   │                   ├── cmd.rs       # RenderCmd（含 RenderArena/RenderDocument）/ DirtyInfo / SelectionMode / DrainedBatch（渲染线程命令合并）
 │   │   │                   ├── key_info.rs  # key_event_info / char_code / media·modifier_key
 │   │   │                   ├── edit.rs      # 纯编辑（apply_input_key/词边界/Ctrl·Shift 导航/paste）
 │   │   │                   ├── field.rs     # 字段分类（is_*_input/textarea 系列/KeyGate/collect_input_ids）
@@ -174,7 +176,10 @@ htui/
 │   │   │                   ├── refresh.rs   # trigger_refresh（按键分发状态机）
 │   │   │                   └── page.rs      # page_level_builtins（页面级滚动/缩放/复制）
 │   │   ├── tests/               # 集成测试（跟随主库）
+│   │   │   ├── fixtures/
+│   │   │   │   └── hot_reload.html # include_html! 编译期加载测试夹具
 │   │   │   ├── html_parse_tests.rs
+│   │   │   ├── html_source_tests.rs # include_html! / HtmlSource 测试（编译期内容 + debug 路径，纯内存）
 │   │   │   ├── css_parse_tests.rs
 │   │   │   ├── dom_node_tests.rs    # DOM 节点 API 测试（insertBefore/replaceChild/cloneNode + Text·Comment·Fragment + document 访问器，纯内存）
 │   │   │   ├── resources_tests.rs   # mem:// 资源层测试（注册 / 读取 / 前缀，纯内存）

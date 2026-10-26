@@ -18,10 +18,11 @@ use htui::html::{css_parse, html_parse};
 use htui::layout::layout::TermMap;
 use htui::layout::{BoxConstraint, Cursor, Rect, layout_tree};
 use htui::script::{ScriptEngine, ScriptMsg, apply_message};
-use htui::tdom::node::{NodeArena, NodeId};
+use htui::tdom::node::{Node, NodeArena, NodeId, NodeType};
 use htui::tui::graph_api::{
-    DirtyInfo, DrainedBatch, InputState, RenderCmd, SelectionMode, TermLayout, apply_input_key,
-    handle_click, handle_mouse_down, handle_mouse_move, handle_mouse_up,
+    DirtyInfo, DrainedBatch, InputState, OverlayKind, RenderCmd, SelectOpenState, SelectionMode,
+    TermLayout, apply_input_key, handle_click, handle_mouse_down, handle_mouse_move,
+    handle_mouse_up,
 };
 
 use crossterm::event::{KeyCode, MouseButton};
@@ -563,6 +564,109 @@ fn disabled_block_copy_blocks_right_drag_selection() {
             .iter()
             .any(|c| matches!(c, RenderCmd::TextSelection { .. })),
         "a disabled block copy must queue no TextSelection"
+    );
+}
+
+#[test]
+fn arena_behind_a_pending_document_merges_without_losing_css() {
+    // A reload reply can be followed by another script reply before the
+    // render thread drains its channel. The newer arena must merge into the
+    // document snapshot; replacing it would lose the new document CSS source.
+    let mut id_arena = NodeArena::default();
+    let first = id_arena.insert(Node::from(NodeType::Document));
+    let second = id_arena.insert(Node::from(NodeType::Document));
+    let mut batch = DrainedBatch::new();
+    batch.absorb(RenderCmd::RenderDocument {
+        arena: Arc::new(NodeArena::default()),
+        root_id: first,
+        document_css: Arc::from("p { color: red; }"),
+        scroll_y: 0,
+        zoom: 1.0,
+        dirty: DirtyInfo {
+            nodes: vec![first],
+            ..DirtyInfo::default()
+        },
+    });
+
+    let fresh_arena = Arc::new(NodeArena::default());
+    batch.absorb(RenderCmd::RenderArena {
+        arena: Arc::clone(&fresh_arena),
+        root_id: second,
+        scroll_y: 7,
+        zoom: 2.0,
+        dynamic: DynamicState::default(),
+        dirty: DirtyInfo {
+            nodes: vec![second],
+            ..DirtyInfo::default()
+        },
+    });
+
+    match batch.take_snapshot() {
+        Some(RenderCmd::RenderDocument {
+            arena,
+            root_id,
+            document_css,
+            scroll_y,
+            zoom,
+            dirty,
+        }) => {
+            assert!(Arc::ptr_eq(&arena, &fresh_arena));
+            assert_eq!(root_id, second);
+            assert_eq!(&*document_css, "p { color: red; }");
+            assert_eq!((scroll_y, zoom), (7, 2.0));
+            assert!(dirty.nodes.contains(&first));
+            assert!(dirty.nodes.contains(&second));
+        }
+        other => panic!("expected the document snapshot to survive, got {other:?}"),
+    }
+}
+
+#[test]
+fn reset_document_state_clears_replaced_document_interaction() {
+    // Whole-document reload invalidates every input-side node id and canvas
+    // coordinate. Scroll / zoom survive, but focus, edits, drags, page
+    // selection and an open dropdown must not leak into the fresh arena.
+    let mut id_arena = NodeArena::default();
+    let focused = id_arena.insert(Node::from(NodeType::Input));
+    let dropdown = id_arena.insert(Node::from(NodeType::Select));
+
+    let mut state = InputState::new();
+    state.pressed = Some((3, 4));
+    state.focused_input = Some(focused);
+    state.focused_is_textarea = true;
+    state.input_value = "editing".into();
+    state.input_cursor = 3;
+    state.input_sel_anchor = Some(0);
+    state.drag_selecting = true;
+    state.text_sel_anchor = Some((0, 0));
+    state.text_sel_end = Some((5, 1));
+    state.open_select = Some(SelectOpenState {
+        node_id: dropdown,
+        kind: OverlayKind::Select,
+        rect: Rect::new(0, 0, 4, 2),
+        options: Vec::new(),
+        rows: Vec::new(),
+        selected: 0,
+        highlight: 0,
+    });
+
+    let mut cmds = Vec::new();
+    state.reset_document_state(&mut cmds);
+
+    assert_eq!(state.pressed, None);
+    assert_eq!(state.focused_input, None);
+    assert!(!state.focused_is_textarea);
+    assert_eq!(state.input_value, "");
+    assert_eq!(state.input_cursor, 0);
+    assert_eq!(state.input_sel_anchor, None);
+    assert!(!state.drag_selecting);
+    assert_eq!(state.text_sel_anchor, None);
+    assert_eq!(state.text_sel_end, None);
+    assert!(state.open_select.is_none());
+    assert!(state.resize_pending);
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, RenderCmd::SelectClose { node_id } if *node_id == dropdown))
     );
 }
 

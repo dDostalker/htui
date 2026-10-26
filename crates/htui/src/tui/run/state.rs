@@ -152,9 +152,13 @@ impl OpenSelect {
 
 pub(super) struct RenderState {
     pub(super) document: ParsedDocument,
-    /// Combined initial stylesheet source (document-embedded + session CSS),
-    /// kept so `innerHTML`-injected CSS can be appended and re-parsed.
-    pub(super) base_css: Arc<str>,
+    /// CSS supplied through `Session::render(html, css)` / `render_source`.
+    ///
+    /// This source is session-scoped and is not replaced by a document reload.
+    pub(super) session_css: Arc<str>,
+    /// CSS extracted from the document currently being rendered. A whole
+    /// document replacement updates this source before rules are rebuilt.
+    pub(super) document_css: Arc<str>,
     /// CSS injected via `innerHTML` `<style>` elements, appended to the
     /// session stylesheet incrementally.
     pub(super) extra_css: String,

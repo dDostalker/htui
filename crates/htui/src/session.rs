@@ -108,4 +108,29 @@ impl Session {
     pub fn render(&mut self, html: &str, css: &str) {
         crate::tui::run::run(html, css, self);
     }
+
+    /// Render a document loaded with [`include_html!`](crate::include_html).
+    ///
+    /// Debug builds start a file watcher when the source knows its path, so
+    /// saving that HTML file reloads the whole document without restarting the
+    /// process. Release builds use only the embedded content and contain no
+    /// watcher code. Hot reload currently requires `Config.events`, because a
+    /// whole-document replacement must go through the script engine to keep the
+    /// live DOM the single source of truth.
+    pub fn render_source(&mut self, source: &crate::HtmlSource, css: &str) {
+        #[cfg(debug_assertions)]
+        if let Some(path) = source.path()
+            && self.config.events
+        {
+            crate::tui::run::run_hot(path, source.as_str(), css, self);
+            return;
+        }
+
+        #[cfg(debug_assertions)]
+        if source.path().is_some() && !self.config.events {
+            log::warn!("Hot reload requires Config.events; rendering statically");
+        }
+
+        crate::tui::run::run(source.as_str(), css, self);
+    }
 }

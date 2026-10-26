@@ -419,6 +419,43 @@ fn host_render_html_reloads_in_engine_instead_of_render_thread() {
 }
 
 #[test]
+fn reload_html_message_reports_document_css_and_clears_hover() {
+    let (mut engine, geo) = build_geometry(r#"<div id="old">old</div>"#, EventBindings::default());
+    let map = HitMap::build(&geo);
+    let old = map.resolve_by_id("old").expect("old region");
+    let (x, y) = center(old.rect);
+    let mut hover = HoverState::new();
+
+    let entered = apply_message(&mut engine, &mut hover, &map, ScriptMsg::Move { x, y });
+    assert_eq!(entered.hovered, Some(old.node_id));
+
+    let reloaded = apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::ReloadHtml {
+            html: Arc::from(r#"<style>p { color: red; }</style><p id="fresh">fresh</p>"#),
+        },
+    );
+    assert_eq!(reloaded.hovered, None, "old node ids cannot survive reload");
+
+    let dirty = reloaded.dirty.expect("reload marks the fresh root dirty");
+    let document_css = dirty
+        .document_css
+        .as_deref()
+        .expect("reload carries document CSS");
+    assert!(
+        document_css.contains("color: red"),
+        "document CSS must reach the render bridge: {document_css}"
+    );
+    assert!(
+        dirty.dirty.nodes.contains(&dirty.root_id),
+        "the fresh root must be marked dirty"
+    );
+    find_node_by_id(&dirty.arena, "fresh");
+}
+
+#[test]
 fn set_timeout_fires_once_then_clears() {
     // `setTimeout` fires exactly once when the deadline passes.
     let (mut engine, _geo) = build_geometry(

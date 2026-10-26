@@ -319,14 +319,14 @@ impl RenderState {
         self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom, dirty);
     }
 
-    /// Replace the session's injected-CSS set with `injected` (host → css)
-    /// and re-parse the combined stylesheet — but only when the set actually
+    /// Replace the session's injected-CSS set with `injected` (host ? css)
+    /// and re-parse the combined stylesheet ? but only when the set actually
     /// changed: a timer tick that re-injects identical styles rebuilds the
     /// combined string and compares, without re-parsing.
     ///
     /// The host-keyed replacement tracks the document's *live* injected
     /// styles. The previous append-only accumulation grew without bound and
-    /// re-parsed `base + full history` on every injected write (O(n²) under
+    /// re-parsed `base + full history` on every injected write (O(n?) under
     /// refresh churn); now both the storage and each re-parse are bounded by
     /// the page's actual style content.
     fn apply_injected_css(&mut self, injected: &IndexMap<NodeId, String>) {
@@ -342,13 +342,30 @@ impl RenderState {
             return;
         }
         self.extra_css = extra;
-        let mut combined = String::with_capacity(self.base_css.len() + 1 + self.extra_css.len());
-        combined.push_str(&self.base_css);
-        combined.push('\n');
-        combined.push_str(&self.extra_css);
+        self.rebuild_css_rules();
+    }
+
+    /// Re-parse `session_css + document_css + extra_css`.
+    fn rebuild_css_rules(&mut self) {
+        let mut combined = combined_css_source(&self.document_css, &self.session_css);
+        if !self.extra_css.trim().is_empty() {
+            combined.push('\n');
+            combined.push_str(&self.extra_css);
+        }
         let rules = parse_css_source(&combined);
         self.pseudo_rules = css_pseudo_rule_set(&rules);
         self.css_rules = Arc::new(rules);
+    }
+
+    /// Drop interaction state whose node ids belonged to a replaced document.
+    fn reset_document_interaction(&mut self) {
+        self.text_selection = None;
+        self.open_select = None;
+        self.dynamic = DynamicState::default();
+        if let Ok(mut guard) = self.selection_text.lock() {
+            guard.clear();
+        }
+        self.title_set = false;
     }
 
     /// Re-cascade the cached geometry with the session interaction state
@@ -506,23 +523,121 @@ impl RenderState {
             let mut parser = crate::html::html_parse::Parser::new(&html);
             parser.parse_with_scripts()
         };
-        // A fresh document discards any `innerHTML`-injected CSS.
+        self.document_css = Arc::clone(&self.document.css);
+        // A fresh document discards injected CSS and interaction state tied
+        // to the replaced arena's node ids.
         self.extra_css = String::new();
-        // The old document's interaction state is meaningless here: its
-        // selection / open dropdown / hover / focus node ids belong to the
-        // replaced arena, and carrying them over would re-apply stale
-        // overlays (or style wrong nodes) on the fresh document.
-        self.text_selection = None;
-        self.open_select = None;
-        self.dynamic = DynamicState::default();
-        if let Ok(mut guard) = self.selection_text.lock() {
-            guard.clear();
-        }
-        let rules = parse_css_source(&self.base_css);
-        self.pseudo_rules = css_pseudo_rule_set(&rules);
-        self.css_rules = Arc::new(rules);
-        // The new document may carry a different `<title>`.
-        self.title_set = false;
+        self.reset_document_interaction();
+        self.rebuild_css_rules();
         self.redraw(out, geo_tx, term_map, scroll_y, zoom);
+    }
+
+    /// Render a whole-document replacement produced by `ScriptEngine::reload`.
+    ///
+    /// The arena and document CSS arrive from the script engine, preserving
+    /// the single-source-of-truth rule: this thread never re-parses hot-reload
+    /// HTML. `dirty.injected_css` may contain styles inserted by scripts that
+    /// ran during the reload; those are applied after the document source is
+    /// replaced. Scroll and zoom are viewport state, so they survive.
+    pub(super) fn render_document<W: Write>(
+        &mut self,
+        out: &mut BufWriter<W>,
+        geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>,
+        term_map: &TermMap,
+        arena: Arc<NodeArena>,
+        root_id: NodeId,
+        document_css: Arc<str>,
+        scroll_y: u32,
+        zoom: f32,
+        dirty: DirtyInfo,
+    ) {
+        self.document.arena = arena;
+        self.document.root_id = root_id;
+        self.document.css = Arc::clone(&document_css);
+        self.document_css = document_css;
+        self.extra_css = String::new();
+        self.reset_document_interaction();
+        self.rebuild_css_rules();
+        if !dirty.injected_css.is_empty() {
+            self.apply_injected_css(&dirty.injected_css);
+        }
+        self.redraw(out, geo_tx, term_map, scroll_y, zoom);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::html::html_parse::Parser;
+    use crossterm::style::Color;
+    use std::sync::Mutex;
+    use std::sync::atomic::AtomicU32;
+
+    fn state(
+        document: crate::html::html_parse::ParsedDocument,
+        session_css: Arc<str>,
+    ) -> RenderState {
+        let document_css = Arc::clone(&document.css);
+        let rules = parse_css_source(&combined_css_source(&document_css, &session_css));
+        let pseudo_rules = css_pseudo_rule_set(&rules);
+        RenderState {
+            document,
+            session_css,
+            document_css,
+            extra_css: String::new(),
+            css_rules: Arc::new(rules),
+            pseudo_rules,
+            term_layout: None,
+            title_set: false,
+            geometry: None,
+            has_pinned: false,
+            dynamic: DynamicState::default(),
+            text_selection: None,
+            selection_text: Arc::new(Mutex::new(String::new())),
+            open_select: None,
+            max_scroll: Arc::new(AtomicU32::new(0)),
+        }
+    }
+
+    #[test]
+    fn render_document_rebuilds_rules_from_the_new_document_css() {
+        let mut old_parser = Parser::new("<p>old</p>");
+        let old_document = old_parser.parse_with_scripts();
+        let mut render_state = state(old_document, Arc::from(""));
+
+        let mut parser = Parser::new("<style>p { color: red; }</style><p id=\"fresh\">fresh</p>");
+        let document = parser.parse_with_scripts();
+        let arena = Arc::clone(&document.arena);
+        let root_id = document.root_id;
+        let document_css = Arc::clone(&document.css);
+
+        let mut out = BufWriter::new(Vec::new());
+        let term_map = TermMap {
+            columns: 80,
+            rows: 24,
+        };
+        render_state.render_document(
+            &mut out,
+            &None,
+            &term_map,
+            arena,
+            root_id,
+            document_css,
+            0,
+            1.0,
+            DirtyInfo::default(),
+        );
+
+        assert_eq!(render_state.document.css, render_state.document_css);
+        let rule = render_state
+            .css_rules
+            .0
+            .first()
+            .expect("the reloaded document contributes a rule");
+        assert_eq!(
+            rule.normal.get_color(),
+            Some(Color::Rgb { r: 255, g: 0, b: 0 }),
+            "document CSS must be rebuilt after reload"
+        );
     }
 }

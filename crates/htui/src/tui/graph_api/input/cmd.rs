@@ -77,6 +77,21 @@ pub enum RenderCmd {
     RenderHtml {
         html: Arc<str>,
     },
+    /// Render a whole-document replacement supplied by the script engine.
+    ///
+    /// Unlike [`RenderHtml`](Self::RenderHtml), the HTML was already re-parsed
+    /// by `ScriptEngine::reload`, so this command carries the live arena and
+    /// the new document-embedded CSS instead of asking the render thread to
+    /// create a second source of truth. Interaction state is reset because the
+    /// old node ids belong to the replaced arena.
+    RenderDocument {
+        arena: Arc<crate::tdom::node::NodeArena>,
+        root_id: crate::tdom::node::NodeId,
+        document_css: Arc<str>,
+        scroll_y: u32,
+        zoom: f32,
+        dirty: DirtyInfo,
+    },
     /// Re-style the cached document for the CSS `:hover` pseudo-class with the
     /// given session-local node (`None` clears any hover), then repaint. With
     /// no `:hover` rules in the stylesheet this repaints to the same pixels.
@@ -162,6 +177,12 @@ impl RenderCmd {
     }
 }
 
+/// Merge a later same-document dirty set into a pending document snapshot.
+fn merge_dirty(target: &mut DirtyInfo, source: DirtyInfo) {
+    target.nodes.extend(source.nodes);
+    target.injected_css.extend(source.injected_css);
+}
+
 /// One render thread's drained command batch, classified by merge semantics.
 ///
 /// The channel accumulates commands across input-loop batches while the
@@ -244,7 +265,7 @@ impl DrainedBatch {
                 ) => self.hover = Some(other),
                 // The document was replaced: the hover target belonged to the
                 // old document and must neither style nor displace the new one.
-                Some(RenderCmd::RenderHtml { .. }) => {}
+                Some(RenderCmd::RenderHtml { .. } | RenderCmd::RenderDocument { .. }) => {}
                 // No snapshot pending (or the quit flag is already latched and
                 // the snapshot is the quit): the hover repaint itself becomes
                 // the batch's snapshot.
@@ -267,7 +288,7 @@ impl DrainedBatch {
                 }
                 // The document was replaced: the focused field belonged to
                 // the old document.
-                Some(RenderCmd::RenderHtml { .. }) => {}
+                Some(RenderCmd::RenderHtml { .. } | RenderCmd::RenderDocument { .. }) => {}
                 _ if !self.quit => self.snapshot = Some(RenderCmd::Focus { node_id }),
                 _ => {}
             },
@@ -275,10 +296,16 @@ impl DrainedBatch {
                 // Fold the newer scroll offset into a pending arena render:
                 // the arena carries the DOM mutations, the rerender only
                 // moves the viewport.
-                Some(RenderCmd::RenderArena {
-                    scroll_y: arena_scroll,
-                    ..
-                }) => {
+                Some(
+                    RenderCmd::RenderArena {
+                        scroll_y: arena_scroll,
+                        ..
+                    }
+                    | RenderCmd::RenderDocument {
+                        scroll_y: arena_scroll,
+                        ..
+                    },
+                ) => {
                     *arena_scroll = scroll_y;
                 }
                 // A pending `RenderHtml` replaces the document wholesale; it
@@ -290,16 +317,61 @@ impl DrainedBatch {
             RenderCmd::Redraw { scroll_y, zoom } => match self.snapshot.as_mut() {
                 // Fold the newer viewport state into a pending arena render
                 // (a resize / zoom must not drop the DOM mutations).
-                Some(RenderCmd::RenderArena {
-                    scroll_y: arena_scroll,
-                    zoom: arena_zoom,
-                    ..
-                }) => {
+                Some(
+                    RenderCmd::RenderArena {
+                        scroll_y: arena_scroll,
+                        zoom: arena_zoom,
+                        ..
+                    }
+                    | RenderCmd::RenderDocument {
+                        scroll_y: arena_scroll,
+                        zoom: arena_zoom,
+                        ..
+                    },
+                ) => {
                     *arena_scroll = scroll_y;
                     *arena_zoom = zoom;
                 }
                 Some(RenderCmd::RenderHtml { .. }) => {}
                 _ => self.snapshot = Some(RenderCmd::Redraw { scroll_y, zoom }),
+            },
+            RenderCmd::RenderArena {
+                arena,
+                root_id,
+                scroll_y,
+                zoom,
+                dynamic,
+                dirty,
+            } => match self.snapshot.as_mut() {
+                // A reload response can be followed in the same render batch
+                // by another script reply (a timer, fetch, or focus event).
+                // Keep the document snapshot: it carries the new CSS source,
+                // while the newer arena carries the latest DOM mutations.
+                Some(RenderCmd::RenderDocument {
+                    arena: doc_arena,
+                    root_id: doc_root,
+                    scroll_y: doc_scroll,
+                    zoom: doc_zoom,
+                    dirty: doc_dirty,
+                    ..
+                }) => {
+                    *doc_arena = arena;
+                    *doc_root = root_id;
+                    *doc_scroll = scroll_y;
+                    *doc_zoom = zoom;
+                    merge_dirty(doc_dirty, dirty);
+                }
+                _ if !self.quit => {
+                    self.snapshot = Some(RenderCmd::RenderArena {
+                        arena,
+                        root_id,
+                        scroll_y,
+                        zoom,
+                        dynamic,
+                        dirty,
+                    });
+                }
+                _ => {}
             },
             other => {
                 self.quit |= matches!(other, RenderCmd::Quit);

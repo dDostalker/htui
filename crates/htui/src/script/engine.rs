@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use boa_engine::{Context, JsResult, JsValue, Source, js_string};
 
@@ -91,6 +92,7 @@ impl ScriptEngine {
             let mut st = state.borrow_mut();
             let root_id = st.root_id;
             st.dirty.nodes.push(root_id);
+            st.document_reload = true;
         }
         self.context = context;
         self.state = state;
@@ -111,6 +113,8 @@ impl ScriptEngine {
         let state = Rc::new(RefCell::new(ScriptState {
             arena: (*doc.arena).clone(),
             root_id: doc.root_id,
+            document_css: Arc::clone(&doc.css),
+            document_reload: false,
             render_cmds: Vec::new(),
             dirty: DirtyInfo::default(),
             current_event: None,
@@ -204,6 +208,16 @@ impl ScriptEngine {
     /// Root node id of the live DOM.
     pub fn root_id(&self) -> NodeId {
         self.state.borrow().root_id
+    }
+
+    /// CSS extracted from the engine's current document.
+    pub fn document_css(&self) -> Arc<str> {
+        Arc::clone(&self.state.borrow().document_css)
+    }
+
+    /// Whether the engine reloaded its whole document since the last reply.
+    pub fn take_document_reload(&mut self) -> bool {
+        std::mem::take(&mut self.state.borrow_mut().document_reload)
     }
 
     /// Whether a JS call mutated the DOM since the last take, and which nodes

@@ -77,6 +77,12 @@ pub enum ScriptMsg {
         target: Option<NodeId>,
         key: KeyEventInfo,
     },
+    /// Replace the whole document owned by the script engine.
+    ///
+    /// Used by the debug hot-reload watcher. The engine re-parses the HTML,
+    /// runs its scripts, and reports a fresh arena plus the new document CSS;
+    /// the render thread never independently parses this source.
+    ReloadHtml { html: Arc<str> },
     /// Shut the script thread down.
     Quit,
 }
@@ -90,6 +96,9 @@ pub struct ScriptDirty {
     pub root_id: NodeId,
     /// Nodes JS touched since the last reported batch.
     pub dirty: DirtyInfo,
+    /// Present only when the engine replaced its whole document, carrying the
+    /// new document-embedded CSS so the render thread can rebuild its rules.
+    pub document_css: Option<Arc<str>>,
 }
 
 /// Outcome of processing one [`ScriptMsg`] (or a due timer tick).
@@ -391,9 +400,24 @@ pub fn apply_message(
             let region = key_region(engine, *target);
             (engine.fire_key(&region, EventType::KeyUp, key), None)
         }
+        ScriptMsg::ReloadHtml { html } => {
+            // Node ids belong to the replaced arena, so hover state cannot be
+            // carried across a whole-document reload.
+            *hover = HoverState::new();
+            if let Err(e) = engine.reload(html) {
+                log::error!("Hot reload failed; keeping the previous document: {e}");
+            }
+            (Vec::new(), None)
+        }
         ScriptMsg::Quit => (Vec::new(), None),
     };
 
+    let document_reload = engine.take_document_reload();
+    if document_reload {
+        // Host-pushed `RenderHtml` can reload in the middle of an event; clear
+        // the same hover state that an explicit `ReloadHtml` clears.
+        *hover = HoverState::new();
+    }
     let dirty = {
         let dirty = engine.take_dirty();
         if dirty.is_empty() {
@@ -403,6 +427,7 @@ pub fn apply_message(
                 arena: Arc::new(engine.arena()),
                 root_id: engine.root_id(),
                 dirty,
+                document_css: document_reload.then(|| engine.document_css()),
             })
         }
     };
@@ -510,12 +535,14 @@ pub fn run_script_thread(
         // its own calls, so without this a load-time command would wait for
         // the first user event.
         event.cmds.extend(engine.take_pending_cmds());
+        let extra_reload = engine.take_document_reload();
         let extra = engine.take_dirty();
         if !extra.is_empty() {
             let snapshot = ScriptDirty {
                 arena: Arc::new(engine.arena()),
                 root_id: engine.root_id(),
                 dirty: extra,
+                document_css: extra_reload.then(|| engine.document_css()),
             };
             event.dirty = match event.dirty {
                 Some(mut d) => {
@@ -523,6 +550,7 @@ pub fn run_script_thread(
                     // Later writes win per host (IndexMap keeps the first
                     // insertion position, matching document order).
                     d.dirty.injected_css.extend(snapshot.dirty.injected_css);
+                    d.document_css = d.document_css.or(snapshot.document_css);
                     d.arena = snapshot.arena;
                     d.root_id = snapshot.root_id;
                     Some(d)

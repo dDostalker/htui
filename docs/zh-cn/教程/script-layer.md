@@ -416,8 +416,9 @@ JS 修改 DOM 后，引擎把被改动的节点 id 记入 `dirty`（一组 `Node
 
 > 注意：`RenderCmd::RenderHtml` 用于"整文档替换"——宿主函数 push 后由**脚本引擎
 > `ScriptEngine::reload` 在引擎内**重新解析（保持引擎为文档单一真源），mark root
-> dirty 后随 `RenderArena` 同步到渲染线程；渲染线程的 `RenderHtml` 分支仅作外部
-> API 兜底。
+> dirty 后随 `RenderCmd::RenderDocument`（携带新 arena 与文档 CSS）同步到渲染线程；
+> 渲染线程的 `RenderHtml` 分支仅作外部 API 兜底。debug 热加载同样通过
+> `ScriptMsg::ReloadHtml` 走这条单一真源路径。
 
 ### 脚本线程（引擎与输入解耦）
 
@@ -428,7 +429,7 @@ JS 修改 DOM 后，引擎把被改动的节点 id 记入 `dirty`（一组 `Node
    回传），`handle_*` 内部读快照判断 node 类型、value、select 选项——不碰引擎。
 2. **写与派发走消息**：聚焦/失焦/输入/select 选择/按键等打包成 `ScriptMsg`（Move /
    Click / FocusInput / BlurInput / InputKeystroke / SelectPick / KeyDown /
-   KeyUp）发给脚本线程，`apply_message`
+   KeyUp / ReloadHtml）发给脚本线程，`apply_message`
    统一执行（含 blur→change、mouseout→mouseover 的顺序保证），回 `ScriptResponse`。
    按键消息携带终端无关键的 `KeyEventInfo`（`key`/`code`/`keyCode`/修饰键/`repeat`），
    目标为聚焦 `<input>` 或 `<body>`（见 §3 键盘事件）。

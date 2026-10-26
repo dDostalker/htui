@@ -16,13 +16,13 @@ use crate::layout::layout::TermMap;
 use crate::tdom::node::{NodeArena, NodeId};
 use crate::tui::graph_api::{DrainedBatch, InputState, RenderCmd};
 
-use super::pipeline::{flush_frame, parse_css_source};
+use super::pipeline::{combined_css_source, flush_frame, parse_css_source};
 use super::state::RenderState;
 
 pub(super) fn render_thread(
     rx: mpsc::Receiver<RenderCmd>,
     document: ParsedDocument,
-    base_css: Arc<str>,
+    session_css: Arc<str>,
     max_scroll: Arc<AtomicU32>,
     geo_tx: Option<mpsc::Sender<Arc<Geometry>>>,
     selection_text: Arc<Mutex<String>>,
@@ -33,11 +33,16 @@ pub(super) fn render_thread(
     // into it and is flushed exactly once, so a frame costs a single write
     // syscall instead of one per render call.
     let mut out = BufWriter::new(stdout());
-    let css_rules = Arc::new(parse_css_source(&base_css));
+    let document_css = Arc::clone(&document.css);
+    let css_rules = Arc::new(parse_css_source(&combined_css_source(
+        &document_css,
+        &session_css,
+    )));
     let pseudo_rules = css_pseudo_rule_set(&css_rules);
     let mut state = RenderState {
         document,
-        base_css,
+        session_css,
+        document_css,
         extra_css: String::new(),
         css_rules,
         pseudo_rules,
@@ -232,6 +237,34 @@ pub(super) fn render_thread(
                         state.render_html(&mut out, &geo_tx, &term_map, html);
                     }
 
+                    RenderCmd::RenderDocument {
+                        arena,
+                        root_id,
+                        document_css,
+                        scroll_y,
+                        zoom,
+                        dirty,
+                    } => {
+                        let term_map = match TermMap::get_ter_map() {
+                            Ok(m) => m,
+                            Err(e) => {
+                                log::error!("Failed to get terminal size: {}", e);
+                                break 'snapshot;
+                            }
+                        };
+                        state.render_document(
+                            &mut out,
+                            &geo_tx,
+                            &term_map,
+                            arena,
+                            root_id,
+                            document_css,
+                            scroll_y,
+                            zoom,
+                            dirty,
+                        );
+                    }
+
                     RenderCmd::Hover { node_id } => {
                         let prev = state.dynamic.hovered;
                         state.dynamic.hovered = node_id;
@@ -341,7 +374,7 @@ pub(super) fn hit_test_thread(rx: mpsc::Receiver<Arc<Geometry>>, hit_map: Arc<Mu
 /// snapshot + dirty set forwarded as a (region-repaint) `RenderArena`.
 /// Shared by the key-gate wait and the ordinary async reply fold.
 pub(super) fn fold_script_event(
-    state: &InputState,
+    state: &mut InputState,
     cmds: &mut Vec<RenderCmd>,
     hovered: &mut Option<NodeId>,
     live_dom: &mut Option<(Arc<NodeArena>, NodeId)>,
@@ -350,17 +383,32 @@ pub(super) fn fold_script_event(
     *hovered = ev.hovered;
     cmds.extend(ev.cmds);
     if let Some(d) = ev.dirty {
+        let document_reloaded = d.document_css.is_some();
+        if document_reloaded {
+            state.reset_document_state(cmds);
+        }
         *live_dom = Some((Arc::clone(&d.arena), d.root_id));
-        cmds.push(RenderCmd::RenderArena {
-            arena: d.arena,
-            root_id: d.root_id,
-            scroll_y: state.scroll_y,
-            zoom: state.zoom,
-            dynamic: DynamicState {
-                hovered: ev.hovered,
-                focused: state.focused_input,
-            },
-            dirty: d.dirty,
-        });
+        if let Some(document_css) = d.document_css {
+            cmds.push(RenderCmd::RenderDocument {
+                arena: d.arena,
+                root_id: d.root_id,
+                document_css,
+                scroll_y: state.scroll_y,
+                zoom: state.zoom,
+                dirty: d.dirty,
+            });
+        } else {
+            cmds.push(RenderCmd::RenderArena {
+                arena: d.arena,
+                root_id: d.root_id,
+                scroll_y: state.scroll_y,
+                zoom: state.zoom,
+                dynamic: DynamicState {
+                    hovered: ev.hovered,
+                    focused: state.focused_input,
+                },
+                dirty: d.dirty,
+            });
+        }
     }
 }

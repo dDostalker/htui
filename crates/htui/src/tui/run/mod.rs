@@ -6,6 +6,8 @@
 //!  and the input loop that translates keys mouse
 //! events into `RenderCmd`s.
 
+#[cfg(debug_assertions)]
+mod hot_reload;
 mod overlay;
 mod pipeline;
 mod region;
@@ -13,7 +15,6 @@ mod selection;
 mod state;
 mod thread;
 
-use self::pipeline::combined_css_source;
 use self::thread::{fold_script_event, hit_test_thread, render_thread};
 
 use std::io::stdout;
@@ -53,6 +54,21 @@ static TERMINAL_ACTIVE: AtomicBool = AtomicBool::new(false);
 const MAX_IN_FLIGHT_MOVES: usize = 8;
 
 pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
+    run_inner(html, css, session, None);
+}
+
+/// Start a debug render with whole-document hot reload for `path`.
+///
+/// The watcher is part of the debug-only branch: release binaries never
+/// reference this entry point.
+#[cfg(debug_assertions)]
+pub(crate) fn run_hot(path: &str, html: &str, css: &str, session: &mut Session) {
+    run_inner(html, css, session, Some(path));
+}
+
+fn run_inner(html: &str, css: &str, session: &mut Session, hot_reload_path: Option<&str>) {
+    // The parameter is consumed only by the debug watcher below.
+    let _ = hot_reload_path;
     // register log hook
     install_panic_hook();
 
@@ -82,8 +98,18 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
         let mut parser = Parser::new(html);
         parser.parse_with_scripts()
     });
-    let css_source: Arc<str> = Arc::from(combined_css_source(&document.css, css));
+    let session_css: Arc<str> = Arc::from(css);
     let config = *session.config();
+
+    // A debug-only side channel reads stable HTML edits and sends them to the
+    // script thread through the input loop. Release builds compile this to no
+    // receiver and no watcher.
+    #[cfg(debug_assertions)]
+    let hot_reload = match hot_reload_path {
+        Some(path) if config.events => Some(hot_reload::spawn(path)),
+        _ => None,
+    };
+
     let registry = session.registry_handle();
     let bindings = if config.events {
         Some(session.take_bindings())
@@ -154,7 +180,7 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
     let render_beat: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
     let render_handle = std::thread::spawn({
         let render_document = document;
-        let css_clone = Arc::clone(&css_source);
+        let css_clone = Arc::clone(&session_css);
         let max_scroll_clone = Arc::clone(&max_scroll);
         let selection_text_clone = Arc::clone(&selection_text);
         let render_beat_clone = Arc::clone(&render_beat);
@@ -263,6 +289,22 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
         }
 
         let mut msgs: Vec<ScriptMsg> = Vec::new();
+        // Coalesce every watcher update that arrived while the input loop was
+        // blocked / processing into the latest HTML. Rapid saves produce one
+        // script-thread reload rather than a queue of obsolete documents.
+        #[cfg(debug_assertions)]
+        if let Some(watcher) = &hot_reload {
+            let mut latest_html: Option<String> = None;
+            while let Ok(html) = watcher.receiver().try_recv() {
+                latest_html = Some(html);
+            }
+            if let Some(html) = latest_html {
+                log::info!("Hot reloading HTML document");
+                msgs.push(ScriptMsg::ReloadHtml {
+                    html: Arc::from(html.as_str()),
+                });
+            }
+        }
         // Detect terminal size changes ourselves instead of relying solely on
         // `Event::Resize`: some resize paths never emit the event (a legacy
         // Windows console can resize its window without changing the buffer),
@@ -412,7 +454,7 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
                 {
                     Ok(ScriptResponse::Event(ev)) => {
                         let verdict = ev.key_gate.filter(|(id, _)| *id == gate.id);
-                        fold_script_event(&state, &mut cmds, &mut hovered, &mut live_dom, ev);
+                        fold_script_event(&mut state, &mut cmds, &mut hovered, &mut live_dom, ev);
                         moves_in_flight = moves_in_flight.saturating_sub(1);
                         if let Some((_, prevented)) = verdict {
                             if !prevented {
@@ -453,7 +495,7 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
         for resp in script_out_rx.try_iter() {
             match resp {
                 ScriptResponse::Event(ev) => {
-                    fold_script_event(&state, &mut cmds, &mut hovered, &mut live_dom, ev);
+                    fold_script_event(&mut state, &mut cmds, &mut hovered, &mut live_dom, ev);
                     moves_in_flight = moves_in_flight.saturating_sub(1);
                 }
                 ScriptResponse::Ready { .. } | ScriptResponse::Failed(_) => {

@@ -171,6 +171,30 @@ impl InputState {
         }
     }
 
+    /// Reset interaction state tied to a replaced document's node ids.
+    ///
+    /// A whole-document reload (hot reload or a host-pushed `RenderHtml`)
+    /// replaces the arena, so focused-field edit buffers, an open dropdown,
+    /// drag state and page-selection coordinates must not survive. Scroll,
+    /// zoom, clipboard and the last pointer position do survive; the latter is
+    /// reused to re-validate hover against the fresh hit map.
+    pub fn reset_document_state(&mut self, cmds: &mut Vec<RenderCmd>) {
+        self.pressed = None;
+        self.focused_input = None;
+        self.focused_is_textarea = false;
+        self.input_value = CompactString::new("");
+        self.input_cursor = 0;
+        self.input_sel_anchor = None;
+        self.drag_selecting = false;
+        clear_text_selection(self, cmds);
+        if let Some(open) = self.open_select.take() {
+            cmds.push(RenderCmd::SelectClose {
+                node_id: open.node_id,
+            });
+        }
+        self.request_resize_revalidation();
+    }
+
     /// Drop a press whose release was never received: a button-free `Moved`
     /// event proves no button is held, so any recorded press is stale. Without
     /// this, a lost release (e.g. the console dropping the `Up` during a
