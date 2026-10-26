@@ -6,9 +6,10 @@
 //! `[hidden] { display: none }` rule). Pure in-memory — no terminal required.
 
 use htui::events::EventBindings;
-use htui::layout::generate_box_tree;
+use htui::layout::layout::TermMap;
 use htui::script::ScriptEngine;
-use htui::tdom::node::{NodeArena, NodeId, NodeType};
+use htui::tdom::node::{NodeArena, NodeId};
+use htui::tui::graph_api::TermLayout;
 
 /// Evaluate `String(expr)` and return its text.
 fn eval_str(engine: &mut ScriptEngine, expr: &str) -> String {
@@ -39,33 +40,22 @@ fn data_attr(engine: &ScriptEngine, id: &str, name: &str) -> Option<String> {
 }
 
 /// Whether any rendered text node in the box tree equals `needle`.
-fn flatten_text_contains(
-    boxes: &[htui::layout::GeneratedBox],
-    arena: &NodeArena,
-    needle: &str,
-) -> bool {
-    fn walk(
-        boxes: &[htui::layout::GeneratedBox],
-        arena: &NodeArena,
-        needle: &str,
-        found: &mut bool,
-    ) {
-        for g in boxes {
-            if arena[g.node_id].node_type == NodeType::Text
-                && arena[g.node_id].data.as_deref() == Some(needle)
-            {
-                *found = true;
-                return;
-            }
-            walk(&g.children, arena, needle, found);
-            if *found {
-                return;
-            }
-        }
-    }
-    let mut found = false;
-    walk(boxes, arena, needle, &mut found);
-    found
+///
+/// Observation goes through the real render pipeline (canvas): generation is
+/// a shallow per-node classifier, so "does it render" is answered by laying
+/// out and drawing, exactly what the render thread does.
+fn canvas_contains(engine: &ScriptEngine, needle: &str) -> bool {
+    let map = TermMap {
+        columns: 80,
+        rows: 24,
+    };
+    let mut tl = TermLayout::new(&map, 1.0);
+    tl.draw(&engine.arena(), engine.root_id(), &map);
+    tl.layout
+        .iter()
+        .map(|b| b.word.as_str())
+        .collect::<String>()
+        .contains(needle)
 }
 
 // ============================================================
@@ -299,11 +289,12 @@ fn hidden_js_property_toggles_rendering() {
         EventBindings::default(),
     )
     .expect("engine initializes");
-    let root_id = engine.root_id();
 
-    // Initial: both <p> boxes exist.
-    let boxes = generate_box_tree(&engine.arena(), root_id);
-    assert!(flatten_text_contains(&boxes, &engine.arena(), "gone"));
+    // Initial: both <p>s render.
+    assert!(
+        canvas_contains(&engine, "gone"),
+        "the unhidden element must render"
+    );
 
     // `el.hidden = true` sets the attribute and marks the node dirty.
     eval_str(&mut engine, "document.getElementById('b').hidden = true");
@@ -318,12 +309,11 @@ fn hidden_js_property_toggles_rendering() {
     );
 
     // The re-layout drops the hidden element and its subtree.
-    let boxes = generate_box_tree(&engine.arena(), root_id);
     assert!(
-        !flatten_text_contains(&boxes, &engine.arena(), "gone"),
+        !canvas_contains(&engine, "gone"),
         "a hidden element must not render"
     );
-    assert!(flatten_text_contains(&boxes, &engine.arena(), "visible"));
+    assert!(canvas_contains(&engine, "visible"));
 
     // `el.hidden = false` restores it.
     eval_str(&mut engine, "document.getElementById('b').hidden = false");
@@ -331,8 +321,10 @@ fn hidden_js_property_toggles_rendering() {
         eval_str(&mut engine, "document.getElementById('b').hidden"),
         "false"
     );
-    let boxes = generate_box_tree(&engine.arena(), root_id);
-    assert!(flatten_text_contains(&boxes, &engine.arena(), "gone"));
+    assert!(
+        canvas_contains(&engine, "gone"),
+        "unhiding must restore the element"
+    );
 }
 
 #[test]

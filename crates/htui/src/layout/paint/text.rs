@@ -23,13 +23,20 @@ use super::PaintCanvas;
 /// Per-line width accounting uses [`InlineRun::width_at`] (which sums
 /// `max(grapheme_width, font_size)` per grapheme) so a wide CJK glyph
 /// at the end of one run does not collide with the first cell of the
-/// next run. The block's `effective_bg` is applied to runs whose own
+/// next run. The box's `effective_bg` is applied to runs whose own
 /// background is `None`, inheriting the surrounding rect's fill (e.g.
 /// an `<aside>`'s `darkblue` strip showing through unstyled text).
 ///
 /// `font_size_cells` is the effective font-size of the containing box.
 /// When `font_size_cells > 1`, each character cell is expanded so the
 /// character occupies that many terminal columns.
+///
+/// `overflow_visible` extends the paint bounds past the box's content box
+/// (CSS `overflow: visible`): lines paint beyond the rect's height (bounded
+/// by the inherited clip) and each row's glyph stream runs to the canvas
+/// edge instead of stopping at the content-box width. Clipping boxes keep
+/// the content-box bounds.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_runs(
     canvas: &mut PaintCanvas<'_>,
     lines: &[Vec<InlineRun>],
@@ -40,6 +47,8 @@ pub(crate) fn paint_runs(
     font_size_cells: usize,
     line_height_cells: usize,
     clip: Rect,
+    overflow_visible: bool,
+    first_line_indent: usize,
 ) {
     if lines.is_empty() {
         return;
@@ -68,19 +77,25 @@ pub(crate) fn paint_runs(
         }
         let line_start =
             cell_start.saturating_add(line_idx.saturating_mul(line_h).saturating_mul(cols));
+        // `text-indent` shifts the first visual line right and narrows its
+        // alignment basis (the wrap pass already reserved the budget).
+        let indent = if line_idx == 0 { first_line_indent } else { 0 };
+        let indent = indent.min(block_width);
         paint_one_line(
             canvas,
             line_runs,
-            line_start,
-            block_width,
+            line_start.saturating_add(indent),
+            block_width.saturating_sub(indent),
             align,
             effective_bg,
             font_size_cells,
+            overflow_visible,
         );
     }
 }
 
 /// Render a single visual line's runs.
+#[allow(clippy::too_many_arguments)]
 fn paint_one_line(
     canvas: &mut PaintCanvas<'_>,
     runs: &[InlineRun],
@@ -89,6 +104,7 @@ fn paint_one_line(
     align: TextAlign,
     effective_bg: Option<Color>,
     font_size_cells: usize,
+    overflow_visible: bool,
 ) {
     let total_width: usize = runs.iter().map(|r| r.width_at(font_size_cells)).sum();
     let total_width = total_width.min(block_width);
@@ -101,8 +117,18 @@ fn paint_one_line(
     // `cell_start` is the first column of the content row and `block_width`
     // is the content-box width. Clip the painted text to this range so a long
     // inline run does not bleed into subsequent rows (or off the right edge
-    // of the canvas) and overwrite neighbouring boxes.
-    let row_end = cell_start.saturating_add(block_width);
+    // of the canvas) and overwrite neighbouring boxes. An `overflow: visible`
+    // box extends the bound to the row's canvas edge instead — a nowrap line
+    // wider than the box paints beyond it (still bounded by the row so the
+    // flat buffer never wraps into the next row).
+    let cols = canvas.columns as usize;
+    let row_end = if overflow_visible {
+        cell_start
+            .saturating_sub(cell_start % cols)
+            .saturating_add(cols)
+    } else {
+        cell_start.saturating_add(block_width)
+    };
     let mut index = cell_start + offset;
     for run in runs {
         if run.is_empty() {
@@ -118,11 +144,14 @@ fn paint_one_line(
             run.style,
             font_size_cells,
             row_end,
+            run.letter_spacing,
+            run.word_spacing,
         );
         index = index.saturating_add(run.width_at(font_size_cells));
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_text_row(
     canvas: &mut PaintCanvas<'_>,
     start: usize,
@@ -132,17 +161,27 @@ fn paint_text_row(
     style: FontStyle,
     font_size_cells: usize,
     row_end: usize,
+    letter_spacing: usize,
+    word_spacing: isize,
 ) {
     let max = canvas.layout.len();
     let mut idx = start;
     let font_size = font_size_cells.max(1);
     for g in text.graphemes(true) {
         let w = grapheme_width(g);
+        // Same advance formula as `InlineRun::grapheme_advance` so the
+        // painted cells line up with every width measurement: the glyph's
+        // expanded slot plus word spacing on spaces plus letter spacing.
+        let word_extra = if g == " " {
+            word_spacing.max(0) as usize
+        } else {
+            0
+        };
+        let slot_width = w.max(font_size) + word_extra + letter_spacing;
         // Stop when the next cluster + its background padding would step
         // past the content-box right edge or the canvas boundary. Without
         // this, a long `<p>` would spill its overflow into the rows below
         // and corrupt the cells of subsequent boxes.
-        let slot_width = w.max(font_size);
         if idx.saturating_add(slot_width) > row_end {
             break;
         }

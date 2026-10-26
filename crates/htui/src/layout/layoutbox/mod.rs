@@ -88,20 +88,22 @@ pub mod inner_formatting_context;
 pub use box_kind::{BoxKind, ReplacedContent};
 pub use cursor::Cursor;
 pub use generation::{
-    GeneratedBox, GeneratedBoxKind, generate_box_tree, generate_node, visible_children,
+    GeneratedBox, GeneratedBoxKind, GeneratedPayload, flatten_contents_children, generate_box_tree,
+    generate_node, visible_children,
 };
 pub use geometry::{layout_generated_box, layout_generated_tree};
 pub use inline::collect_runs;
-pub(crate) use inline::{q_quote_pair, text_node_run};
+pub(crate) use inline::{inline_tree_has_forced_break, q_quote_pair, text_node_run};
 pub use inline_run::InlineRun;
 pub use inner_formatting_context::FormattingContext;
 pub use outer_display::OuterDisplay;
 pub use paint_style::{ColumnLayout, PaintStyle};
+pub(crate) use position::translate_subtree;
 pub use position::{
     apply_relative_offset, pin_fixed_boxes, pin_sticky_boxes, resolve_positioned_rects,
 };
 pub use rect::Rect;
-pub use wrap::{is_cjk_break_opportunity, wrap_runs, wrapped_size};
+pub use wrap::{apply_ellipsis, is_cjk_break_opportunity, wrap_runs, wrapped_size};
 
 use crate::html::css_parse::Positioning;
 use crate::tdom::node::NodeId;

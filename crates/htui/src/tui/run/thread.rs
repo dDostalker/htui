@@ -53,7 +53,7 @@ pub(super) fn render_thread(
     };
 
     let mut last_frame_at: Option<Instant> = None;
-    loop {
+    'frame: loop {
         let first = match rx.recv() {
             Ok(c) => c,
             Err(e) => {
@@ -129,156 +129,163 @@ pub(super) fn render_thread(
 
         if let Some(cmd) = batch.take_snapshot() {
             let batch_t0 = Instant::now();
-            match cmd {
-                RenderCmd::Quit => break,
+            // The snapshot arms below `break 'snapshot` on their no-op / error
+            // paths instead of `continue`ing the frame loop: the deferred
+            // hover / focus repaints at the loop tail must still run — a
+            // `RenderArena` is exactly the command that defers a hover, and
+            // its error branch would otherwise silently drop the highlight.
+            'snapshot: {
+                match cmd {
+                    RenderCmd::Quit => break 'frame,
 
-                RenderCmd::Rerender { scroll_y } => {
-                    // Resolve the new scroll position (with clamping) inside a
-                    // scoped borrow so the fixed-box repin below can borrow the
-                    // whole state.
-                    {
+                    RenderCmd::Rerender { scroll_y } => {
+                        // Resolve the new scroll position (with clamping) inside a
+                        // scoped borrow so the fixed-box repin below can borrow the
+                        // whole state.
+                        {
+                            let Some(tl) = state.term_layout.as_mut() else {
+                                break 'snapshot;
+                            };
+                            let prev = tl.scroll_y;
+                            tl.scroll_y = scroll_y;
+                            tl.clamp_scroll();
+                            // Defense in depth: drop rerenders whose resolved scroll
+                            // position is unchanged after clamping. Most such events
+                            // are already filtered in the input thread, but if a
+                            // `Rerender` slips past (e.g. races between a Redraw
+                            // updating the max_scroll ceiling and a queued scroll
+                            // event) we still avoid the diff pass.
+                            if tl.scroll_y == prev {
+                                break 'snapshot;
+                            }
+                        }
+                        // Scroll-aware `position: fixed`: re-anchor the fixed boxes
+                        // to the new scroll offset and repaint the cells they occupy
+                        // (old + new areas), so they stay pinned to their screen
+                        // position. Documents without pinned boxes keep the cheap
+                        // canvas re-slice below.
+                        if state.has_pinned {
+                            state.pin_fixed_and_repaint(&geo_tx);
+                        }
+                        // The incremental renderer diffs the shifted viewport against
+                        // the previous frame, so scrolling needs no full-screen Clear.
                         let Some(tl) = state.term_layout.as_mut() else {
-                            continue;
+                            break 'snapshot;
                         };
-                        let prev = tl.scroll_y;
-                        tl.scroll_y = scroll_y;
-                        tl.clamp_scroll();
-                        // Defense in depth: drop rerenders whose resolved scroll
-                        // position is unchanged after clamping. Most such events
-                        // are already filtered in the input thread, but if a
-                        // `Rerender` slips past (e.g. races between a Redraw
-                        // updating the max_scroll ceiling and a queued scroll
-                        // event) we still avoid the diff pass.
-                        if tl.scroll_y == prev {
-                            continue;
-                        }
+                        tl.render(&mut out);
+                        flush_frame(&mut out);
                     }
-                    // Scroll-aware `position: fixed`: re-anchor the fixed boxes
-                    // to the new scroll offset and repaint the cells they occupy
-                    // (old + new areas), so they stay pinned to their screen
-                    // position. Documents without pinned boxes keep the cheap
-                    // canvas re-slice below.
-                    if state.has_pinned {
-                        state.pin_fixed_and_repaint(&geo_tx);
+
+                    RenderCmd::Redraw { scroll_y, zoom } => {
+                        let term_map = match TermMap::get_ter_map() {
+                            Ok(m) => m,
+                            Err(e) => {
+                                log::error!("Failed to get terminal size: {}", e);
+                                break 'snapshot;
+                            }
+                        };
+                        state.redraw(&mut out, &geo_tx, &term_map, scroll_y, zoom);
                     }
-                    // The incremental renderer diffs the shifted viewport against
-                    // the previous frame, so scrolling needs no full-screen Clear.
-                    let Some(tl) = state.term_layout.as_mut() else {
-                        continue;
-                    };
-                    tl.render(&mut out);
-                    flush_frame(&mut out);
-                }
 
-                RenderCmd::Redraw { scroll_y, zoom } => {
-                    let term_map = match TermMap::get_ter_map() {
-                        Ok(m) => m,
-                        Err(e) => {
-                            log::error!("Failed to get terminal size: {}", e);
-                            continue;
-                        }
-                    };
-                    state.redraw(&mut out, &geo_tx, &term_map, scroll_y, zoom);
-                }
-
-                RenderCmd::RenderArena {
-                    arena,
-                    root_id,
-                    scroll_y,
-                    zoom,
-                    dynamic,
-                    dirty,
-                } => {
-                    // A hover / focus change re-styles the whole tree (the
-                    // `:hover` / `:focus` highlight may sit anywhere), so the
-                    // incremental repaint is only valid when the interaction
-                    // state is unchanged.
-                    let state_changed = state.dynamic != dynamic;
-                    state.dynamic = dynamic;
-                    let term_map = match TermMap::get_ter_map() {
-                        Ok(m) => m,
-                        Err(e) => {
-                            log::error!("Failed to get terminal size: {}", e);
-                            continue;
-                        }
-                    };
-                    state.render_arena(
-                        &mut out,
-                        &geo_tx,
-                        &term_map,
-                        &arena,
+                    RenderCmd::RenderArena {
+                        arena,
                         root_id,
                         scroll_y,
                         zoom,
+                        dynamic,
                         dirty,
-                        state_changed,
-                    );
-                }
+                    } => {
+                        // A hover / focus change re-styles the whole tree (the
+                        // `:hover` / `:focus` highlight may sit anywhere), so the
+                        // incremental repaint is only valid when the interaction
+                        // state is unchanged.
+                        let state_changed = state.dynamic != dynamic;
+                        state.dynamic = dynamic;
+                        let term_map = match TermMap::get_ter_map() {
+                            Ok(m) => m,
+                            Err(e) => {
+                                log::error!("Failed to get terminal size: {}", e);
+                                break 'snapshot;
+                            }
+                        };
+                        state.render_arena(
+                            &mut out,
+                            &geo_tx,
+                            &term_map,
+                            &arena,
+                            root_id,
+                            scroll_y,
+                            zoom,
+                            dirty,
+                            state_changed,
+                        );
+                    }
 
-                RenderCmd::RenderHtml { html } => {
-                    let term_map = match TermMap::get_ter_map() {
-                        Ok(m) => m,
-                        Err(e) => {
-                            log::error!("Failed to get terminal size: {}", e);
-                            continue;
+                    RenderCmd::RenderHtml { html } => {
+                        let term_map = match TermMap::get_ter_map() {
+                            Ok(m) => m,
+                            Err(e) => {
+                                log::error!("Failed to get terminal size: {}", e);
+                                break 'snapshot;
+                            }
+                        };
+                        state.render_html(&mut out, &geo_tx, &term_map, html);
+                    }
+
+                    RenderCmd::Hover { node_id } => {
+                        let prev = state.dynamic.hovered;
+                        state.dynamic.hovered = node_id;
+                        // Without any `:hover` rule the cascade is identical for every
+                        // pointer position, so nothing can change on screen — skip the
+                        // repaint entirely (browser behaviour: moving the pointer with
+                        // no `:hover` styles produces no drawing).
+                        if !state.pseudo_rules.contains_pseudo(PseudoClass::Hover) {
+                            break 'snapshot;
                         }
-                    };
-                    state.render_html(&mut out, &geo_tx, &term_map, html);
-                }
-
-                RenderCmd::Hover { node_id } => {
-                    let prev = state.dynamic.hovered;
-                    state.dynamic.hovered = node_id;
-                    // Without any `:hover` rule the cascade is identical for every
-                    // pointer position, so nothing can change on screen — skip the
-                    // repaint entirely (browser behaviour: moving the pointer with
-                    // no `:hover` styles produces no drawing).
-                    if !state.pseudo_rules.contains_pseudo(PseudoClass::Hover) {
-                        continue;
+                        state.repaint_dynamic(&mut out, PseudoClass::Hover, prev, node_id);
                     }
-                    state.repaint_dynamic(&mut out, PseudoClass::Hover, prev, node_id);
-                }
 
-                RenderCmd::Focus { node_id } => {
-                    let prev = state.dynamic.focused;
-                    state.dynamic.focused = node_id;
-                    // Without any `:focus` rule the cascade is identical for every
-                    // focus position, so nothing can change on screen — skip the
-                    // repaint entirely (browser behaviour: focusing with no
-                    // `:focus` styles produces no drawing).
-                    if !state.pseudo_rules.contains_pseudo(PseudoClass::Focus) {
-                        continue;
+                    RenderCmd::Focus { node_id } => {
+                        let prev = state.dynamic.focused;
+                        state.dynamic.focused = node_id;
+                        // Without any `:focus` rule the cascade is identical for every
+                        // focus position, so nothing can change on screen — skip the
+                        // repaint entirely (browser behaviour: focusing with no
+                        // `:focus` styles produces no drawing).
+                        if !state.pseudo_rules.contains_pseudo(PseudoClass::Focus) {
+                            break 'snapshot;
+                        }
+                        state.repaint_dynamic(&mut out, PseudoClass::Focus, prev, node_id);
                     }
-                    state.repaint_dynamic(&mut out, PseudoClass::Focus, prev, node_id);
-                }
 
-                // Select dropdown commands share one handler so the pending pass
-                // can also run them (see `DrainedBatch::drain_selects`).
-                RenderCmd::SelectOpen { .. }
-                | RenderCmd::SelectClose { .. }
-                | RenderCmd::SelectMove { .. } => {
-                    state.handle_select(&mut out, cmd);
-                }
+                    // Select dropdown commands share one handler so the pending pass
+                    // can also run them (see `DrainedBatch::drain_selects`).
+                    RenderCmd::SelectOpen { .. }
+                    | RenderCmd::SelectClose { .. }
+                    | RenderCmd::SelectMove { .. } => {
+                        state.handle_select(&mut out, cmd);
+                    }
 
-                RenderCmd::TextSelection { anchor, end, mode } => {
-                    state.apply_text_selection_cmd(&mut out, anchor, end, mode);
-                }
+                    RenderCmd::TextSelection { anchor, end, mode } => {
+                        state.apply_text_selection_cmd(&mut out, anchor, end, mode);
+                    }
 
-                RenderCmd::RenderInput {
-                    node_id,
-                    value,
-                    cursor,
-                    focused,
-                    selection,
-                } => {
-                    state.handle_input(&mut out, node_id, value, cursor, focused, selection);
-                }
+                    RenderCmd::RenderInput {
+                        node_id,
+                        value,
+                        cursor,
+                        focused,
+                        selection,
+                    } => {
+                        state.handle_input(&mut out, node_id, value, cursor, focused, selection);
+                    }
 
-                // JS `el.focus()` / `el.blur()` requests are intercepted by the
-                // input loop (they mutate input-loop state); if one ever reaches
-                // the render thread it is stale — drop it.
-                RenderCmd::FocusRequest { .. } | RenderCmd::BlurRequest { .. } => {
-                    log::debug!("Focus request reached the render thread — dropping");
+                    // JS `el.focus()` / `el.blur()` requests are intercepted by the
+                    // input loop (they mutate input-loop state); if one ever reaches
+                    // the render thread it is stale — drop it.
+                    RenderCmd::FocusRequest { .. } | RenderCmd::BlurRequest { .. } => {
+                        log::debug!("Focus request reached the render thread — dropping");
+                    }
                 }
             }
 
@@ -298,6 +305,16 @@ pub(super) fn render_thread(
             state.dynamic.hovered = node_id;
             if state.pseudo_rules.contains_pseudo(PseudoClass::Hover) {
                 state.repaint_dynamic(&mut out, PseudoClass::Hover, prev, node_id);
+            }
+        }
+        // A deferred `Focus` (queued behind a `Redraw` / `Rerender`) runs
+        // after the snapshot render for the same reason: it re-styles the
+        // fresh frame instead of displacing it.
+        if let Some(RenderCmd::Focus { node_id }) = batch.take_focus() {
+            let prev = state.dynamic.focused;
+            state.dynamic.focused = node_id;
+            if state.pseudo_rules.contains_pseudo(PseudoClass::Focus) {
+                state.repaint_dynamic(&mut out, PseudoClass::Focus, prev, node_id);
             }
         }
     }

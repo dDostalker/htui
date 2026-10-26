@@ -2,9 +2,9 @@
 use crossterm::style::Color;
 
 use crate::html::box_edges::BoxEdges;
+use crate::html::css_parse::{CornerRadii, TextAlign};
 
 use super::inline_run::InlineRun;
-use crate::html::css_parse::CornerRadii;
 
 /// Multi-column fragmentation of a box's own inline content.
 ///
@@ -71,6 +71,15 @@ pub struct PaintStyle {
     /// to leave breathing room before the next block. These rows are not
     /// filled with the rect's background.
     pub spacing_after: usize,
+    /// Resolved `text-align` for the box's own inline runs. Carried here (not
+    /// re-read from the cascade at paint time) so user-agent defaults that
+    /// the layout phase resolved — `<th>`'s `center` — participate even
+    /// though they are not stored in the node's `css_attr`.
+    pub text_align: TextAlign,
+    /// First-line indent (CSS `text-indent`) in cells: the first visual
+    /// line's wrap budget shrank by this many columns at layout time, and
+    /// the paint phase shifts its origin right accordingly.
+    pub text_indent: usize,
 }
 
 impl Default for PaintStyle {
@@ -84,6 +93,8 @@ impl Default for PaintStyle {
             border_radius: CornerRadii::default(),
             fill_bg: false,
             spacing_after: 0,
+            text_align: TextAlign::Left,
+            text_indent: 0,
         }
     }
 }

@@ -26,11 +26,11 @@ fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     } else {
         format!("{embedded}\n{css}")
     };
-    if !combined.trim().is_empty() {
-        let mut css_parser = css_parse::Parser::new(&combined);
-        let rules = css_parser.parse();
-        css_parse::css_into_node(&mut arena, root_id, &rules);
-    }
+    // Always cascade: an empty stylesheet must still apply inline `style`
+    // attributes and inheritance.
+    let mut css_parser = css_parse::Parser::new(&combined);
+    let rules = css_parser.parse();
+    css_parse::css_into_node(&mut arena, root_id, &rules);
     (root_id, arena)
 }
 
@@ -374,5 +374,90 @@ fn nbsp_entity_is_preserved() {
             .any(|r| r.contains("a\u{00A0}\u{00A0}\u{00A0}b")),
         "&nbsp; must survive as non-collapsible spaces, rows = {:?}",
         rows
+    );
+}
+
+// ============================================================
+// letter-spacing / word-spacing / text-indent / text-overflow
+// ============================================================
+
+/// Row string with trailing blanks trimmed, for exact-prefix assertions.
+fn row_trimmed(rows: &[String], idx: usize) -> String {
+    rows.get(idx)
+        .map(|r| r.trim_end().to_string())
+        .unwrap_or_default()
+}
+
+/// First non-blank row's trimmed text (skips UA top margins like `<p>`'s).
+fn first_content_row(rows: &[String]) -> String {
+    rows.iter()
+        .map(|r| r.trim_end())
+        .find(|r| !r.is_empty())
+        .unwrap_or_default()
+        .to_string()
+}
+
+#[test]
+fn letter_spacing_widens_text() {
+    init();
+    let (plain, _) = render_rows("<p>ab</p>", "");
+    let (spaced, _) = render_rows("<p style=\"letter-spacing: 2ch\">ab</p>", "");
+    let plain_row = first_content_row(&plain);
+    let spaced_row = first_content_row(&spaced);
+    assert!(
+        plain_row.contains("ab"),
+        "baseline renders, got {plain_row:?}"
+    );
+    // Two graphemes with +2-cell spacing each → "a  b" vs "ab".
+    assert!(
+        spaced_row.contains("a  b"),
+        "letter-spacing inserts blank columns, got {spaced_row:?}"
+    );
+}
+
+#[test]
+fn word_spacing_widens_word_gaps() {
+    init();
+    let (spaced, _) = render_rows("<p style=\"word-spacing: 3ch\">a b</p>", "");
+    let row = first_content_row(&spaced);
+    assert!(
+        row.contains("a    b"),
+        "word-spacing widens the space by 3 columns, got {row:?}"
+    );
+}
+
+#[test]
+fn text_indent_shifts_first_line() {
+    init();
+    // Two forced lines via <br>: the first shifts by 4 columns, the second
+    // stays flush. Content starts after `<p>`'s UA top margin.
+    let (rows, _) = render_rows("<p style=\"text-indent: 4ch\">aa<br>bb</p>", "");
+    let content_start = rows
+        .iter()
+        .position(|r| !r.trim_end().is_empty())
+        .expect("content rendered");
+    let first = row_trimmed(&rows, content_start);
+    let second = row_trimmed(&rows, content_start + 1);
+    assert!(
+        first.starts_with("    aa"),
+        "first line indented by 4 columns, got {first:?}"
+    );
+    assert!(
+        second.starts_with("bb"),
+        "second line stays flush, got {second:?}"
+    );
+}
+
+#[test]
+fn text_overflow_ellipsis_clips_nowrap() {
+    init();
+    let (rows, _) = render_rows(
+        "<div style=\"width: 6ch; overflow: hidden; white-space: nowrap; text-overflow: ellipsis\">abcdefgh</div>",
+        "",
+    );
+    let row = first_content_row(&rows);
+    assert!(
+        row.contains("abcde…") && !row.contains("abcdef"),
+        "clipped nowrap line ends with ellipsis, got {row:?}"
     );
 }

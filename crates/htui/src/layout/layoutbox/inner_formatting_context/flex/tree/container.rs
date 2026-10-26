@@ -8,6 +8,7 @@ use crate::{
         BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext, PaintStyle, Rect,
         inner_formatting_context::flow::{constrained_block_width, dispatch},
         layoutbox::{
+            flatten_contents_children,
             generation::{GeneratedBoxKind, generate_node},
             text_node_run, visible_children,
         },
@@ -223,7 +224,12 @@ pub(super) fn layout_flex_container(
     let mut item_preps: Vec<FlexItemPrep> = Vec::new();
     let mut text_runs: Vec<InlineRun> = Vec::new();
 
-    for &child_id in &visible_children(arena, node_id) {
+    // `display: contents` children are spliced out (recursively) before item
+    // collection: a contents element produces no flex item, so its visible
+    // children take its place in document order (its raw text still folds
+    // into the container's anonymous text runs below).
+    let dom_children = flatten_contents_children(arena, &visible_children(arena, node_id));
+    for &child_id in &dom_children {
         let child = &arena[child_id];
         if child.node_type == NodeType::Text {
             if let Some(run) = text_node_run(
@@ -441,6 +447,8 @@ pub(super) fn layout_flex_container(
         ),
         fill_bg,
         spacing_after: 0,
+        text_align: node.css_attr.get_text_align(),
+        text_indent: 0,
     };
 
     LayoutBox::new_flex_container(

@@ -443,6 +443,15 @@ pub fn serialize_inner_html(arena: &NodeArena, node_id: NodeId) -> String {
     out
 }
 
+/// Serialize an element **including its own tags** (the `outerHTML`
+/// getter). Non-element nodes fall back to their fragment serialization
+/// (text / comment bodies), like the DOM serializer's node form.
+pub fn serialize_outer_html(arena: &NodeArena, node_id: NodeId) -> String {
+    let mut out = String::new();
+    serialize_node(arena, node_id, &mut out);
+    out
+}
+
 /// Append the serialized form of `node_id` to `out`.
 fn serialize_node(arena: &NodeArena, node_id: NodeId, out: &mut String) {
     let node = &arena[node_id];

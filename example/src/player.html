@@ -42,7 +42,7 @@
   .clock { color: #56c8f5; font-weight: bold; margin-left: 2ch; }
 
   /* ---------- layout ---------- */
-  .main-wrap { margin: 1ch 1ch 0 1ch; height: 50vh; }
+  .main-wrap { margin: 1ch 1ch 0 1ch; height: 40vh; overflow: hidden; }
   .main { display: flex; gap: 1ch; align-items: flex-start; }
   .np { flex: 1 1 0; display: flex; flex-direction: column; }
   .side { width: 30ch; flex-shrink: 0; display: flex; flex-direction: column; gap: 1ch; }
@@ -159,10 +159,12 @@
 
   .card-lyr { flex: 1; }
   .ly { color: #4a5372; }
+  .ly::before { content: "   "; }
   .ly.on { color: #43e5a0; font-weight: bold; }
+  .ly.on::before { content: "▸  "; }
 
   /* ---------- library ---------- */
-  .lib-wrap { margin: 1ch 1ch 0 1ch; height: 26vh; }
+  .lib-wrap { margin: 1ch 1ch 0 1ch; height: 18vh; overflow: hidden; }
   .lib { display: flex; flex-direction: column; }
   .lib-head { flex: 0 0 auto; display: flex; align-items: center; gap: 2ch; margin-bottom: 1ch; }
   .lib-title { font-weight: bold; color: #ffffff; text-transform: uppercase; }
@@ -184,9 +186,11 @@
   .row.active { background-color: #0f2a22; border-radius: 1; }
   .idx { width: 4ch; flex-shrink: 0; text-align: right; color: #556085; }
   .row.active .idx { color: #43e5a0; }
-  .ptitle { flex: 1 1 auto; }
+  .ptitle { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row.active .ptitle { color: #43e5a0; font-weight: bold; }
   .heart { color: #ff7a90; }
+  .heart.off { color: #556085; }
+  .heart:hover { color: #ff7a90; }
   .partist { width: 20ch; flex-shrink: 0; color: #8b96b5; }
   .ptag {
     width: 10ch;
@@ -425,6 +429,7 @@
       $("btn-like").textContent = t.fav ? "\u2665" : "\u2661";
       setOn("btn-repeat", repeat);
       setOn("btn-shuffle", shuffle);
+      document.title = (playing ? "\u25b6 " : "\u275a\u275a ") + t.title + " \u2014 " + t.artist;
       updateWave();
       updateVolume();
     }
@@ -438,7 +443,8 @@
         count++;
         total += tracks[i].dur;
         var mark = (i === current && playing) ? "\u25b6" : String(i + 1);
-        var heart = tracks[i].fav ? '<span class="heart">\u2665</span> ' : "";
+        var heart = '<span class="heart' + (tracks[i].fav ? "" : " off") + '" onclick="like(event,'+ i +')">'
+          + (tracks[i].fav ? "\u2665" : "\u2661") + '</span> ';
         html += '<div class="' + (i === current ? "row active" : "row")
           + '" onclick="pick(' + i + ')">'
           + '<span class="idx">' + mark + '</span>'
@@ -476,8 +482,7 @@
       }
       var html = "";
       for (var j = 0; j < lines.length; j++) {
-        html += '<div class="' + (j === active ? "ly on" : "ly") + '">'
-          + (j === active ? "\u25b8 " : "&nbsp;&nbsp; ") + lines[j][1] + '</div>';
+        html += '<div class="' + (j === active ? "ly on" : "ly") + '">' + lines[j][1] + '</div>';
       }
       $("lyr").innerHTML = html;
     }
@@ -558,6 +563,7 @@
     /* ---------- spectrum ---------- */
     var vizLevels = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     var vizTick = 0;
+    var vizPhase = 0;
 
     function renderViz() {
       var left = "";
@@ -584,8 +590,13 @@
 
     function tickViz() {
       vizTick++;
+      /* rAF fires ~60fps; only touch the DOM every 9th frame (~150ms).
+         Without this the script thread drowns in repaint commands and
+         click handling feels laggy / queued clicks fire in bursts. */
+      if (vizTick % 9 !== 0) { return; }
+      vizPhase++;
       for (var i = 0; i < 16; i++) {
-        var base = 0.5 + 0.5 * Math.sin(vizTick * 0.35 + i * 0.85);
+        var base = 0.5 + 0.5 * Math.sin(vizPhase * 0.35 + i * 0.85);
         var target = playing ? base * (0.3 + 0.7 * Math.random()) : 0.05;
         vizLevels[i] = vizLevels[i] + (target - vizLevels[i]) * 0.5;
         if (vizLevels[i] < 0.02) { vizLevels[i] = 0.02; }
@@ -614,10 +625,8 @@
       renderLyrics();
     }, 1000);
 
-    setInterval(tickViz, 150);
-
     refresh();
-    tickViz();
+    requestAnimationFrame(tickViz);
   </script>
 </body>
 </html>

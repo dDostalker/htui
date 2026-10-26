@@ -5,6 +5,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     graphics::grapheme_width,
+    html::css_parse::CssDisplay,
     tdom::node::{NodeArena, NodeId, NodeType},
 };
 
@@ -65,24 +66,37 @@ pub(super) fn collect_cells(arena: &NodeArena, row_id: NodeId) -> Vec<CellInfo> 
 }
 
 /// Measure a cell's inline text width as the sum of `grapheme_width` of every
-/// grapheme cluster in every direct text descendant. Nested block elements
-/// are ignored — their own cell layout would require its own metric pass and
-/// we don't currently surface that.
+/// grapheme cluster in its inline content: direct text nodes plus the text of
+/// inline-element descendants (a `<td><b>wide</b></td>` measures its real
+/// width — the inline text folds into the cell's own runs at layout time).
+/// Nested block elements are ignored — their own cell layout would require
+/// its own metric pass and we don't currently surface that.
 ///
 /// Iterating graphemes (rather than `char`s) keeps multi-codepoint emoji
 /// (ZWJ ligatures, modifier sequences, variation-selector pairs) at their
 /// correct column count — `char_width` would either double-count VS-16 or
 /// under-count ZWJ sequences.
 pub(super) fn cell_text_width(arena: &NodeArena, cell_id: NodeId) -> usize {
-    let node = &arena[cell_id];
-    let mut total = 0usize;
-    for &child_id in &node.children {
-        if arena[child_id].node_type == NodeType::Text
-            && let Some(s) = arena[child_id].data.as_deref()
-        {
-            total += s.graphemes(true).map(grapheme_width).sum::<usize>();
+    fn walk(arena: &NodeArena, node_id: NodeId, total: &mut usize) {
+        for &child_id in &arena[node_id].children {
+            let child = &arena[child_id];
+            match child.node_type {
+                NodeType::Text => {
+                    if let Some(s) = child.data.as_deref() {
+                        *total += s.graphemes(true).map(grapheme_width).sum::<usize>();
+                    }
+                }
+                // Inline wrappers fold their text into the cell's inline
+                // content; recurse so their text contributes to the column.
+                _ if child.node_type.ua_default_display() == CssDisplay::Inline => {
+                    walk(arena, child_id, total);
+                }
+                _ => {}
+            }
         }
     }
+    let mut total = 0usize;
+    walk(arena, cell_id, &mut total);
     total
 }
 
@@ -118,7 +132,14 @@ pub(super) fn compute_column_widths(
     }
     let total: usize = widths.iter().sum();
     if total > available_width && total > 0 {
-        let mut scaled: Vec<usize> = widths.iter().map(|w| w * available_width / total).collect();
+        // Floor every scaled width at 1 cell: without the floor, a dominant
+        // column (total ≫ available) drives the narrow columns' share below
+        // one cell, and a zero-width column silently drops its content (the
+        // paint phase skips zero-area rects).
+        let mut scaled: Vec<usize> = widths
+            .iter()
+            .map(|w| (w * available_width / total).max(1))
+            .collect();
         let scaled_total: usize = scaled.iter().sum();
         let mut remainder = available_width.saturating_sub(scaled_total);
         let mut indices: Vec<usize> = (0..column_count).collect();
@@ -131,6 +152,36 @@ pub(super) fn compute_column_widths(
             idx_pos += 1;
         }
         return scaled;
+    }
+    widths
+}
+
+/// `table-layout: fixed` column widths: the available width is shared
+/// evenly across the first row's cell count, the division remainder going
+/// to the leading columns one cell at a time. Cell content never influences
+/// the widths (the spec's first-row-driven layout — the terminal take skips
+/// `<col>` widths and first-row `width` declarations).
+pub(super) fn fixed_column_widths(
+    row_cells: &[Vec<CellInfo>],
+    available_width: usize,
+) -> Vec<usize> {
+    let count = row_cells
+        .first()
+        .map(|r| r.len())
+        .filter(|&n| n > 0)
+        .or_else(|| row_cells.iter().map(|r| r.len()).max())
+        .unwrap_or(0);
+    if count == 0 {
+        return Vec::new();
+    }
+    let base = (available_width / count).max(1);
+    let mut widths = vec![base; count];
+    let mut remainder = available_width.saturating_sub(base * count);
+    let mut idx = 0usize;
+    while remainder > 0 {
+        widths[idx % count] += 1;
+        remainder -= 1;
+        idx += 1;
     }
     widths
 }

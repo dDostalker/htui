@@ -608,3 +608,50 @@ fn find_img_box(boxes: &[LayoutBox]) -> Option<&LayoutBox> {
         _ => find_img_box(&b.children),
     })
 }
+
+// ============================================================
+// Placement: margins active, left-aligned by default
+// ============================================================
+
+#[test]
+fn layout_img_respects_margin_and_left_aligns() {
+    init();
+    // An `<img>` is inline-level: left-aligned in its flow with active CSS
+    // margins. It used to be force-centred and to ignore `margin-*`
+    // entirely — diverging from both the browser and the other replaced
+    // controls (which go through the shared `control_placement`).
+    let mut p = html_parse::Parser::new(
+        r#"<img src="x.png" width="80" height="24" style="margin-left: 16px">"#,
+    );
+    let (root_id, mut arena, _) = p.parse();
+    // Inline styles land in `css_attr` only via the cascade sweep — run it
+    // with an empty rule set so the `style=` attribute applies.
+    let mut css_parser = htui::html::css_parse::Parser::new("");
+    htui::html::css_parse::css_into_node(&mut arena, root_id, &css_parser.parse());
+    let img_id = find_img_node(&arena, root_id);
+
+    let containing = BoxConstraint { x: 0, width: 80 };
+    let mut cursor = Cursor::new();
+    let lb = layout_img(
+        &arena,
+        img_id,
+        containing,
+        &mut cursor,
+        LayoutContext {
+            font: htui::html::css_parse::FontContext::root(),
+            viewport: Viewport { cols: 80, rows: 24 },
+        },
+    )
+    .expect("<img> should produce a LayoutBox");
+
+    assert_eq!(
+        lb.rect.x, 2,
+        "margin-left: 16px resolves to 2 cells (8px per cell); the image must \
+         shift right instead of centring"
+    );
+    assert_eq!(
+        lb.rect.width, 80,
+        "the HTML width attribute is interpreted as a cell count (80), \
+         unchanged by the margin"
+    );
+}

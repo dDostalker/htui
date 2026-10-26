@@ -8,8 +8,8 @@ use super::InputState;
 use super::TEXT_SEL_DRAG_THRESHOLD;
 use super::cmd::{RenderCmd, SelectionMode};
 use super::field::{
-    char_index_at_x, clear_text_selection, is_button_input, is_text_field, is_textarea_node,
-    is_toggle_input, textarea_index_at,
+    char_index_at_x, clear_text_selection, is_button_input, is_disabled_control, is_text_field,
+    is_textarea_node, is_toggle_input, textarea_index_at,
 };
 use super::focus::{blur_input, focus_input, push_input_render};
 use super::select::{close_select, hit_select_option, open_select, refresh_datalist, row_option};
@@ -36,7 +36,7 @@ pub fn handle_click(
     let clicked = hit_map.hit_test(x, y);
     // A disabled form control swallows the click entirely (no Click
     // dispatch, no focus change) — matching browser behaviour.
-    if clicked.is_some_and(|r| is_disabled_control(arena, r.node_id)) {
+    if clicked.is_some_and(|r| is_disabled_control(Some(arena), r.node_id)) {
         return;
     }
     msgs.push(ScriptMsg::Click { x, y });
@@ -120,18 +120,6 @@ pub fn handle_mouse_up(
     }
     // A drag ended on a different cell: the selection (field-internal or
     // page text) is kept as-is.
-}
-
-/// `true` for a form control carrying a `disabled` attribute — such
-/// controls swallow clicks (no Click dispatch, no focus change).
-fn is_disabled_control(arena: &NodeArena, node_id: NodeId) -> bool {
-    arena.get(node_id).is_some_and(|n| {
-        n.attributes.contains_key("disabled")
-            && matches!(
-                n.node_type,
-                NodeType::Button | NodeType::Input | NodeType::Select | NodeType::Textarea
-            )
-    })
 }
 
 /// Resolve the element a click should act on: a `<label>` hit resolves to
@@ -229,6 +217,15 @@ pub fn handle_mouse_down(
         if clicked_self {
             return;
         }
+    }
+
+    // A disabled form control swallows the press entirely: no focus, no
+    // caret / drag-selection, no dropdown open — the mousedown analogue of
+    // [`handle_click`]'s swallow rule (browsers ignore presses on disabled
+    // controls). Placed after the open-dropdown block so an outside press
+    // still closes a pending dropdown first.
+    if clicked.is_some_and(|r| is_disabled_control(Some(arena), r.node_id)) {
+        return;
     }
 
     // A click on a `<label>` delegates to its associated control; the caret /

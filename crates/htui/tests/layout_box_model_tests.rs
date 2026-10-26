@@ -751,11 +751,13 @@ fn css_height_fixes_the_frame_and_clips_text() {
     init();
     // `height` fixes the border-box height (htui's default box-sizing is
     // `border-box`): a 3-row card with six lines of content keeps its frame
-    // and clips the overflow instead of growing — the box frame wins over
-    // the text when the two conflict on a small terminal.
+    // and — with `overflow: hidden` — clips the overflow instead of growing.
+    // (Without an explicit overflow the CSS default `visible` applies: the
+    // frame stays 3 rows but the extra lines paint beyond it, like a
+    // browser; the hidden variant is what pins the frame-vs-text rule.)
     let (term_map, tl) = draw(
         r#"<div class="card">line one<br>line two<br>line three<br>line four<br>line five<br>line six</div>"#,
-        "body { margin: 0ch; } .card { height: 3ch; border: 1ch solid red; }",
+        "body { margin: 0ch; } .card { height: 3ch; border: 1ch solid red; overflow: hidden; }",
     );
     let cols = term_map.columns as usize;
     let row_text = |y: usize| {
@@ -787,5 +789,99 @@ fn css_height_fixes_the_frame_and_clips_text() {
             .iter()
             .all(|b| b.word.trim().is_empty()),
         "nothing may paint below the fixed-height frame"
+    );
+}
+
+#[test]
+fn overflow_visible_paints_beyond_the_fixed_height() {
+    init();
+    // CSS default `overflow: visible`: the fixed-height frame stays 3 rows,
+    // but the extra lines paint beyond it (bounded only by the ancestors' /
+    // canvas clip) instead of vanishing. The old renderer clipped
+    // unconditionally, diverging from every browser.
+    let (term_map, tl) = draw(
+        r#"<div class="card">line one<br>line two<br>line three<br>line four</div>"#,
+        "body { margin: 0ch; } .card { height: 3ch; border: 1ch solid red; }",
+    );
+    let cols = term_map.columns as usize;
+    let row_text = |y: usize| {
+        tl.layout[y * cols..(y + 1) * cols]
+            .iter()
+            .map(|b| b.word.as_str())
+            .collect::<String>()
+    };
+    assert_eq!(row_text(2).chars().next(), Some('└'), "frame stays 3 rows");
+    // The four content lines paint at canvas rows 1..5: lines one and two
+    // inside the frame, line three over the bottom border row (the border
+    // glyphs paint last and win), line four beyond it.
+    assert!(
+        row_text(4).contains("line four"),
+        "the overflowing line paints below the frame (overflow: visible)"
+    );
+    assert!(
+        !row_text(3).contains("line four") && row_text(3).contains("line three"),
+        "the lines stack in order below the frame"
+    );
+}
+
+#[test]
+fn overflow_hidden_clips_block_children_to_the_content_box() {
+    init();
+    // A clipping parent bounds its block children at its content box: a
+    // 3-row child inside a 1-row `overflow: hidden` parent leaves the rows
+    // below blank. (The visible control above shows the same document
+    // painting through.)
+    let (term_map, tl) = draw(
+        r#"<div class="wrap"><div>one<br>two<br>three</div></div>"#,
+        "body { margin: 0ch; } .wrap { height: 1ch; overflow: hidden; }",
+    );
+    let cols = term_map.columns as usize;
+    assert!(
+        tl.layout[cols..].iter().all(|b| b.word.trim().is_empty()),
+        "rows below the clipping parent must stay blank"
+    );
+}
+
+#[test]
+fn overflow_visible_lets_nowrap_paint_past_the_box_width() {
+    init();
+    // Horizontal overflow with `white-space: nowrap`: the line is wider
+    // than the box, and `overflow: visible` paints it to the canvas edge
+    // instead of clipping at the content-box width (still bounded per row
+    // so the flat canvas never wraps into the next row).
+    let (term_map, tl) = draw(
+        r#"<div class="n">abcdefghijklmnopqrstuvwxyz</div>"#,
+        "body { margin: 0ch; } .n { width: 10ch; white-space: nowrap; }",
+    );
+    let cols = term_map.columns as usize;
+    let row0: String = tl.layout[..cols].iter().map(|b| b.word.as_str()).collect();
+    assert!(
+        row0.contains('z'),
+        "the nowrap line paints past the 10-column box (overflow: visible): {row0:?}"
+    );
+    assert!(
+        row0.contains("qrstuvwxyz"),
+        "the tail renders contiguously beyond the box: {row0:?}"
+    );
+}
+
+#[test]
+fn overflow_hidden_clips_nowrap_at_the_box_width() {
+    init();
+    // The clipping counterpart: the same nowrap line stops at the box's
+    // content-box width.
+    let (term_map, tl) = draw(
+        r#"<div class="n">abcdefghijklmnopqrstuvwxyz</div>"#,
+        "body { margin: 0ch; } .n { width: 10ch; white-space: nowrap; overflow: hidden; }",
+    );
+    let cols = term_map.columns as usize;
+    let row0: String = tl.layout[..cols].iter().map(|b| b.word.as_str()).collect();
+    assert!(
+        !row0.contains("k"),
+        "the nowrap line clips at the box width: {row0:?}"
+    );
+    assert!(
+        row0.contains("abcdefghij"),
+        "the first ten columns render: {row0:?}"
     );
 }

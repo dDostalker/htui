@@ -2,9 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use boa_engine::object::ObjectInitializer;
-use boa_engine::property::Attribute;
-use boa_engine::{Context, JsResult, JsValue, NativeFunction, Source, js_string};
+use boa_engine::{Context, JsResult, JsValue, Source, js_string};
 
 use crate::{
     events::{EventBindings, EventType, HitRegion, HtmlEvent, KeyEventInfo},
@@ -13,9 +11,7 @@ use crate::{
     tui::graph_api::{DirtyInfo, RenderCmd},
 };
 
-use super::bindings::{
-    compile_attribute_listeners, prevent_default, register_host_global, stop_propagation,
-};
+use super::bindings::{compile_attribute_listeners, register_host_global};
 use super::dom::{get_attr_handler, get_listeners, install_builtins, node_wrapper};
 use super::host::HostFn;
 use super::state::{ENGINE_STATE, ScriptState};
@@ -506,7 +502,10 @@ impl ScriptEngine {
                     Vec::new()
                 }
             };
-            let mut stopped = false;
+            // `stopImmediatePropagation` only — `stopPropagation` lets the
+            // remaining listeners of the *current* element run and just ends
+            // the bubbling afterwards (browser semantics).
+            let mut immediate = false;
             for listener in listeners {
                 let call = listener.to_object(&mut self.context).and_then(|f| {
                     f.call(&wrapper, std::slice::from_ref(&event), &mut self.context)
@@ -514,12 +513,8 @@ impl ScriptEngine {
                 if let Err(e) = call {
                     log::warn!("Listener threw: {e}");
                 }
-                if let Some(obj) = event.as_object()
-                    && let Ok(v) = obj.get(js_string!("_stopped"), &mut self.context)
-                    && v.is_boolean()
-                    && v.to_boolean()
-                {
-                    stopped = true;
+                if self.event_flag(&event, "_stoppedImmediate") {
+                    immediate = true;
                     break;
                 }
             }
@@ -527,8 +522,8 @@ impl ScriptEngine {
             // The `on*` attribute handler is a single slot per (element,
             // event type); per the DOM spec it runs after that element's
             // `addEventListener` listeners, still inside this element's leg
-            // of the bubbling path.
-            if !stopped {
+            // of the bubbling path — suppressed only by an immediate stop.
+            if !immediate {
                 let handler = match get_attr_handler(&mut self.context, element.node_id, event_type)
                 {
                     Ok(h) => h,
@@ -547,17 +542,13 @@ impl ScriptEngine {
                     if let Err(e) = call {
                         log::warn!("Attribute handler threw: {e}");
                     }
-                    if let Some(obj) = event.as_object()
-                        && let Ok(v) = obj.get(js_string!("_stopped"), &mut self.context)
-                        && v.is_boolean()
-                        && v.to_boolean()
-                    {
-                        stopped = true;
+                    if self.event_flag(&event, "_stoppedImmediate") {
+                        immediate = true;
                     }
                 }
             }
 
-            if stopped {
+            if immediate || self.event_flag(&event, "_stopped") {
                 break;
             }
         }
@@ -574,6 +565,15 @@ impl ScriptEngine {
         let cmds = std::mem::take(&mut st.render_cmds);
         drop(st);
         (self.intercept_render_html(cmds), prevented)
+    }
+
+    /// Read a boolean control flag (`_stopped` / `_stoppedImmediate` /
+    /// `_prevented`) off the in-flight event object.
+    fn event_flag(&mut self, event: &JsValue, name: &str) -> bool {
+        event
+            .as_object()
+            .and_then(|obj| obj.get(js_string!(name), &mut self.context).ok())
+            .is_some_and(|v| v.is_boolean() && v.to_boolean())
     }
 
     /// Evaluate a JS snippet in the engine's global scope.
@@ -613,7 +613,9 @@ impl ScriptEngine {
         self.intercept_render_html(cmds)
     }
 
-    /// Build a JS `Event` object for a dispatch.
+    /// Build a JS `Event` object for a dispatch: the shared object from
+    /// [`super::dom::make_event_object`] plus the keyboard payload fields
+    /// when a [`KeyEventInfo`] rides along.
     fn build_event_object(
         &mut self,
         event_type: EventType,
@@ -626,73 +628,25 @@ impl ScriptEngine {
             Some(el) => node_wrapper(&mut self.context, el.node_id)?,
             None => JsValue::null(),
         };
-        let type_str = match event_type {
-            EventType::Click => "click",
-            EventType::MouseOver => "mouseover",
-            EventType::MouseOut => "mouseout",
-            EventType::Focus => "focus",
-            EventType::Blur => "blur",
-            EventType::Input => "input",
-            EventType::Change => "change",
-            EventType::KeyDown => "keydown",
-            EventType::KeyUp => "keyup",
-            EventType::Submit => "submit",
-            EventType::Reset => "reset",
-            EventType::Toggle => "toggle",
-            EventType::Close => "close",
-        };
-
-        let mut init = ObjectInitializer::new(&mut self.context);
-        init.property(js_string!("type"), js_string!(type_str), Attribute::all())
-            .property(js_string!("target"), target, Attribute::all())
-            .property(
-                js_string!("currentTarget"),
-                JsValue::null(),
-                Attribute::all(),
-            )
-            .property(js_string!("x"), x as f64, Attribute::all())
-            .property(js_string!("y"), y as f64, Attribute::all())
-            .property(js_string!("bubbles"), true, Attribute::all())
-            .property(
-                js_string!("_stopped"),
-                false,
-                Attribute::WRITABLE | Attribute::NON_ENUMERABLE,
-            )
-            .property(js_string!("defaultPrevented"), false, Attribute::all())
-            .property(
-                js_string!("_prevented"),
-                false,
-                Attribute::WRITABLE | Attribute::NON_ENUMERABLE,
-            );
-        if let Some(k) = key {
-            init.property(
-                js_string!("key"),
-                js_string!(k.key.as_str()),
-                Attribute::all(),
-            )
-            .property(
-                js_string!("code"),
-                js_string!(k.code.as_str()),
-                Attribute::all(),
-            )
-            .property(js_string!("keyCode"), k.key_code as f64, Attribute::all())
-            .property(js_string!("shiftKey"), k.shift, Attribute::all())
-            .property(js_string!("ctrlKey"), k.ctrl, Attribute::all())
-            .property(js_string!("altKey"), k.alt, Attribute::all())
-            .property(js_string!("metaKey"), k.meta, Attribute::all())
-            .property(js_string!("repeat"), k.repeat, Attribute::all());
+        let event = super::dom::make_event_object(&mut self.context, event_type, &target, x, y)?;
+        if let Some(k) = key
+            && let Some(obj) = event.as_object()
+        {
+            let fields: [(&str, JsValue); 8] = [
+                ("key", js_string!(k.key.as_str()).into()),
+                ("code", js_string!(k.code.as_str()).into()),
+                ("keyCode", JsValue::from(k.key_code as f64)),
+                ("shiftKey", JsValue::from(k.shift)),
+                ("ctrlKey", JsValue::from(k.ctrl)),
+                ("altKey", JsValue::from(k.alt)),
+                ("metaKey", JsValue::from(k.meta)),
+                ("repeat", JsValue::from(k.repeat)),
+            ];
+            for (name, value) in fields {
+                obj.set(js_string!(name), value, false, &mut self.context)?;
+            }
         }
-        init.function(
-            NativeFunction::from_fn_ptr(stop_propagation),
-            js_string!("stopPropagation"),
-            0,
-        )
-        .function(
-            NativeFunction::from_fn_ptr(prevent_default),
-            js_string!("preventDefault"),
-            0,
-        );
-        Ok(init.build().into())
+        Ok(event)
     }
 }
 

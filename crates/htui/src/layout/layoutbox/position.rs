@@ -108,33 +108,59 @@ fn resolve_positioned_box(b: &mut LayoutBox, pos_ancestor: Option<Rect>, viewpor
         }
         Position::Relative => {
             // Already offset in place; it is a positioned ancestor for its
-            // descendants.
+            // descendants. Descendants anchor to its padding box (CSS:
+            // the containing block of an absolutely positioned descendant is
+            // the nearest positioned ancestor's padding box).
+            let cb = padding_box(b);
             for child in &mut b.children {
-                resolve_positioned_box(child, Some(b.rect), viewport);
+                resolve_positioned_box(child, Some(cb), viewport);
             }
         }
         Position::Absolute => {
             let cb = pos_ancestor.unwrap_or(viewport);
             reposition(b, cb);
+            let inner = padding_box(b);
             for child in &mut b.children {
-                resolve_positioned_box(child, Some(b.rect), viewport);
+                resolve_positioned_box(child, Some(inner), viewport);
             }
         }
         Position::Fixed => {
             reposition(b, viewport);
+            let inner = padding_box(b);
             for child in &mut b.children {
-                resolve_positioned_box(child, Some(b.rect), viewport);
+                resolve_positioned_box(child, Some(inner), viewport);
             }
         }
         Position::Sticky => {
             // Sticky keeps its flow slot (no inline offset) and is a
             // positioned ancestor for its descendants; the scroll clamp is
             // applied by [`pin_sticky_boxes`].
+            let cb = padding_box(b);
             for child in &mut b.children {
-                resolve_positioned_box(child, Some(b.rect), viewport);
+                resolve_positioned_box(child, Some(cb), viewport);
             }
         }
     }
+}
+
+/// The padding-box rectangle of a box: its border-box inset by the border
+/// thickness on every side. CSS anchors an absolutely positioned
+/// descendant's insets to the containing block's padding box, so this — not
+/// the border-box rect — is what a positioned ancestor hands down.
+fn padding_box(b: &LayoutBox) -> Rect {
+    let border = &b.paint_style.box_edges.border;
+    Rect::new(
+        b.rect.x.saturating_add(border.left.thickness()),
+        b.rect.y.saturating_add(border.top.thickness()),
+        b.rect
+            .width
+            .saturating_sub(border.left.thickness())
+            .saturating_sub(border.right.thickness()),
+        b.rect
+            .height
+            .saturating_sub(border.top.thickness())
+            .saturating_sub(border.bottom.thickness()),
+    )
 }
 
 /// Move `b` inside containing block `cb` per its insets, then translate the
@@ -205,7 +231,12 @@ fn stick(b: &mut LayoutBox, viewport: Rect) {
 }
 
 /// Shift a box's rect (and every descendant's) by `dx` / `dy`.
-fn translate_subtree(b: &mut LayoutBox, dx: i64, dy: i64) {
+///
+/// Layout-tree rects are absolute canvas coordinates, so any pass that moves
+/// a box after its subtree was laid out must move the whole subtree with it —
+/// the flex `align-content` / `*-reverse` placement passes share this helper
+/// with the CSS positioning pass.
+pub(crate) fn translate_subtree(b: &mut LayoutBox, dx: i64, dy: i64) {
     b.rect.x = shift(b.rect.x, dx);
     b.rect.y = shift(b.rect.y, dy);
     for child in &mut b.children {

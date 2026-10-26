@@ -400,8 +400,16 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
         if let Some(gate) = state.key_gate.take() {
             let mut gate_cmds = gate.cmds;
             let mut resolved = false;
+            // The budget is an *absolute* deadline, not a per-`recv` timeout:
+            // each unrelated response folded below (a hover move, a timer
+            // tick) must consume the same window instead of restarting it —
+            // a per-recv timeout let a busy script thread's backlog (hot
+            // timers, slow per-event handlers) defer the built-in action
+            // indefinitely, stalling scrolling / quitting for seconds.
+            let deadline = Instant::now() + KEY_GATE_TIMEOUT;
             while !resolved {
-                match script_out_rx.recv_timeout(KEY_GATE_TIMEOUT) {
+                match script_out_rx.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                {
                     Ok(ScriptResponse::Event(ev)) => {
                         let verdict = ev.key_gate.filter(|(id, _)| *id == gate.id);
                         fold_script_event(&state, &mut cmds, &mut hovered, &mut live_dom, ev);
@@ -550,6 +558,17 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
             log::debug!("Script thread already gone; skipping Quit");
         }
         drop(handle);
+    }
+
+    // Wake the render thread before joining: the error break paths above (a
+    // dead script thread, a poisoned hit-map lock, a failed channel send) exit
+    // the loop without any `Quit` in flight, and `tx` stays alive on this
+    // stack frame until after `join` — the render thread would block in
+    // `rx.recv()` forever and the terminal restore below would never run.
+    if let Err(e) = tx.send(RenderCmd::Quit) {
+        // The render thread already terminated (e.g. panicked): `join` below
+        // returns immediately, nothing is left to wake up.
+        log::debug!("Render thread already gone; skipping Quit: {e}");
     }
 
     if let Err(payload) = render_handle.join() {

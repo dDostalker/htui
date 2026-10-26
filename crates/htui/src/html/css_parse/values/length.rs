@@ -610,6 +610,80 @@ pub enum Length {
     /// Resolves to `round(n * viewport_rows / 100)` cells, min 1.
     /// Mirrors [`Length::Vw`] on the row axis.
     Vh(f32),
+    /// A `calc()` / `min()` / `max()` / `clamp()` expression (the supported
+    /// subset — see [`MathFn`]). Kept unevaluated at parse time (the units
+    /// need a [`LengthContext`]) and resolved cell-exact at
+    /// [`resolve`](Self::resolve) time.
+    Math(MathFn),
+}
+
+/// The math-function subset supported inside [`Length::Math`] — everything
+/// stays `Copy` by keeping the expression flat:
+///
+/// - `calc(<a> ± <b>)` — a linear sum of two terms (each a plain length
+///   value; nested math functions are not accepted).
+/// - `min(<a>, <b>)` / `max(<a>, <b>)` — the smaller / larger of two terms.
+/// - `clamp(<min>, <val>, <max>)` — `min ≤ val ≤ max`.
+///
+/// Multiplication / division by bare numbers inside `calc` is folded into
+/// the term coefficient (`calc(2 * 10ch)` parses as the term `20ch`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MathFn {
+    Calc(Term, Term),
+    Min(Term, Term),
+    Max(Term, Term),
+    Clamp(Term, Term, Term),
+}
+
+/// One operand of a math expression: a coefficient and a unit the
+/// coefficient multiplies at resolve time.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Term {
+    /// Signed coefficient.
+    pub n: f32,
+    /// The unit the coefficient scales (`%` carries `containing`).
+    pub unit: MathUnit,
+}
+
+/// Units a [`Term`] can carry.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MathUnit {
+    Px,
+    Pct,
+    Em,
+    Rem,
+    Ch,
+    Vw,
+    Vh,
+}
+
+impl Term {
+    /// Resolve this term to a signed cell count under `context`.
+    fn cells(self, context: LengthContext) -> f32 {
+        match self.unit {
+            MathUnit::Px => self.n / PX_PER_CELL,
+            MathUnit::Pct => self.n * context.containing as f32 / 100.0,
+            MathUnit::Em => self.n * context.font.font_size_cells as f32,
+            MathUnit::Rem => self.n * context.font.root_font_size_cells as f32,
+            MathUnit::Ch => self.n,
+            MathUnit::Vw => self.n * context.viewport.cols as f32 / 100.0,
+            MathUnit::Vh => self.n * context.viewport.rows as f32 / 100.0,
+        }
+    }
+}
+
+impl MathFn {
+    /// Evaluate the expression to a signed cell count under `context`.
+    fn eval(self, context: LengthContext) -> f32 {
+        match self {
+            MathFn::Calc(a, b) => a.cells(context) + b.cells(context),
+            MathFn::Min(a, b) => a.cells(context).min(b.cells(context)),
+            MathFn::Max(a, b) => a.cells(context).max(b.cells(context)),
+            MathFn::Clamp(min, val, max) => val
+                .cells(context)
+                .clamp(min.cells(context), max.cells(context)),
+        }
+    }
 }
 
 /// Owned mirror of the cssparser [`Token`] variants we accept. Lets
@@ -669,6 +743,7 @@ impl Length {
             &Length::Ch(n) => n.round() as isize,
             &Length::Vw(n) => (n * context.viewport.cols as f32 / 100.0).round() as isize,
             &Length::Vh(n) => (n * context.viewport.rows as f32 / 100.0).round() as isize,
+            Length::Math(func) => func.eval(context).round() as isize,
         }
     }
 
@@ -679,6 +754,13 @@ impl Length {
         let s = s.trim();
         if s.eq_ignore_ascii_case("auto") {
             return Some(Length::Auto);
+        }
+        // Math functions (`calc(…)` / `min(…)` / `max(…)` / `clamp(…)`)
+        // parse through their own reader; the cssparser tokenizer below
+        // would otherwise reject the function token.
+        if let Some(math) = parse_math_function(s) {
+            let _ = allow_signed;
+            return Some(Length::Math(math));
         }
         // cssparser's tokenizer handles `40`, `40.5`, `40px`, `1.5em`, `50%`,
         // escapes, and unicode digits uniformly. We pin the lifetime with a
@@ -825,6 +907,172 @@ impl Length {
                 let raw = (n * context.viewport.rows as f32 / 100.0).round();
                 (raw as usize).max(1)
             }
+            Length::Math(func) => {
+                let cells = func.eval(context).round();
+                (cells.max(0.0) as usize).max(1)
+            }
         }
     }
+}
+
+// ============================================================
+// Math functions: calc() / min() / max() / clamp()
+// ============================================================
+
+/// Recognize and parse a leading `calc(` / `min(` / `max(` / `clamp(`
+/// function (ASCII case-insensitive). Returns `None` for anything else so
+/// the plain-token path stays untouched.
+fn parse_math_function(s: &str) -> Option<MathFn> {
+    let lower = s.to_ascii_lowercase();
+    for name in ["calc", "min", "max", "clamp"] {
+        let prefix = format!("{name}(");
+        if let Some(rest) = lower.strip_prefix(&prefix)
+            && rest.ends_with(')')
+        {
+            // Re-slice the original string so escapes / case survive.
+            let body = &s[name.len() + 1..s.len() - 1];
+            return parse_math_body(name, body);
+        }
+    }
+    None
+}
+
+/// Parse the body of one math function into its expression form.
+///
+/// - `calc`: `term ± term` (a lone term is also accepted, folded as
+///   `term + 0ch`); `number * term` and `term / number` fold into the
+///   coefficient.
+/// - `min` / `max`: exactly two comma-separated terms.
+/// - `clamp`: exactly three (min, val, max).
+fn parse_math_body(name: &str, body: &str) -> Option<MathFn> {
+    match name {
+        "calc" => {
+            let (a, b) = split_calc_addends(body)?;
+            Some(MathFn::Calc(a, b))
+        }
+        "min" | "max" => {
+            let parts = split_commas(body);
+            if parts.len() != 2 {
+                return None;
+            }
+            let a = parse_term(parts[0])?;
+            let b = parse_term(parts[1])?;
+            Some(if name == "min" {
+                MathFn::Min(a, b)
+            } else {
+                MathFn::Max(a, b)
+            })
+        }
+        _ => {
+            let parts = split_commas(body);
+            if parts.len() != 3 {
+                return None;
+            }
+            Some(MathFn::Clamp(
+                parse_term(parts[0])?,
+                parse_term(parts[1])?,
+                parse_term(parts[2])?,
+            ))
+        }
+    }
+}
+
+/// Split `calc`'s body at the top-level `+` / `-` into two addends (the
+/// sign rides on the second term). A body with no operator is a single
+/// term plus zero.
+fn split_calc_addends(body: &str) -> Option<(Term, Term)> {
+    let mut depth = 0usize;
+    for (i, ch) in body.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            '+' | '-' if depth == 0 && i > 0 => {
+                // Ignore the sign directly following `*` or `/` (not part of
+                // the supported grammar anyway — reject there).
+                let a = parse_term(&body[..i])?;
+                let b = parse_term(&body[i + 1..])?;
+                let b_signed = Term {
+                    n: if ch == '-' { -b.n } else { b.n },
+                    unit: b.unit,
+                };
+                return Some((a, b_signed));
+            }
+            _ => {}
+        }
+    }
+    let a = parse_term(body)?;
+    Some((
+        a,
+        Term {
+            n: 0.0,
+            unit: MathUnit::Ch,
+        },
+    ))
+}
+
+/// Split on top-level commas (outside nested parens), trimming each part
+/// and dropping empties.
+fn split_commas(body: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (i, ch) in body.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                parts.push(body[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(body[start..].trim());
+    parts.into_iter().filter(|p| !p.is_empty()).collect()
+}
+
+/// Parse one term: `[number *] value`, `value [*|/ number]`, or a bare
+/// value. The value itself is a plain length token (unit or `%`).
+fn parse_term(s: &str) -> Option<Term> {
+    let s = s.trim();
+    // `N * value`
+    if let Some((lhs, rhs)) = s.split_once('*') {
+        let k: f32 = lhs.trim().parse().ok()?;
+        let mut t = parse_value_term(rhs)?;
+        t.n *= k;
+        return Some(t);
+    }
+    // `value / N`
+    if let Some((lhs, rhs)) = s.split_once('/') {
+        let d: f32 = rhs.trim().parse().ok()?;
+        let mut t = parse_value_term(lhs)?;
+        if d == 0.0 {
+            return None;
+        }
+        t.n /= d;
+        return Some(t);
+    }
+    parse_value_term(s)
+}
+
+/// Parse a plain `<number><unit>` / `<percent>` token into a term.
+fn parse_value_term(s: &str) -> Option<Term> {
+    let s = s.trim();
+    let (num_end, unit) = s
+        .char_indices()
+        .find(|(_, c)| !(c.is_ascii_digit() || *c == '.' || *c == '-' || *c == '+'))
+        .map(|(i, _)| (i, &s[i..]))
+        .unwrap_or((s.len(), ""));
+    let n: f32 = s[..num_end].trim().parse().ok()?;
+    let unit = match unit.trim().to_ascii_lowercase().as_str() {
+        "" | "px" => MathUnit::Px,
+        "%" => MathUnit::Pct,
+        "em" => MathUnit::Em,
+        "rem" => MathUnit::Rem,
+        "ch" => MathUnit::Ch,
+        "vw" => MathUnit::Vw,
+        "vh" => MathUnit::Vh,
+        _ => return None,
+    };
+    Some(Term { n, unit })
 }

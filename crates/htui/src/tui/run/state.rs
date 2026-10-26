@@ -86,14 +86,26 @@ pub(super) struct TextSel {
 /// An open `<select>` dropdown overlay: the field rect, the option list and
 /// the highlighted row. Painted after every repaint (like the text
 /// selection) so it survives layout / hover passes.
+///
+/// `rect` / `options` / `rows` are *derived* state: every repaint of the
+/// overlay re-resolves them against the layout being painted
+/// ([`Self::reanchor`]) so the dropdown always sits on the frame it is
+/// drawn on — a re-layout that moves the field or changes the option list
+/// must not leave the overlay floating at the position cached when it
+/// opened. `node_id` + `filter` + `highlight` are the intent that survives.
 pub(super) struct OpenSelect {
     pub(super) node_id: NodeId,
+    /// The datalist filter the overlay was opened with (`None` for a plain
+    /// `<select>`); re-applied when the options are re-resolved.
+    pub(super) filter: Option<CompactString>,
     /// Overlay rectangle (canvas coordinates, directly below the field).
+    /// Re-derived on every reanchor — do not paint from a stale value.
     pub(super) rect: Rect,
     /// Flat option list (`value`, `label`, optional group) — the label source
-    /// for the row painter.
+    /// for the row painter. Re-resolved on every reanchor.
     pub(super) options: Vec<crate::layout::layoutbox::geometry::SelectOption>,
     /// Dropdown rows (group headers interleaved with option items).
+    /// Re-resolved on every reanchor.
     pub(super) rows: Vec<crate::layout::layoutbox::geometry::SelectRow>,
     /// Option index highlighted by the keyboard cursor.
     pub(super) highlight: usize,
@@ -107,6 +119,34 @@ impl OpenSelect {
             .iter()
             .position(|r| matches!(r, SelectRow::Item(i) if *i == self.highlight))
             .unwrap_or(0)
+    }
+
+    /// Re-resolve the overlay's options / rows / rect against a fresh layout.
+    ///
+    /// A re-layout (`RenderArena` / `Redraw` / `RenderHtml` / a pinned-box
+    /// scroll repaint) can move the field or change the option list; the
+    /// overlay must be re-derived from the geometry it will be painted on.
+    /// Returns `false` when the select no longer produces a box (the
+    /// document was replaced or the field is hidden) — the caller must drop
+    /// the overlay instead of painting it into nowhere.
+    pub(super) fn reanchor(
+        &mut self,
+        arena: &NodeArena,
+        boxes: &[crate::layout::LayoutBox],
+    ) -> bool {
+        let Some(select_rect) = find_box_rect(boxes, self.node_id) else {
+            return false;
+        };
+        let options = overlay_options(arena, self.node_id, self.filter.as_deref());
+        let rows = select_rows(&options);
+        // Keep the keyboard highlight when the option list still holds it;
+        // clamp when the list shrank below it.
+        let item_count = select_item_indices(&rows).len();
+        self.highlight = self.highlight.min(item_count.saturating_sub(1));
+        self.rect = select_overlay_rect(&options, &rows, select_rect);
+        self.options = options;
+        self.rows = rows;
+        true
     }
 }
 
@@ -236,6 +276,7 @@ impl RenderState {
                 let rect = select_overlay_rect(&options, &rows, select_rect);
                 self.open_select = Some(OpenSelect {
                     node_id,
+                    filter,
                     rect,
                     options,
                     rows,

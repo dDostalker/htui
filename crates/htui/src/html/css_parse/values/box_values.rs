@@ -79,6 +79,99 @@ pub fn parse_visibility(s: &str) -> Option<Visibility> {
     }
 }
 
+/// CSS `table-layout` algorithm selector.
+///
+/// `auto` sizes each column to its widest cell (the existing algorithm);
+/// `fixed` divides the available width evenly across the first row's column
+/// count — the terminal's take on the spec's first-row-driven layout (no
+/// `<col>` width / first-row `width` declaration weighting).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TableLayout {
+    /// `auto` — column widths follow the widest content.
+    #[default]
+    Auto,
+    /// `fixed` — columns share the available width evenly.
+    Fixed,
+}
+
+/// Parse a `table-layout` keyword.
+pub fn parse_table_layout(s: &str) -> Option<TableLayout> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "auto" => Some(TableLayout::Auto),
+        "fixed" => Some(TableLayout::Fixed),
+        _ => None,
+    }
+}
+
+/// CSS `caption-side` — which side of the table the `<caption>` box renders
+/// on. Only the two horizontal sides exist in a terminal grid.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CaptionSide {
+    /// `top` (the default).
+    #[default]
+    Top,
+    /// `bottom`.
+    Bottom,
+}
+
+/// Parse a `caption-side` keyword.
+pub fn parse_caption_side(s: &str) -> Option<CaptionSide> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "top" => Some(CaptionSide::Top),
+        "bottom" => Some(CaptionSide::Bottom),
+        _ => None,
+    }
+}
+
+/// CSS `empty-cells` — whether cells with no visible content paint their
+/// borders / background.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EmptyCells {
+    /// `show` (the default).
+    #[default]
+    Show,
+    /// `hide` — empty cells paint nothing.
+    Hide,
+}
+
+/// Parse an `empty-cells` keyword.
+pub fn parse_empty_cells(s: &str) -> Option<EmptyCells> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "show" => Some(EmptyCells::Show),
+        "hide" => Some(EmptyCells::Hide),
+        _ => None,
+    }
+}
+
+/// CSS `overflow` for a box's content, resolved to the two behaviours the
+/// terminal can express.
+///
+/// `visible` (the CSS default) lets content paint beyond the box's content
+/// area, exactly like a browser; `hidden` clips it there. The
+/// container-scroll keywords (`auto` / `scroll`) have no terminal
+/// counterpart — the engine scrolls the whole document, not boxes — so they
+/// degenerate to [`Overflow::Clip`] (see 能力差异清单 "overflow").
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Overflow {
+    /// Content paints beyond the content box (the browser default).
+    #[default]
+    Visible,
+    /// `hidden` / `auto` / `scroll` / `clip` — content is clipped to the
+    /// content box.
+    Clip,
+}
+
+#[doc(hidden)]
+/// Parse an `overflow` keyword (`auto` / `scroll` / `clip` all clip; the
+/// terminal has no container-level scrolling).
+pub fn parse_overflow(s: &str) -> Option<Overflow> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "visible" => Some(Overflow::Visible),
+        "hidden" | "auto" | "scroll" | "clip" => Some(Overflow::Clip),
+        _ => None,
+    }
+}
+
 /// CSS `top` / `right` / `bottom` / `left`, resolved to cells.
 ///
 /// Each side is `None` when the property is unset / `auto`, in which case
@@ -399,6 +492,15 @@ impl CssDisplay {
     /// parent's text.
     pub fn is_flex(self) -> bool {
         matches!(self, CssDisplay::Flex | CssDisplay::InlineFlex)
+    }
+
+    /// `true` for `display: grid` and `display: inline-grid`. The grid
+    /// layout algorithm is on the reject list, so both variants produce no
+    /// box — and (via the inline-runs walker) no inline runs either, so an
+    /// inline-grid element's text cannot leak into its parent while a
+    /// block-level grid sibling's content vanishes.
+    pub fn is_grid(self) -> bool {
+        matches!(self, CssDisplay::Grid | CssDisplay::InlineGrid)
     }
 
     /// `true` for `display: table`, `inline-table`, and table-internal

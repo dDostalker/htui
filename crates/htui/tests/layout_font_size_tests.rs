@@ -662,3 +662,31 @@ fn line_height_normal_keeps_one_row_per_line() {
     let c_idx = tl.layout.iter().position(|b| b.word == "c").unwrap();
     assert_eq!(c_idx / cols, 1, "second line on row 1 without line-height");
 }
+
+#[test]
+fn collapsed_space_wrap_accounting_matches_paint_expansion() {
+    init();
+    // A collapsed space occupies one *expanded* slot (`font-size` cells) —
+    // the same width the paint phase accounts via `InlineRun::width_at`. The
+    // wrap pass used to count it as a bare cell, so a line whose painted
+    // width exceeded the block lost its trailing glyph to the content-box
+    // clip: `a b c` at font-size 2em paints 10 cells (2 per glyph / space);
+    // in an 8-cell box the old accounting said it fit exactly and the `c`
+    // vanished instead of wrapping to the next visual line.
+    let (term_map, tl) = draw(
+        "<div style=\"font-size: 2em\">a b c</div>",
+        "div { width: 8ch; }",
+    );
+    let cols = term_map.columns as usize;
+    let c_idx = tl
+        .layout
+        .iter()
+        .position(|b| b.word == "c")
+        .expect("the trailing glyph must not be clipped by the wrap/paint width mismatch");
+    assert_eq!(
+        c_idx / cols,
+        2,
+        "the line wraps to the second visual line (line-height = font-size = 2 \
+         rows per line) instead of overflowing the block"
+    );
+}

@@ -123,6 +123,23 @@ impl CascadeIndex {
     }
 }
 
+/// Insert every declaration under its pseudo-element-prefixed key
+/// (`color` → `color::before`), the slot namespace generated content reads.
+fn add_prefixed(
+    target: &mut crate::html::css_parse::properties::CssAttr,
+    css: &crate::html::css_parse::properties::CssAttr,
+    pe: crate::html::css_parse::PseudoElement,
+) {
+    let suffix = match pe {
+        crate::html::css_parse::PseudoElement::Before => "::before",
+        crate::html::css_parse::PseudoElement::After => "::after",
+    };
+    for (k, v) in &css.0 {
+        let key: Arc<str> = Arc::from(format!("{k}{suffix}"));
+        target.0.insert(key, Arc::clone(v));
+    }
+}
+
 /// Apply the `style` attribute of one node, restricted to the `important`
 /// subset when `important` is true the per-node form of the cascade's
 /// inline passes (inline normal beats stylesheet normal, inline `!important`
@@ -182,7 +199,15 @@ pub fn css_into_node_with_state(
                 continue;
             }
             if selector_chain_matches_with_state(arena, node_id, &entry.selector, state) {
-                arena[node_id].css_attr.add(&entry.normal);
+                if let Some(pe) = entry.selector.pseudo_element {
+                    // Pseudo-element declarations live under key-prefixed
+                    // slots (`content::before`, `color::before`, …) so they
+                    // cascade among themselves without touching the origin
+                    // element's own properties.
+                    add_prefixed(&mut arena[node_id].css_attr, &entry.normal, pe);
+                } else {
+                    arena[node_id].css_attr.add(&entry.normal);
+                }
             }
         }
         // 2. Inline `style` attributes, normal declarations.
@@ -194,7 +219,11 @@ pub fn css_into_node_with_state(
                 continue;
             }
             if selector_chain_matches_with_state(arena, node_id, &entry.selector, state) {
-                arena[node_id].css_attr.add(&entry.important);
+                if let Some(pe) = entry.selector.pseudo_element {
+                    add_prefixed(&mut arena[node_id].css_attr, &entry.important, pe);
+                } else {
+                    arena[node_id].css_attr.add(&entry.important);
+                }
             }
         }
         // 4. Inline `style` attributes, `!important` declarations (highest).
@@ -346,6 +375,11 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "word-break",
     "overflow-wrap",
     "word-wrap",
+    // Text spacing / clipping
+    "letter-spacing",
+    "word-spacing",
+    "text-indent",
+    "text-overflow",
     // Positioning (CSS Positioned Layout)
     "position",
     "z-index",
@@ -368,6 +402,15 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "overflow",
     "overflow-x",
     "overflow-y",
+    // Lists
+    "list-style",
+    "list-style-type",
+    // Tables
+    "table-layout",
+    "caption-side",
+    "empty-cells",
+    // Font shorthand (expanded at parse time into the font-* longhands)
+    "font",
 ];
 
 /// Inheritable subset of [`SUPPORTED_PROPERTIES`]: a child without an explicit
@@ -397,9 +440,19 @@ pub const INHERITED_PROPS: &[&str] = &[
     "white-space",
     "word-break",
     "overflow-wrap",
+    "list-style-type",
+    "empty-cells",
+    "letter-spacing",
+    "word-spacing",
+    "text-indent",
 ];
 
 fn inherit_css(arena: &mut NodeArena, root_id: NodeId) {
+    /// The value `initial` (and `inherit` without a parent value) resolves
+    /// to: unparseable by every getter, so reads fall back to the built-in
+    /// default, while occupying the cascade slot so the inherited merge
+    /// cannot refill it.
+    const INITIAL_SENTINEL: &str = "\u{1}initial";
     type InheritedMap = IndexMap<Arc<str>, Arc<str>>;
     // Iterative pre-order walk with an explicit stack. An implicit-recursive
     // version would clone each node's `children` `Vec` on the way down
@@ -409,6 +462,51 @@ fn inherit_css(arena: &mut NodeArena, root_id: NodeId) {
     let mut stack: Vec<(NodeId, Arc<InheritedMap>)> =
         vec![(root_id, Arc::new(InheritedMap::new()))];
     while let Some((node_id, parent_attrs)) = stack.pop() {
+        // Explicit global keywords, resolved before the inherited merge so
+        // the literal value cannot squat on the slot:
+        // - `inherit` takes the parent's **computed** value (any property —
+        //   the non-inherited set reads the parent node's css_attr directly);
+        //   with no parent value it falls to the initial sentinel below.
+        // - `initial` swaps the declaration for the [`INITIAL_SENTINEL`]
+        //   value: getters fail to parse it and fall back to their built-in
+        //   default (the engine's initial-value analogue), and the sentinel
+        //   occupies the slot so the inherited merge cannot refill it —
+        //   which is exactly the keyword's point on inherited properties.
+        // `unset` / `revert` / `revert-layer` are not recognized (no cascade
+        // origin table to revert to).
+        {
+            let parent_id = arena.get(node_id).and_then(|n| n.parent);
+            // Collect (key, parent-value-if-inherit) under shared borrows.
+            let mut resolves: Vec<(Arc<str>, Option<Arc<str>>)> = Vec::new();
+            {
+                let node = &arena[node_id];
+                for (key, value) in node.css_attr.0.iter() {
+                    let text = value.trim();
+                    if text.eq_ignore_ascii_case("inherit") {
+                        let parent_value = parent_id
+                            .and_then(|pid| arena.get(pid))
+                            .and_then(|p| p.css_attr.0.get(key).cloned());
+                        resolves.push((key.clone(), parent_value));
+                    } else if text.eq_ignore_ascii_case("initial") {
+                        resolves.push((key.clone(), None));
+                    }
+                }
+            }
+            if !resolves.is_empty() {
+                let node = &mut arena[node_id];
+                for (key, value) in resolves {
+                    match value {
+                        Some(v) => {
+                            node.css_attr.0.insert(key, v);
+                        }
+                        None => {
+                            node.css_attr.0.insert(key, Arc::from(INITIAL_SENTINEL));
+                        }
+                    }
+                }
+            }
+        }
+
         // Merge parent inheritable attrs into current node (if not already
         // set). `entry` does a single hash probe for the find-or-insert; the
         // eager key allocation is cheaper than a second `contains_key` probe

@@ -9,32 +9,43 @@ use crate::tdom::node::{NodeId, NodeType};
 
 use super::{
     attrs::{
-        native_get_attribute, native_get_id, native_remove_attribute, native_set_attribute,
-        native_set_id,
+        native_get_attribute, native_get_attributes, native_get_id, native_has_attribute,
+        native_remove_attribute, native_set_attribute, native_set_id, native_toggle_attribute,
     },
     content::{
-        native_get_data, native_get_inner_html, native_get_node_value, native_get_text,
-        native_get_value, native_set_data, native_set_inner_html, native_set_node_value,
-        native_set_text, native_set_value,
+        native_append_data, native_delete_data, native_get_data, native_get_data_length,
+        native_get_inner_html, native_get_node_value, native_get_outer_html, native_get_text,
+        native_get_value, native_insert_data, native_replace_data, native_set_data,
+        native_set_inner_html, native_set_node_value, native_set_text, native_set_value,
+        native_split_text, native_substring_data,
     },
-    events::{native_add_event_listener, native_blur, native_focus, native_remove_event_listener},
+    events::{
+        native_add_event_listener, native_blur, native_click, native_dispatch_event, native_focus,
+        native_remove_event_listener,
+    },
     global_attrs::{
         native_get_class, native_get_class_list, native_get_dataset, native_get_hidden,
         native_set_class, native_set_hidden,
     },
     js_fn,
     mutation::{
-        native_append_child, native_clone_node, native_insert_before, native_remove_child,
-        native_replace_child,
+        native_after, native_append, native_append_child, native_before, native_clone_node,
+        native_insert_adjacent_element, native_insert_adjacent_html, native_insert_adjacent_text,
+        native_insert_before, native_normalize, native_prepend, native_remove, native_remove_child,
+        native_replace_child, native_replace_children, native_replace_with, native_set_outer_html,
     },
     node_id_to_f64,
     style::native_get_style,
     traverse::{
-        native_contains, native_get_base_uri, native_get_child_nodes, native_get_first_child,
-        native_get_last_child, native_get_next_sibling, native_get_node_name, native_get_node_type,
-        native_get_owner_document, native_get_parent, native_get_parent_element,
-        native_get_prev_sibling, native_get_tag_name, native_has_child_nodes, native_is_equal_node,
-        native_is_same_node, native_query_selector, native_query_selector_all,
+        native_closest, native_compare_document_position, native_contains, native_get_base_uri,
+        native_get_child_nodes, native_get_elements_by_class_name, native_get_elements_by_tag_name,
+        native_get_first_child, native_get_is_connected, native_get_last_child,
+        native_get_local_name, native_get_namespace_uri, native_get_next_element_sibling,
+        native_get_next_sibling, native_get_node_name, native_get_node_type,
+        native_get_owner_document, native_get_parent, native_get_parent_element, native_get_prefix,
+        native_get_prev_element_sibling, native_get_prev_sibling, native_get_root_node,
+        native_get_tag_name, native_has_child_nodes, native_is_equal_node, native_is_same_node,
+        native_matches, native_query_selector, native_query_selector_all,
     },
     with_state,
 };
@@ -48,7 +59,7 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
     let node_key = node_id_to_f64(node_id);
     let hidden = Attribute::READONLY | Attribute::NON_ENUMERABLE;
 
-    let (is_element, is_text_like) = {
+    let (is_element, is_text_like, is_text, is_parent_node) = {
         let Some(rc) = with_state() else {
             return Ok(JsValue::null());
         };
@@ -59,6 +70,12 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
         (
             node.node_type_constant() == 1,
             matches!(node.node_type, NodeType::Text | NodeType::Comment),
+            node.node_type == NodeType::Text,
+            // ParentNode mixin domain: elements, the document and fragments.
+            matches!(
+                node.node_type,
+                NodeType::Document | NodeType::DocumentFragment
+            ) || node.node_type_constant() == 1,
         )
     };
 
@@ -93,6 +110,7 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
     let get_base_uri = js_fn(context, NativeFunction::from_fn_ptr(native_get_base_uri));
     let get_data = js_fn(context, NativeFunction::from_fn_ptr(native_get_data));
     let set_data = js_fn(context, NativeFunction::from_fn_ptr(native_set_data));
+    let get_data_length = js_fn(context, NativeFunction::from_fn_ptr(native_get_data_length));
     let get_tag = js_fn(context, NativeFunction::from_fn_ptr(native_get_tag_name));
     let get_class = js_fn(context, NativeFunction::from_fn_ptr(native_get_class));
     let set_class = js_fn(context, NativeFunction::from_fn_ptr(native_set_class));
@@ -104,9 +122,30 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
     let set_value = js_fn(context, NativeFunction::from_fn_ptr(native_set_value));
     let get_inner_html = js_fn(context, NativeFunction::from_fn_ptr(native_get_inner_html));
     let set_inner_html = js_fn(context, NativeFunction::from_fn_ptr(native_set_inner_html));
+    let get_outer_html = js_fn(context, NativeFunction::from_fn_ptr(native_get_outer_html));
+    let set_outer_html = js_fn(context, NativeFunction::from_fn_ptr(native_set_outer_html));
+    let get_attributes = js_fn(context, NativeFunction::from_fn_ptr(native_get_attributes));
     let get_hidden = js_fn(context, NativeFunction::from_fn_ptr(native_get_hidden));
     let set_hidden = js_fn(context, NativeFunction::from_fn_ptr(native_set_hidden));
     let get_dataset = js_fn(context, NativeFunction::from_fn_ptr(native_get_dataset));
+    let get_prev_elem_sibling = js_fn(
+        context,
+        NativeFunction::from_fn_ptr(native_get_prev_element_sibling),
+    );
+    let get_next_elem_sibling = js_fn(
+        context,
+        NativeFunction::from_fn_ptr(native_get_next_element_sibling),
+    );
+    let get_is_connected = js_fn(
+        context,
+        NativeFunction::from_fn_ptr(native_get_is_connected),
+    );
+    let get_namespace_uri = js_fn(
+        context,
+        NativeFunction::from_fn_ptr(native_get_namespace_uri),
+    );
+    let get_prefix = js_fn(context, NativeFunction::from_fn_ptr(native_get_prefix));
+    let get_local_name = js_fn(context, NativeFunction::from_fn_ptr(native_get_local_name));
 
     let mut init = ObjectInitializer::new(context);
     init.property(js_string!("_nodeId"), node_key, hidden);
@@ -246,9 +285,73 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
         js_string!("removeEventListener"),
         2,
     );
+    init.function(
+        NativeFunction::from_fn_ptr(native_dispatch_event),
+        js_string!("dispatchEvent"),
+        1,
+    );
+
+    // Node connectivity / structure helpers apply to every node kind.
+    init.accessor(
+        js_string!("isConnected"),
+        Some(get_is_connected),
+        None,
+        Attribute::all(),
+    );
+    init.function(
+        NativeFunction::from_fn_ptr(native_get_root_node),
+        js_string!("getRootNode"),
+        0,
+    );
+    init.function(
+        NativeFunction::from_fn_ptr(native_normalize),
+        js_string!("normalize"),
+        0,
+    );
+
+    // `previousElementSibling` / `nextElementSibling` belong to the Element
+    // and CharacterData mixins — exposed on element and text-like wrappers
+    // only, never on the document root or fragments.
+    if is_element || is_text_like {
+        init.accessor(
+            js_string!("previousElementSibling"),
+            Some(get_prev_elem_sibling),
+            None,
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("nextElementSibling"),
+            Some(get_next_elem_sibling),
+            None,
+            Attribute::all(),
+        );
+    }
 
     if is_element {
         init.accessor(js_string!("tagName"), Some(get_tag), None, Attribute::all());
+        init.accessor(
+            js_string!("namespaceURI"),
+            Some(get_namespace_uri),
+            None,
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("prefix"),
+            Some(get_prefix),
+            None,
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("localName"),
+            Some(get_local_name),
+            None,
+            Attribute::all(),
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_compare_document_position),
+            js_string!("compareDocumentPosition"),
+            1,
+        );
         init.accessor(
             js_string!("className"),
             Some(get_class),
@@ -281,6 +384,18 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
             Attribute::all(),
         );
         init.accessor(
+            js_string!("outerHTML"),
+            Some(get_outer_html),
+            Some(set_outer_html),
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("attributes"),
+            Some(get_attributes),
+            None,
+            Attribute::all(),
+        );
+        init.accessor(
             js_string!("hidden"),
             Some(get_hidden),
             Some(set_hidden),
@@ -308,6 +423,26 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
             1,
         );
         init.function(
+            NativeFunction::from_fn_ptr(native_has_attribute),
+            js_string!("hasAttribute"),
+            1,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_toggle_attribute),
+            js_string!("toggleAttribute"),
+            1,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_matches),
+            js_string!("matches"),
+            1,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_closest),
+            js_string!("closest"),
+            1,
+        );
+        init.function(
             NativeFunction::from_fn_ptr(native_query_selector),
             js_string!("querySelector"),
             1,
@@ -327,6 +462,26 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
             js_string!("blur"),
             0,
         );
+        init.function(
+            NativeFunction::from_fn_ptr(native_click),
+            js_string!("click"),
+            0,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_insert_adjacent_element),
+            js_string!("insertAdjacentElement"),
+            2,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_insert_adjacent_text),
+            js_string!("insertAdjacentText"),
+            2,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_insert_adjacent_html),
+            js_string!("insertAdjacentHTML"),
+            2,
+        );
     }
     if is_text_like {
         init.accessor(
@@ -334,6 +489,97 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
             Some(get_data),
             Some(set_data),
             Attribute::all(),
+        );
+        init.accessor(
+            js_string!("length"),
+            Some(get_data_length),
+            None,
+            Attribute::all(),
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_substring_data),
+            js_string!("substringData"),
+            2,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_append_data),
+            js_string!("appendData"),
+            1,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_insert_data),
+            js_string!("insertData"),
+            2,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_delete_data),
+            js_string!("deleteData"),
+            2,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_replace_data),
+            js_string!("replaceData"),
+            3,
+        );
+    }
+    if is_text {
+        init.function(
+            NativeFunction::from_fn_ptr(native_split_text),
+            js_string!("splitText"),
+            1,
+        );
+    }
+    // ChildNode mixin: element and CharacterData wrappers (the DocumentType
+    // exclusion of the spec is unreachable — doctype wrappers are never
+    // built here).
+    if is_element || is_text_like {
+        init.function(
+            NativeFunction::from_fn_ptr(native_remove),
+            js_string!("remove"),
+            0,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_before),
+            js_string!("before"),
+            1,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_after),
+            js_string!("after"),
+            1,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_replace_with),
+            js_string!("replaceWith"),
+            1,
+        );
+    }
+    // ParentNode mixin: elements, the document and document fragments.
+    if is_parent_node {
+        init.function(
+            NativeFunction::from_fn_ptr(native_append),
+            js_string!("append"),
+            1,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_prepend),
+            js_string!("prepend"),
+            1,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_replace_children),
+            js_string!("replaceChildren"),
+            0,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_get_elements_by_tag_name),
+            js_string!("getElementsByTagName"),
+            1,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_get_elements_by_class_name),
+            js_string!("getElementsByClassName"),
+            1,
         );
     }
     let obj = init.build();

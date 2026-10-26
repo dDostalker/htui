@@ -20,7 +20,11 @@ pub(crate) fn paint_block(
     let node = &arena[lb.node_id];
     let fg = node.css_attr.get_color();
     let style = block_style(&node.css_attr);
-    let align = node.css_attr.get_text_align();
+    // The resolved alignment comes from the paint style, not the cascade:
+    // user-agent defaults the layout phase resolved (`<th>`'s `center`) are
+    // not stored in the node's `css_attr`, so the paint style is the single
+    // source the paint phase may consult.
+    let align = lb.paint_style.text_align;
 
     // Effective bg: own bg wins; otherwise inherit the parent's bg so child
     // text appears on the rect's background rather than the terminal default.
@@ -194,11 +198,13 @@ pub(crate) fn paint_block(
             + (border_top.saturating_add(padding_top)) * cols
             + content_x_offset
             + vertical_offset;
-        // The runs are additionally clipped to the box's content-box (the
-        // rect minus border + padding): wrapped text that overflows the
-        // allocated content area must not paint onto the padding / border
-        // rows (which would break the frame glyphs). The inherited clip is
-        // still applied on top.
+        // The runs of a clipping box (`overflow: hidden` / `auto` / `scroll`
+        // / `clip`) are additionally bounded by the content-box (the rect
+        // minus border + padding): wrapped text that overflows the allocated
+        // content area must not paint onto the padding / border rows (which
+        // would break the frame glyphs). The inherited clip still applies on
+        // top. A `visible` box skips that bound — overflowing lines paint
+        // beyond the box, bounded only by the inherited clip / canvas.
         let border_bottom = box_edges.border.bottom.thickness();
         let padding_bottom = box_edges.padding.bottom;
         let content_clip = Rect::new(
@@ -212,7 +218,9 @@ pub(crate) fn paint_block(
                 .saturating_sub(padding_bottom)
                 .max(1),
         );
-        if let Some(content_clip) = intersect_rects(content_clip, clip) {
+        let overflow_visible =
+            node.css_attr.get_overflow() != crate::html::css_parse::Overflow::Clip;
+        if overflow_visible {
             paint_runs(
                 canvas,
                 runs,
@@ -222,7 +230,23 @@ pub(crate) fn paint_block(
                 effective_bg,
                 lb.paint_style.font_size_cells,
                 lb.paint_style.line_height_cells,
-                content_clip,
+                clip,
+                true,
+                lb.paint_style.text_indent,
+            );
+        } else if let Some(runs_clip) = intersect_rects(content_clip, clip) {
+            paint_runs(
+                canvas,
+                runs,
+                content_row,
+                content_width,
+                align,
+                effective_bg,
+                lb.paint_style.font_size_cells,
+                lb.paint_style.line_height_cells,
+                runs_clip,
+                false,
+                lb.paint_style.text_indent,
             );
         }
     }
@@ -292,6 +316,10 @@ fn paint_column_layout(
                 font,
                 line_h,
                 col_clip,
+                // Multicol fragmentation is intrinsic clipping: each column
+                // bounds its own lines regardless of the box's overflow.
+                false,
+                0,
             );
         }
     }

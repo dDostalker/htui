@@ -1,5 +1,6 @@
 use crate::{
     graphics::block_style,
+    html::css_parse::ListStyleType,
     layout::{
         BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext,
         inner_formatting_context::flow::{LayoutBlockOptions, layout_block},
@@ -184,23 +185,41 @@ fn list_depth(arena: &NodeArena, node_id: NodeId) -> usize {
     depth
 }
 
-/// Compute the marker string for an `<li>` based on its enclosing list.
+/// Compute the marker string for an `<li>` based on its enclosing list and
+/// the effective `list-style-type` (declared on the `<li>` or inherited from
+/// the list).
 ///
-/// Returns `• ` inside `<ul>`/`<menu>`, `<n>. ` inside `<ol>`, or `- ` for an
-/// orphan `<li>` (no list parent) so we still render a visible marker.
+/// The element-driven default is `disc` inside `<ul>` / `<menu>`, `decimal`
+/// inside `<ol>`; an orphan `<li>` (no list parent) keeps the historical
+/// `- ` marker so existing output does not shift. `<ol start=N>` offsets the
+/// ordinals (a `start` below 1 or unparsable behaves as 1).
 fn list_marker_for_li(arena: &NodeArena, li_id: NodeId) -> String {
-    let Some(parent_id) = arena[li_id].parent else {
+    let li = &arena[li_id];
+    let Some(parent_id) = li.parent else {
         return "- ".to_string();
     };
     let parent = &arena[parent_id];
-    match parent.node_type {
-        NodeType::Ul | NodeType::Menu => "• ".to_string(),
+    let default_type = match parent.node_type {
+        NodeType::Ul | NodeType::Menu => ListStyleType::Disc,
+        NodeType::Ol => ListStyleType::Decimal,
+        _ => return "- ".to_string(),
+    };
+    let style = li.css_attr.get_list_style_type(default_type);
+    let ordinal = match parent.node_type {
         NodeType::Ol => {
-            let ordinal = li_ordinal(arena, li_id, parent_id);
-            format!("{ordinal}. ")
+            let start = parent
+                .attributes
+                .get("start")
+                .and_then(|s| s.trim().parse::<usize>().ok())
+                .filter(|&s| s >= 1)
+                .unwrap_or(1);
+            let nth = li_ordinal(arena, li_id, parent_id);
+            start.saturating_add(nth.saturating_sub(1))
         }
-        _ => "- ".to_string(),
-    }
+        // Unordered markers ignore the ordinal.
+        _ => 1,
+    };
+    style.marker(ordinal)
 }
 
 /// Compute the 1-based ordinal of `<li>` among its `<ol>` parent's `<li>`

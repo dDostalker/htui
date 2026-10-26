@@ -2338,3 +2338,146 @@ fn test_flex_grow_redistributes_space_when_capped_by_max_width() {
         rows[0]
     );
 }
+
+#[test]
+fn test_flex_item_percentage_margin_resolves_against_container_width() {
+    init();
+    // Percentage margins on a flex item resolve against the container's
+    // content width (80 columns here): `margin-left: 10%` = 8 cells. The
+    // item preparation used to resolve edges against a `usize::MAX`
+    // containing width, turning the margin into ~9.2e17 cells and pushing
+    // the item off the canvas entirely.
+    let html = r#"<div class="c"><div class="a">A</div></div>"#;
+    let css = ".c { display: flex; } .a { margin-left: 10%; }";
+    let (rows, _) = render_rows(html, css);
+    assert_eq!(
+        rows[0].find('A'),
+        Some(8),
+        "10% left margin against an 80-column container places the item at column 8: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn test_flex_item_percentage_padding_resolves_against_container_width() {
+    init();
+    // Same rule for percentage padding: `padding-left: 50%` against an
+    // 80-column container = 40 cells of padding; the item's text starts at
+    // column 40 instead of the billion-cell blow-up.
+    let html = r#"<div class="c"><div class="a">A</div></div>"#;
+    let css = ".c { display: flex; } .a { padding-left: 50%; }";
+    let (rows, _) = render_rows(html, css);
+    assert_eq!(
+        rows[0].find('A'),
+        Some(40),
+        "50% left padding against an 80-column container places the text at column 40: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn test_flex_column_item_percentage_margin_top_resolves_against_width() {
+    init();
+    // CSS resolves percentage margins against the containing block's *width*
+    // even on the vertical axis: `margin-top: 10%` in an 80-column container
+    // = 8 rows, so the item's text lands on row 8.
+    let html = r#"<div class="c"><div class="a">A</div></div>"#;
+    let css = ".c { display: flex; flex-direction: column; } .a { margin-top: 10%; }";
+    let (rows, _) = render_rows(html, css);
+    assert_eq!(
+        rows[8].trim(),
+        "A",
+        "10% top margin resolves to 8 rows (against the width, not the height): {:?}",
+        &rows[0..10]
+    );
+}
+
+#[test]
+fn test_flex_percentage_gap_degenerates_to_zero() {
+    init();
+    // Percentage gap is unsupported: the container's resolved axis size is
+    // not in scope at parse time, and the old sentinel resolution turned
+    // `gap: 50%` into billion-cell gaps that pushed every item off the
+    // canvas. A percentage gap now degenerates to 0 — both items render
+    // side by side instead of vanishing.
+    let html = r#"<div class="c"><div class="a">A</div><div class="b">B</div></div>"#;
+    let css = ".c { display: flex; gap: 50%; }";
+    let (rows, _) = render_rows(html, css);
+    assert!(
+        rows[0].contains('A') && rows[0].contains('B'),
+        "a percentage gap must not blow the layout up: {:?}",
+        rows[0]
+    );
+    assert!(
+        rows[0].find('B') == rows[0].find('A').map(|a| a + 1),
+        "with the gap at 0 the items sit adjacent: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn test_align_content_center_moves_item_subtrees() {
+    init();
+    // A multi-line flex container with `align-content: center` shifts the
+    // lines down by the leading free space. Rects are absolute coordinates,
+    // so each item's laid-out subtree (its nested text) must move with its
+    // border-box — moving only the top-level rect used to leave the nested
+    // text stranded on the pre-shift rows.
+    let html = r#"<div class="c"><div class="a"><div class="t">T1</div></div><div class="b">B</div><div class="d">D</div></div>"#;
+    let css = ".c { display: flex; flex-wrap: wrap; align-content: center; height: 20ch; width: 12ch; } \
+               .a { width: 8ch; } .b { width: 6ch; }";
+    let (rows, _) = render_rows(html, css);
+    let text_row = rows
+        .iter()
+        .position(|r| r.contains("T1"))
+        .expect("nested item text must render");
+    assert!(
+        text_row >= 7,
+        "the nested text must shift down with its item's border-box \
+         (align-content: center over a 20-row container), got row {text_row}: {:?}",
+        &rows[0..=text_row.min(12)]
+    );
+}
+
+#[test]
+fn test_row_reverse_moves_item_subtrees() {
+    init();
+    // `row-reverse` mirrors each item toward the main-end edge; a nested
+    // child's text must mirror with its parent's border-box instead of
+    // staying at the pre-mirror columns.
+    let html = r#"<div class="c"><div class="a"><div class="t">T1</div></div><div class="b">B</div></div>"#;
+    let css = ".c { display: flex; flex-direction: row-reverse; } .a { width: 10ch; }";
+    let (rows, _) = render_rows(html, css);
+    let text_col = rows[0]
+        .rfind("T1")
+        .expect("nested item text must render on the first row");
+    assert!(
+        text_col >= 60,
+        "the nested text must mirror with its item's border-box \
+         (item packed against the right edge of an 80-column container), got column {text_col}: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn test_unlayouttable_flex_item_does_not_desync_align_content() {
+    init();
+    // A `display: grid` child (grid geometry is unimplemented — its dispatch
+    // returns `None`, only a warning is logged) inside a multi-line flex
+    // container must not desync the `align-content` pass: the old
+    // prep-indexed walk assumed one placed box per prep and indexed past
+    // `placed` (panic) or shifted the wrong boxes.
+    let html = r#"<div class="c"><div class="a">A</div><div class="g" style="display: grid">G</div><div class="b">B</div><div class="d">D</div></div>"#;
+    let css = ".c { display: flex; flex-wrap: wrap; align-content: center; height: 20ch; width: 12ch; } \
+               .a { width: 8ch; } .b { width: 6ch; }";
+    let (rows, _) = render_rows(html, css);
+    let a_row = rows
+        .iter()
+        .position(|r| r.contains('A'))
+        .expect("layoutable items must still render");
+    assert!(
+        a_row >= 7,
+        "the line's boxes must shift with align-content: center over a 20-row \
+         container even when a sibling item failed to lay out, got row {a_row}"
+    );
+}

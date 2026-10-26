@@ -23,6 +23,25 @@ pub(super) fn stop_propagation(
     Ok(JsValue::undefined())
 }
 
+/// `event.stopImmediatePropagation()` — stop the bubbling **and** the
+/// remaining listeners on the current element (a superset of
+/// `stopPropagation`, so both flags are set).
+pub(super) fn stop_immediate_propagation(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    if let Ok(obj) = this.to_object(context) {
+        for flag in ["_stopped", "_stoppedImmediate"] {
+            if let Err(e) = obj.set(js_string!(flag), true, false, context) {
+                log::warn!("Failed to mark event stopped-immediate: {e}");
+                break;
+            }
+        }
+    }
+    Ok(JsValue::undefined())
+}
+
 /// `event.preventDefault()` — marks the event so the input loop can skip the
 /// built-in shortcut for that key (the verdict is echoed back in the script
 /// thread's response; the input loop waits for it before acting).

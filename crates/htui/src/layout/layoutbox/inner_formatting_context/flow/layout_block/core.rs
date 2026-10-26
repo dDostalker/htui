@@ -158,11 +158,32 @@ pub fn layout_block(
         block_font_style |= FontStyle::ITALIC;
     }
     // `<hr>` has no inline content of its own; skip the (empty) walk.
+    let spacing = (
+        node.css_attr
+            .get_letter_spacing(child_context.font, child_context.viewport),
+        node.css_attr
+            .get_word_spacing(child_context.font, child_context.viewport),
+    );
     let body_runs = if opts.hr_rule {
         Vec::new()
     } else {
-        collect_runs(arena, node_id, node, block_fg, None, block_font_style)
+        collect_runs(
+            arena,
+            node_id,
+            node,
+            block_fg,
+            None,
+            block_font_style,
+            spacing,
+        )
     };
+    // CSS `text-indent`: reserved leading columns of the first visual line
+    // (resolved against the content width so percentages track the box).
+    let text_indent = node.css_attr.get_text_indent(
+        geom.content_constraint.width,
+        child_context.font,
+        child_context.viewport,
+    );
     let fill_bg = block_bg.is_some();
 
     let child_containing = match opts.child_containing_shift {
@@ -285,7 +306,19 @@ pub fn layout_block(
                 white_space,
                 word_break,
                 overflow_wrap,
+                text_indent,
             )
+        };
+        // `text-overflow: ellipsis`: a clipped box whose line still exceeds
+        // the content width ends in `…` (in practice the unwrapped `nowrap`
+        // line — wrapped lines never exceed the budget).
+        let wrapped_lines = if node.css_attr.get_overflow()
+            == crate::html::css_parse::Overflow::Clip
+            && node.css_attr.get_text_overflow() == crate::html::css_parse::TextOverflow::Ellipsis
+        {
+            crate::layout::layoutbox::apply_ellipsis(wrapped_lines, wrap_width, own_font_size_cells)
+        } else {
+            wrapped_lines
         };
         let inline_rows = wrapped_lines.len().saturating_mul(line_height_cells.max(1));
 
@@ -430,6 +463,8 @@ pub fn layout_block(
         ),
         fill_bg,
         spacing_after: effective_spacing_after,
+        text_align: node.css_attr.get_text_align(),
+        text_indent,
     };
 
     LayoutBox::new_normal(
@@ -455,23 +490,33 @@ fn merge_ua_border(node: &Node, edges: BoxEdges, ua_border: Option<BorderSides>)
         return edges;
     };
     let css = &node.css_attr;
-    let authored = |side: &str, component: &str| -> bool {
-        css.is_set("border")
-            || css.is_set(&format!("border-{side}"))
-            || css.is_set(&format!("border-{component}"))
-    };
-    let merge = |side: &str, author: Border, ua_side: Border| Border {
-        width: if authored(side, "width") {
+    // Fixed candidate tables instead of `format!`-built lookup keys: this
+    // runs per block element per layout pass, and every candidate is a
+    // static string.
+    let has_shorthand = css.is_set("border");
+    let side_declared = [
+        css.is_set("border-top"),
+        css.is_set("border-right"),
+        css.is_set("border-bottom"),
+        css.is_set("border-left"),
+    ];
+    let component_declared = [
+        css.is_set("border-width"),
+        css.is_set("border-style"),
+        css.is_set("border-color"),
+    ];
+    let merge = |side: usize, author: Border, ua_side: Border| Border {
+        width: if has_shorthand || side_declared[side] || component_declared[0] {
             author.width
         } else {
             ua_side.width
         },
-        style: if authored(side, "style") {
+        style: if has_shorthand || side_declared[side] || component_declared[1] {
             author.style
         } else {
             ua_side.style
         },
-        color: if authored(side, "color") {
+        color: if has_shorthand || side_declared[side] || component_declared[2] {
             author.color
         } else {
             ua_side.color
@@ -479,10 +524,10 @@ fn merge_ua_border(node: &Node, edges: BoxEdges, ua_border: Option<BorderSides>)
     };
     BoxEdges {
         border: BorderSides {
-            top: merge("top", edges.border.top, ua.top),
-            right: merge("right", edges.border.right, ua.right),
-            bottom: merge("bottom", edges.border.bottom, ua.bottom),
-            left: merge("left", edges.border.left, ua.left),
+            top: merge(0, edges.border.top, ua.top),
+            right: merge(1, edges.border.right, ua.right),
+            bottom: merge(2, edges.border.bottom, ua.bottom),
+            left: merge(3, edges.border.left, ua.left),
         },
         ..edges
     }
@@ -565,6 +610,9 @@ fn layout_multicol(
     let wrapped_lines = if all_runs.is_empty() {
         Vec::new()
     } else {
+        // Multi-column content does not apply the block's `text-indent`
+        // (the first column's first line is not the block's first line in
+        // any meaningful sense for fragmentation).
         wrap_runs(
             &all_runs,
             col_w,
@@ -572,6 +620,7 @@ fn layout_multicol(
             white_space,
             word_break,
             overflow_wrap,
+            0,
         )
     };
     let line_rows = wrapped_lines.len().saturating_mul(line_height_cells.max(1));
