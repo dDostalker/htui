@@ -3,7 +3,7 @@
   htui music player demo — interface + interaction only (no audio).
   Works in the terminal via htui and in a regular browser (standard DOM).
   Theme: "neon night" — charcoal slate + mint/cyan/violet/coral accents.
-  Features: animated spectrum, range-slider seek/volume, lyrics, up-next queue,
+  Features: animated spectrum, range-slider seek/volume/list-limit,
   favorites with filtering, seek, repeat/shuffle, volume, live clock.
   Layout: viewport-fit — the page is exactly 100vh (flex column); panels
   stretch on tall terminals and clip gracefully on small ones, so it never
@@ -180,6 +180,10 @@
   .tab:hover { color: #ffffff; background-color: #26314a; }
   .tab.on { color: #43e5a0; background-color: #0f2a22; }
   .lib-meta { flex: 1; text-align: right; color: #556085; }
+  .limit { display: flex; gap: 1ch; align-items: center; flex-shrink: 0; }
+  .limit-label { color: #556085; font-weight: bold; }
+  .limit-range { width: 18ch; color: #43e5a0; }
+  .limit-value { min-width: 3ch; text-align: right; color: #56c8f5; }
 
   .row { display: flex; gap: 2ch; padding: 0 1ch; }
   .row:nth-child(odd) { background-color: #0e1220; }
@@ -326,6 +330,12 @@
         <span id="tab-all" class="tab on" onclick="setTab('all')">All</span>
         <span id="tab-fav" class="tab" onclick="setTab('fav')">&#9825; Fav</span>
       </span>
+      <span class="limit">
+        <span class="limit-label">LIMIT</span>
+        <input id="list-limit" class="range limit-range" type="range" min="1" max="6" step="1" value="6"
+          aria-label="Playlist limit" oninput="setListLimit(this.value)">
+        <span id="limit-value" class="limit-value">ALL</span>
+      </span>
       <span id="lib-meta" class="lib-meta"></span>
     </div>
     <div id="plist"></div>
@@ -360,6 +370,7 @@
     var shuffle = false;
     var volume = 80;
     var tab = "all";
+    var listLimit = 6;
 
     var WAVE_N = 48;
     var seeking = false;
@@ -438,10 +449,13 @@
 
     function renderPlaylist() {
       var count = 0;
+      var matched = 0;
       var total = 0;
       var html = "";
       for (var i = 0; i < tracks.length; i++) {
         if (tab === "fav" && !tracks[i].fav) { continue; }
+        matched++;
+        if (count >= listLimit) { continue; }
         count++;
         total += tracks[i].dur;
         var mark = (i === current && playing) ? "\u25b6" : String(i + 1);
@@ -458,9 +472,11 @@
           + '</div>';
       }
       $("plist").innerHTML = html;
+      $("limit-value").textContent = listLimit >= tracks.length ? "ALL" : String(listLimit);
       var allTotal = 0;
       for (var j = 0; j < tracks.length; j++) { allTotal += tracks[j].dur; }
-      $("lib-meta").textContent = count + " TRACKS \u00b7 " + fmt(total) + (tab === "all" ? " \u00b7 TOTAL " + fmt(allTotal) : "");
+      $("lib-meta").textContent = count + " / " + matched + " TRACKS \u00b7 " + fmt(total)
+        + (tab === "all" ? " \u00b7 TOTAL " + fmt(allTotal) : "");
     }
 
     function renderQueue() {
@@ -562,6 +578,11 @@
     function setVolume(value) {
       volume = Math.min(100, Math.max(0, Math.round(Number(value) || 0)));
       updateVolume();
+    }
+
+    function setListLimit(value) {
+      listLimit = Math.min(tracks.length, Math.max(1, Math.round(Number(value) || 1)));
+      renderPlaylist();
     }
 
     function toggleRepeat() { repeat = !repeat; update(); }
