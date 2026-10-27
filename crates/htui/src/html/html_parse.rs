@@ -8,7 +8,8 @@ use log::{debug, info, warn};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 
 use crate::resources;
-use crate::tdom::node::{Node, NodeArena, NodeId, NodeType, document_base_href};
+use crate::source::SharedSourceText;
+use crate::tdom::node::{Node, NodeArena, NodeId, NodeType, SharedNodeArena, document_base_href};
 
 /// Parsed HTML document: the DOM arena plus the `<style>` CSS and `<script>`
 /// JS sources extracted during parsing (inline, or external files loaded via
@@ -16,8 +17,8 @@ use crate::tdom::node::{Node, NodeArena, NodeId, NodeType, document_base_href};
 #[derive(Debug, Clone)]
 pub struct ParsedDocument {
     pub root_id: NodeId,
-    pub arena: Arc<NodeArena>,
-    pub css: Arc<str>,
+    pub arena: SharedNodeArena,
+    pub css: SharedSourceText,
     pub scripts: Arc<[String]>,
 }
 

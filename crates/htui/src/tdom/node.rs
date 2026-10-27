@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, sync::Arc};
 
 use indexmap::IndexMap;
 use slotmap::{Key, SlotMap, new_key_type};
@@ -25,6 +25,9 @@ new_key_type! {
 
 /// Global DOM node storage.
 pub type NodeArena = SlotMap<NodeId, Node>;
+
+/// A DOM arena shared across threads (parsed documents and render commands).
+pub type SharedNodeArena = Arc<NodeArena>;
 
 /// The document base URL (`<base href>`), if one is present.
 ///

@@ -4,6 +4,7 @@ use compact_str::CompactString;
 use indexmap::IndexMap;
 
 use crate::html::css_parse::DynamicState;
+use crate::source::SharedSourceText;
 use crate::tdom::node::NodeId;
 
 /// Shape of the page text selection.
@@ -79,7 +80,7 @@ pub enum RenderCmd {
     RenderDocument {
         arena: Arc<crate::tdom::node::NodeArena>,
         root_id: crate::tdom::node::NodeId,
-        document_css: Arc<str>,
+        document_css: SharedSourceText,
         scroll_y: u32,
         zoom: f32,
         dirty: DirtyInfo,
@@ -90,7 +91,7 @@ pub enum RenderCmd {
     /// after a `RenderDocument`, so both a CSS save and an HTML save in the
     /// same batch are applied.
     ReloadCss {
-        css: Arc<str>,
+        css: SharedSourceText,
     },
     /// Re-style the cached document for the CSS `:hover` pseudo-class with the
     /// given session-local node (`None` clears any hover), then repaint. With

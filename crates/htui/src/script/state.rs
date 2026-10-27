@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -10,6 +9,7 @@ use boa_engine::{Context, JsError};
 use crate::{
     events::HtmlEvent,
     resources::AsyncResult,
+    source::SharedSourceText,
     tdom::node::{NodeArena, NodeId},
     tui::graph_api::{DirtyInfo, RenderCmd},
 };
@@ -29,7 +29,7 @@ pub(crate) struct ScriptState {
     /// A whole-document reload changes this source even when JS has not
     /// touched the new arena yet; the script reply carries it to the render
     /// thread so `<style>` edits can take effect.
-    pub document_css: Arc<str>,
+    pub document_css: SharedSourceText,
     /// Whether the engine replaced its document since the last reply.
     ///
     /// Set by `ScriptEngine::reload` and consumed by the script-thread bridge;
@@ -38,7 +38,7 @@ pub(crate) struct ScriptState {
     /// Session-level JS supplied beside the HTML source. It runs after the
     /// document's inline `<script>` blocks and is re-run after whole-document
     /// reloads; `ReloadJs` can replace it without replacing the DOM.
-    pub session_js: Arc<str>,
+    pub session_js: SharedSourceText,
     /// Render commands pushed by host functions during JS execution.
     pub render_cmds: Vec<RenderCmd>,
     /// Nodes whose content or attributes JS changed since the last render.

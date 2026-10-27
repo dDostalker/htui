@@ -1,5 +1,7 @@
 //! Compile-time HTML / CSS / JS source loading with debug hot-reload paths.
 
+use std::sync::Arc;
+
 macro_rules! define_source {
     ($name:ident) => {
         /// A compile-time source loaded by the matching `include_*!` macro.
@@ -32,6 +34,9 @@ macro_rules! define_source {
         }
     };
 }
+
+/// Source text shared between the runtime threads.
+pub type SharedSourceText = Arc<str>;
 
 define_source!(HtmlSource);
 define_source!(CssSource);

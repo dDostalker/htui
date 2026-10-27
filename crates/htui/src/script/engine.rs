@@ -5,6 +5,8 @@ use std::sync::Arc;
 
 use boa_engine::{Context, JsResult, JsValue, Source, js_string};
 
+use crate::source::SharedSourceText;
+
 use crate::{
     events::{EventBindings, EventType, HitRegion, HtmlEvent, KeyEventInfo},
     html::html_parse::{ParsedDocument, Parser},
@@ -110,7 +112,7 @@ impl ScriptEngine {
     fn build_engine(
         document: ParsedDocument,
         host_fns: HashMap<String, HostFn>,
-        session_js: Arc<str>,
+        session_js: SharedSourceText,
     ) -> Result<EngineParts, EngineBuildError> {
         let doc = document;
         let run_session_js = Arc::clone(&session_js);
@@ -211,7 +213,7 @@ impl ScriptEngine {
     /// whole-document reload; runtime side effects already performed by the
     /// failed script cannot be rolled back (matching JS semantics).
     pub fn reload_js(&mut self, js: &str) -> JsResult<()> {
-        let source: Arc<str> = Arc::from(js);
+        let source: SharedSourceText = Arc::from(js);
         let previous = {
             let mut st = self.state.borrow_mut();
             std::mem::replace(&mut st.session_js, Arc::clone(&source))
@@ -226,7 +228,7 @@ impl ScriptEngine {
     }
 
     /// CSS extracted from the engine's current document.
-    pub fn document_css(&self) -> Arc<str> {
+    pub fn document_css(&self) -> SharedSourceText {
         Arc::clone(&self.state.borrow().document_css)
     }
 

@@ -13,19 +13,21 @@
 //! the synchronous `handle_*` / `trigger_refresh` wrappers used by tests, so
 //! both paths are guaranteed to behave identically.
 
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use compact_str::CompactString;
 
 use crate::events::{
-    ElementRef, EventBindings, EventType, HitMap, HitRegion, HoverState, KeyEventInfo, interaction,
+    ElementRef, EventBindings, EventType, HitMap, HitRegion, HoverState, KeyEventInfo,
+    SharedHitMap, interaction,
 };
 use crate::html::html_parse::ParsedDocument;
 use crate::layout::Rect;
 use crate::script::ScriptEngine;
-use crate::tdom::node::{NodeArena, NodeId, NodeType};
+use crate::source::SharedSourceText;
+use crate::tdom::node::{NodeArena, NodeId, NodeType, SharedNodeArena};
 use crate::tui::graph_api::{DirtyInfo, RenderCmd};
 
 /// An action the input loop hands to the script thread.
@@ -82,12 +84,12 @@ pub enum ScriptMsg {
     /// Used by the debug hot-reload watcher. The engine re-parses the HTML,
     /// runs its scripts, and reports a fresh arena plus the new document CSS;
     /// the render thread never independently parses this source.
-    ReloadHtml { html: Arc<str> },
+    ReloadHtml { html: SharedSourceText },
     /// Replace and re-run session-level JS while retaining the live DOM.
     ///
     /// The DOM arena is not replaced, so node ids and interaction state stay
     /// valid; any DOM writes performed by the source are reported as dirty.
-    ReloadJs { js: Arc<str> },
+    ReloadJs { js: SharedSourceText },
     /// Shut the script thread down.
     Quit,
 }
@@ -97,13 +99,13 @@ pub enum ScriptMsg {
 #[derive(Debug)]
 pub struct ScriptDirty {
     /// Latest live arena (slotmap clone keeps the same node ids).
-    pub arena: Arc<NodeArena>,
+    pub arena: SharedNodeArena,
     pub root_id: NodeId,
     /// Nodes JS touched since the last reported batch.
     pub dirty: DirtyInfo,
     /// Present only when the engine replaced its whole document, carrying the
     /// new document-embedded CSS so the render thread can rebuild its rules.
-    pub document_css: Option<Arc<str>>,
+    pub document_css: Option<SharedSourceText>,
 }
 
 /// Outcome of processing one [`ScriptMsg`] (or a due timer tick).
@@ -126,7 +128,7 @@ pub struct ScriptEvent {
 pub enum ScriptResponse {
     /// Engine constructed; initial arena for the first frame.
     Ready {
-        arena: Arc<NodeArena>,
+        arena: SharedNodeArena,
         root_id: NodeId,
     },
     /// Engine construction failed (event handling is disabled afterwards).
@@ -458,10 +460,10 @@ pub fn apply_message(
 pub fn run_script_thread(
     document: ParsedDocument,
     bindings: EventBindings,
-    session_js: Arc<str>,
+    session_js: SharedSourceText,
     rx: Receiver<ScriptMsg>,
     tx: Sender<ScriptResponse>,
-    hit_map: Arc<Mutex<Arc<HitMap>>>,
+    hit_map: SharedHitMap,
 ) {
     let mut engine = match ScriptEngine::new_from_document(document, &session_js, bindings) {
         Ok(engine) => engine,

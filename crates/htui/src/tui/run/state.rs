@@ -8,13 +8,14 @@ use std::sync::{Arc, Mutex};
 use compact_str::CompactString;
 use crossterm::style::Color;
 
-use crate::events::Geometry;
+use crate::events::SharedGeometry;
 use crate::html::css_parse::{self, CssRule, DynamicState, PseudoClassSet};
 use crate::html::html_parse::ParsedDocument;
 use crate::layout::Rect;
 use crate::layout::layoutbox::geometry::{
     SelectRow, overlay_options, select_item_indices, select_overlay_rect, select_rows,
 };
+use crate::source::SharedSourceText;
 use crate::tdom::node::{NodeArena, NodeId};
 use crate::tui::graph_api::{InputRenderState, RenderCmd, SelectionMode, TermLayout};
 
@@ -155,10 +156,10 @@ pub(super) struct RenderState {
     /// CSS supplied through `Session::render`.
     ///
     /// This source is session-scoped and is not replaced by a document reload.
-    pub(super) session_css: Arc<str>,
+    pub(super) session_css: SharedSourceText,
     /// CSS extracted from the document currently being rendered. A whole
     /// document replacement updates this source before rules are rebuilt.
-    pub(super) document_css: Arc<str>,
+    pub(super) document_css: SharedSourceText,
     /// CSS injected via `innerHTML` `<style>` elements, appended to the
     /// session stylesheet incrementally.
     pub(super) extra_css: String,
@@ -181,7 +182,7 @@ pub(super) struct RenderState {
     /// Cached geometry of the latest layout pass: kept so `RenderCmd::Hover`
     /// / `RenderCmd::Focus` can re-style the document for CSS `:hover` /
     /// `:focus` rules and repaint without re-parsing or re-laying out.
-    pub(super) geometry: Option<Arc<Geometry>>,
+    pub(super) geometry: Option<SharedGeometry>,
     /// Whether the current document contains any `position: fixed` box. When
     /// true, scrolling re-anchors the fixed boxes to the new scroll offset
     /// The document contains `position: fixed` / `sticky` boxes, so scrolling

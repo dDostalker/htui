@@ -1,6 +1,8 @@
 //! Immutable layout snapshot shared between the render thread and the
 //! hit-test thread (region collection).
 
+use std::sync::Arc;
+
 use crate::{
     layout::layoutbox::LayoutBox,
     tdom::node::{NodeArena, NodeId},
@@ -18,3 +20,6 @@ pub struct Geometry {
     /// for `:hover` re-styling).
     pub root_id: NodeId,
 }
+
+/// A layout snapshot shared from the render thread to the hit-test thread.
+pub type SharedGeometry = Arc<Geometry>;

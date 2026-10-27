@@ -1,21 +1,30 @@
-//! Debug-only source hot reload watcher.
+//! Debug-only file watcher for compile-time HTML / CSS / JS sources.
 //!
-//! Each watched source gets a small polling thread. The poll first reads file
-//! metadata; only when its size / modified-time signature changes does it read
-//! the full file. A new payload is emitted after one more poll sees the same
-//! signature, which filters transient states produced by editors.
+//! Each watched source gets one metadata-first poll tick. The poll first
+//! reads file metadata; only when its size / modified-time signature changes
+//! does it read the full file. A new payload is emitted after one more poll
+//! sees the same signature, which filters transient states produced by editors.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime};
 
-use super::SourceKind;
-
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+/// The source role carried by a watched path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SourceKind {
+    Html,
+    Css,
+    Js,
+}
+
+/// Watch paths keyed by source role, ordered HTML, CSS, then JS.
+pub(super) type SourceWatches<'a> = Vec<(SourceKind, &'a str)>;
 
 /// A stable update from one watched source.
 #[derive(Debug)]
@@ -25,6 +34,16 @@ pub(super) enum HotReloadEvent {
     Js(String),
 }
 
+impl HotReloadEvent {
+    fn from_source(kind: SourceKind, content: String) -> Self {
+        match kind {
+            SourceKind::Html => Self::Html(content),
+            SourceKind::Css => Self::Css(content),
+            SourceKind::Js => Self::Js(content),
+        }
+    }
+}
+
 /// Cheap file fingerprint used to avoid full reads on every poll.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct FileSignature {
@@ -32,13 +51,83 @@ struct FileSignature {
     len: u64,
 }
 
-/// Debug-only watchers owned by the input loop.
+impl FileSignature {
+    fn new(path: &Path) -> std::io::Result<Self> {
+        let metadata = fs::metadata(path)?;
+        Ok(Self {
+            modified: metadata.modified().ok(),
+            len: metadata.len(),
+        })
+    }
+}
+
+/// Mutable polling state for one watched file.
+struct WatchState {
+    kind: SourceKind,
+    path: PathBuf,
+    signature: Option<FileSignature>,
+    content: Option<String>,
+    pending: Option<String>,
+}
+
+impl WatchState {
+    fn new(kind: SourceKind, path: &str) -> Self {
+        let path = PathBuf::from(path);
+        Self {
+            kind,
+            signature: FileSignature::new(&path).ok(),
+            content: read(&path).ok(),
+            path,
+            pending: None,
+        }
+    }
+
+    /// Poll once; return `false` when the event receiver is gone.
+    fn poll(&mut self, tx: &Sender<HotReloadEvent>) -> bool {
+        // Cheap pre-check: unchanged metadata does not read the payload. The
+        // content comparison is still authoritative because mtime precision
+        // and editor save semantics differ across platforms/filesystems.
+        let signature = FileSignature::new(&self.path).ok();
+        if signature == self.signature {
+            // The new signature stayed stable for one poll, so emit the full
+            // payload that was read when the metadata first changed.
+            if let Some(content) = self.pending.take()
+                && tx
+                    .send(HotReloadEvent::from_source(self.kind, content))
+                    .is_err()
+            {
+                return false;
+            }
+            return true;
+        }
+
+        let content = match read(&self.path) {
+            Ok(content) => Some(content),
+            Err(e) => {
+                log::warn!("Cannot read hot-reload source {}: {e}", self.path.display());
+                None
+            }
+        };
+        // Metadata changed (for example a touch), but an identical payload
+        // must not reset JS/document state.
+        self.pending = if content.as_ref() == self.content.as_ref() {
+            None
+        } else {
+            content.clone()
+        };
+        self.content = content;
+        self.signature = signature;
+        true
+    }
+}
+
+/// Debug-only watcher owned by the input loop.
 pub(super) struct HotReloadWatcher {
     rx: Receiver<HotReloadEvent>,
     #[cfg_attr(not(test), allow(dead_code))]
     ready_rx: Receiver<()>,
-    stop_flags: Vec<Arc<AtomicBool>>,
-    handles: Vec<JoinHandle<()>>,
+    stop: Arc<AtomicBool>,
+    handle: Option<JoinHandle<()>>,
 }
 
 impl HotReloadWatcher {
@@ -56,131 +145,67 @@ impl HotReloadWatcher {
 
 impl Drop for HotReloadWatcher {
     fn drop(&mut self) {
-        for stop in &self.stop_flags {
-            stop.store(true, Ordering::Relaxed);
-        }
-        for handle in self.handles.drain(..) {
-            if let Err(payload) = handle.join() {
-                log::error!("Hot-reload watcher panicked: {payload:?}");
-            }
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take()
+            && let Err(payload) = handle.join()
+        {
+            log::error!("Hot-reload watcher panicked: {payload:?}");
         }
     }
 }
 
-/// Watch every `(kind, path)` pair and send stable updates on one channel.
-pub(super) fn spawn(watches: Vec<(SourceKind, &str)>) -> HotReloadWatcher {
+/// Watch every selected source and send stable updates on one channel.
+pub(super) fn spawn(watches: SourceWatches<'_>) -> HotReloadWatcher {
     let (tx, rx) = mpsc::channel();
     let (ready_tx, ready_rx) = mpsc::channel();
-    let mut stop_flags = Vec::new();
-    let mut handles = Vec::new();
+    let stop = Arc::new(AtomicBool::new(false));
+    let thread_stop = Arc::clone(&stop);
+    let watches = watches
+        .into_iter()
+        .map(|(kind, path)| (kind, path.to_owned()))
+        .collect::<Vec<_>>();
 
-    for (kind, path) in watches {
-        let path = PathBuf::from(path);
-        let stop = Arc::new(AtomicBool::new(false));
-        let thread_stop = Arc::clone(&stop);
-        let tx = tx.clone();
-        let ready_tx = ready_tx.clone();
-        let result = thread::Builder::new()
-            .name(format!("htui-hot-reload-{:?}", kind))
-            .spawn(move || watch(kind, path, tx, ready_tx, thread_stop));
-        match result {
-            Ok(handle) => {
-                stop_flags.push(stop);
-                handles.push(handle);
+    let handle = thread::Builder::new()
+        .name("htui-hot-reload".to_string())
+        .spawn(move || {
+            let mut states = watches
+                .into_iter()
+                .map(|(kind, path)| WatchState::new(kind, &path))
+                .collect::<Vec<_>>();
+
+            // The baseline must exist before a caller starts a negative-test
+            // window; otherwise a slow scheduler could make a later write look
+            // like the watcher's first observation.
+            let _ = ready_tx.send(());
+
+            while !thread_stop.load(Ordering::Relaxed) {
+                thread::sleep(POLL_INTERVAL);
+                if thread_stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                if !states.iter_mut().all(|state| state.poll(&tx)) {
+                    break;
+                }
             }
-            Err(e) => log::error!("Failed to start hot-reload watcher: {e}"),
+        });
+
+    let handle = match handle {
+        Ok(handle) => Some(handle),
+        Err(e) => {
+            log::error!("Failed to start hot-reload watcher: {e}");
+            None
         }
-    }
+    };
 
     HotReloadWatcher {
         rx,
         ready_rx,
-        stop_flags,
-        handles,
+        stop,
+        handle,
     }
 }
 
-fn watch(
-    kind: SourceKind,
-    path: PathBuf,
-    tx: Sender<HotReloadEvent>,
-    ready_tx: Sender<()>,
-    stop: Arc<AtomicBool>,
-) {
-    let mut last_signature = signature(&path).ok();
-    let mut last_content: Option<String> = read(&path).ok();
-    // The initial baseline must exist before a caller starts a negative-test
-    // window; otherwise a slow CI scheduler could make a later write look like
-    // the watcher's first observation.
-    let _ = ready_tx.send(());
-    let mut pending: Option<String> = None;
-
-    while !stop.load(Ordering::Relaxed) {
-        thread::sleep(POLL_INTERVAL);
-        if stop.load(Ordering::Relaxed) {
-            break;
-        }
-
-        // Cheap pre-check: unchanged metadata does not read the payload. The
-        // content comparison is still authoritative because mtime precision
-        // and editor save semantics differ across platforms/filesystems.
-        let current_signature = signature(&path).ok();
-        if current_signature == last_signature {
-            // The new signature stayed stable for one poll, so emit the full
-            // payload that was read when the metadata first changed.
-            if let Some(current) = pending.take() {
-                let event = match kind {
-                    SourceKind::Html => HotReloadEvent::Html(current),
-                    SourceKind::Css => HotReloadEvent::Css(current),
-                    SourceKind::Js => HotReloadEvent::Js(current),
-                };
-                if tx.send(event).is_err() {
-                    break;
-                }
-            }
-            continue;
-        }
-
-        let current_content = match read(&path) {
-            Ok(source) => Some(source),
-            Err(e) => {
-                log::warn!("Cannot read hot-reload source {}: {e}", path.display());
-                None
-            }
-        };
-
-        match current_content {
-            Some(current) => {
-                let changed = last_content.as_ref() != Some(&current);
-                last_content = Some(current);
-                pending = if changed {
-                    last_content.clone()
-                } else {
-                    // Metadata changed (for example a touch), but the payload
-                    // is identical. Do not reset JS/document state.
-                    None
-                };
-            }
-            None => {
-                last_content = None;
-                pending = None;
-            }
-        }
-        last_signature = current_signature;
-    }
-
-    log::debug!("Hot-reload watcher exiting");
-}
-
-fn signature(path: &PathBuf) -> std::io::Result<FileSignature> {
-    let metadata = fs::metadata(path)?;
-    Ok(FileSignature {
-        modified: metadata.modified().ok(),
-        len: metadata.len(),
-    })
-}
-
-fn read(path: &PathBuf) -> std::io::Result<String> {
+fn read(path: &Path) -> std::io::Result<String> {
     fs::read_to_string(path)
 }
 

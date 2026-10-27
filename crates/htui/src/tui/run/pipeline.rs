@@ -4,7 +4,6 @@
 use std::io::{BufWriter, Write, stdout};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc;
 
 use crossterm::execute;
 use indexmap::IndexMap;
@@ -17,9 +16,11 @@ use crate::html::css_parse::{
 use crate::layout::Rect;
 use crate::layout::layout::TermMap;
 use crate::layout::layoutbox::{pin_fixed_boxes, pin_sticky_boxes};
-use crate::tdom::node::{NodeArena, NodeId, NodeType};
+use crate::source::SharedSourceText;
+use crate::tdom::node::{NodeArena, NodeId, NodeType, SharedNodeArena};
 use crate::tui::graph_api::{DirtyInfo, TermLayout};
 
+use super::GeometrySender;
 use super::overlay::apply_select_overlay;
 use super::region::{incremental_region, pinned_boxes_rects, pseudo_affected_region, union_rect};
 use super::selection::{highlight_lines, lines_bounds};
@@ -94,7 +95,7 @@ impl RenderState {
     pub(super) fn redraw<W: Write>(
         &mut self,
         out: &mut BufWriter<W>,
-        geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>,
+        geo_tx: &GeometrySender,
         term_map: &TermMap,
         scroll_y: u32,
         zoom: f32,
@@ -114,7 +115,7 @@ impl RenderState {
     fn layout_and_paint<W: Write>(
         &mut self,
         out: &mut BufWriter<W>,
-        geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>,
+        geo_tx: &GeometrySender,
         term_map: &TermMap,
         arena: NodeArena,
         root_id: NodeId,
@@ -289,9 +290,9 @@ impl RenderState {
     pub(super) fn render_arena<W: Write>(
         &mut self,
         out: &mut BufWriter<W>,
-        geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>,
+        geo_tx: &GeometrySender,
         term_map: &TermMap,
-        arena: &Arc<NodeArena>,
+        arena: &SharedNodeArena,
         root_id: NodeId,
         scroll_y: u32,
         zoom: f32,
@@ -453,7 +454,7 @@ impl RenderState {
     /// is forwarded to the hit-test thread so hit regions stay in sync. Backs
     /// the scroll-aware path of [`RenderCmd::Rerender`] when the document has
     /// pinned boxes; the caller renders the frame afterwards.
-    pub(super) fn pin_fixed_and_repaint(&mut self, geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>) {
+    pub(super) fn pin_fixed_and_repaint(&mut self, geo_tx: &GeometrySender) {
         let Some(tl) = self.term_layout.as_mut() else {
             return;
         };
@@ -508,9 +509,9 @@ impl RenderState {
     pub(super) fn reload_css<W: Write>(
         &mut self,
         out: &mut BufWriter<W>,
-        geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>,
+        geo_tx: &GeometrySender,
         term_map: &TermMap,
-        css: Arc<str>,
+        css: SharedSourceText,
     ) {
         self.session_css = css;
         self.rebuild_css_rules();
@@ -531,11 +532,11 @@ impl RenderState {
     pub(super) fn render_document<W: Write>(
         &mut self,
         out: &mut BufWriter<W>,
-        geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>,
+        geo_tx: &GeometrySender,
         term_map: &TermMap,
-        arena: Arc<NodeArena>,
+        arena: SharedNodeArena,
         root_id: NodeId,
-        document_css: Arc<str>,
+        document_css: SharedSourceText,
         scroll_y: u32,
         zoom: f32,
         dirty: DirtyInfo,
@@ -564,7 +565,7 @@ mod tests {
 
     fn state(
         document: crate::html::html_parse::ParsedDocument,
-        session_css: Arc<str>,
+        session_css: SharedSourceText,
     ) -> RenderState {
         let document_css = Arc::clone(&document.css);
         let rules = parse_css_source(&combined_css_source(&document_css, &session_css));

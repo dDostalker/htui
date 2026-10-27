@@ -1,6 +1,9 @@
 //! Hit regions and spatial lookup over the laid-out box forest.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use crate::{
     layout::layoutbox::{LayoutBox, Rect},
@@ -32,6 +35,9 @@ impl HitRegion {
         self.path.first().and_then(|e| e.id.as_deref())
     }
 }
+
+/// A hit map shared between the hit-test, input and script threads.
+pub type SharedHitMap = Arc<Mutex<Arc<HitMap>>>;
 
 /// All hit regions of the latest layout pass.
 #[derive(Default)]

@@ -9,22 +9,25 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::config::Config;
-use crate::events::{Geometry, HitMap};
+use crate::events::{HitMap, SharedGeometry, SharedHitMap};
 use crate::html::css_parse::{DynamicState, PseudoClass, css_pseudo_rule_set};
 use crate::html::html_parse::ParsedDocument;
 use crate::layout::layout::TermMap;
-use crate::tdom::node::{NodeArena, NodeId};
+use crate::source::SharedSourceText;
+use crate::tdom::node::NodeId;
 use crate::tui::graph_api::{DrainedBatch, InputState, RenderCmd};
 
+use super::GeometrySender;
+use super::LiveDocument;
 use super::pipeline::{combined_css_source, flush_frame, parse_css_source};
 use super::state::RenderState;
 
 pub(super) fn render_thread(
     rx: mpsc::Receiver<RenderCmd>,
     document: ParsedDocument,
-    session_css: Arc<str>,
+    session_css: SharedSourceText,
     max_scroll: Arc<AtomicU32>,
-    geo_tx: Option<mpsc::Sender<Arc<Geometry>>>,
+    geo_tx: GeometrySender,
     selection_text: Arc<Mutex<String>>,
     render_beat: Arc<AtomicU64>,
     config: Config,
@@ -364,7 +367,7 @@ pub(super) fn render_thread(
 /// Consumes geometry snapshots published by the render thread and replaces
 /// the shared hit map with a freshly built region list. Exits when the render
 /// thread drops the channel (i.e. on quit).
-pub(super) fn hit_test_thread(rx: mpsc::Receiver<Arc<Geometry>>, hit_map: Arc<Mutex<Arc<HitMap>>>) {
+pub(super) fn hit_test_thread(rx: mpsc::Receiver<SharedGeometry>, hit_map: SharedHitMap) {
     while let Ok(geo) = rx.recv() {
         let map = Arc::new(HitMap::build(&geo));
         match hit_map.lock() {
@@ -383,7 +386,7 @@ pub(super) fn fold_script_event(
     state: &mut InputState,
     cmds: &mut Vec<RenderCmd>,
     hovered: &mut Option<NodeId>,
-    live_dom: &mut Option<(Arc<NodeArena>, NodeId)>,
+    live_dom: &mut Option<LiveDocument>,
     ev: crate::script::ScriptEvent,
 ) {
     *hovered = ev.hovered;

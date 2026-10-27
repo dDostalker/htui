@@ -34,17 +34,24 @@ use crossterm::{
 
 use crate::Session;
 use crate::{
-    events::{Geometry, HitMap},
+    events::{HitMap, SharedGeometry, SharedHitMap},
     html::{css_parse::DynamicState, html_parse::Parser},
     layout::layout::{MAX_TERM_COLS, MAX_TERM_ROWS, TermMap},
     resources,
     script::{ScriptMsg, ScriptResponse, run_script_thread},
-    tdom::node::{NodeArena, NodeId},
+    source::SharedSourceText,
+    tdom::node::{NodeId, SharedNodeArena},
     tui::graph_api::{
         DirtyInfo, InputState, KEY_GATE_TIMEOUT, RenderCmd, apply_focus_requests,
         reapply_console_modes, trigger_refresh,
     },
 };
+
+/// The input loop's latest read-only DOM snapshot.
+type LiveDocument = (SharedNodeArena, NodeId);
+
+/// Channel used to publish immutable layout snapshots.
+type GeometrySender = Option<mpsc::Sender<SharedGeometry>>;
 
 /// Whether the terminal is currently in raw mode / alternate screen
 static TERMINAL_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -64,20 +71,13 @@ pub(crate) struct HotReloadPaths<'a> {
 }
 
 #[cfg_attr(not(debug_assertions), allow(dead_code))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SourceKind {
-    Html,
-    Css,
-    Js,
-}
-
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
 impl<'a> HotReloadPaths<'a> {
-    fn watches(self) -> Vec<(SourceKind, &'a str)> {
+    #[cfg(debug_assertions)]
+    fn watches(self) -> hot_reload::SourceWatches<'a> {
         [
-            self.html.map(|path| (SourceKind::Html, path)),
-            self.css.map(|path| (SourceKind::Css, path)),
-            self.js.map(|path| (SourceKind::Js, path)),
+            self.html.map(|path| (hot_reload::SourceKind::Html, path)),
+            self.css.map(|path| (hot_reload::SourceKind::Css, path)),
+            self.js.map(|path| (hot_reload::SourceKind::Js, path)),
         ]
         .into_iter()
         .flatten()
@@ -145,13 +145,13 @@ fn run_inner(
     // Keep the original HTML available for debug `mem://` re-parses. A
     // registry change cannot carry the document text, so this source is sent
     // back through the script engine to resolve every resource again.
-    let html_source: Arc<str> = Arc::from(html);
+    let html_source: SharedSourceText = Arc::from(html);
     let document = session.with_registry(|| {
         let mut parser = Parser::new(&html_source);
         parser.parse_with_scripts()
     });
-    let session_css: Arc<str> = Arc::from(css);
-    let session_js: Arc<str> = Arc::from(js);
+    let session_css: SharedSourceText = Arc::from(css);
+    let session_js: SharedSourceText = Arc::from(js);
     let config = *session.config();
 
     // A debug-only side channel reads stable source edits. HTML goes to the
@@ -175,8 +175,8 @@ fn run_inner(
 
     // The render thread sends layout snapshots to the hit-test thread.
     // The hit-test thread publishes clickable regions in this shared map.
-    let (geo_tx, geo_rx) = mpsc::channel::<Arc<Geometry>>();
-    let hit_map: Arc<Mutex<Arc<HitMap>>> = Arc::new(Mutex::new(Arc::new(HitMap::new())));
+    let (geo_tx, geo_rx) = mpsc::channel::<SharedGeometry>();
+    let hit_map: SharedHitMap = Arc::new(Mutex::new(Arc::new(HitMap::new())));
 
     // Input-loop requests go to the script thread; its responses come back
     // on the second channel. Start that thread only when event bindings exist.
@@ -204,7 +204,7 @@ fn run_inner(
     // Wait for the engine to come up — the first frame needs its live arena.
     // `live_dom` is the input loop's latest DOM snapshot for read-only queries;
     // it is refreshed whenever JS mutates the arena.
-    let mut live_dom: Option<(Arc<NodeArena>, NodeId)> = None;
+    let mut live_dom: Option<LiveDocument> = None;
     if script_thread.is_some() {
         match script_out_rx.recv() {
             Ok(ScriptResponse::Ready { arena, root_id }) => live_dom = Some((arena, root_id)),

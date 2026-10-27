@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use htui::events::{EventBindings, Geometry, HitMap, HoverState, KeyEventInfo};
+use htui::events::{EventBindings, Geometry, HitMap, HoverState, KeyEventInfo, SharedHitMap};
 use htui::layout::layout::TermMap;
 use htui::layout::{BoxConstraint, Cursor, layout_tree};
 use htui::resources::{ResourceRegistry, with_registry};
@@ -815,7 +815,7 @@ fn run_script_thread_ready_then_processes_messages() {
     let calls = Arc::new(Mutex::new(0usize));
     let calls2 = Arc::clone(&calls);
     let bindings = counting_host(calls2);
-    let hit_map: Arc<Mutex<Arc<HitMap>>> = Arc::new(Mutex::new(Arc::new(HitMap::new())));
+    let hit_map: SharedHitMap = Arc::new(Mutex::new(Arc::new(HitMap::new())));
 
     let (tx, out_rx, handle) = spawn_script(
         r#"<div id="btn" onclick="tick()">click me</div>"#,
@@ -853,7 +853,7 @@ fn run_script_thread_stays_silent_when_idle() {
     // An idle page (no timers, no fetches, no messages) must not tick the
     // loop: the thread blocks until a message arrives instead of emitting
     // empty `Event` responses on a poll interval.
-    let hit_map: Arc<Mutex<Arc<HitMap>>> = Arc::new(Mutex::new(Arc::new(HitMap::new())));
+    let hit_map: SharedHitMap = Arc::new(Mutex::new(Arc::new(HitMap::new())));
 
     let (tx, out_rx, handle) = spawn_script(
         r#"<div id="btn">plain</div>"#,
@@ -889,7 +889,7 @@ fn blocking_host_fn_does_not_block_the_input_side_channel() {
         std::thread::sleep(Duration::from_millis(300));
         boa_engine::JsValue::undefined()
     });
-    let hit_map: Arc<Mutex<Arc<HitMap>>> = Arc::new(Mutex::new(Arc::new(HitMap::new())));
+    let hit_map: SharedHitMap = Arc::new(Mutex::new(Arc::new(HitMap::new())));
 
     let (tx, out_rx, _handle) = spawn_script(
         r#"<div id="btn" onclick="slow()">click me</div>"#,
@@ -1129,7 +1129,7 @@ fn build_geometry(html: &str, bindings: EventBindings) -> (ScriptEngine, Geometr
 fn spawn_script(
     html: &str,
     bindings: EventBindings,
-    hit_map: Arc<Mutex<Arc<HitMap>>>,
+    hit_map: SharedHitMap,
 ) -> (Sender<ScriptMsg>, Receiver<ScriptResponse>, JoinHandle<()>) {
     let mut parser = htui::html::html_parse::Parser::new(html);
     let document = parser.parse_with_scripts();
@@ -1143,7 +1143,7 @@ fn spawn_script(
 
 /// Lay out `arena` and publish the resulting hit map for the script thread
 /// (its region node ids come from the same arena the script thread owns).
-fn publish_hit_map(hit_map: &Arc<Mutex<Arc<HitMap>>>, arena: &NodeArena, root_id: NodeId) {
+fn publish_hit_map(hit_map: &SharedHitMap, arena: &NodeArena, root_id: NodeId) {
     let term_map = TermMap {
         columns: COLS,
         rows: ROWS,
