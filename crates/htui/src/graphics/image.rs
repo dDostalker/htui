@@ -450,7 +450,7 @@ pub fn render_image_at(
 /// caller-provided `&mut [Block]` instead of a full `TermLayout`.
 ///
 /// `cache` is shared across frames so identical `(path, size)` requests hit
-/// the previously decoded raster instead of re-opening the file.
+/// the cached raster instead of re-opening the file.
 ///
 /// `max_size` is the image's full size in terminal cells and is always what
 /// gets decoded; `clip` restricts which cells are actually stamped. Pass

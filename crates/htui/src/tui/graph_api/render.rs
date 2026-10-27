@@ -180,11 +180,9 @@ impl TermLayout {
 
     /// The visible viewport as `(scroll_start, scroll_end)` indexes into
     /// `layout`. The scroll position is normally clamped to the canvas, but
-    /// the bounds are guarded anyway: a stale out-of-range position (sent
-    /// before the clamp republished, or one the old `max_scroll` advertised
-    /// for documents taller than the buffer cap) must degrade to an empty
-    /// frame instead of indexing past the buffer and panicking the render
-    /// thread.
+    /// the bounds are guarded anyway: a stale out-of-range position must
+    /// degrade to an empty frame instead of indexing past the buffer and
+    /// panicking the render thread.
     fn viewport_range(&self) -> (usize, usize) {
         let cols = self.columns as usize;
         let scroll_start = (self.scroll_y as usize)
@@ -197,10 +195,9 @@ impl TermLayout {
     }
 
     /// Scan the next maximal batch of same-styled cells starting at/after
-    /// `from`, appending its words to `batch` (cleared first; the buffer is
-    /// reused across batches so a styled run no longer allocates a fresh
-    /// `String` — it grows to the longest run once and is reused
-    /// thereafter). Returns `None` past the viewport end.
+    /// `from`, appending its words to `batch`. The buffer is cleared and
+    /// reused across batches, growing to the longest observed run. Returns
+    /// `None` past the viewport end.
     ///
     /// This scan is the single source of truth for the run batching shared
     /// by [`Self::render_to_bytes`] and [`Self::render_diff_to_bytes`]:
@@ -314,11 +311,10 @@ fn block_state_eq(a: &Block, b: &Block) -> bool {
 }
 
 /// Write the SGR escape codes for `style` / `fg` / `bg` plus `text` straight
-/// into `out`, avoiding the intermediate `String` that the old
-/// `format!("{styled}")` path allocated per styled run. `Vec<u8>` implements
-/// `io::Write`, so `write!` dispatches through it and the bytes land directly
-/// in the output buffer (the writer is infallible for `Vec<u8>`; the error
-/// branch exists only to satisfy the `io::Write` contract).
+/// into `out`. `Vec<u8>` implements `io::Write`, so `write!` dispatches
+/// through it and the bytes land directly in the output buffer (the writer is
+/// infallible for `Vec<u8>`; the error branch exists only to satisfy the
+/// `io::Write` contract).
 fn push_styled(
     out: &mut Vec<u8>,
     text: &str,

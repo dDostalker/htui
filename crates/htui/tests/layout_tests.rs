@@ -516,12 +516,9 @@ fn inline_row_skips_unlayouttable_item_without_shifting_siblings() {
     init();
     // An inline row containing a `display: inline-grid` item (grid geometry
     // is unimplemented — its layout dispatch returns `None`) must skip that
-    // item. The measurement pass used to compact successful measurements
-    // while the placement pass indexed by the item position, so every later
-    // sibling consumed the *previous* item's measurements and the last
-    // sibling's box was never placed at all (its text still leaked through
-    // the parent's inline runs, but its box — here the background fill —
-    // went missing).
+    // item. Measurement indices and placement positions stay aligned so a
+    // later sibling consumes its own measurement and its box, including any
+    // background fill, is painted.
     let html = r#"<div><span class="a">AA</span><span class="g" style="display: inline-grid">G</span><span class="b">BBB</span></div>"#;
     let css = ".a, .b { display: inline-block; } .b { background-color: navy; }";
     let (root_id, arena) = setup(html, css);
@@ -760,9 +757,8 @@ fn test_layout_text_semantics_styles() {
     // The UA default for `<mark>` resolves through the shared
     // `inline_ua_declarations` table (`background-color: yellow` → the named
     // colour's RGB value), the same source the block-level path injects into
-    // `css_attr` — inline and block `<mark>` paint the identical yellow.
-    // (The inline path used to hardcode the ANSI `Color::Yellow` variant,
-    // diverging from the block path's truecolour yellow.)
+    // `css_attr` — inline and block `<mark>` paint the identical truecolour
+    // yellow.
     assert_eq!(
         tl.layout[mark_idx].bcolor,
         Some(Color::Rgb {

@@ -74,9 +74,8 @@ pub enum SelectorError {
 /// `an + b` expression used by the `:nth-child()` pseudo-class.
 ///
 /// The selector matches an element when its 1-based index among its parent's
-/// siblings equals `a*n + b` for some non-negative integer `n`. This is the
-/// minimal subset of the CSS formula that the existing visual tests need
-/// (`even` → `2n`, `odd` → `2n+1`, and bare integers like `:nth-child(2)`).
+/// siblings equals `a*n + b` for some non-negative integer `n`. Supported
+/// forms are `even`, `odd`, and bare integers like `:nth-child(2)`.
 /// More complex forms (`-n+3`, `n+2` with implicit coefficient) are rejected
 /// during parsing so we never silently mis-match.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -266,9 +265,9 @@ impl FromStr for CssSelector {
         // A trailing `::before` / `::after` pseudo-element (inside the last
         // segment) is lifted off the chain: the chain itself matches the
         // origin element and the pseudo-element rides along as a flag.
-        // Only `::before` / `::after` are recognized (single-`:` legacy
-        // spellings included); anything else after `::` stays the
-        // unsupported pseudo-class error it has always been.
+        // Only `::before` / `::after` are recognized, including their
+        // single-colon CSS compatibility spellings; other `::` names remain
+        // unsupported pseudo-class errors.
         let mut pseudo_element = None;
         let mut segments: Vec<String> = segments.iter().map(|s| s.to_string()).collect();
         if let Some(last) = segments.last_mut()
@@ -643,8 +642,7 @@ fn parse_compound_inner(
 
 /// Parse the argument of `:nth-child(...)`.
 ///
-/// Accepted forms (matching the subset of the CSS `an+b` grammar that the
-/// visual tests use):
+/// Accepted `an+b` forms:
 /// - `even`     → `2n`     (every 2nd starting at 2)
 /// - `odd`      → `2n + 1` (every 2nd starting at 1)
 /// - `<n>`      → bare integer, matches exactly that 1-based index

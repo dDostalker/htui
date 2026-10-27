@@ -226,8 +226,7 @@ fn test_nth_child_compound_with_tag() {
 
 #[test]
 fn test_nth_child_descendant_combinator() {
-    // `table tr:nth-child(even)` — the exact selector used by the
-    // `table/index.html` visual test for striping. The descendant
+    // `table tr:nth-child(even)` — a striping selector. The descendant
     // combinator must still walk ancestors correctly.
     init();
     let mut arena = NodeArena::default();
@@ -1003,8 +1002,7 @@ fn test_cascade_important_precedence_with_inline_style() {
 fn test_cascade_same_specificity_later_source_wins() {
     init();
     // `.a` appears before and after `.b` at equal specificity; the last
-    // declaration in source order wins (green). The old same-selector rule
-    // merging would have collapsed `.a`'s two occurrences and reported blue.
+    // declaration in source order wins (green).
     let mut arena = NodeArena::default();
     let (root, p_id) = build_p_with_classes(&mut arena);
     let css = Parser::new(".a { color: red } .b { color: blue } .a { color: green }").parse();
@@ -2802,12 +2800,9 @@ fn white_space_inherits_to_inline_children() {
 
 #[test]
 fn stale_node_id_fails_to_match_instead_of_panicking() {
-    // A `NodeId` from a previous arena generation — a node JS removed between
-    // the hit map's snapshot and a hover repaint (the music-demo quick-click
-    // race: hovering a song while its click handler rebuilds the list) —
-    // must fail to match rather than panic with "invalid SlotMap key used".
-    // The public entry points' doc contract promises `arena.get` lookups;
-    // `matches_css` used to index the node parameter directly.
+    // A `NodeId` absent from the current arena — for example after JS removes
+    // the node between the hit-map snapshot and a hover repaint — must fail
+    // to match rather than panic. Public entry points use `arena.get` lookups.
     let mut p = html_parse::Parser::new(r#"<div class="btn"><span class="btn">x</span></div>"#);
     let (root_id, mut arena, _) = p.parse();
     let mut cp = Parser::new(".btn:hover { color: red }");
@@ -3110,8 +3105,7 @@ fn test_form_state_pseudo_classes() {
 
 #[test]
 fn test_selector_paren_args_allow_spaces() {
-    // Regression for the paren-unaware compound split: whitespace inside a
-    // function argument used to tear the pseudo-class apart.
+    // Whitespace is allowed inside a pseudo-class function argument.
     init();
     let sel: CssSelector = ":nth-child(2n + 1)".parse().unwrap();
     let (arena, _parent, kids) = children_of(3);

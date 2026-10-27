@@ -371,7 +371,7 @@ impl RenderState {
 
     /// Re-cascade the cached geometry with the session interaction state
     /// (`self.dynamic`) and repaint only the region affected by `pseudo`
-    /// moving from `prev` to `new` (the old highlight is cleared, the new one
+    /// moving from `prev` to `new` (the previous highlight is cleared, the new one
     /// painted). When neither position matches a rule of that pseudo-class the
     /// cascade paints identically, so nothing is drawn.
     ///
@@ -392,11 +392,9 @@ impl RenderState {
         let Some(geo) = self.geometry.as_ref() else {
             return;
         };
-        // The hovered / focused id may be stale: the element it names can be
-        // removed by JS between the hit map's snapshot and this repaint (the
-        // music-demo quick-click race). Filter both against the cached
-        // arena — a stale id restyles nothing, and the ancestor-chain walk
-        // below must never see a key the arena does not hold.
+        // The hovered / focused id may be stale after JS removes the named
+        // element. Filter both against the cached arena — a stale id restyles
+        // nothing, and the ancestor-chain walk must never see a missing key.
         let in_geo = |id: Option<NodeId>| id.filter(|id| geo.arena.contains_key(*id));
         let prev = in_geo(prev);
         let new = in_geo(new);

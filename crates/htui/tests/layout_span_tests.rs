@@ -556,7 +556,7 @@ fn test_h1_prefix_is_a_separate_run() {
 
 #[test]
 fn test_pure_span_inside_p_renders_text() {
-    // Regression guard: a <p> whose only child is a <span> must still emit
+    // A <p> whose only child is a <span> must still emit
     // the span's text on the canvas.
     init();
     let html = "<p><span>x</span></p>";

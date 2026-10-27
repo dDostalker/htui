@@ -580,9 +580,8 @@ fn absolute_insets_anchor_to_the_positioned_ancestors_padding_box() {
     init();
     // CSS: an absolutely positioned descendant's insets resolve against the
     // nearest positioned ancestor's *padding box* — its border-box inset by
-    // the border thickness. The implementation used to hand down the
-    // border-box rect (the module doc already claimed padding-box), so a
-    // bordered positioned parent shifted the child by its own border width.
+    // the border thickness, so a bordered positioned parent does not add its
+    // own border width to the child's inset.
     let html = r#"
         <div class="wrap"><div class="dot">X</div></div>
     "#;

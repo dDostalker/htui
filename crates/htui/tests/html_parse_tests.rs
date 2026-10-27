@@ -53,9 +53,8 @@ fn test_tag_map_metadata() {
 
 #[test]
 fn test_tag_map_heading_group_and_address() {
-    // `<h6>` / `<hgroup>` / `<address>` must map to their own `NodeType`
-    // (they used to be flattened by the HTML parser), and the case
-    // normalisation must match the browser's tag-name handling.
+    // `<h6>` / `<hgroup>` / `<address>` map to their own `NodeType`, and case
+    // normalisation matches the browser's tag-name handling.
     init();
     assert_eq!(html_parse::tag_name_to_node_type("h6"), Some(NodeType::H6));
     assert_eq!(html_parse::tag_name_to_node_type("H6"), Some(NodeType::H6));

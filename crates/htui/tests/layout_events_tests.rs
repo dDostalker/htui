@@ -672,11 +672,9 @@ fn reset_document_state_clears_replaced_document_interaction() {
 
 #[test]
 fn focus_behind_a_pending_arena_merges_into_the_arena_dynamic() {
-    // The render thread used to let a `Focus` queued behind a pending
-    // `RenderArena` supersede it (dropping the DOM mutations the snapshot
-    // carries), while the input-side pre-filter dropped the `Focus` instead
-    // (freezing the `:focus` highlight). The drain now merges the focus into
-    // the arena's interaction state, so one pass paints both.
+    // A `Focus` queued behind a pending `RenderArena` merges into that
+    // arena's interaction state, preserving both its DOM mutations and the
+    // `:focus` update in one repaint.
     let new_focus = NodeId::default();
     let mut batch = DrainedBatch::new();
     batch.absorb(RenderCmd::RenderArena {
@@ -734,8 +732,8 @@ fn hover_behind_a_pending_arena_is_deferred_not_dropped() {
 #[test]
 fn hover_behind_a_pending_redraw_is_deferred_not_dropped() {
     // A resize pushes a `Redraw`, and pointer motion in the same batch queues
-    // a `Hover` behind it. The drain used to let the hover supersede the
-    // redraw, permanently losing the resize re-layout; it must defer instead.
+    // a `Hover` behind it. The drain defers the hover so the re-layout
+    // remains intact.
     let mut batch = DrainedBatch::new();
     batch.absorb(RenderCmd::Redraw {
         scroll_y: 0,
@@ -2171,7 +2169,7 @@ fn unknown_action_is_ignored_without_error() {
 }
 
 #[test]
-fn sysmon_refresh_pipeline_updates_the_dom() {
+fn refresh_pipeline_updates_the_dom() {
     // Full demo pipeline: JS `refresh()` calls the host `sample()` (returns a
     // JS object) and writes textContent into the DOM, marking the engine dirty
     // so the input loop would emit `RenderArena`.
@@ -2217,7 +2215,7 @@ fn sysmon_refresh_pipeline_updates_the_dom() {
 }
 
 #[test]
-fn sysmon_refresh_renders_the_progress_bar() {
+fn refresh_renders_the_progress_bar() {
     // End-to-end over the interactive path: JS `refresh()` calls the host
     // `sample()` and writes a progress-bar string into `<p id=cpu>`, then the
     // engine's arena is laid out the way the render thread does it. The bar
@@ -2344,8 +2342,8 @@ fn hover_background_fills_padding_cells_not_just_the_text_run() {
     // A `:hover` background introduced by the render thread's re-cascade (the
     // element had no background when its boxes were laid out) must fill the
     // whole padding-box, not only the text columns. Without this, the padding
-    // cells of a bordered/padded `.btn:hover` keep the page background and the
-    // highlight reads as a hollow frame (the configurator save/reset bug).
+    // cells of a bordered/padded `.btn:hover` keep the page background,
+    // making the highlight look like a hollow frame.
     let html = r#"<div id="save" class="btn">Save</div>"#;
     let css = ".btn { padding-left: 1ch; padding-right: 1ch; border: 1ch solid #7aa2f7; }\n\
                .btn:hover { background-color: #28304d; }";

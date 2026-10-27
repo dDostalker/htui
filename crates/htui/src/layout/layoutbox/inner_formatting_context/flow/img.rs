@@ -1,12 +1,10 @@
 //! Compatibility wrapper around the geometry-driven replaced-element path.
 //!
-//! `<img>` is now classified as [`crate::layout::layoutbox::generation::GeneratedBoxKind::Replaced`]
-//! during the generation phase and dispatched through the geometry entry
-//! point. This entry point remains so external callers and the existing
-//! flex / table integration continue to compile; it simply defers to the
-//! geometry dispatcher and returns `None` for non-`<img>` nodes (the
-//! geometry phase itself decides whether the payload qualifies as a
-//! replaced element).
+//! `<img>` is classified as [`crate::layout::layoutbox::generation::GeneratedBoxKind::Replaced`]
+//! and dispatched through the geometry entry point. This wrapper preserves the
+//! existing flex / table integration; it defers to the geometry dispatcher and
+//! returns `None` for non-`<img>` nodes (the geometry phase decides whether
+//! the payload qualifies as a replaced element).
 
 use crate::{
     layout::{BoxConstraint, Cursor, LayoutBox, LayoutContext},

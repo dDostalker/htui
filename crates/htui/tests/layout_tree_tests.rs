@@ -8,8 +8,7 @@
 //! * Nested block elements inherit `x` / `width` from their parent's
 //!   containing block, so `text-align` is computed against the inner width
 //!   rather than the terminal width.
-//! * `<aside>` provides a containing block to its children (previously it
-//!   called `collect_all_text()` and could not nest anything meaningful).
+//! * `<aside>` provides a containing block to its nested children.
 
 use crossterm::style::Color;
 use htui::html::{css_parse, html_parse};
@@ -210,10 +209,8 @@ fn layout_box_rect_is_deterministic() {
 
 #[test]
 fn rendered_rows_walks_full_layout_tree() {
-    // Locks down the scroll-fix: `rendered_rows` (which drives `max_scroll`)
-    // must reflect the deepest descendant's bottom row, not just the
-    // top-level boxes. Regression test for the bug where nested `<p>`
-    // children of `<div>` were ignored when computing `max_y`.
+    // `rendered_rows` (which drives `max_scroll`) reflects the deepest
+    // descendant's bottom row, not just top-level boxes.
     use htui::layout::inner_formatting_context::flow::layout_tree;
 
     // Layout sketch (each block's rect encompasses its children — no empty

@@ -142,8 +142,7 @@ fn test_table_th_ua_defaults_bold_and_centered() {
     init();
     // Browser UA stylesheet: `th { font-weight: bold; text-align: center }`.
     // Both defaults resolve from the shared UA declaration table and yield to
-    // author declarations — the cell used to render identical to `<td>`, so
-    // a header did not look like one.
+    // author declarations.
     let html = "<table><tr><th>Hdr</th></tr><tr><td>D</td></tr></table>";
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
@@ -412,7 +411,7 @@ fn test_table_cell_bg_color_applies() {
 
 #[test]
 fn test_table_nth_child_even_stripes_td_bg() {
-    // Mirrors the `table/index.html` visual test: `tr:nth-child(even) td` and
+    // `tr:nth-child(even) td` and
     // `tr:nth-child(odd) td` must colour the even / odd rows' cells
     // distinctly. Before the `:nth-child()` selector was implemented, both
     // rules silently no-op'd so all cells kept the same background.
@@ -638,7 +637,7 @@ fn test_table_column_width_grows_to_widest_cell() {
 #[test]
 fn test_table_row_grows_when_cell_text_wraps_on_narrow_terminals() {
     init();
-    // Regression: on a narrow terminal the column width is clamped below the
+    // On a narrow terminal the column width can be clamped below the
     // cell's text width, so the cell text wraps to several lines. The row
     // height must grow to hold every wrapped line — otherwise the wrapped
     // lines paint over the row below (here the <div> after the table).
@@ -720,9 +719,7 @@ fn test_table_outside_table_falls_back_to_block() {
 fn scaled_columns_never_collapse_to_zero_width() {
     init();
     // When one dominant column drives the total far past the available
-    // width, the narrow columns' proportional share used to round down to 0
-    // — a zero-width column is skipped by the paint phase and its content
-    // vanished silently. Every scaled column keeps a 1-cell floor, so each
+    // width. Every scaled column keeps a 1-cell floor, so each
     // narrow column still shows at least its first character.
     let long_word = "0123456789".repeat(33); // 330 chars
     let html = format!("<table><tr><td>a1</td><td>b2</td><td>{long_word}</td></tr></table>");
@@ -742,9 +739,8 @@ fn cell_column_width_counts_inline_descendant_text() {
     init();
     // A `<td><b>…</b></td>` cell's column must size to the bold text: the
     // inline descendants' text folds into the cell's own runs at layout
-    // time, so the column width must count it too — the old direct-text-only
-    // measurement reported 0 and the column collapsed to the 3-cell minimum,
-    // wrapping the content over many rows.
+    // time, so the column width must count descendant text rather than
+    // stopping at direct text nodes.
     let html = "<table><tr><td><b>tenchars!!</b></td><td>x</td></tr></table>";
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();

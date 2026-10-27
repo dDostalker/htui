@@ -2,11 +2,10 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Display cell width of a single `char`.
 ///
-/// Returns `0` for control characters (matching the legacy behaviour — null,
-/// BEL, etc. don't consume a column). Width values follow
-/// [Unicode Standard Annex #11] (East Asian Width) and pick up emoji codepoints
-/// that the previous hand-rolled range table missed (Emoticons,
-/// Misc Symbols and Pictographs, Transport, Dingbats, etc.).
+/// Returns `0` for control characters, which do not consume a column. Width
+/// values follow [Unicode Standard Annex #11] (East Asian Width), including
+/// emoji ranges such as Emoticons, Misc Symbols and Pictographs, Transport,
+/// and Dingbats.
 ///
 /// Use [`grapheme_width`] for multi-codepoint constructs (ZWJ sequences such
 /// as 👨‍👩‍👧, modifier sequences such as 👍🏽, presentation selectors such

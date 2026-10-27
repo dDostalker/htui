@@ -797,8 +797,7 @@ fn overflow_visible_paints_beyond_the_fixed_height() {
     init();
     // CSS default `overflow: visible`: the fixed-height frame stays 3 rows,
     // but the extra lines paint beyond it (bounded only by the ancestors' /
-    // canvas clip) instead of vanishing. The old renderer clipped
-    // unconditionally, diverging from every browser.
+    // canvas clip, matching browser `overflow: visible` behavior.
     let (term_map, tl) = draw(
         r#"<div class="card">line one<br>line two<br>line three<br>line four</div>"#,
         "body { margin: 0ch; } .card { height: 3ch; border: 1ch solid red; }",

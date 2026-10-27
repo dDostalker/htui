@@ -327,9 +327,7 @@ fn test_aside_text_align_right() {
 }
 
 // ============================================================
-// Multi-row background — regression coverage for the bug where
-// `<aside>` rendered its background only on the first row, leaving
-// nested block children visually detached from the aside's bg.
+// Multi-row background covers nested block children.
 // ============================================================
 
 #[test]
@@ -564,9 +562,7 @@ fn test_aside_with_nested_div_extends_bg_to_div_row() {
 
 #[test]
 fn test_aside_without_children_still_has_height_one() {
-    // Guard against an over-eager fix: an aside with no nested blocks must
-    // still report height=1 so single-row tests (e.g. test_aside_text_align_center)
-    // stay green.
+    // An aside containing only inline content still reports height=1.
     init();
     let html = "<aside>just text</aside>";
     let css = "aside { background-color: darkblue; }";

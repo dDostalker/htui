@@ -866,8 +866,7 @@ fn run_script_thread_stays_silent_when_idle() {
         other => panic!("expected Ready, got {other:?}"),
     }
 
-    // The old 50 ms poll cap delivered an empty `Event` within this window;
-    // the event-driven loop must produce nothing at all.
+    // The event-driven loop must produce no `Event` while the input is idle.
     assert!(
         out_rx.recv_timeout(Duration::from_millis(150)).is_err(),
         "idle script thread must not emit empty responses"

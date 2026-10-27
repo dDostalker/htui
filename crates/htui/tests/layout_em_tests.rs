@@ -1,17 +1,15 @@
 //! Tests for `<em>` (emphasis) inline rendering.
 //!
-//! `<em>` is recognised by the HTML parser and the selector parser, but
-//! previously had no handler in the layout pass — its text content was
-//! silently dropped because `walk_runs` only collected `Text`, `<span>` and
-//! `<a>` children. These tests pin down the inline rendering: em text
+//! `<em>` participates in inline rendering through `walk_runs`. These tests
+//! pin down that em text
 //! reaches the canvas, the user-agent default (`font-style: italic`) applies
 //! when no CSS overrides it, and author CSS overrides take precedence over
 //! the default (e.g. `em { font-style: normal }` or `em { color: red }`).
 //!
 //! The parser-level mapping (`<em>` → `NodeType::Em`) and CSS selector
 //! matching (`em { … }`) are covered by the generic tag-selector tests in
-//! `html_parse_tests` / `css_parse_tests`; here we focus on the layout-time
-//! behaviour so regressions in `walk_runs` are caught.
+//! `html_parse_tests` / `css_parse_tests`; these tests focus on layout-time
+//! behavior.
 
 use crossterm::style::Color;
 use htui::html::{css_parse, html_parse};

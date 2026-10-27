@@ -617,9 +617,7 @@ fn test_align_self_margin_box_pins_to_line_end() {
     init();
     // `align-self: flex-end` aligns the item's *margin-box* to the line end
     // (browser semantics): with `margin: 1ch`, B's 3-row margin-box hugs the
-    // container bottom, so the content sits on row 7-1-1 = 5. Regression for
-    // the bug where the leading margin was added on top of the alignment,
-    // pushing B past the container edge.
+    // container bottom, so the content sits on row 7-1-1 = 5.
     let html = r#"
         <div class="container"><div class="a">A</div><div class="b">B</div></div>
     "#;
@@ -1288,10 +1286,8 @@ fn test_flex_container_carries_flex_formatting_context() {
 }
 
 // ----------------------------------------------------------
-// Tests for v1 features that the visual tests exercise but the
-// existing unit tests do not cover: align-self, align-content,
-// justify-content: space-evenly, flex-shrink overflow, and
-// nested flex containers.
+// Coverage for align-self, align-content, justify-content: space-evenly,
+// flex-shrink overflow, and nested flex containers.
 // ----------------------------------------------------------
 
 /// Recursive count of boxes whose `inner_formatting_context` matches `ctx`.
@@ -1487,7 +1483,7 @@ fn test_flex_nested_containers_both_have_flex_formatting_context() {
 #[test]
 fn test_flex_nested_row_inside_row_stacks_three_rows() {
     init();
-    // Regression: a flex column nested inside a flex row must report its
+    // A flex column nested inside a flex row reports its
     // real intrinsic height (3 rows here) to the parent, so the parent's
     // line cross-axis size is 3 instead of collapsing to 1. Otherwise the
     // nested column gets clipped to 1 row and only the first child
@@ -1872,7 +1868,7 @@ fn test_visual_flex_nested_document_keeps_all_nested_items_visible() {
 #[test]
 fn test_flex_overflow_is_clipped_not_wrapped_on_small_terminals() {
     init();
-    // Regression: flex items whose allocated width exceeds the terminal
+    // Flex items whose allocated width exceeds the terminal
     // width (here `flex-shrink: 0` keeps the 60-cell basis) must be
     // clipped at the right edge of the canvas. The canvas is a flat 1-D
     // buffer, so writing a cell at column >= `columns` would wrap into
@@ -1932,10 +1928,8 @@ fn test_flex_overflow_is_clipped_not_wrapped_on_small_terminals() {
 #[test]
 fn test_flex_column_keeps_items_at_min_content_when_viewport_is_small() {
     init();
-    // Regression: a definite-height flex column must not crush its items
-    // below their min-content height (CSS `min-height: auto`). Previously
-    // the `.card` (natural height 5) was shrunk to the column's 2-row
-    // height, so its children spilled onto the card's bottom border row.
+    // A definite-height flex column must not crush its items below their
+    // min-content height (CSS `min-height: auto`).
     let html = r#"
         <div class="app">
             <div class="card">
@@ -2108,10 +2102,8 @@ fn test_flex_item_content_taller_than_container_height_is_not_clipped() {
     // A flex item whose content is taller than the container's explicit
     // `height` must not be clipped: the line's cross size grows to the
     // natural content size, and the pre-allocated item rect expands to fit
-    // the content's real border-box height. Regression guard for the
-    // `<hr>`-inside-flex-item case where the natural measure used to
-    // under-count `spacing_after` and the item's last row bled into the
-    // parent's paint clip (silently dropped).
+    // the content's real border-box height, including spacing after nested
+    // elements such as `<hr>`.
     let html = r#"
         <div class="container">
             <div class="item">
@@ -2156,14 +2148,10 @@ fn test_flex_item_content_taller_than_container_height_is_not_clipped() {
 #[test]
 fn test_flex_row_line_grows_when_item_content_wraps() {
     init();
-    // Regression: a flex item whose text wraps at the item's final width
-    // (e.g. the showcase DISK I/O card's "812 MB/s" on a narrow terminal)
-    // grows taller than the natural max-content measure. The line and the
-    // flex container must expand to cover the grown item, and the default
-    // `align-items: stretch` must stretch every item to the final line
-    // height. Before the fix the container stayed at the natural height, so
-    // the paint clip drew the card's bottom border over its own last
-    // content row (broken `└──  ──┘` frame).
+    // A flex item whose text wraps at its final width grows taller than the
+    // natural max-content measure. The line and flex container expand to
+    // cover that height, and `align-items: stretch` stretches every item to
+    // the final line height.
     let html = r#"
         <div class="row">
             <div class="card"><div>MEMORY</div><div>61%</div></div>
@@ -2255,9 +2243,8 @@ fn tall_column_flex_keeps_items_within_container_width() {
 }
 
 // ============================================================
-// Regression tests: browser-semantics fixes found by probe
-// review (stretch vs explicit height / auto margins /
-// max-width space redistribution).
+// Browser-semantics edge cases: stretch versus explicit height,
+// auto margins, and max-width space redistribution.
 // ============================================================
 
 #[test]
@@ -2343,10 +2330,7 @@ fn test_flex_grow_redistributes_space_when_capped_by_max_width() {
 fn test_flex_item_percentage_margin_resolves_against_container_width() {
     init();
     // Percentage margins on a flex item resolve against the container's
-    // content width (80 columns here): `margin-left: 10%` = 8 cells. The
-    // item preparation used to resolve edges against a `usize::MAX`
-    // containing width, turning the margin into ~9.2e17 cells and pushing
-    // the item off the canvas entirely.
+    // content width (80 columns here): `margin-left: 10%` = 8 cells.
     let html = r#"<div class="c"><div class="a">A</div></div>"#;
     let css = ".c { display: flex; } .a { margin-left: 10%; }";
     let (rows, _) = render_rows(html, css);
@@ -2396,10 +2380,8 @@ fn test_flex_column_item_percentage_margin_top_resolves_against_width() {
 fn test_flex_percentage_gap_degenerates_to_zero() {
     init();
     // Percentage gap is unsupported: the container's resolved axis size is
-    // not in scope at parse time, and the old sentinel resolution turned
-    // `gap: 50%` into billion-cell gaps that pushed every item off the
-    // canvas. A percentage gap now degenerates to 0 — both items render
-    // side by side instead of vanishing.
+    // not in scope at parse time. A percentage gap degenerates to 0, so
+    // both items render side by side.
     let html = r#"<div class="c"><div class="a">A</div><div class="b">B</div></div>"#;
     let css = ".c { display: flex; gap: 50%; }";
     let (rows, _) = render_rows(html, css);
@@ -2420,9 +2402,8 @@ fn test_align_content_center_moves_item_subtrees() {
     init();
     // A multi-line flex container with `align-content: center` shifts the
     // lines down by the leading free space. Rects are absolute coordinates,
-    // so each item's laid-out subtree (its nested text) must move with its
-    // border-box — moving only the top-level rect used to leave the nested
-    // text stranded on the pre-shift rows.
+    // so each item's laid-out subtree (including nested text) moves with its
+    // border-box.
     let html = r#"<div class="c"><div class="a"><div class="t">T1</div></div><div class="b">B</div><div class="d">D</div></div>"#;
     let css = ".c { display: flex; flex-wrap: wrap; align-content: center; height: 20ch; width: 12ch; } \
                .a { width: 8ch; } .b { width: 6ch; }";

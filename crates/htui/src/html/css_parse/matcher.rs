@@ -59,10 +59,8 @@ fn ancestor_chain(arena: &NodeArena, target: Option<NodeId>) -> Vec<NodeId> {
 }
 
 fn matches_css(arena: &NodeArena, node_id: NodeId, sel: &Selector, state: &DynamicState) -> bool {
-    // A stale id from a previous arena generation — a node JS removed
-    // between the hit map's snapshot and this match (the quick-click race:
-    // hover a song, the click handler rebuilds the list, the queued repaint
-    // still carries the old id) — must fail to match, not panic. The public
+    // A stale id from a previous arena generation — for example, a node JS
+    // removed after the hit-map snapshot — must fail to match, not panic. The public
     // entry points' doc contract promises `arena.get` lookups everywhere.
     let Some(node) = arena.get(node_id) else {
         return false;

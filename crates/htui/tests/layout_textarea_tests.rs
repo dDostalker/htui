@@ -470,8 +470,7 @@ fn test_textarea_caret_at_line_end_stays_on_its_line() {
     let (row, col) = (caret_idx / cols, caret_idx % cols);
     // The textarea box sits at y=0 and the content starts at (0,0) (no
     // frame); the caret paints at column 2 — after 'ab' (x=0..1 'ab', x=2
-    // caret). Before the fix it landed on the second content row (canvas
-    // y=1, 'c' start) instead.
+    // caret), not on the second content row.
     assert_eq!(
         (row, col),
         (0, 2),

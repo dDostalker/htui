@@ -407,8 +407,8 @@ pub fn dispatch(
     )
 }
 
-/// Run the legacy element handlers after the geometry dispatcher has selected
-/// normal flow.
+/// Run the specialized element handlers after the geometry dispatcher has
+/// selected normal flow.
 pub(crate) fn dispatch_flow_geometry(
     arena: &NodeArena,
     node_id: NodeId,

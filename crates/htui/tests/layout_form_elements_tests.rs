@@ -581,9 +581,8 @@ fn test_select_option_shape() {
 #[test]
 fn disabled_select_press_does_not_open_dropdown() {
     init();
-    // The mousedown path used to check `disabled` only in `handle_click`: a
-    // press on a disabled `<select>` still opened its dropdown. The press
-    // must swallow like the click does.
+    // Both mousedown and click honor `disabled`; a press must not open a
+    // disabled `<select>` dropdown.
     let (engine, geo) = build_geometry(
         r#"<div><select disabled id="s"><option value="a">Alpha</option></select></div>"#,
     );

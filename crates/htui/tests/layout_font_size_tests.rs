@@ -427,17 +427,10 @@ fn explicit_bg_at_default_font_size_still_fills_full_row() {
 #[test]
 fn bg_pad_cells_carry_space_and_bg_into_rendered_output() {
     init();
-    // Regression: previously `paint_text_row` wrote empty `word` for the
-    // bg-pad cells that fill the trailing slot of every expanded glyph
-    // (e.g. cols 3, 5, 7, ... for ASCII text at font-size 2). The renderer
-    // (`render_to_bytes`) drops cells whose `word` is empty to avoid
-    // printing the second half of a wide CJK glyph, so those pads skipped
-    // rendering entirely and the bg colour silently vanished from between
-    // every letter. The user saw this as a jagged / chunky green band on
-    // `<p class="pad-em">em padding</p>` (`padding: 0.5em 1em;
-    // background-color: darkgreen; font-size: 2em`). The fix changes the
-    // bg-pad cells to carry a `" "` word plus the run's bg so the
-    // renderer keeps them and the bg spans the full slot.
+    // Background padding cells fill the trailing slot of an expanded glyph.
+    // They carry a space word and the run background because the renderer
+    // drops empty cells to avoid printing the second half of a wide CJK
+    // glyph; the result is a continuous background across the full slot.
     let (term_map, tl) = draw(
         r#"<p class="em2bg">AB</p>"#,
         "p.em2bg { font-size: 2em; background-color: darkgreen; }",
@@ -489,9 +482,8 @@ fn render_to_bytes_includes_bg_sgr_on_pad_cells_for_padded_em_block() {
     // `font_size` visual fixture's `.pad-em` element (`padding: 0.5em 1em;
     // font-size: 2em; background-color: darkgreen`) and verifies the
     // padding rows + the bg-pad cells between letters all emit the
-    // `background-color: darkgreen` SGR. Before the fix, the bg-pad
-    // cells were skipped by `render_to_bytes`, leaving gaps of un-bged
-    // cells between letters (the user-visible jaggedness).
+    // `background-color: darkgreen` SGR, including on background padding
+    // cells between letters.
     let (term_map, tl) = draw(
         r#"<p class="pad-em">em padding</p>"#,
         "p.pad-em { font-size: 2em; padding: 0.5em 1em; background-color: darkgreen; color: white; }",
@@ -518,26 +510,18 @@ fn render_to_bytes_includes_bg_sgr_on_pad_cells_for_padded_em_block() {
     );
     // The bg applies across the padding-top row, the text row, the
     // 2nd content row, and the padding-bottom row — so four SGR
-    // occurrences (one per row). The text row also sees the bg-pad
-    // cells between letters, which is what this test is really
-    // guarding: without the fix the bg-pad cells were skipped by
-    // `render_to_bytes` and the bg vanished from between letters.
+    // occurrences (one per row). The text row also checks the background
+    // padding cells between letters.
     let sgr_count = rendered.matches(dark_green_sgr).count();
     assert!(
         sgr_count >= 4,
         "rendered output should contain the bg SGR at least 4 times (one per rect row); got {sgr_count}",
     );
     // The text row in the visible batch must show the bg SGR covering
-    // the whole content + padding ring, including the bg-pad cells
-    // between letters. The bg SGR is emitted right after the cursor
-    // position move for the text row — verify by finding the text
-    // segment and checking that the bg SGR appears in the same ANSI
-    // batch (no fg-only or no-bg batches interleave within the 20+2
-    // cells of content + padding-left). Without the fix, the bg-pad
-    // cells between letters were skipped by `render_to_bytes`, so the
-    // SGR-wrapped batch would only cover the 10 glyph cells (5 letters
-    // paired with their bg, 5 letters without — or some other split),
-    // and the rendered output would carry a reset SGR between glyphs.
+    // the whole content plus padding ring, including background padding
+    // cells between letters. Find the text segment and verify that its ANSI
+    // batch carries the background SGR throughout; foreground-only or
+    // background-free batches must not interleave across those cells.
     let text_row_start = rendered
         .find(" e m   p a d d i n g")
         .expect("text row batch should be present in the ANSI stream");
@@ -670,12 +654,9 @@ fn line_height_normal_keeps_one_row_per_line() {
 fn collapsed_space_wrap_accounting_matches_paint_expansion() {
     init();
     // A collapsed space occupies one *expanded* slot (`font-size` cells) —
-    // the same width the paint phase accounts via `InlineRun::width_at`. The
-    // wrap pass used to count it as a bare cell, so a line whose painted
-    // width exceeded the block lost its trailing glyph to the content-box
-    // clip: `a b c` at font-size 2em paints 10 cells (2 per glyph / space);
-    // in an 8-cell box the old accounting said it fit exactly and the `c`
-    // vanished instead of wrapping to the next visual line.
+    // the same width the paint phase accounts via `InlineRun::width_at`.
+    // `a b c` at font-size 2em paints 10 cells (two per glyph or space), so
+    // in an 8-cell box the trailing glyph wraps to the next visual line.
     let (term_map, tl) = draw(
         "<div style=\"font-size: 2em\">a b c</div>",
         "div { width: 8ch; }",

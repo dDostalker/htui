@@ -10,8 +10,7 @@
 //!   (e.g. `<aside><a>Dashboard</a></aside>`). Handled by
 //!   [`crate::layout::layoutbox::inner_formatting_context::flow::layout_a`].
 //!   The user-agent defaults still apply; the *block* section below pins
-//!   down the new behaviour and guards against the silent regression that
-//!   left `<a>` unrendered before `layout_a` was registered.
+//!   down that behaviour.
 
 use crossterm::style::Color;
 use htui::html::{css_parse, html_parse};
@@ -179,8 +178,8 @@ fn test_a_inherits_parent_color_when_no_override() {
 
 #[test]
 fn test_a_inside_div_with_padding_and_bg() {
-    // Regression guard: `<a>` rendered inside a styled `<div>` still hits
-    // the canvas and keeps its UA underline. The bg of the div should
+    // `<a>` rendered inside a styled `<div>` hits the canvas and keeps its
+    // UA underline. The div background should
     // bleed through to the link cells.
     init();
     let html = "<div><a href=\"x\">link</a></div>";
@@ -289,11 +288,8 @@ fn render_rows(html: &str, css: &str) -> (Vec<String>, TermLayout) {
 
 #[test]
 fn test_block_a_renders_text_as_its_own_row() {
-    // Before `layout_a` was registered, an `<a>` sitting as a direct block-level
-    // child was silently dropped (the registry iterated past it and returned
-    // `None`). This is the regression guard: the four `<a>` items in a
-    // navigation-style sidebar must each occupy their own row, in document
-    // order, with no text loss.
+    // A direct block-level `<a>` occupies its own row, in document order,
+    // with no text loss.
     init();
     let html = r##"
         <aside>
@@ -420,10 +416,8 @@ fn test_block_a_inherits_parent_color_when_no_override() {
 
 #[test]
 fn test_block_a_sidebar_renders_all_menu_items() {
-    // End-to-end regression: the sidebar's `<a>`
-    // menu items (Dashboard / Projects / Tasks / Settings) must each appear
-    // in the canvas. Before `layout_a` was registered, only the `<h3>Menu`
-    // heading rendered — the four `<a>` links were silently dropped.
+    // The sidebar's `<a>` menu items (Dashboard / Projects / Tasks /
+    // Settings) must each appear in the canvas alongside the heading.
     init();
     let html = r##"
         <aside class="sidebar">

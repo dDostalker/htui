@@ -95,8 +95,7 @@ impl Default for Block {
     /// A blank cell: a single space with no color, no style, and no
     /// foreground/background. Used as the starting state for the canvas
     /// (`vec![Block::default(); n]`) and as a reusable template by the
-    /// painters so each per-cell fill no longer needs to spell out
-    /// `" ".to_string()` at the call site.
+    /// painters, avoiding repeated `" ".to_string()` construction.
     ///
     /// `CompactString` stores every grapheme cluster up to 24 bytes fully
     /// inline (ASCII, CJK, box-drawing glyphs, flags, skin-tone and keycap

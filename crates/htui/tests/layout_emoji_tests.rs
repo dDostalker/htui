@@ -4,8 +4,7 @@
 //!
 //! - [`char_width`](htui::tui::graph_api::char_width) reports 2 for any single
 //!   codepoint in an emoji-presenting block (Emoticons, Misc Symbols and
-//!   Pictographs, Transport, Dingbats, …) that the old hand-rolled range
-//!   table missed.
+//!   Pictographs, Transport, Dingbats, …).
 //! - [`grapheme_width`](htui::tui::graph_api::grapheme_width) honours the
 //!   full emoji ligature rule set: variation-selector pairs (❤️), modifier
 //!   sequences (👍🏽), and ZWJ sequences (👨‍👩‍👧) all measure as 2.
@@ -61,7 +60,6 @@ fn position_of(tl: &TermLayout, word: &str) -> Option<usize> {
 
 #[test]
 fn test_char_width_emoji_presents_as_two_columns() {
-    // Emoticons block (U+1F600–U+1F64F): previously returned 1.
     assert_eq!(char_width('\u{1F600}'), 2, "😀 (grinning face)");
     assert_eq!(
         char_width('\u{1F603}'),
@@ -77,7 +75,6 @@ fn test_char_width_emoji_presents_as_two_columns() {
 
 #[test]
 fn test_char_width_misc_symbols_and_pictographs_is_two() {
-    // Misc Symbols and Pictographs (U+1F300–U+1F5FF): previously returned 1.
     assert_eq!(char_width('\u{1F680}'), 2, "🚀 (rocket)");
     assert_eq!(char_width('\u{2B50}'), 2, "⭐ (star)");
 }
@@ -263,8 +260,8 @@ fn test_heart_with_variation_selector_lands_in_one_cell() {
         .unwrap_or_else(|| panic!("heart + VS-16 must occupy one cell with word {pair:?}"));
 
     // The cluster is 2 columns wide, so the next cell should be the
-    // padding cell (empty word) — and crucially it must NOT contain VS-16
-    // alone (the old code would split them up).
+    // padding cell (empty word); the variation selector must not occupy a
+    // separate cell.
     assert!(
         tl.layout[idx + 1].word.is_empty(),
         "VS-16 must not be split into its own cell"

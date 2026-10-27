@@ -478,7 +478,7 @@ fn test_block_style_aggregates_font_properties() {
 
 #[test]
 fn test_styled_space_cells_carry_style_flag() {
-    // Regression: a styled paragraph like `<p>a b</p>` with underline must
+    // A styled paragraph like `<p>a b</p>` with underline must
     // populate the inter-letter space cell with the underline flag too —
     // otherwise `TermLayout::render`'s batch grouping prints the space
     // without SGR and the underline drops out between characters.
@@ -510,9 +510,8 @@ fn test_styled_space_cells_carry_style_flag() {
 
 #[test]
 fn test_bold_italic_underline_all_apply_to_text_run() {
-    // The visual rendering path needs every style flag to show up on the
-    // non-space glyphs as well. This guards against any future regression
-    // where one of the flags gets dropped during aggregation or painting.
+    // The rendering path applies every requested style flag to non-space
+    // glyphs after aggregation and painting.
     use htui::tui::graph_api::FontStyle;
     let (root_id, arena) = setup(
         "<p>xyz</p>",
@@ -576,8 +575,7 @@ fn test_style_persists_after_consecutive_spaces() {
 fn test_render_emits_underline_sgr_across_spaces() {
     // End-to-end check: after rendering `<p>a b</p>` with underline, the
     // emitted ANSI byte stream must contain an underline SGR (`\x1B[4m`)
-    // followed by the entire `a b` run (space included). Before the fix,
-    // the renderer treated the space as "bare" and dropped the SGR.
+    // followed by the entire `a b` run, with the styled space included.
     let (root_id, arena) = setup("<p>a b</p>", "p { text-decoration: underline; }");
     let term_map = mock_term_map();
     let mut tl = TermLayout::new(&term_map, 1.0);

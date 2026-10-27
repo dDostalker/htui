@@ -137,9 +137,7 @@ pub(super) fn prepare_flex_item(
         (font - 1) / 2
     };
     // Percentage margins / paddings resolve against the container's content
-    // width (CSS inline-size axis, both directions) — resolving them against
-    // the `usize::MAX` sentinel used to turn `margin: 5%` into ~9.2e17 cells
-    // and blow up the whole line layout.
+    // width (CSS inline-size axis, both directions).
     let edges = css.get_box_edges(containing_main, context.font, context.viewport);
     let margin = edges.margin;
     // Flex-item margins are clamped to 0 when negative: the item-sizing /
@@ -474,8 +472,7 @@ fn natural_intrinsic_size(
     // Intrinsic measurement resolves percentage margins / paddings against
     // the containing-block width when it is definite (the direct flex-item
     // case) and to 0 when it is indefinite (the recursive descent — CSS
-    // resolves a cyclic percentage to zero). The old `usize::MAX` "safe
-    // upper bound" instead inflated the basis by billions of cells.
+    // resolves a cyclic percentage to zero).
     // Non-percentage edges are unaffected by the containing width.
     let edges = css.get_box_edges(
         containing_width.unwrap_or(0),
@@ -571,11 +568,9 @@ fn natural_intrinsic_size(
         // Non-flex block: measure content by recursing into block children
         // (sum their heights, take the max width) and adding one
         // max-content row for any inline / text content. Explicit CSS
-        // `width` / `height` always win — this only supplies the `auto`
-        // fallback so a block with nested content no longer collapses to
-        // a single font-size row when used as a flex item (CSS `flex-basis:
-        // auto` resolves to the content-based size). Mirrors the
-        // flex-container branch above, which already recurses.
+        // `width` / `height` always win; the recursive `auto` fallback gives
+        // nested content its content-based intrinsic size, matching the
+        // flex-container branch above.
         //
         // We deliberately ignore the containing block here — that value is
         // meant for resolving percentages during layout, not for the

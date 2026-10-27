@@ -370,10 +370,8 @@ fn display_contents_children_become_flex_items() {
 //
 // The grid layout algorithm is a documented reject: `display: grid` /
 // `inline-grid` produce no box. The fallback must be the same for both
-// variants — the box is skipped and the element contributes no content at
-// all. An `inline-grid` element used to leak its text into the parent's
-// inline runs as plain text while a block-level grid sibling's content
-// vanished silently.
+// variants — the box is skipped and the element contributes no content to
+// the parent's inline runs or rendered canvas.
 
 #[test]
 fn grid_fallback_is_uniform_between_block_and_inline_variants() {

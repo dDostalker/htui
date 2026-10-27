@@ -346,10 +346,8 @@ fn test_ol_double_digit_ordinals() {
 #[test]
 fn test_nested_ul_inside_li_stacks_below_parent_text() {
     init();
-    // Regression: the parent <li>'s own text and its nested <ul> children must
-    // stack on separate rows. Previously the nested list started on the same
-    // row as the parent's text, so "Nested list" was partially overwritten by
-    // the first nested item ("• Inner A").
+    // The parent <li>'s own text and its nested <ul> children stack on
+    // separate rows.
     let html = "<ul><li>Nested list<ul><li>Inner A</li><li>Inner B</li></ul></li><li>Sibling of nested</li></ul>";
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();

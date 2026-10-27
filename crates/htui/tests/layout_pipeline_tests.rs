@@ -152,8 +152,8 @@ fn unified_pipeline_renders_mixed_document_end_to_end() {
 #[test]
 fn sibling_top_level_boxes_paint_on_distinct_rows() {
     // A root with two rendered children (no `<html>` wrapper) yields two
-    // top-level boxes that must paint their own rows sequentially — a
-    // regression guard for the paint pass over multi-box forests.
+    // top-level boxes that must paint their own rows sequentially across a
+    // multi-box forest.
     let mut arena = NodeArena::default();
     let root = arena.insert(Node::from(NodeType::Document));
     let div1 = arena.insert(Node::from(NodeType::Div));

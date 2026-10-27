@@ -41,13 +41,9 @@ fn term_map() -> TermMap {
 
 #[test]
 fn fresh_canvas_max_scroll_requires_the_paint_pass() {
-    // The render thread publishes `max_scroll` right after `layout_only`, but
-    // `rendered_rows` (its basis) is only established by the paint pass — a
-    // fresh canvas (first frame / every resize) starts at 0. Publishing that
-    // 0 would clamp every scroll position and make the wheel / PageUp /
-    // PageDown appear dead, so the publication must happen after painting.
-    // This test pins down the pre/post-paint difference the ordering fix
-    // depends on.
+    // `rendered_rows`, the basis for `max_scroll`, is established by the
+    // paint pass. These assertions pin the fresh canvas to zero before
+    // painting and to the measured content height afterward.
     let mut html = String::from("<div>");
     for i in 0..60 {
         html.push_str(&format!("<p>line {i}</p>"));
@@ -62,8 +58,7 @@ fn fresh_canvas_max_scroll_requires_the_paint_pass() {
     assert_eq!(
         pre.max_scroll(),
         0,
-        "pre-paint max_scroll on a fresh canvas must be 0 (this is the value \
-         the render thread used to publish, killing the wheel after a resize)"
+        "pre-paint max_scroll on a fresh canvas must be 0"
     );
 
     // After the full draw the content height is known and scrollable.
@@ -82,9 +77,7 @@ fn scroll_bound_never_exceeds_the_canvas_buffer() {
     // Two invariants protect the incremental diff renderer (which slices
     // `layout[scroll_start..]`): the advertised scroll bound never points
     // past the buffer end, and rendering at an out-of-range position is a
-    // safe no-op instead of an underflow panic (the old `max_scroll` once
-    // advertised the content height for buffer-capped documents and the
-    // render thread died on scroll — the `image` visual test reproduced it).
+    // safe no-op instead of an underflow panic.
     let mut html = String::from("<div>");
     for _ in 0..120 {
         html.push_str("<div>r</div>");
@@ -113,8 +106,7 @@ fn scroll_bound_never_exceeds_the_canvas_buffer() {
         "clamped scroll must fit in the canvas"
     );
 
-    // Even an out-of-range position (what the input loop used to send before
-    // the bound fix) must render as a safe no-op instead of panicking.
+    // An out-of-range position must render as a safe no-op.
     tl.scroll_y = 1000;
     tl.render_diff_to_bytes();
     tl.render_to_bytes();
@@ -131,11 +123,8 @@ fn scroll_bound_never_exceeds_the_canvas_buffer() {
 
 #[test]
 fn stale_scroll_batch_row_never_underflows() {
-    // The per-batch cursor math used to be
-    // `(batch_start / cols) as u16 - scroll_y as u16`: a scroll past the
-    // batch's canvas row underflowed u16 (debug panic), and u32 scroll
-    // values near 2^16 silently truncated before the subtraction. Both
-    // render paths must survive every stale-scroll shape as a safe no-op.
+    // Both render paths must treat stale scroll values — including canvas
+    // boundaries and 16/32-bit extremes — as safe no-ops.
     let mut html = String::from("<div>");
     for i in 0..40 {
         html.push_str(&format!("<p>line {i}</p>"));
@@ -151,7 +140,7 @@ fn stale_scroll_batch_row_never_underflows() {
 
     let canvas_rows = (tl.layout.len() / map.columns as usize) as u32;
     let mut stale = vec![0u32, 1, canvas_rows, canvas_rows + 1, canvas_rows + 50];
-    // u16 boundary values: the old `as u16` cast wrapped these.
+    // Exercise both sides of the 16-bit boundary.
     stale.extend([u16::MAX as u32, u16::MAX as u32 + 1, u16::MAX as u32 + 100]);
     stale.push(u32::MAX);
 
@@ -354,7 +343,7 @@ fn region_repaint_preserves_ancestor_background() {
 #[test]
 fn region_repaint_clears_stale_cells_of_a_shorter_value() {
     // A fixed-width box whose value shrinks: the trailing cells must be
-    // blanked (they were cleared with the region), not keep the old glyphs.
+    // blanked (they were cleared with the region), not keep stale glyphs.
     let html = concat!(
         "<style>p { width: 20ch; background-color: yellow }</style>",
         "<p id=\"a\">longvalue</p>"
@@ -386,8 +375,8 @@ fn region_repaint_clears_stale_cells_of_a_shorter_value() {
 
 #[test]
 fn block_element_char_width() {
-    // U+2588 FULL BLOCK / U+2591 LIGHT SHADE are the progress-bar glyphs in
-    // the sysmon demo. Their East Asian Width is "Ambiguous": Unicode treats
+    // U+2588 FULL BLOCK / U+2591 LIGHT SHADE are progress-bar glyphs. Their
+    // East Asian Width is "Ambiguous": Unicode treats
     // them as one column, but CJK-configured legacy terminals may render two.
     // The engine must lay them out consistently with the terminal or the bar
     // misaligns (over-wide row, wrapped percentage, shifted digits).
@@ -455,7 +444,7 @@ fn set_text_by_id(arena: &mut NodeArena, target: &str, text: &str) {
 #[test]
 fn incremental_repaint_matches_full_repaint_after_value_changes() {
     // Golden test for the incremental path: after every simulated refresh
-    // cycle (sysmon-style `textContent` updates), the incrementally repainted
+    // `textContent` update cycle, the incrementally repainted
     // canvas must be pixel-identical to a full re-draw. Any stale / missing
     // cell in the region repaint fails here, which would otherwise show up as
     // flickering or "jumping" digits on screen.
@@ -477,9 +466,9 @@ fn incremental_repaint_matches_full_repaint_after_value_changes() {
     let _ = incr.render_diff_to_bytes();
 
     // Text lengths change across cycles (short→long, long→short) so wrapping
-    // is exercised as well as in-place rewrites. The `cpu` cycles use the
-    // sysmon progress-bar glyphs (U+2588 / U+2591) to prove the incremental
-    // path stays pixel-identical for them too.
+    // is exercised as well as in-place rewrites. The `cpu` cycles use block
+    // and shade glyphs to prove the incremental path stays pixel-identical
+    // for them too.
     let cycles: &[(&str, &str)] = &[
         ("now", "now: 14:03:23 · session 00:05"),
         ("cpu", "[████████░░░░░░░░] 45%"),
@@ -586,11 +575,9 @@ fn viewport_resize_recreates_canvas_and_recovers() {
 
 /// The page-selection highlight must preserve background-driven widgets.
 ///
-/// The music example's progress bar is a flex row of two background-only divs
-/// (fill / rest) with no glyphs. The old highlight unconditionally overwrote
-/// every selected cell's background with the flat selection colour, erasing
-/// the fill / rest boundary — the bar became invisible under the selection.
-/// It must instead blend an existing RGB background with the selection colour
+/// Background-driven widgets can be made from adjacent glyph-free divs with
+/// different fills. Selection must blend an existing RGB background with the
+/// selection colour
 /// so the two halves stay distinguishable (tinted, browser-like translucent
 /// `::selection`).
 #[test]

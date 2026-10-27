@@ -1,12 +1,10 @@
 //! Tests for the `<img>` layout pipeline.
 //!
-//! The bugs being guarded against:
-//!   - `_create_img` previously interpreted `term_size` as pixel dimensions
-//!     even though `paint_image_at` documents it as cell dimensions, so only
-//!     `cols/2 × rows/4` cells were actually rasterized into the rect.
-//!   - `layout_img` stored the unclamped cell width (`img_cols`) as
-//!     `LayoutBox::cols`, while `rect.width` was clamped to the terminal
-//!     width, so painting could overflow the rect into neighboring boxes.
+//! Invariants covered here:
+//!   - image dimensions passed to painting are terminal-cell dimensions, not
+//!     pixel dimensions.
+//!   - the laid-out image width is clamped with its rect so painting cannot
+//!     overflow into neighboring boxes.
 
 use std::sync::Arc;
 
@@ -49,7 +47,7 @@ fn find_img_node(arena: &node::NodeArena, root_id: node::NodeId) -> node::NodeId
 }
 
 // ============================================================
-// Bug #2 — LayoutBox cols / rows must match rect.width / height
+// LayoutBox dimensions and image rect dimensions agree
 // ============================================================
 
 #[test]
@@ -154,7 +152,7 @@ fn image_sampling_constants_lock_in_1_by_2_ratio() {
 }
 
 // ============================================================
-// Bug #1 — `_create_img` cell→pixel conversion
+// Image raster dimensions use terminal-cell units
 // ============================================================
 
 /// Build a small 64×64 checkerboard PNG in memory and register it under a
@@ -218,8 +216,7 @@ fn paint_image_at_fills_requested_cell_area() {
             .expect("paint_image_at should succeed");
 
         // Every cell the image requested must have been written — none should
-        // still hold the default space. Before the fix only `cell_w/2 × cell_h/4`
-        // cells got filled, leaving most of the rect blank.
+        // still hold the default space.
         let cells_per_row = term_map.columns as usize;
         for row in 0..(cell_h as usize) {
             for col in 0..(cell_w as usize) {
@@ -617,9 +614,7 @@ fn find_img_box(boxes: &[LayoutBox]) -> Option<&LayoutBox> {
 fn layout_img_respects_margin_and_left_aligns() {
     init();
     // An `<img>` is inline-level: left-aligned in its flow with active CSS
-    // margins. It used to be force-centred and to ignore `margin-*`
-    // entirely — diverging from both the browser and the other replaced
-    // controls (which go through the shared `control_placement`).
+    // margins, matching browser inline replaced-element placement.
     let mut p = html_parse::Parser::new(
         r#"<img src="x.png" width="80" height="24" style="margin-left: 16px">"#,
     );

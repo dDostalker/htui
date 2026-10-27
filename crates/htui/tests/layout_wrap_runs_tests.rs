@@ -188,9 +188,8 @@ fn nbsp_is_not_collapsible() {
 fn cjk_closing_punctuation_never_starts_a_line() {
     // Simple kinsoku: a closing punctuation mark cannot detach from the word
     // before it. `甲乙丙丁。` at 4 cells (two 2-cell CJK glyphs per line): the
-    // tokenizer used to emit `。` as its own breakable word, producing
-    // 甲乙 / 丙丁 / 。 — a line opening with the full stop. The mark now
-    // merges into `丁`, so the last line is `丁。` and no line opens with
+    // tokenizer keeps the mark attached to the preceding word, so the last
+    // line is `丁。` and no line opens with
     // the mark.
     let lines = run("甲乙丙丁。", 4);
     let l2: String = lines[2].iter().map(|r| r.text.as_str()).collect();

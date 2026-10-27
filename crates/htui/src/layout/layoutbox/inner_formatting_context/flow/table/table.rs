@@ -25,10 +25,9 @@ pub fn layout_table(
 ) -> Option<LayoutBox> {
     let node = &arena[node_id];
     if node.node_type != NodeType::Table {
-        // `display: table` on an arbitrary element is now allowed (the
-        // generation phase no longer special-cases `<table>`); we only
-        // log a debug hint so the table algorithm's expectations on its
-        // row / cell children remain visible.
+        // `display: table` may reach this path for an arbitrary element.
+        // Log a hint so the table algorithm's expectations on its row /
+        // cell children remain visible.
         log::debug!(
             "layout_table reached for non-table node {:?} (allowed by display: table); \
              children must be <tr> / <td>-shaped to render",

@@ -172,11 +172,6 @@ pub(super) fn layout_flex_items(
         //       multi-line column container has no concept of
         //       cross-axis stretching per line — lines stack along the
         //       main axis, so we keep the natural line cross for them.
-        //       The previous `container_height` shortcut was incorrect
-        //       for column direction: it used a vertical measurement as
-        //       a horizontal size, which made children of a flex column
-        //       stretch to the column's height — and overflow the
-        //       column's own width.
         let line_cross = match direction.is_row() {
             true => {
                 if has_explicit_height && line_count == 1 {

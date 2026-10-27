@@ -502,9 +502,8 @@ pub fn parse_gap_shorthand(s: &str, font_ctx: FontContext, viewport: Viewport) -
             column: resolve_gap(v, font_ctx, viewport),
         });
     };
-    // CSS allows more than two values for row-gap-style properties, but the
-    // visual test corpus never uses them. Reject any trailing token so we
-    // never silently mis-parse.
+    // CSS allows more than two values for row-gap-style properties. Reject
+    // any trailing token so we never silently mis-parse.
     if parts.next().is_some() {
         return None;
     }

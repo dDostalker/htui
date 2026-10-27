@@ -212,9 +212,7 @@ fn input_renders_empty_field_without_panicking() {
 fn input_long_value_windows_around_the_caret() {
     init();
     // Width 8 (6 content cells), value much longer: the visible window must
-    // follow the caret instead of blanking the field (regression: the window
-    // used to be positioned in absolute value columns, so a long value drew
-    // nothing at all).
+    // follow the caret so a long value remains visible.
     let (root_id, arena) = setup(r#"<div><input width="8"></div>"#);
     let input_id = find_input(&arena, root_id);
     let term_map = mock_term_map();
@@ -789,7 +787,7 @@ fn key_event_info_maps_every_key_to_browser_fields() {
 
 #[test]
 fn input_state_clamps_scroll_to_the_content_ceiling() {
-    // Regression: growing the terminal (or reloading a shorter document) drops
+    // Growing the terminal or reloading a shorter document can lower
     // `max_scroll` below the current scroll position. The input loop must
     // follow the render thread's clamp or every wheel / arrow `Rerender` is
     // clamped to the same value in the render thread and dropped as a no-op —

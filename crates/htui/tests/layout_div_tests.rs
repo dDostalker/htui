@@ -86,11 +86,8 @@ fn test_div_background_color() {
 #[test]
 fn test_div_text_and_block_child_stack_on_separate_rows() {
     init();
-    // Regression: a block's own inline text and its block-level children must
-    // stack (text line first, children below). Previously both were laid out
-    // from the same content-top row, so the child's first line painted over
-    // the parent's text (`<div>parent text<p>child block</p></div>` lost the
-    // parent text entirely).
+    // A block's own inline text and its block-level children stack: the text
+    // line comes first and children begin below it.
     let html = "<div>parent text<p>child block</p></div>";
     let (root_id, arena) = setup(html, "");
     let term_map = mock_term_map();
@@ -350,12 +347,8 @@ fn test_div_color_inherited_by_p() {
 
 #[test]
 fn test_long_p_text_does_not_overflow_into_next_row() {
-    // Regression guard: `paint_text_row` previously wrote cells linearly
-    // with only a canvas-end check, so a long inline run would spill its
-    // overflow into the rows below and overwrite the cells of subsequent
-    // boxes (e.g. an h2 after the long p would show trailing "dth." in the
-    // p's fg color). The fix clips each row's text to the content-box
-    // right edge, so a 1-row `<p>` must NOT write past col 79.
+    // Each text row clips at its content-box right edge, so a one-row `<p>`
+    // must not write past column 79 or overwrite following boxes.
     init();
     let long_text = "A longer paragraph that contains multiple sentences. This demonstrates how text wrapping and layout work in the terminal renderer. The text should flow naturally within the available terminal width.";
     let html = format!("<p>{}</p><h2>Next</h2>", long_text);
@@ -369,11 +362,9 @@ fn test_long_p_text_does_not_overflow_into_next_row() {
     let p_row = 0;
     let p_row_end = (p_row + 1) * cols;
     for cell in &tl.layout[p_row_end..] {
-        // None of the <p>'s colour / chars should appear past row 0. The
-        // fix means the paint simply stops at col 79; cells beyond stay as
-        // either the empty default (no fg, no bg) or get overwritten by
-        // the next paint pass for the <h2>. We assert no p-coloured
-        // character remains in those cells.
+        // None of the <p>'s colour or characters should appear past row 0.
+        // Paint stops at column 79; later cells remain empty unless the next
+        // paint pass overwrites them with the <h2>.
         let has_p_text = !cell.word.is_empty()
             && cell.word != " "
             && cell.fcolor
