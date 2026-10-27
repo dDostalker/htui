@@ -102,7 +102,7 @@ impl Default for Block {
     /// inline (ASCII, CJK, box-drawing glyphs, flags, skin-tone and keycap
     /// sequences), so per-cell canvas init / clone / diff never touches the
     /// heap. Longer clusters (multi-person ZWJ emoji) transparently fall
-    /// back to one heap allocation, matching the old `String` behaviour.
+    /// back to one heap allocation.
     fn default() -> Self {
         let word = CompactString::new(" ");
         Self {

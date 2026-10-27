@@ -66,8 +66,7 @@ pub enum ImageError {
 // source pixels. The top pixel becomes the cell's foreground color,
 // the bottom pixel its background color, and the upper-half-block
 // glyph U+2580 draws them, so every cell carries two real color
-// samples instead of the single averaged color of the old 2×4
-// braille mode. The ratio is intentionally independent of
+// samples. The ratio is intentionally independent of
 // `crate::html::css_parse::values::PX_PER_CELL`, which governs CSS px
 // in the box model — the two answer different questions:
 //   - PX_PER_CELL: how many CSS px is one terminal cell? Answer: 8.
@@ -145,9 +144,8 @@ impl Img {
         // cell displays IMAGE_PIXELS_PER_CELL_COL x IMAGE_PIXELS_PER_CELL_ROW
         // source pixels (1 wide x 2 tall in half-block mode), so the pixel
         // grid is `cols x (rows * 2)`. We must resize to exactly that grid:
-        // `imageops::resize` in image 0.25 scales to the exact target size
-        // (the old aspect-preserving behaviour moved to `thumbnail`), keeping
-        // the cell-to-pixel correspondence exact.
+        // `imageops::resize` scales to the exact target size, keeping the
+        // cell-to-pixel correspondence exact.
         let pixel_w = self
             .term_size
             .0
@@ -370,8 +368,7 @@ pub(crate) fn image_intrinsic_size(path: &str) -> Option<(u32, u32)> {
 /// Cache of decoded + half-block-rasterized images, keyed by
 /// `(path, cols, rows)` in terminal cells.
 ///
-/// The paint phase runs once per frame, and every `<img>` used to be
-/// re-decoded from disk on each pass. `TermLayout` owns one of these and the
+/// The paint phase runs once per frame. `TermLayout` owns one cache and the
 /// paint pipeline shares it across frames, so each image is decoded once per
 /// size and reused for the rest of the session. When the cap is hit the
 /// oldest entry is evicted (FIFO): clearing the whole cache would force every

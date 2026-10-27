@@ -42,8 +42,7 @@ pub(crate) struct ScriptState {
     /// Render commands pushed by host functions during JS execution.
     pub render_cmds: Vec<RenderCmd>,
     /// Nodes whose content or attributes JS changed since the last render.
-    /// Non-empty means the DOM needs a re-render (the old `dom_dirty` flag
-    /// merged into this set).
+    /// Non-empty means the DOM needs a re-render.
     pub dirty: DirtyInfo,
     /// The event currently being dispatched (for host functions).
     pub current_event: Option<HtmlEvent>,

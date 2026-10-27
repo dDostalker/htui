@@ -118,10 +118,8 @@ fn run_inner(
     // The paths are consumed only by the debug watcher below.
     #[cfg(not(debug_assertions))]
     let _ = hot_reload_paths;
-    // register log hook
     install_panic_hook();
 
-    // crossterm init
     if let Err(e) = enable_raw_mode() {
         log::error!("Failed to enable raw mode: {}", e);
         return;
@@ -139,7 +137,6 @@ fn run_inner(
         }
         return;
     }
-    //
     TERMINAL_ACTIVE.store(true, Ordering::SeqCst);
 
     // Keep the original HTML available for debug `mem://` re-parses. A
@@ -170,7 +167,6 @@ fn run_inner(
         None
     };
 
-    // Shared scroll upper bound
     let max_scroll = Arc::new(AtomicU32::new(u32::MAX));
 
     // The render thread sends layout snapshots to the hit-test thread.
@@ -182,7 +178,6 @@ fn run_inner(
     // on the second channel. Start that thread only when event bindings exist.
     let (script_tx, script_rx) = mpsc::channel::<ScriptMsg>();
     let (script_out_tx, script_out_rx) = mpsc::channel::<ScriptResponse>();
-    // start js thread
     let script_thread: Option<std::thread::JoinHandle<()>> = bindings.map(|bindings| {
         let script_document = document.clone();
         let hit_map_thread = Arc::clone(&hit_map);

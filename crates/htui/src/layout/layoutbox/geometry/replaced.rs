@@ -434,11 +434,9 @@ fn layout_image(
                 containing.width,
             );
             // Placement goes through the shared replaced-control path so CSS
-            // `width` / `height` / `min-*` / `max-*` and — critically — the
-            // box edges apply: `<img style="margin-left: 10px">` used to be
-            // ignored and the image forced-centred, diverging from both the
-            // browser (an `img` is inline-level: left-aligned in its flow,
-            // margins active) and the other replaced controls. Border /
+            // `width` / `height` / `min-*` / `max-*` and box edges apply.
+            // An `img` is inline-level: left-aligned in its flow with margins
+            // active, matching other replaced controls.
             // padding participate in the box size like any control; painting
             // them on the pixels stays future work (`paint_image` fills the
             // rect).
