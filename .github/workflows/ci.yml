@@ -279,6 +279,7 @@ jobs:
       - name: Run area tests
         run: cargo test -p htui --locked
           --test render_diff_tests
+          --test scroll_anim_tests
           --test layout_input_tests
           --test layout_textarea_tests
           --test layout_form_tests

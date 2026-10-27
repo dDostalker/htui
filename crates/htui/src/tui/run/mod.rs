@@ -35,15 +35,15 @@ use crossterm::{
 use crate::Session;
 use crate::{
     events::{HitMap, SharedGeometry, SharedHitMap},
-    html::{css_parse::DynamicState, html_parse::Parser},
+    html::{css_parse::DynamicState, css_parse::Viewport, html_parse::Parser},
     layout::layout::{MAX_TERM_COLS, MAX_TERM_ROWS, TermMap},
     resources,
     script::{ScriptMsg, ScriptResponse, run_script_thread},
     source::SharedSourceText,
     tdom::node::{NodeId, SharedNodeArena},
     tui::graph_api::{
-        DirtyInfo, InputState, KEY_GATE_TIMEOUT, RenderCmd, apply_focus_requests,
-        reapply_console_modes, trigger_refresh,
+        ANIM_POLL_MS, DirtyInfo, InputState, KEY_GATE_TIMEOUT, RenderCmd, ScrollAnim, ScrollTarget,
+        apply_focus_requests, reapply_console_modes, trigger_refresh,
     },
 };
 
@@ -262,6 +262,7 @@ fn run_inner(
     state.zoom = config.zoom;
     state.copy_flow = config.copy_flow;
     state.copy_block = config.copy_block;
+    state.smooth_scroll = config.smooth_scroll;
     state.selection_text = Arc::clone(&selection_text);
     let (mut columns, mut rows): (u16, u16) = match TermMap::get_ter_map() {
         Ok(m) => (m.columns, m.rows),
@@ -430,6 +431,14 @@ fn run_inner(
         // no-op, so scrolling appears dead after a resize.
         let max_scroll_val = max_scroll.load(Ordering::Relaxed);
         state.clamp_scroll_to(max_scroll_val);
+        // While a scroll animation is active the loop wakes at the animation
+        // frame rate instead of the idle poll cadence; eased positions are
+        // wall-clock based, so a late wake self-corrects next frame.
+        let poll_timeout = if state.scroll_anim.is_some() {
+            Duration::from_millis(ANIM_POLL_MS)
+        } else {
+            Duration::from_millis(100)
+        };
         let mut cmds = if events_active {
             let map = match hit_map.lock() {
                 Ok(guard) => Arc::clone(&guard),
@@ -457,7 +466,7 @@ fn run_inner(
                 Some(&map),
                 live_dom.as_ref().map(|(arena, _)| arena.as_ref()),
                 &mut msgs,
-                Some(Duration::from_millis(100)),
+                Some(poll_timeout),
             )
         } else {
             trigger_refresh(
@@ -467,7 +476,7 @@ fn run_inner(
                 None,
                 None,
                 &mut msgs,
-                Some(Duration::from_millis(100)),
+                Some(poll_timeout),
             )
         };
 
@@ -546,7 +555,17 @@ fn run_inner(
                 {
                     Ok(ScriptResponse::Event(ev)) => {
                         let verdict = ev.key_gate.filter(|(id, _)| *id == gate.id);
-                        fold_script_event(&mut state, &mut cmds, &mut hovered, &mut live_dom, ev);
+                        fold_script_event(
+                            &mut state,
+                            &mut cmds,
+                            &mut hovered,
+                            &mut live_dom,
+                            Viewport {
+                                cols: columns as usize,
+                                rows: rows as usize,
+                            },
+                            ev,
+                        );
                         moves_in_flight = moves_in_flight.saturating_sub(1);
                         if let Some((_, prevented)) = verdict {
                             if !prevented {
@@ -581,13 +600,79 @@ fn run_inner(
             }
         }
 
+        // Convert scroll-animation markers into the input loop's animation
+        // state, then emit this frame's tick — before the script-response
+        // fold, so a DOM-mutation arena appended below still supersedes the
+        // tick's viewport command (the render batch folds the newer scroll
+        // offset into a pending arena instead of dropping either).
+        let now = Instant::now();
+        cmds.retain_mut(|cmd| {
+            if let RenderCmd::ScrollAnimate { target, to } = cmd {
+                match &mut state.scroll_anim {
+                    Some(anim) if anim.target() == *target => anim.retarget(*to, now),
+                    _ => {
+                        let from = match *target {
+                            ScrollTarget::Page => state.scroll_y,
+                            ScrollTarget::Container(id) => {
+                                state.scroll_offsets.get(&id).copied().unwrap_or(0)
+                            }
+                        };
+                        state.scroll_anim = Some(ScrollAnim::start(*target, from, *to, now));
+                    }
+                }
+                false
+            } else {
+                true
+            }
+        });
+        if let Some(anim) = state.scroll_anim.take() {
+            // A page glide is capped by the live scroll ceiling (the document
+            // may have shrunk since the trigger); a container glide already
+            // targets the container's own ceiling.
+            let cap = match anim.target() {
+                ScrollTarget::Page => max_scroll_val,
+                ScrollTarget::Container(_) => anim.to(),
+            };
+            let pos = anim.position(now).min(cap);
+            match anim.target() {
+                ScrollTarget::Page => {
+                    if pos != state.scroll_y {
+                        state.scroll_y = pos;
+                        cmds.push(RenderCmd::Rerender { scroll_y: pos });
+                    }
+                }
+                ScrollTarget::Container(id) => {
+                    if state.scroll_offsets.get(&id) != Some(&pos) {
+                        state.scroll_offsets.insert(id, pos);
+                        cmds.push(RenderCmd::RenderScroll {
+                            node_id: id,
+                            scroll_y: pos,
+                        });
+                    }
+                }
+            }
+            if !anim.finished(now) {
+                state.scroll_anim = Some(anim);
+            }
+        }
+
         // Fold the script thread's replies into this frame: render commands
         // pushed by host functions, hover updates, and — when JS mutated the
         // DOM — a fresh arena snapshot + dirty set for a (region) repaint.
         for resp in script_out_rx.try_iter() {
             match resp {
                 ScriptResponse::Event(ev) => {
-                    fold_script_event(&mut state, &mut cmds, &mut hovered, &mut live_dom, ev);
+                    fold_script_event(
+                        &mut state,
+                        &mut cmds,
+                        &mut hovered,
+                        &mut live_dom,
+                        Viewport {
+                            cols: columns as usize,
+                            rows: rows as usize,
+                        },
+                        ev,
+                    );
                     moves_in_flight = moves_in_flight.saturating_sub(1);
                 }
                 ScriptResponse::Ready { .. } | ScriptResponse::Failed(_) => {
@@ -653,6 +738,10 @@ fn run_inner(
                         dynamic: DynamicState {
                             hovered,
                             focused: state.focused_input,
+                            viewport: Viewport {
+                                cols: columns as usize,
+                                rows: rows as usize,
+                            },
                         },
                         dirty: DirtyInfo::default(),
                     },

@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use crate::config::Config;
 use crate::events::{HitMap, SharedGeometry, SharedHitMap};
+use crate::html::css_parse::Viewport;
 use crate::html::css_parse::{DynamicState, PseudoClass, css_pseudo_rule_set};
 use crate::html::html_parse::ParsedDocument;
 use crate::layout::layout::TermMap;
@@ -343,6 +344,13 @@ pub(super) fn render_thread(
                     RenderCmd::FocusRequest { .. } | RenderCmd::BlurRequest { .. } => {
                         log::debug!("Focus request reached the render thread — dropping");
                     }
+
+                    // Scroll-animation markers are intercepted by the run loop
+                    // (the animation lives on the input side); a leaked one
+                    // renders nothing.
+                    RenderCmd::ScrollAnimate { .. } => {
+                        log::debug!("ScrollAnimate marker reached the render thread — dropping");
+                    }
                 }
             }
 
@@ -396,12 +404,15 @@ pub(super) fn hit_test_thread(rx: mpsc::Receiver<SharedGeometry>, hit_map: Share
 /// Fold one `ScriptResponse::Event` into the current frame: hover updates,
 /// host-pushed render commands, and — when JS mutated the DOM — a fresh arena
 /// snapshot + dirty set forwarded as a (region-repaint) `RenderArena`.
-/// Shared by the key-gate wait and the ordinary async reply fold.
+/// Shared by the key-gate wait and the ordinary async reply fold. `viewport`
+/// is the input loop's terminal size, carried into the arena's dynamic state
+/// for the `@media` re-cascade.
 pub(super) fn fold_script_event(
     state: &mut InputState,
     cmds: &mut Vec<RenderCmd>,
     hovered: &mut Option<NodeId>,
     live_dom: &mut Option<LiveDocument>,
+    viewport: Viewport,
     ev: crate::script::ScriptEvent,
 ) {
     *hovered = ev.hovered;
@@ -430,6 +441,7 @@ pub(super) fn fold_script_event(
                 dynamic: DynamicState {
                     hovered: ev.hovered,
                     focused: state.focused_input,
+                    viewport,
                 },
                 dirty: d.dirty,
             });

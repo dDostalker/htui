@@ -9,6 +9,7 @@ use std::str::FromStr;
 use std::sync::{Arc, OnceLock};
 
 use super::cascade::CascadeIndex;
+use super::media::{MediaQueryList, parse_media_query_list};
 use super::{
     properties::CssAttr,
     selector::CssSelector,
@@ -30,6 +31,10 @@ pub struct CssRuleEntry {
     pub normal: CssAttr,
     /// `!important` declarations.
     pub important: CssAttr,
+    /// Enclosing `@media` condition (`None` = unconditional). The cascade
+    /// skips the rule while the condition does not match the current
+    /// terminal viewport.
+    pub media: Option<MediaQueryList>,
 }
 
 /// The parsed author stylesheet: every qualified rule, with the `!important`
@@ -60,22 +65,30 @@ impl CssRule {
 
     /// Append a rule with explicit normal / important declaration splits.
     pub fn push(&mut self, selector: CssSelector, normal: CssAttr, important: CssAttr) {
+        self.push_media(selector, normal, important, None);
+    }
+
+    /// Append a rule with the declarations split above plus an enclosing
+    /// `@media` condition.
+    pub fn push_media(
+        &mut self,
+        selector: CssSelector,
+        normal: CssAttr,
+        important: CssAttr,
+        media: Option<MediaQueryList>,
+    ) {
         self.1.take();
         self.0.push(CssRuleEntry {
             selector,
             normal,
             important,
+            media,
         });
     }
 
     /// Append a rule whose declarations all have normal priority.
     pub fn add(&mut self, selector: CssSelector, attr: CssAttr) {
-        self.1.take();
-        self.0.push(CssRuleEntry {
-            selector,
-            normal: attr,
-            important: CssAttr::new(),
-        });
+        self.push(selector, attr, CssAttr::new());
     }
 }
 
@@ -114,20 +127,28 @@ impl Parser {
             }
         }
         let mut css = CssRule::new();
-        for (sel_text, normal, important) in state.rules.drain(..) {
-            // Split comma-separated selectors: `table, td { ... }` is two
-            // independent rules targeting distinct node types. Each
-            // sub-selector is parsed in isolation so it can stand on its
-            // own when applied via the cascade.
-            for sub_sel in split_top_level_commas(&sel_text) {
-                match CssSelector::from_str(sub_sel) {
-                    std::result::Result::Ok(sel) => {
-                        css.push(sel, normal.clone(), important.clone())
-                    }
-                    std::result::Result::Err(e) => {
-                        warn!("Selector parse fail: {}: {}", sub_sel, e);
+        for collected in state.rules.drain(..) {
+            match collected {
+                CollectedRule::Qualified(sel_text, normal, important) => {
+                    // Split comma-separated selectors: `table, td { ... }` is
+                    // two independent rules targeting distinct node types.
+                    // Each sub-selector is parsed in isolation so it can stand
+                    // on its own when applied via the cascade.
+                    for sub_sel in split_top_level_commas(&sel_text) {
+                        match CssSelector::from_str(sub_sel) {
+                            std::result::Result::Ok(sel) => {
+                                css.push(sel, normal.clone(), important.clone())
+                            }
+                            std::result::Result::Err(e) => {
+                                warn!("Selector parse fail: {}: {}", sub_sel, e);
+                            }
+                        }
                     }
                 }
+                // `@media` children were fully parsed (selector split
+                // included) while their block was read; they carry their
+                // condition on the entry.
+                CollectedRule::Media(entry) => css.0.push(entry),
             }
         }
         debug!("CSS parsed: {} rules", css.0.len());
@@ -136,12 +157,19 @@ impl Parser {
 }
 
 struct CssParseState {
-    rules: Vec<(String, CssAttr, CssAttr)>,
+    rules: Vec<CollectedRule>,
 }
 impl CssParseState {
     fn new() -> Self {
         Self { rules: vec![] }
     }
+}
+
+/// One collected top-level item, kept in source order: a plain qualified rule
+/// (prelude text not yet selector-split) or a fully parsed `@media` child.
+enum CollectedRule {
+    Qualified(String, CssAttr, CssAttr),
+    Media(CssRuleEntry),
 }
 
 impl<'i> QualifiedRuleParser<'i> for CssParseState {
@@ -173,39 +201,126 @@ impl<'i> QualifiedRuleParser<'i> for CssParseState {
         let mut normal = CssAttr::new();
         let mut important = CssAttr::new();
         parse_declarations_into(input, &mut normal, &mut important, true);
-        self.rules.push((prelude, normal, important));
+        self.rules
+            .push(CollectedRule::Qualified(prelude, normal, important));
         Ok(())
     }
 }
 
+/// Prelude collected by [`AtRuleParser`]: a parsed `@media` condition, or the
+/// marker for at-rules the engine skips (`@font-face`, `@supports`, …).
+enum AtRulePrelude {
+    Media(MediaQueryList),
+    Other,
+}
+
 impl<'i> AtRuleParser<'i> for CssParseState {
-    type Prelude = ();
+    type Prelude = AtRulePrelude;
     type AtRule = ();
     type Error = cssparser::BasicParseError<'i>;
     fn parse_prelude<'t>(
         &mut self,
         name: CowRcStr<'i>,
         input: &mut CssParser<'i, 't>,
-    ) -> std::result::Result<(), ParseError<'i, Self::Error>> {
+    ) -> std::result::Result<AtRulePrelude, ParseError<'i, Self::Error>> {
+        if name.eq_ignore_ascii_case("media") {
+            let start = input.position();
+            // `parse_until_before` skips balanced `(…)` groups as units, so
+            // the slice below covers the whole prelude text including the
+            // feature blocks (a plain `next()` loop would stop inside the
+            // first `(` — block contents never advance the position).
+            let _: std::result::Result<(), ParseError<()>> = input
+                .parse_until_before(Delimiter::Semicolon | Delimiter::CurlyBracketBlock, |_| {
+                    Ok(())
+                });
+            let text = input.slice_from(start);
+            return match parse_media_query_list(text) {
+                Some(list) => Ok(AtRulePrelude::Media(list)),
+                None => Ok(AtRulePrelude::Other),
+            };
+        }
         debug!("skip @{}", name);
         while !input.is_exhausted() {
             input.next().ok();
         }
-        Ok(())
+        Ok(AtRulePrelude::Other)
     }
     fn parse_block<'t>(
         &mut self,
-        _: (),
+        prelude: AtRulePrelude,
         _: &ParserState,
         input: &mut CssParser<'i, 't>,
     ) -> std::result::Result<(), ParseError<'i, Self::Error>> {
-        while !input.is_exhausted() {
-            input.next().ok();
+        let AtRulePrelude::Media(list) = prelude else {
+            while !input.is_exhausted() {
+                input.next().ok();
+            }
+            return Ok(());
+        };
+        // The block body is re-parsed through the full top-level parser, so
+        // nested rules and declarations reuse the exact same code path.
+        let body = serialize_rule_body(input);
+        let mut sub = Parser::new(&body).parse();
+        for mut entry in sub.0.drain(..) {
+            if entry.media.is_some() {
+                warn!("Nested @media is not supported — dropping rule");
+                continue;
+            }
+            entry.media = Some(list.clone());
+            self.rules.push(CollectedRule::Media(entry));
         }
         Ok(())
     }
-    fn rule_without_block(&mut self, _: (), _: &ParserState) -> std::result::Result<(), ()> {
+    fn rule_without_block(
+        &mut self,
+        _: AtRulePrelude,
+        _: &ParserState,
+    ) -> std::result::Result<(), ()> {
         Ok(())
+    }
+}
+
+/// Serialize the remaining tokens of `input` back to CSS text.
+///
+/// Used for `@media` block bodies. Balanced blocks (`{ … }`, `( … )`, function
+/// calls) are pre-scanned by the tokenizer as single units whose contents
+/// never advance the outer token stream, so a plain `slice_from` walk would
+/// silently drop them — [`CssParser::parse_block`] enters the block and its
+/// contents resume as the nested stream, which is serialized recursively.
+/// Everything else is taken verbatim from the source.
+fn serialize_rule_body<'i, 't>(input: &mut CssParser<'i, 't>) -> String {
+    let mut out = String::new();
+    serialize_tokens(input, &mut out);
+    out
+}
+
+fn serialize_tokens<'i, 't>(input: &mut CssParser<'i, 't>, out: &mut String) {
+    while !input.is_exhausted() {
+        let start = input.position();
+        let tok = match input.next_including_whitespace_and_comments() {
+            Ok(t) => t,
+            Err(_) => break,
+        };
+        let block: Option<(&str, &str)> = match tok {
+            cssparser::Token::CurlyBracketBlock => Some(("{", "}")),
+            cssparser::Token::ParenthesisBlock => Some(("(", ")")),
+            cssparser::Token::SquareBracketBlock => Some(("[", "]")),
+            // A function token's source slice already covers `name(`.
+            cssparser::Token::Function(_) => Some((input.slice_from(start), ")")),
+            _ => None,
+        };
+        match block {
+            None => out.push_str(input.slice_from(start)),
+            Some((open, close)) => {
+                out.push_str(open);
+                let _: std::result::Result<(), ParseError<()>> =
+                    input.parse_nested_block(|nested| {
+                        serialize_tokens(nested, out);
+                        Ok(())
+                    });
+                out.push_str(close);
+            }
+        }
     }
 }
 

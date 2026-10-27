@@ -320,8 +320,8 @@ fn focus_pseudo_class_styles_only_the_focused_field() {
         root_id,
         &rules,
         &css_parse::DynamicState {
-            hovered: None,
             focused: Some(a),
+            ..Default::default()
         },
     );
     assert!(
@@ -350,8 +350,8 @@ fn focus_pseudo_class_matches_only_the_element_itself() {
         root_id,
         &rules,
         &css_parse::DynamicState {
-            hovered: None,
             focused: Some(a),
+            ..Default::default()
         },
     );
     assert_eq!(

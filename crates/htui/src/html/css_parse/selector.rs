@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use super::values::Viewport;
 use crate::tdom::node::{NodeId, NodeType};
 
 /// Errors produced while parsing a CSS selector string.
@@ -108,6 +109,18 @@ impl NthExpr {
 /// `hovered`; the input loop's focus state fills `focused`). The cascade and
 /// the render thread treat it as a single value: adding a pseudo-class means
 /// adding one field here, one `PseudoClass` variant and one method arm.
+/// Session-level dynamic pseudo-class state (`:hover` / `:focus`) plus the
+/// cascade environment.
+///
+/// One slot per dynamic pseudo-class, populated by whoever owns that piece of
+/// interaction state (the script thread's pointer state machine fills
+/// `hovered`; the input loop's focus state fills `focused`). The cascade and
+/// the render thread treat it as a single value: adding a pseudo-class means
+/// adding one field here, one `PseudoClass` variant and one method arm.
+///
+/// `viewport` carries the terminal cell grid for `@media` matching. The
+/// default (`0x0`) matches no size condition — unconditional rules are
+/// unaffected — so callers that never cascade a real viewport keep working.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DynamicState {
     /// The node currently under the pointer (`:hover` matches it and its
@@ -115,6 +128,8 @@ pub struct DynamicState {
     pub hovered: Option<NodeId>,
     /// The focused text field (`:focus` matches it exactly).
     pub focused: Option<NodeId>,
+    /// Terminal viewport (columns × rows in cells) for `@media` conditions.
+    pub viewport: Viewport,
 }
 
 /// The set of dynamic pseudo-classes a stylesheet actually uses, packed as a

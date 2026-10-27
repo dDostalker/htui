@@ -36,11 +36,11 @@ impl PseudoClass {
         match self {
             PseudoClass::Hover => DynamicState {
                 hovered: target,
-                focused: None,
+                ..Default::default()
             },
             PseudoClass::Focus => DynamicState {
-                hovered: None,
                 focused: target,
+                ..Default::default()
             },
         }
     }
@@ -340,7 +340,7 @@ pub fn selector_chain_matches_with_hover(
         selector,
         &DynamicState {
             hovered,
-            focused: None,
+            ..Default::default()
         },
     )
 }

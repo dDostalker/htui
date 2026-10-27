@@ -684,7 +684,7 @@ fn focus_behind_a_pending_arena_merges_into_the_arena_dynamic() {
         zoom: 1.0,
         dynamic: DynamicState {
             hovered: Some(NodeId::default()),
-            focused: None,
+            ..Default::default()
         },
         dirty: DirtyInfo::default(),
     });
@@ -1460,7 +1460,7 @@ fn drive_msgs(
                 zoom: state.zoom,
                 dynamic: DynamicState {
                     hovered: ev.hovered,
-                    focused: None,
+                    ..Default::default()
                 },
                 dirty: d.dirty,
             });

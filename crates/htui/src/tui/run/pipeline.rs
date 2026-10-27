@@ -9,6 +9,7 @@ use crossterm::execute;
 use indexmap::IndexMap;
 
 use crate::events::Geometry;
+use crate::html::css_parse::Viewport;
 use crate::html::css_parse::{
     self, CssRule, DynamicState, PseudoClass, css_into_node_with_state, css_pseudo_rule_set,
     reset_css_attr,
@@ -86,6 +87,16 @@ fn extract_title(arena: &NodeArena, root_id: NodeId) -> Option<String> {
     None
 }
 
+/// The terminal viewport in cells for `@media` matching: the physical grid
+/// (zoom deliberately not folded in — a resize is the real media-triggering
+/// event, and the cell grid is what "window size" means on a terminal).
+pub(super) fn viewport_of(map: &TermMap) -> Viewport {
+    Viewport {
+        cols: map.columns as usize,
+        rows: map.rows as usize,
+    }
+}
+
 impl RenderState {
     /// Re-layout, re-paint, publish the geometry and flush a frame.
     ///
@@ -100,7 +111,8 @@ impl RenderState {
         scroll_y: u32,
         zoom: f32,
     ) {
-        let (root_id, arena) = cascade_document(&self.document, &self.css_rules);
+        let (root_id, arena) =
+            cascade_document(&self.document, &self.css_rules, viewport_of(term_map));
         self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom, None);
     }
 
@@ -306,6 +318,9 @@ impl RenderState {
         if css_changed {
             self.apply_injected_css(&dirty.injected_css);
         }
+        // The cascade re-evaluates `@media` against the current viewport (the
+        // stored dynamic state may predate a resize).
+        self.dynamic.viewport = viewport_of(term_map);
         let source_arena = Arc::clone(arena);
         let mut arena = (*source_arena).clone();
         reset_css_attr(&mut arena, root_id);
@@ -418,6 +433,12 @@ impl RenderState {
         let in_geo = |id: Option<NodeId>| id.filter(|id| geo.arena.contains_key(*id));
         let prev = in_geo(prev);
         let new = in_geo(new);
+        // Keep the `@media` viewport in sync with the canvas (identical unless
+        // a resize landed between layouts).
+        self.dynamic.viewport = Viewport {
+            cols: tl.columns as usize,
+            rows: tl.rows as usize,
+        };
         let mut arena = geo.arena.clone();
         reset_css_attr(&mut arena, geo.root_id);
         css_into_node_with_state(&mut arena, geo.root_id, &self.css_rules, &self.dynamic);

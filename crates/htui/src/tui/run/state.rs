@@ -9,6 +9,7 @@ use compact_str::CompactString;
 use crossterm::style::Color;
 
 use crate::events::SharedGeometry;
+use crate::html::css_parse::Viewport;
 use crate::html::css_parse::{self, CssRule, DynamicState, PseudoClassSet};
 use crate::html::html_parse::ParsedDocument;
 use crate::layout::Rect;
@@ -27,9 +28,18 @@ use super::selection::{extract_selection, highlight_lines, lines_bounds, selecti
 pub(super) fn cascade_document(
     document: &ParsedDocument,
     css_rules: &CssRule,
+    viewport: Viewport,
 ) -> (NodeId, NodeArena) {
     let mut arena = (*document.arena).clone();
-    css_parse::css_into_node(&mut arena, document.root_id, css_rules);
+    css_parse::css_into_node_with_state(
+        &mut arena,
+        document.root_id,
+        css_rules,
+        &DynamicState {
+            viewport,
+            ..Default::default()
+        },
+    );
     (document.root_id, arena)
 }
 

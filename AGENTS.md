@@ -28,7 +28,7 @@ htui/
 │   │   ├── src/
 │   │   │   ├── lib.rs              # 入口：模块声明 + 公共 re-export（Session / Config / Parser / 宏 / boa_engine）
 │   │   │   ├── session.rs          # Session：渲染会话（mem:// 注册表 + Config + EventBindings，render(html/css/js) 主入口）
-│   │   │   ├── config.rs           # Config：渲染设置（zoom / events / frame_gap / copy_flow / copy_block）
+│   │   │   ├── config.rs           # Config：渲染设置（zoom / events / frame_gap / copy_flow / copy_block / smooth_scroll）
 │   │   │   ├── source.rs           # HtmlSource/CssSource/JsSource + include_html!/include_css!/include_js!（debug 携带源路径）
 │   │   │   ├── resources.rs        # 资源层：mem:// 内存注册表（前缀可选；debug 注册/删除通知会话重解析），供 <script>/<link>/<img>/fetch
 │   │   │   ├── graphics/           # 终端图形原语层（依赖方向：layout → graphics → tui）
@@ -75,6 +75,7 @@ htui/
 │   │   │   │       ├── cascade.rs  # INHERITED_PROPS / SUPPORTED_PROPERTIES / css_into_node()
 │   │   │   │       ├── matcher.rs  # selector_chain_matches(+with_hover)
 │   │   │   │       ├── selector.rs # CssSelector
+│   │   │   │       ├── media.rs    # @media 查询（MediaQueryList/四特征/格数语义）
 │   │   │   │       ├── stylesheet.rs # StyleSheet parsing 入口
 │   │   │   │       ├── values/     # CSS 值枚举 + 解析函数
 │   │   │   │       │   ├── mod.rs  # 入口：mod 声明 + 显式 re-exports（Length / TextAlign / ...）
@@ -174,6 +175,7 @@ htui/
 │   │   │                   ├── mouse.rs     # handle_click/mouse_down/mouse_move/mouse_up + label 解析
 │   │   │                   ├── select.rs    # OverlayKind / open·close_select / refresh_datalist
 │   │   │                   ├── refresh.rs   # trigger_refresh（按键分发状态机）
+│   │   │                   ├── scroll_anim.rs # 平滑滚动缓动（ScrollAnim/ScrollTarget/step_target，wheel/翻页键动画）
 │   │   │                   └── page.rs      # page_level_builtins（页面级滚动/缩放/复制）
 │   │   ├── tests/               # 集成测试（跟随主库）
 │   │   │   ├── fixtures/
@@ -541,7 +543,7 @@ let x = find(b).unwrap();
 | 类型               | 位置                    | 说明                      |
 | ------------------ | ----------------------- | ------------------------- |
 | `Session`          | `session`               | 渲染会话：mem:// 注册表 + `Config` + `EventBindings`，`render()` 主入口 |
-| `Config`           | `config`                | 渲染设置（zoom / events / frame_gap / copy_flow / copy_block） |
+| `Config`           | `config`                | 渲染设置（zoom / events / frame_gap / copy_flow / copy_block / smooth_scroll） |
 | `NodeId`           | `tdom::node`            | slotmap 生成的类型安全 ID |
 | `NodeArena`        | `tdom::node`            | `SlotMap<NodeId, Node>`   |
 | `Node`             | `tdom::node`            | DOM 节点（含子节点/属性） |
@@ -550,6 +552,7 @@ let x = find(b).unwrap();
 | `CssAttr`          | `html::css_parse::properties` | 解析后的 CSS 属性（`IndexMap<Arc<str>, Arc<str>>` + 30+ 个 getter；键/值共享引用，级联逐属性 O(1) 拷贝） |
 | `CssRule`          | `html::css_parse`       | 完整 CSS 规则表           |
 | `CssSelector`      | `html::css_parse`       | CSS 选择器（含组合器）    |
+| `MediaQueryList`   | `html::css_parse`       | `@media` 查询列表（逗号 OR；值按终端格计，匹配物理视口） |
 | `FontWeight`       | `html::css_parse::values` | `font-weight` 枚举（`Normal` / `Bold`） |
 | `FontStyleKind`    | `html::css_parse::values` | `font-style` 枚举（`Normal` / `Italic` / `Oblique`） |
 | `TextDecoration`   | `html::css_parse::values` | `text-decoration` 枚举（`None` / `Underline` / `LineThrough` / `UnderlineLineThrough`） |
@@ -570,7 +573,9 @@ let x = find(b).unwrap();
 | `FontStyle`        | `graphics`（`tui::graph_api` re-export） | `Block` 的聚合样式位掩码（`BOLD` / `ITALIC` / `UNDERLINED` / `CROSSED_OUT`） |
 | `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举（Rerender / Redraw / RenderArena / RenderHtml / Hover / Quit） |
 | `DirtyInfo`        | `tui::graph_api`        | `RenderArena` 携带的脏节点集合（`nodes: Vec<NodeId>` + `injected_css: IndexMap<NodeId, String>`，后者按宿主键控、重写即替换，渲染端内容不变则跳过重解析） |
-| `InputState`       | `tui::graph_api::input` | 输入循环状态（scroll_y / zoom / pressed / 焦点输入框 / 编辑缓冲 / 选择 / open_select；hover 归脚本线程） |
+| `InputState`       | `tui::graph_api::input` | 输入循环状态（scroll_y / scroll_offsets / scroll_anim / zoom / pressed / 焦点输入框 / 编辑缓冲 / 选择 / open_select；hover 归脚本线程） |
+| `ScrollAnim`       | `tui::graph_api` | 单次缓动滚动 tween（ease-out-cubic，位置按墙钟计算；输入循环持有，输入重定向/手动滚动取消） |
+| `ScrollTarget`     | `tui::graph_api` | 滚动动画目标轴（`Page` / `Container(NodeId)`） |
 | `InputRenderState` | `graphics::canvas`      | `<input>` 渲染状态（value / cursor / focused），`TermLayout.input_states` |
 | `EventType`        | `events`                | DOM 事件类型（Click / MouseOver / MouseOut）               |
 | `HtmlEvent`        | `events`                | 事件对象（event_type / target / current_target / x / y / bubbles）|

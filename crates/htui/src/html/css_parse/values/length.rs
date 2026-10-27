@@ -503,7 +503,10 @@ pub struct FontContext {
 /// `Viewport` is a peer of [`FontContext`], not a field inside it. `vw` /
 /// `vh` always anchor to the terminal columns / rows respectively; carrying
 /// the viewport separately makes that explicit at every call site.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// The default (`0x0`) stands for "no viewport known" — size conditions never
+/// match it, so unconditional styling is unaffected.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Viewport {
     pub cols: usize,
     pub rows: usize,

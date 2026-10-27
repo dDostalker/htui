@@ -112,7 +112,7 @@ fn apply(engine: &mut ScriptEngine, map: &HitMap, msg: ScriptMsg) -> Vec<RenderC
             zoom: 1.0,
             dynamic: DynamicState {
                 hovered: ev.hovered,
-                focused: None,
+                ..Default::default()
             },
             dirty: d.dirty,
         });

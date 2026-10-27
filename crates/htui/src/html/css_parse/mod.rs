@@ -1,5 +1,6 @@
 mod cascade;
 mod matcher;
+mod media;
 mod properties;
 mod selector;
 mod stylesheet;
@@ -15,6 +16,7 @@ pub use cascade::{
 pub use matcher::{
     selector_chain_matches, selector_chain_matches_with_hover, selector_chain_matches_with_state,
 };
+pub use media::{MediaQuery, MediaQueryList};
 pub(crate) use properties::clamp_min_max;
 pub use properties::{AlignSelf, CssAttr};
 pub use selector::{

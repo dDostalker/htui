@@ -319,6 +319,19 @@
     background-color: #0e121c;
   }
   .foot-key { color: #8b96b5; }
+
+  /* ---------- small-window behavior (@media, htui supports
+     max/min-width/height in cell counts) — shrink the terminal to see the
+     cards drop out in priority order: spectrum first, then lyrics ---------- */
+  @media (max-width: 60ch) {
+    .viz { display: none; }
+  }
+  @media (max-height: 14) {
+    .card-lyr, .viz { display: none; }
+  }
+  @media (max-width: 40ch) {
+    .foot-key { display: none; }
+  }
 </style>
 </head>
 <body>

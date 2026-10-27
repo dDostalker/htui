@@ -2506,7 +2506,7 @@ fn bucketed_cascade_matches_reference_cascade() {
     // rest of the tree must stay byte-identical to the reference.
     let hovered = DynamicState {
         hovered: Some(li2),
-        focused: None,
+        ..Default::default()
     };
     let mut arena = NodeArena::default();
     let (root, _div, _ul, _li2, _em) = build_cascade_tree(&mut arena);
@@ -2848,7 +2848,7 @@ fn stale_node_id_fails_to_match_instead_of_panicking() {
         sel,
         &DynamicState {
             hovered: Some(stale),
-            focused: None,
+            ..Default::default()
         },
     ));
 }
@@ -3568,5 +3568,251 @@ fn test_generated_content_renders_before_and_after() {
     assert!(
         canvas2.contains("mid") && !canvas2.contains('['),
         "content: none generates nothing"
+    );
+}
+
+// ============================================================
+// @media conditions
+// ============================================================
+
+use htui::html::css_parse::{MediaQuery, MediaQueryList};
+
+fn media_queries(css: &str) -> Vec<Option<MediaQueryList>> {
+    Parser::new(css)
+        .parse()
+        .0
+        .iter()
+        .map(|e| e.media.clone())
+        .collect()
+}
+
+#[test]
+fn test_media_query_matches_features_and_or() {
+    init();
+    let list = MediaQueryList(vec![MediaQuery {
+        max_width: Some(70.0),
+        min_width: None,
+        max_height: None,
+        min_height: None,
+    }]);
+    assert!(
+        list.matches(&Viewport { cols: 70, rows: 24 }),
+        "boundary is inclusive"
+    );
+    assert!(list.matches(&Viewport { cols: 40, rows: 24 }));
+    assert!(!list.matches(&Viewport { cols: 71, rows: 24 }));
+
+    // Two features in one query AND together.
+    let both = MediaQueryList(vec![MediaQuery {
+        max_width: Some(70.0),
+        min_width: Some(40.0),
+        max_height: None,
+        min_height: None,
+    }]);
+    assert!(both.matches(&Viewport { cols: 60, rows: 24 }));
+    assert!(!both.matches(&Viewport { cols: 39, rows: 24 }));
+    assert!(!both.matches(&Viewport { cols: 80, rows: 24 }));
+
+    // Comma-separated queries OR together.
+    let or = MediaQueryList(vec![
+        MediaQuery {
+            max_width: Some(40.0),
+            min_width: None,
+            max_height: None,
+            min_height: None,
+        },
+        MediaQuery {
+            max_width: None,
+            min_width: None,
+            max_height: Some(10.0),
+            min_height: None,
+        },
+    ]);
+    assert!(or.matches(&Viewport { cols: 39, rows: 24 }), "first query");
+    assert!(or.matches(&Viewport { cols: 80, rows: 9 }), "second query");
+    assert!(
+        !or.matches(&Viewport { cols: 80, rows: 24 }),
+        "neither query"
+    );
+
+    // An empty list never matches.
+    assert!(!MediaQueryList(vec![]).matches(&Viewport { cols: 80, rows: 24 }));
+
+    // The 0x0 "no viewport known" default never matches a size condition.
+    assert!(!list.matches(&Viewport { cols: 0, rows: 0 }));
+}
+
+#[test]
+fn test_media_at_rule_parses_conditional_entries() {
+    init();
+    // Bare numbers and `ch` are both cell counts.
+    let media = media_queries("@media (max-width: 70ch) { .side { display: none; } }");
+    assert_eq!(media.len(), 1);
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(list.matches(&Viewport { cols: 60, rows: 24 }));
+    assert!(!list.matches(&Viewport { cols: 80, rows: 24 }));
+
+    // Unconditional rules carry no condition.
+    let mixed = media_queries("p { color: red; } @media (max-height: 14) { .x { color: blue; } }");
+    assert_eq!(mixed.len(), 2);
+    assert!(mixed[0].is_none());
+    let list = mixed[1].as_ref().expect("media condition");
+    assert!(list.matches(&Viewport { cols: 80, rows: 10 }));
+    assert!(!list.matches(&Viewport { cols: 80, rows: 24 }));
+
+    // `and` between features, comma OR between queries.
+    let list = media_queries(
+        "@media (max-width: 40) and (min-height: 20), (min-width: 100) { .x { color: red; } }",
+    );
+    let list = list[0].as_ref().expect("condition attached");
+    assert!(
+        list.matches(&Viewport { cols: 30, rows: 24 }),
+        "first query"
+    );
+    assert!(
+        !list.matches(&Viewport { cols: 30, rows: 10 }),
+        "height too small"
+    );
+    assert!(
+        list.matches(&Viewport {
+            cols: 120,
+            rows: 24
+        }),
+        "second query"
+    );
+}
+
+#[test]
+fn test_media_cascade_by_viewport() {
+    init();
+    // The unconditional `.side` twin verifies the non-media rule always
+    // applies to the same node (color and display are independent keys).
+    let css = "@media (max-width: 40) { .side { display: none; } } .side { color: red; }";
+    let rules = Parser::new(css).parse();
+    let mut arena = NodeArena::default();
+    let (root, div_id) = build_test(&mut arena);
+    arena[div_id]
+        .attributes
+        .insert("class".to_string(), "side".to_string());
+
+    // Wide viewport: the conditional rule never applies.
+    css_into_node_with_state(
+        &mut arena,
+        root,
+        &rules,
+        &DynamicState {
+            viewport: Viewport { cols: 80, rows: 24 },
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        arena[div_id].css_attr.0.get("display").map(|s| s.as_ref()),
+        None
+    );
+
+    // Narrow viewport: the rule applies.
+    let mut arena = NodeArena::default();
+    let (root, div_id) = build_test(&mut arena);
+    arena[div_id]
+        .attributes
+        .insert("class".to_string(), "side".to_string());
+    css_into_node_with_state(
+        &mut arena,
+        root,
+        &rules,
+        &DynamicState {
+            viewport: Viewport { cols: 40, rows: 24 },
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        arena[div_id].css_attr.0.get("display").map(|s| s.as_ref()),
+        Some("none")
+    );
+
+    // Re-cascading the same tree at the wide viewport (the resize path) drops
+    // the rule again — nothing about the old pass leaks through `reset_css_attr`.
+    reset_css_attr(&mut arena, root);
+    css_into_node_with_state(
+        &mut arena,
+        root,
+        &rules,
+        &DynamicState {
+            viewport: Viewport { cols: 80, rows: 24 },
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        arena[div_id].css_attr.0.get("display").map(|s| s.as_ref()),
+        None
+    );
+    assert_eq!(
+        arena[div_id].css_attr.0.get("color").map(|s| s.as_ref()),
+        Some("red")
+    );
+
+    // Unknown viewport (the DynamicState default): size conditions never match.
+    let mut arena = NodeArena::default();
+    let (root, div_id) = build_test(&mut arena);
+    arena[div_id]
+        .attributes
+        .insert("class".to_string(), "side".to_string());
+    css_into_node_with_state(&mut arena, root, &rules, &DynamicState::default());
+    assert_eq!(
+        arena[div_id].css_attr.0.get("display").map(|s| s.as_ref()),
+        None
+    );
+    assert_eq!(
+        arena[div_id].css_attr.0.get("color").map(|s| s.as_ref()),
+        Some("red")
+    );
+}
+
+#[test]
+fn test_media_unsupported_query_drops_the_block() {
+    init();
+    // An unsupported unit makes the query false — the rule is parsed but can
+    // never match any viewport.
+    let media = media_queries("@media (max-width: 5em) { .side { display: none; } }");
+    assert_eq!(media.len(), 1);
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(!list.matches(&Viewport { cols: 1, rows: 1 }));
+
+    // An unknown feature also drops its query; the other comma alternative
+    // still works.
+    let media = media_queries(
+        "@media (orientation: landscape), (max-width: 40) { .side { display: none; } }",
+    );
+    assert_eq!(media.len(), 1);
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(list.matches(&Viewport { cols: 30, rows: 24 }));
+    assert!(!list.matches(&Viewport { cols: 80, rows: 24 }));
+
+    // An empty prelude drops the whole block (no rules at all). A query that
+    // cannot parse (missing value) leaves the rule in place but its empty
+    // query list matches no viewport — CSS treats an unknown media query as
+    // false.
+    assert!(media_queries("@media { .side { display: none; } }").is_empty());
+    let media = media_queries("@media (max-width:) { .side { display: none; } }");
+    assert_eq!(media.len(), 1);
+    assert!(
+        !media[0]
+            .as_ref()
+            .expect("condition attached")
+            .matches(&Viewport { cols: 1, rows: 1 })
+    );
+}
+
+#[test]
+fn test_media_at_rule_does_not_disturb_following_rules() {
+    init();
+    let css = "@media (max-width: 40) { .side { display: none; } } .after { color: red; }";
+    let rules = Parser::new(css).parse();
+    assert_eq!(rules.0.len(), 2, "media child + following rule");
+    assert!(rules.0[0].media.is_some());
+    assert!(rules.0[1].media.is_none());
+    assert_eq!(
+        rules.0[1].normal.0.get("color").map(|s| s.as_ref()),
+        Some("red")
     );
 }

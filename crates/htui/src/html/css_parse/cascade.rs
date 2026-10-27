@@ -9,6 +9,7 @@ use super::{
     matcher::selector_chain_matches_with_state,
     selector::{DynamicState, PseudoClassSet, Selector},
     stylesheet::{CssRule, parse_declaration_splits},
+    values::Viewport,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -177,6 +178,13 @@ pub fn css_into_node_with_state(
     state: &DynamicState,
 ) {
     let index = css.cascade_index();
+    // `@media` visibility is fixed for the whole pass (the viewport is part
+    // of the state), so it is decided once per rule instead of per node.
+    let media_active: Vec<bool> = css
+        .0
+        .iter()
+        .map(|e| e.media.as_ref().is_none_or(|m| m.matches(&state.viewport)))
+        .collect();
     // Per-node evaluation scratch, reused across the whole pass so neither
     // the traversal nor the candidate gathering allocates per node / rule.
     let mut seen = vec![0u32; css.0.len()];
@@ -192,6 +200,9 @@ pub fn css_into_node_with_state(
             stamp = 1;
         }
         index.candidates_for(&arena[node_id], &mut candidates, &mut seen, stamp);
+        // Drop rules whose `@media` condition does not match the viewport
+        // (order-preserving, so the cascade rank survives the filter).
+        candidates.retain(|&rule| media_active[rule as usize]);
         // 1. Author stylesheet, normal declarations (lowest priority).
         for &rule in &candidates {
             let entry = &css.0[rule as usize];
@@ -251,6 +262,7 @@ pub fn css_into_node_with_hover(
         &DynamicState {
             hovered,
             focused: None,
+            viewport: Viewport { cols: 0, rows: 0 },
         },
     );
 }
