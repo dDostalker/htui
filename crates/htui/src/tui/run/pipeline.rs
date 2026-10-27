@@ -88,7 +88,7 @@ fn extract_title(arena: &NodeArena, root_id: NodeId) -> Option<String> {
 impl RenderState {
     /// Re-layout, re-paint, publish the geometry and flush a frame.
     ///
-    /// Shared by `Redraw` (same document) and `RenderHtml` (new document).
+    /// Shared by same-document and whole-document redraw commands.
     /// `out` is generic so tests can drive the pipeline against an in-memory
     /// writer.
     pub(super) fn redraw<W: Write>(
@@ -499,37 +499,6 @@ impl RenderState {
         {
             apply_select_overlay(tl, open);
         }
-    }
-
-    /// Replace the session document and fully re-render it, keeping the
-    /// current scroll position / zoom.
-    ///
-    /// Backs `RenderCmd::RenderHtml`. Script-side replacements are intercepted
-    /// by `ScriptEngine::reload` (the engine stays the document's single
-    /// source of truth); this render-thread path remains only for direct API
-    /// use and as a fallback when an in-engine reload fails.
-    pub(super) fn render_html<W: Write>(
-        &mut self,
-        out: &mut BufWriter<W>,
-        geo_tx: &Option<mpsc::Sender<Arc<Geometry>>>,
-        term_map: &TermMap,
-        html: Arc<str>,
-    ) {
-        let (scroll_y, zoom) = match &self.term_layout {
-            Some(tl) => (tl.scroll_y, tl.zoom),
-            None => (0, 1.0),
-        };
-        self.document = {
-            let mut parser = crate::html::html_parse::Parser::new(&html);
-            parser.parse_with_scripts()
-        };
-        self.document_css = Arc::clone(&self.document.css);
-        // A fresh document discards injected CSS and interaction state tied
-        // to the replaced arena's node ids.
-        self.extra_css = String::new();
-        self.reset_document_interaction();
-        self.rebuild_css_rules();
-        self.redraw(out, geo_tx, term_map, scroll_y, zoom);
     }
 
     /// Replace session-level CSS and fully redraw the same document.

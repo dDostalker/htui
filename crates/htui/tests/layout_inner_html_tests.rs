@@ -61,7 +61,8 @@ fn inner_html_getter_serializes_children() {
     // Nested elements, attributes, void elements, comments and escaped text
     // must serialize back to faithful HTML.
     let mut engine = ScriptEngine::new(
-        r#"<div id="d"><p class="a">Hi &amp; bye</p><br><img src="x.png"><!-- c --><span>a&lt;b&gt;</span></div>"#,
+        r#"<div id="d"><p class="a">Hi &amp; bye</p><br><img src="x.png"><!-- c --><span>a&lt;b&gt;</span></div>"#, "",
+
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -76,6 +77,7 @@ fn inner_html_getter_round_trips_escaped_source() {
     // Text escapes `&` `<` `>`; attribute values escape `&` and quotes.
     let mut engine = ScriptEngine::new(
         r#"<div id="d"><p title="a&quot;b">x &amp; y &lt; z</p></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -91,6 +93,7 @@ fn inner_html_getter_preserves_attribute_source_order() {
     // not sorted.
     let mut engine = ScriptEngine::new(
         r#"<div id="d"><a id="x" class="btn" data-k="v" href="/z">t</a></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -106,6 +109,7 @@ fn inner_html_getter_tracks_set_and_remove_attribute_order() {
     // remaining ones in their relative source order (browser behaviour).
     let mut engine = ScriptEngine::new(
         r#"<div id="d"><p class="x"></p></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -118,11 +122,11 @@ fn inner_html_getter_tracks_set_and_remove_attribute_order() {
 
 #[test]
 fn inner_html_getter_empty_when_no_children() {
-    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
+    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, "", EventBindings::default())
         .expect("engine initializes");
     assert_eq!(
         eval_str(&mut engine, "document.getElementById('d').innerHTML"),
-        ""
+        "",
     );
 }
 
@@ -134,6 +138,7 @@ fn inner_html_getter_empty_when_no_children() {
 fn inner_html_setter_replaces_children() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d">old<p>text</p></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -175,6 +180,7 @@ fn inner_html_setter_replaces_children() {
 fn inner_html_setter_empty_clears_children() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d"><p>a</p><p>b</p></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -187,7 +193,7 @@ fn inner_html_setter_empty_clears_children() {
     );
     assert_eq!(
         eval_str(&mut engine, "document.getElementById('d').textContent"),
-        ""
+        "",
     );
 }
 
@@ -197,6 +203,7 @@ fn inner_html_setter_parses_in_element_context() {
     // table fragments that would be dropped in a `<div>` context survive.
     let mut engine = ScriptEngine::new(
         r#"<table><tbody id="b"></tbody></table>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -218,7 +225,7 @@ fn inner_html_setter_parses_in_element_context() {
 
 #[test]
 fn inner_html_content_is_query_selectorable() {
-    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
+    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, "", EventBindings::default())
         .expect("engine initializes");
     eval_str(
         &mut engine,
@@ -240,7 +247,7 @@ fn inner_html_content_is_query_selectorable() {
 
 #[test]
 fn inner_html_setter_extracts_style_css() {
-    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
+    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, "", EventBindings::default())
         .expect("engine initializes");
     eval_str(
         &mut engine,
@@ -274,7 +281,7 @@ fn inner_html_setter_extracts_style_css() {
 fn inner_html_style_css_applies_to_fragment() {
     // The extracted CSS is re-parsed and cascaded exactly like the render
     // thread does, so the injected rule styles the fragment's elements.
-    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
+    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, "", EventBindings::default())
         .expect("engine initializes");
     eval_str(
         &mut engine,
@@ -309,7 +316,7 @@ fn inner_html_setter_loads_link_stylesheet() {
     reg.register("inner-html-test.css", b"li { color: blue; }".to_vec())
         .expect("register css");
     with_registry(Arc::clone(&reg), || {
-        let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
+        let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, "", EventBindings::default())
             .expect("engine initializes");
         eval_str(
             &mut engine,
@@ -349,7 +356,7 @@ fn inner_html_setter_loads_link_stylesheet() {
 
 #[test]
 fn inner_html_setter_skips_scripts() {
-    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
+    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, "", EventBindings::default())
         .expect("engine initializes");
     eval_str(
         &mut engine,
@@ -377,7 +384,7 @@ fn inner_html_setter_skips_scripts() {
 
 #[test]
 fn inner_html_on_non_element_is_noop() {
-    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
+    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, "", EventBindings::default())
         .expect("engine initializes");
     // `innerHTML` is an Element-only property: the document has none.
     assert_eq!(
@@ -400,7 +407,8 @@ fn inner_html_click_handler_mutation_carries_style_css() {
     // A JS event handler that rewrites `innerHTML` (the common interactive
     // use) must carry the extracted CSS through the ScriptEvent dirty batch.
     let mut engine = ScriptEngine::new(
-        r#"<div id="d" onclick="this.innerHTML = '<style>i { color: green; }</style><i id=&quot;q&quot;>hi</i>'"></div>"#,
+        r#"<div id="d" onclick="this.innerHTML = '<style>i { color: green; }</style><i id=&quot;q&quot;>hi</i>'"></div>"#, "",
+
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -431,7 +439,7 @@ fn inner_html_rewrites_replace_host_styles_instead_of_accumulating() {
     // The injected-CSS set is keyed by the host, so a rewrite *replaces* the
     // entry (the browser drops the host's old `<style>` elements) instead of
     // appending an unbounded history that the render side re-parses O(n²).
-    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
+    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, "", EventBindings::default())
         .expect("engine initializes");
 
     eval_str(

@@ -40,7 +40,7 @@ HTML ──► html_parse（提取 style CSS / script JS 源码）
 | 事件来源 | `onclick="func()"` 直接查 `EventBindings.actions`（Rust 闭包） | `<script>` 定义 JS 函数；`on*` 属性编译为 `function(event){…}`；`addEventListener` 注册 |
 | 求值器 | 手写 JS 子集 `eval.rs`（仅表达式） | Boa 完整 ECMAScript 引擎 |
 | DOM 访问 | 无 | `document` / element 包装对象（`textContent`、`style`、`className`…） |
-| 动态重渲染 | `RenderCmd::RenderHtml`（整文档重新解析） | JS 直接改 DOM → `RenderCmd::RenderArena`（**零重解析**） |
+| 动态重渲染 | `RenderCmd::RenderHtml`（旧整文档命令，已移除） | JS 直接改 DOM → `RenderCmd::RenderArena`（**零重解析**） |
 | 宿主回调 | `EventHandler: FnMut(&HtmlEvent) -> Option<RenderCmd>` | `host_fn` 构造的 `HostFn`（闭包不暴露 Boa，参数/返回值/错误均纯 Rust） |
 
 ---
@@ -416,11 +416,9 @@ JS 修改 DOM 后，引擎把被改动的节点 id 记入 `dirty`（一组 `Node
 在渲染线程内完成，只有引擎持有的 arena 被克隆发送；且单个 `textContent` 变化
 不再触发整张画布的清空与重绘。
 
-> 注意：`RenderCmd::RenderHtml` 用于"整文档替换"——宿主函数 push 后由**脚本引擎
-> `ScriptEngine::reload` 在引擎内**重新解析（保持引擎为文档单一真源），mark root
-> dirty 后随 `RenderCmd::RenderDocument`（携带新 arena 与文档 CSS）同步到渲染线程；
-> 渲染线程的 `RenderHtml` 分支仅作外部 API 兜底。debug 热加载同样通过
-> `ScriptMsg::ReloadHtml` 走这条单一真源路径。
+> 注意：整文档替换现在必须通过 `ScriptMsg::ReloadHtml`，由 `ScriptEngine::reload`
+> 在引擎内重新解析，保持引擎为文档单一真源；mark root dirty 后随
+> `RenderCmd::RenderDocument`（携带新 arena 与文档 CSS）同步到渲染线程。
 
 ### 脚本线程（引擎与输入解耦）
 
@@ -476,7 +474,7 @@ JS 每 200ms 刷一次监控器，大部分帧只改几个 `<p>` 的文本。旧
    不置 `dirty`。监控器每 200ms 刷新但值基本不变时，实际 `RenderArena`
    次数远少于刷新次数（监控器页面实测 200 次刷新只触发约 14 次渲染）。
 2. **命令合并**：合并语义由渲染线程的 `DrainedBatch` 单点实现。快照命令
-   （`Rerender`/`Redraw`/`RenderArena`/`RenderHtml`/`Quit`）只保留最后一个，
+   （`Rerender`/`Redraw`/`RenderArena`/`RenderDocument`/`Quit`）只保留最后一个，
    避免重复重绘；`RenderArena` 携带 `dynamic`（hover + focus 快照），重排时自动
    重新应用当前高亮——落后于它的 `Hover` 命令延后叠加，`Focus` 命令合并进
    `dynamic`，DOM 变更与高亮增量都不会丢失。

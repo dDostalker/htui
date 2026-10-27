@@ -173,7 +173,7 @@ impl InputState {
 
     /// Reset interaction state tied to a replaced document's node ids.
     ///
-    /// A whole-document reload (hot reload or a host-pushed `RenderHtml`)
+    /// A whole-document reload (hot reload or `ScriptMsg::ReloadHtml`)
     /// replaces the arena, so focused-field edit buffers, an open dropdown,
     /// drag state and page-selection coordinates must not survive. Scroll,
     /// zoom, clipboard and the last pointer position do survive; the latter is

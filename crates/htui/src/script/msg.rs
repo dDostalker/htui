@@ -425,7 +425,7 @@ pub fn apply_message(
 
     let document_reload = engine.take_document_reload();
     if document_reload {
-        // Host-pushed `RenderHtml` can reload in the middle of an event; clear
+        // A whole-document reload can happen in the middle of an event; clear
         // the same hover state that an explicit `ReloadHtml` clears.
         *hover = HoverState::new();
     }
@@ -451,26 +451,11 @@ pub fn apply_message(
     }
 }
 
-/// Run the page's JS engine on its own thread.
+/// Run the page's JS engine with required initial session-level JS.
 ///
-/// Build the engine and run top-level `<script>` code, then report the
-/// initial DOM with `Ready` or initialization failure with `Failed`. Handle
-/// `ScriptMsg` requests from the input loop, and wake for due JS timers or
-/// completed fetches. Each reply carries render commands, DOM updates, hover
-/// state, and key-gate results. `Quit` or a closed request channel ends the
-/// loop.
+/// Build the engine, run top-level scripts, then handle `ScriptMsg` requests,
+/// timers, and fetches until `Quit` or channel disconnect.
 pub fn run_script_thread(
-    document: ParsedDocument,
-    bindings: EventBindings,
-    rx: Receiver<ScriptMsg>,
-    tx: Sender<ScriptResponse>,
-    hit_map: Arc<Mutex<Arc<HitMap>>>,
-) {
-    run_script_thread_with_js(document, bindings, Arc::from(""), rx, tx, hit_map);
-}
-
-/// Run the page's JS engine with initial session-level JS on its own thread.
-pub fn run_script_thread_with_js(
     document: ParsedDocument,
     bindings: EventBindings,
     session_js: Arc<str>,
@@ -478,8 +463,7 @@ pub fn run_script_thread_with_js(
     tx: Sender<ScriptResponse>,
     hit_map: Arc<Mutex<Arc<HitMap>>>,
 ) {
-    let mut engine = match ScriptEngine::new_from_document_with_js(document, &session_js, bindings)
-    {
+    let mut engine = match ScriptEngine::new_from_document(document, &session_js, bindings) {
         Ok(engine) => engine,
         Err(err) => {
             log::error!("Failed to initialize script engine: {err}");

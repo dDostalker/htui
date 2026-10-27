@@ -85,7 +85,7 @@ impl ScriptEngine {
         let mut st = self.state.borrow_mut();
         let cmds = std::mem::take(&mut st.render_cmds);
         drop(st);
-        self.intercept_render_html(cmds)
+        cmds
     }
 
     /// Drain completed loads and settle their `fetch` promises.

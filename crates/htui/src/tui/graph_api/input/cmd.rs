@@ -69,17 +69,9 @@ pub enum RenderCmd {
         dynamic: DynamicState,
         dirty: DirtyInfo,
     },
-    /// Replace the session document with `html` and fully re-render it,
-    /// keeping the current scroll position / zoom. Script-path uses are
-    /// intercepted by `ScriptEngine::reload` so the engine re-parses the
-    /// document (single source of truth); the render-thread branch only
-    /// handles direct API use / fallback.
-    RenderHtml {
-        html: Arc<str>,
-    },
     /// Render a whole-document replacement supplied by the script engine.
     ///
-    /// Unlike [`RenderHtml`](Self::RenderHtml), the HTML was already re-parsed
+    /// The HTML was already re-parsed
     /// by `ScriptEngine::reload`, so this command carries the live arena and
     /// the new document-embedded CSS instead of asking the render thread to
     /// create a second source of truth. Interaction state is reset because the
@@ -204,14 +196,13 @@ fn merge_dirty(target: &mut DirtyInfo, source: DirtyInfo) {
 ///   favour of the [`RenderCmd::RenderArena`] its `change` handler
 ///   triggers) — are kept in arrival order and all run.
 /// - Snapshot commands (`Rerender` / `Redraw` / `RenderArena` /
-///   `RenderHtml` / `Quit`) each carry a complete final state, so a later
+///   `RenderDocument` / `Quit`) each carry a complete final state, so a later
 ///   one safely supersedes an earlier one; only the last of the batch is
 ///   kept. Two exceptions preserve a richer snapshot the command cannot
 ///   reproduce: a `Rerender` / `Redraw` behind a pending `RenderArena` folds
-///   its scroll / zoom into the arena instead of replacing it (the arena
-///   carries DOM mutations a pure viewport command must not drop), and a
-///   `Rerender` / `Redraw` behind a pending `RenderHtml` is dropped (the
-///   document replacement wins; it re-renders at its own clamped scroll).
+///   its scroll / zoom into the arena or document snapshot instead of
+///   replacing it (the arena carries DOM mutations a pure viewport command
+///   must not drop).
 /// - [`RenderCmd::TextSelection`] is *incremental*: its repaint region
 ///   derives from the previously applied selection, so superseding it with
 ///   a same-batch snapshot (a `RenderArena` triggered by a timer / hover
@@ -224,12 +215,12 @@ fn merge_dirty(target: &mut DirtyInfo, source: DirtyInfo) {
 ///   superseding the snapshot would drop a resize re-layout or the DOM
 ///   mutations an arena carries (a resize while the pointer moves, an
 ///   animated widget under the pointer). The deferred hover repaint
-///   re-applies the newer highlight on top. Behind a pending `RenderHtml`
-///   it is dropped: the hover target belongs to the replaced document.
+///   re-applies the newer highlight on top. Behind a pending whole-document
+///   snapshot it is dropped: the hover target belongs to the replaced document.
 /// - A [`RenderCmd::Focus`] arriving behind a pending `RenderArena` *merges
 ///   into that arena's [`DynamicState`]* (the same pass paints the DOM
 ///   mutations and the newest focus); behind a pending `Redraw` / `Rerender`
-///   it is deferred like a hover; behind a pending `RenderHtml` it is
+///   it is deferred like a hover; behind a pending whole-document snapshot it
 ///   dropped (the focused field belonged to the replaced document).
 #[derive(Debug, Default)]
 pub struct DrainedBatch {
@@ -275,7 +266,7 @@ impl DrainedBatch {
                 ) => self.hover = Some(other),
                 // The document was replaced: the hover target belonged to the
                 // old document and must neither style nor displace the new one.
-                Some(RenderCmd::RenderHtml { .. } | RenderCmd::RenderDocument { .. }) => {}
+                Some(RenderCmd::RenderDocument { .. }) => {}
                 // No snapshot pending (or the quit flag is already latched and
                 // the snapshot is the quit): the hover repaint itself becomes
                 // the batch's snapshot.
@@ -298,7 +289,7 @@ impl DrainedBatch {
                 }
                 // The document was replaced: the focused field belonged to
                 // the old document.
-                Some(RenderCmd::RenderHtml { .. } | RenderCmd::RenderDocument { .. }) => {}
+                Some(RenderCmd::RenderDocument { .. }) => {}
                 _ if !self.quit => self.snapshot = Some(RenderCmd::Focus { node_id }),
                 _ => {}
             },
@@ -318,10 +309,6 @@ impl DrainedBatch {
                 ) => {
                     *arena_scroll = scroll_y;
                 }
-                // A pending `RenderHtml` replaces the document wholesale; it
-                // re-renders at its own (clamped) scroll position, so the
-                // stale viewport command is dropped.
-                Some(RenderCmd::RenderHtml { .. }) => {}
                 _ => self.snapshot = Some(RenderCmd::Rerender { scroll_y }),
             },
             RenderCmd::Redraw { scroll_y, zoom } => match self.snapshot.as_mut() {
@@ -342,7 +329,6 @@ impl DrainedBatch {
                     *arena_scroll = scroll_y;
                     *arena_zoom = zoom;
                 }
-                Some(RenderCmd::RenderHtml { .. }) => {}
                 _ => self.snapshot = Some(RenderCmd::Redraw { scroll_y, zoom }),
             },
             RenderCmd::RenderArena {

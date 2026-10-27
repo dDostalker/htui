@@ -123,7 +123,7 @@ impl OpenSelect {
 
     /// Re-resolve the overlay's options / rows / rect against a fresh layout.
     ///
-    /// A re-layout (`RenderArena` / `Redraw` / `RenderHtml` / a pinned-box
+    /// A re-layout (`RenderArena` / `RenderDocument` / `Redraw` / a pinned-box
     /// scroll repaint) can move the field or change the option list; the
     /// overlay must be re-derived from the geometry it will be painted on.
     /// Returns `false` when the select no longer produces a box (the

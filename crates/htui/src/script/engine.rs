@@ -36,30 +36,19 @@ impl ScriptEngine {
     /// compiles `on*` attribute bodies into listeners, then runs every
     /// `<script>` block. Errors are returned as Boa errors; individual script
     /// failures log a warning and continue.
-    pub fn new(html: &str, bindings: EventBindings) -> JsResult<Self> {
-        Self::new_with_js(html, "", bindings)
-    }
-
-    /// Create an engine from HTML plus session-level JS.
-    pub fn new_with_js(html: &str, session_js: &str, bindings: EventBindings) -> JsResult<Self> {
+    pub fn new(html: &str, session_js: &str, bindings: EventBindings) -> JsResult<Self> {
         let document = {
             let mut parser = Parser::new(html);
             parser.parse_with_scripts()
         };
-        Self::new_from_document_with_js(document, session_js, bindings)
-    }
-
-    /// Create an engine from an already-parsed document.
-    ///
-    /// This is the startup path used when the caller wants to parse the HTML
-    /// once and distribute independent document snapshots to the script and
-    /// render threads.
-    pub fn new_from_document(document: ParsedDocument, bindings: EventBindings) -> JsResult<Self> {
-        Self::new_from_document_with_js(document, "", bindings)
+        Self::new_from_document(document, session_js, bindings)
     }
 
     /// Create an engine from an already-parsed document plus session-level JS.
-    pub fn new_from_document_with_js(
+    ///
+    /// This startup path parses the HTML once and distributes independent
+    /// snapshots to the script and render threads.
+    pub fn new_from_document(
         document: ParsedDocument,
         session_js: &str,
         bindings: EventBindings,
@@ -204,26 +193,6 @@ impl ScriptEngine {
         Ok((context, state))
     }
 
-    /// Rewrite `RenderCmd::RenderHtml` pushed by host functions into an
-    /// in-engine document reload, so the script engine stays the single
-    /// source of truth for the document (see [`reload`](Self::reload)). A
-    /// failed reload keeps the command for the render thread's legacy path.
-    pub(super) fn intercept_render_html(&mut self, cmds: Vec<RenderCmd>) -> Vec<RenderCmd> {
-        let mut out = Vec::with_capacity(cmds.len());
-        for cmd in cmds {
-            match cmd {
-                RenderCmd::RenderHtml { html } => {
-                    if let Err(e) = self.reload(&html) {
-                        log::error!("In-engine document reload failed: {e}");
-                        out.push(RenderCmd::RenderHtml { html });
-                    }
-                }
-                other => out.push(other),
-            }
-        }
-        out
-    }
-
     /// Clone of the live DOM arena.
     pub fn arena(&self) -> NodeArena {
         self.state.borrow().arena.clone()
@@ -277,13 +246,9 @@ impl ScriptEngine {
     /// from a top-level `<script>` or a host call inside a settled `fetch`
     /// `.then`. [`dispatch`](Self::fire) only takes the queue for its own
     /// calls, so without an explicit drain a load-time command would sit until
-    /// the first event. Applies the same [`RenderHtml`](RenderCmd::RenderHtml)
-    /// interception as every other command source.
+    /// the first event.
     pub fn take_pending_cmds(&mut self) -> Vec<RenderCmd> {
-        let mut st = self.state.borrow_mut();
-        let cmds = std::mem::take(&mut st.render_cmds);
-        drop(st);
-        self.intercept_render_html(cmds)
+        std::mem::take(&mut self.state.borrow_mut().render_cmds)
     }
 
     /// Commit an `<input>` field's edited value into the DOM `value`
@@ -626,7 +591,7 @@ impl ScriptEngine {
         st.current_event = None;
         let cmds = std::mem::take(&mut st.render_cmds);
         drop(st);
-        (self.intercept_render_html(cmds), prevented)
+        (cmds, prevented)
     }
 
     /// Read a boolean control flag (`_stopped` / `_stoppedImmediate` /
@@ -672,7 +637,7 @@ impl ScriptEngine {
         let mut st = self.state.borrow_mut();
         let cmds = std::mem::take(&mut st.render_cmds);
         drop(st);
-        self.intercept_render_html(cmds)
+        cmds
     }
 
     /// Build a JS `Event` object for a dispatch: the shared object from

@@ -1,60 +1,18 @@
-//! Compile-time HTML / CSS / JS source loading with debug hot-reload metadata.
-//!
-//! Each source type is a distinct newtype so `Session::render` cannot mix up its
-//! three inputs. All wrappers share the same small runtime representation.
-
-/// The language carried by a [`Source`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SourceKind {
-    Html,
-    Css,
-    Js,
-}
-
-/// Language-agnostic compile-time source text and optional debug path.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Source {
-    kind: SourceKind,
-    content: &'static str,
-    path: Option<&'static str>,
-}
-
-impl Source {
-    /// Create a source from compile-time content.
-    pub const fn new(kind: SourceKind, content: &'static str, path: Option<&'static str>) -> Self {
-        Self {
-            kind,
-            content,
-            path,
-        }
-    }
-
-    /// The embedded content.
-    pub const fn as_str(&self) -> &'static str {
-        self.content
-    }
-
-    /// The absolute source path in a debug build, or `None` in release.
-    pub const fn path(&self) -> Option<&str> {
-        self.path
-    }
-
-    /// Which render input this source represents.
-    pub const fn kind(&self) -> SourceKind {
-        self.kind
-    }
-}
+//! Compile-time HTML / CSS / JS source loading with debug hot-reload paths.
 
 macro_rules! define_source {
-    ($name:ident, $kind:expr) => {
+    ($name:ident) => {
         /// A compile-time source loaded by the matching `include_*!` macro.
         #[derive(Debug, Clone, PartialEq, Eq)]
-        pub struct $name(Source);
+        pub struct $name {
+            content: &'static str,
+            path: Option<&'static str>,
+        }
 
         impl $name {
             /// Create a source. `path` is supplied by debug macro expansion.
             pub const fn new(content: &'static str, path: Option<&'static str>) -> Self {
-                Self(Source::new($kind, content, path))
+                Self { content, path }
             }
 
             /// Create source text without a hot-reload path.
@@ -64,31 +22,20 @@ macro_rules! define_source {
 
             /// The embedded content.
             pub const fn as_str(&self) -> &'static str {
-                self.0.as_str()
+                self.content
             }
 
             /// The absolute source path in a debug build, or `None` in release.
             pub const fn path(&self) -> Option<&str> {
-                self.0.path()
-            }
-
-            /// Which render input this source represents.
-            pub const fn kind(&self) -> SourceKind {
-                self.0.kind()
-            }
-        }
-
-        impl From<$name> for Source {
-            fn from(value: $name) -> Self {
-                value.0
+                self.path
             }
         }
     };
 }
 
-define_source!(HtmlSource, SourceKind::Html);
-define_source!(CssSource, SourceKind::Css);
-define_source!(JsSource, SourceKind::Js);
+define_source!(HtmlSource);
+define_source!(CssSource);
+define_source!(JsSource);
 
 /// Shared expansion for all `include_*!` macros. In debug builds it embeds the
 /// absolute source path; in release builds the path constant is removed.
@@ -108,10 +55,8 @@ macro_rules! include_source {
 
 /// Embed an HTML file and, in debug builds, remember its source path.
 ///
-/// The path is relative to the current Cargo package root
-/// (`CARGO_MANIFEST_DIR`), not the invoking source file. The file is still
-/// embedded with `include_str!`, so missing files fail at compile time and
-/// Cargo tracks edits.
+/// The path is relative to the current Cargo package root, not the invoking
+/// source file.
 #[macro_export]
 macro_rules! include_html {
     ($path:literal $(,)?) => {
@@ -120,8 +65,6 @@ macro_rules! include_html {
 }
 
 /// Embed a CSS file and, in debug builds, remember its source path.
-///
-/// See [`include_html!`](crate::include_html) for path and release semantics.
 #[macro_export]
 macro_rules! include_css {
     ($path:literal $(,)?) => {
@@ -130,8 +73,6 @@ macro_rules! include_css {
 }
 
 /// Embed a JS file and, in debug builds, remember its source path.
-///
-/// See [`include_html!`](crate::include_html) for path and release semantics.
 #[macro_export]
 macro_rules! include_js {
     ($path:literal $(,)?) => {

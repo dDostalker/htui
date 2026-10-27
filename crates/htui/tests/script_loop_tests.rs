@@ -376,51 +376,8 @@ fn apply_message_keydown_without_prevent_default_reports_clear_verdict() {
 }
 
 #[test]
-fn host_render_html_reloads_in_engine_instead_of_render_thread() {
-    // A host function that pushes `RenderHtml` must rebuild the document in
-    // the engine (the single source of truth): the fresh arena + a dirty root
-    // reach the render thread as a `RenderArena`, never as an independent
-    // re-parse on the render side (the former dual-source bug).
-    let bindings = host_bindings("rebuild", move |call| {
-        call.render().push(RenderCmd::RenderHtml {
-            html: Arc::from(r#"<div id="fresh">hello</div>"#),
-        });
-        boa_engine::JsValue::undefined()
-    });
-    let mut engine = ScriptEngine::new(r#"<div id="old">bye</div>"#, bindings).expect("engine");
-    find_node_by_id(&engine.arena(), "old"); // panics if absent
-
-    let cmds = engine.invoke_action("rebuild");
-    assert!(
-        cmds.iter()
-            .all(|c| !matches!(c, RenderCmd::RenderHtml { .. })),
-        "RenderHtml must be consumed in-engine, not forwarded to the render thread"
-    );
-    find_node_by_id(&engine.arena(), "fresh"); // panics if absent — must be live in the engine
-    assert!(
-        engine
-            .arena()
-            .iter()
-            .all(|(_, n)| n.attributes.get("id").map(String::as_str) != Some("old")),
-        "the old document must be gone"
-    );
-    assert!(
-        !engine.take_dirty().is_empty(),
-        "reload must mark the root dirty so the response carries the fresh arena"
-    );
-
-    // The host map survives the reload: a second call works again.
-    let cmds2 = engine.invoke_action("rebuild");
-    assert!(cmds2.is_empty(), "second reload also consumes the command");
-    assert!(
-        !engine.take_dirty().is_empty(),
-        "each reload marks its root dirty"
-    );
-}
-
-#[test]
 fn initial_session_js_runs_after_document_scripts() {
-    let mut engine = ScriptEngine::new_with_js(
+    let mut engine = ScriptEngine::new(
         r#"<script>globalThis.__order = ["inline"];</script><p>x</p>"#,
         r#"globalThis.__order.push("session")"#,
         EventBindings::default(),
@@ -464,9 +421,8 @@ fn reload_html_after_mem_change_resolves_the_new_resource() {
         let mut parser =
             htui::html::html_parse::Parser::new(r#"<script src="mem-change.js"></script><p>x</p>"#);
         let document = parser.parse_with_scripts();
-        let mut engine =
-            ScriptEngine::new_from_document_with_js(document, "", EventBindings::default())
-                .expect("engine initializes");
+        let mut engine = ScriptEngine::new_from_document(document, "", EventBindings::default())
+            .expect("engine initializes");
         assert_eq!(eval_str(&mut engine, "globalThis.__mem"), "old");
 
         registry
@@ -676,6 +632,7 @@ fn timer_callback_can_push_render_commands() {
         r#"<script>
           setTimeout(function(){ pushIt(); }, 5);
         </script><p>x</p>"#,
+        "",
         bindings,
     )
     .expect("engine");
@@ -995,6 +952,7 @@ fn fetch_mem_resource_resolves_promise_and_text() {
               });
             </script>
             <div id="out"></div>"#,
+            "",
             EventBindings::default(),
         )
         .expect("engine initializes");
@@ -1029,6 +987,7 @@ fn fetch_mem_missing_rejects_promise() {
                 globalThis.__rejected = 'rejected:' + String(err);
               });
             </script>"#,
+            "",
             EventBindings::default(),
         )
         .expect("engine initializes");
@@ -1067,7 +1026,7 @@ fn fetch_mem_resource_resolves_through_poll() {
     );
     with_registry(Arc::clone(&reg), || {
         let mut engine =
-            ScriptEngine::new(&html, EventBindings::default()).expect("engine initializes");
+            ScriptEngine::new(&html, "", EventBindings::default()).expect("engine initializes");
 
         // A single drain settles the promise; run the microtask queue to land the
         // text in the DOM.
@@ -1102,7 +1061,7 @@ fn fetch_relative_url_resolves_against_document_base() {
     );
     with_registry(Arc::clone(&reg), || {
         let mut engine =
-            ScriptEngine::new(&html, EventBindings::default()).expect("engine initializes");
+            ScriptEngine::new(&html, "", EventBindings::default()).expect("engine initializes");
         engine.poll_fetches();
         engine.poll_fetches();
 
@@ -1121,14 +1080,14 @@ fn base_uri_reflects_document_base_href() {
     let pid = std::process::id();
     let html = format!(r#"<base href="mem://site/{pid}/"><div id="x"></div>"#);
     let mut engine =
-        ScriptEngine::new(&html, EventBindings::default()).expect("engine initializes");
+        ScriptEngine::new(&html, "", EventBindings::default()).expect("engine initializes");
     let expected_uri = format!("mem://site/{pid}/");
     assert_eq!(
         eval_str(&mut engine, "document.getElementById('x').baseURI"),
         expected_uri
     );
 
-    let mut no_base = ScriptEngine::new(r#"<div id="y"></div>"#, EventBindings::default())
+    let mut no_base = ScriptEngine::new(r#"<div id="y"></div>"#, "", EventBindings::default())
         .expect("engine initializes");
     assert_eq!(
         eval_str(&mut no_base, "document.getElementById('y').baseURI"),
@@ -1142,7 +1101,7 @@ fn base_uri_reflects_document_base_href() {
 // ============================================================
 
 fn build_geometry(html: &str, bindings: EventBindings) -> (ScriptEngine, Geometry) {
-    let engine = ScriptEngine::new(html, bindings).expect("engine initializes");
+    let engine = ScriptEngine::new(html, "", bindings).expect("engine initializes");
     let arena = engine.arena();
     let root_id = engine.root_id();
     let term_map = TermMap {
@@ -1176,8 +1135,9 @@ fn spawn_script(
     let document = parser.parse_with_scripts();
     let (tx, rx) = mpsc::channel::<ScriptMsg>();
     let (out_tx, out_rx) = mpsc::channel::<ScriptResponse>();
-    let handle =
-        std::thread::spawn(move || run_script_thread(document, bindings, rx, out_tx, hit_map));
+    let handle = std::thread::spawn(move || {
+        run_script_thread(document, bindings, Arc::from(""), rx, out_tx, hit_map)
+    });
     (tx, out_rx, handle)
 }
 
@@ -1260,6 +1220,7 @@ fn eval_str(engine: &mut ScriptEngine, expr: &str) -> String {
 fn inner_html_churn_does_not_grow_the_arena() {
     let mut engine = ScriptEngine::new(
         r#"<div id="host"><p id="old">stale</p></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -1307,6 +1268,7 @@ fn inner_html_churn_does_not_grow_the_arena() {
 fn inner_html_keeps_a_script_held_node_usable() {
     let mut engine = ScriptEngine::new(
         r#"<div id="host"><p id="kid">keepme</p></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -1354,6 +1316,7 @@ fn eval_catch(engine: &mut ScriptEngine, expr: &str) -> String {
 fn append_child_rejects_inserting_a_node_into_itself() {
     let mut engine = ScriptEngine::new(
         r#"<div id="outer"><div id="inner"></div></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -1402,6 +1365,7 @@ fn append_child_rejects_inserting_a_node_into_its_own_descendant() {
     // descendant — the ancestor walk must reject it before any mutation.
     let mut engine = ScriptEngine::new(
         r#"<div id="outer"><div id="inner"></div></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -1428,6 +1392,7 @@ fn append_child_rejects_inserting_a_node_into_its_own_descendant() {
 fn insert_before_and_replace_child_reject_cycles() {
     let mut engine = ScriptEngine::new(
         r#"<div id="outer"><div id="inner"></div></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");

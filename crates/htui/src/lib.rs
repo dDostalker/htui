@@ -24,4 +24,4 @@ pub use config::Config;
 pub use html::html_parse::Parser;
 pub use layout::layout::TermMap;
 pub use session::Session;
-pub use source::{CssSource, HtmlSource, JsSource, Source, SourceKind};
+pub use source::{CssSource, HtmlSource, JsSource};

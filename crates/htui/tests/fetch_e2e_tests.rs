@@ -45,7 +45,7 @@ fn mem_script_and_fetch_drive_dom_together() {
     "#;
     with_registry(Arc::clone(&reg), || {
         let mut engine =
-            ScriptEngine::new(html, EventBindings::default()).expect("engine initializes");
+            ScriptEngine::new(html, "", EventBindings::default()).expect("engine initializes");
 
         // Drain the event loop the way the script thread does: `mem://e2e/app.js`
         // ran during construction and called loadApp(), which started the fetch.

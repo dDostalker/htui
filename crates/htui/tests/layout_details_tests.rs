@@ -93,7 +93,7 @@ fn canvas_has_word(tl: &TermLayout, word: &str) -> bool {
 /// Build the engine + geometry for a document (mirrors the runtime path: the
 /// engine owns the live arena and runs scripts at construction).
 fn build_geometry(html: &str) -> (ScriptEngine, Geometry) {
-    let engine = ScriptEngine::new(html, EventBindings::default()).expect("engine initializes");
+    let engine = ScriptEngine::new(html, "", EventBindings::default()).expect("engine initializes");
     let arena = engine.arena();
     let root_id = engine.root_id();
     let term_map = TermMap {

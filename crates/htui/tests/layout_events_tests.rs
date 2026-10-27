@@ -802,26 +802,6 @@ fn redraw_behind_a_pending_arena_folds_scroll_and_zoom() {
 }
 
 #[test]
-fn viewport_commands_behind_a_pending_render_html_are_dropped() {
-    // A document replacement is the dominant intent: a queued scroll or a
-    // hover for the *old* document must neither replace it nor restyle it.
-    let mut batch = DrainedBatch::new();
-    batch.absorb(RenderCmd::RenderHtml {
-        html: Arc::from("<p>new</p>"),
-    });
-    batch.absorb(RenderCmd::Rerender { scroll_y: 3 });
-    batch.absorb(RenderCmd::Hover { node_id: None });
-    assert!(
-        matches!(batch.take_snapshot(), Some(RenderCmd::RenderHtml { .. })),
-        "the document replacement must survive the queued viewport commands"
-    );
-    assert!(
-        batch.take_hover().is_none(),
-        "the stale hover must be dropped"
-    );
-}
-
-#[test]
 fn focus_behind_a_pending_redraw_is_deferred_not_dropped() {
     // Focus moving while a resize `Redraw` is pending must defer like a
     // hover, not supersede the re-layout.
@@ -1258,6 +1238,7 @@ fn command_macro_exposes_rust_functions_to_js() {
         </script>
         <p>ok</p>
         "#,
+        "",
         bindings,
     )
     .expect("engine");
@@ -1325,7 +1306,7 @@ fn setup(html: &str) -> (NodeId, NodeArena) {
 /// Mirrors the runtime path: the engine owns the live arena (scripts run at
 /// construction), and the hit map is built from that arena's layout.
 fn build_geometry(html: &str, bindings: EventBindings) -> (ScriptEngine, Geometry) {
-    let engine = ScriptEngine::new(html, bindings).expect("engine initializes");
+    let engine = ScriptEngine::new(html, "", bindings).expect("engine initializes");
     let arena = engine.arena();
     let root_id = engine.root_id();
     let term_map = TermMap {
@@ -1808,7 +1789,7 @@ fn remove_child_drops_listeners_of_the_detached_subtree() {
       </script>
       <div id="wrap"><div id="btn">b</div></div>
     "#;
-    let mut engine = ScriptEngine::new(html, EventBindings::default()).expect("engine");
+    let mut engine = ScriptEngine::new(html, "", EventBindings::default()).expect("engine");
     assert_eq!(
         eval_str(
             &mut engine,
@@ -1830,7 +1811,7 @@ fn replace_child_drops_listeners_of_the_replaced_subtree() {
       </script>
       <div id="wrap"><div id="btn">b</div></div>
     "#;
-    let mut engine = ScriptEngine::new(html, EventBindings::default()).expect("engine");
+    let mut engine = ScriptEngine::new(html, "", EventBindings::default()).expect("engine");
     assert_eq!(
         eval_str(
             &mut engine,
@@ -1853,7 +1834,7 @@ fn removing_a_sibling_keeps_the_survivor_listener() {
       <div id="gone">g</div>
       <div id="live">l</div>
     "#;
-    let mut engine = ScriptEngine::new(html, EventBindings::default()).expect("engine");
+    let mut engine = ScriptEngine::new(html, "", EventBindings::default()).expect("engine");
     assert_eq!(
         eval_str(
             &mut engine,
@@ -1872,7 +1853,7 @@ fn js_can_mutate_the_dom_and_marks_dirty() {
       </script>
       <p id="out">before</p>
     "#;
-    let mut engine = ScriptEngine::new(html, EventBindings::default()).expect("engine");
+    let mut engine = ScriptEngine::new(html, "", EventBindings::default()).expect("engine");
     assert!(
         !engine.take_dirty().is_empty(),
         "script textContent mutation must mark dirty"
@@ -2169,6 +2150,7 @@ fn invoke_action_calls_a_js_global_function() {
     "#;
     let mut engine = ScriptEngine::new(
         html,
+        "",
         host_bindings("report", move |call| {
             if let Some(n) = call.arg::<f64>(0).ok().flatten() {
                 *sampled2.lock().unwrap() = n;
@@ -2183,7 +2165,7 @@ fn invoke_action_calls_a_js_global_function() {
 
 #[test]
 fn unknown_action_is_ignored_without_error() {
-    let mut engine = ScriptEngine::new("<p>x</p>", EventBindings::default()).expect("engine");
+    let mut engine = ScriptEngine::new("<p>x</p>", "", EventBindings::default()).expect("engine");
     // Must not panic, must not produce render commands.
     assert!(engine.invoke_action("nope").is_empty());
 }
@@ -2211,7 +2193,7 @@ fn sysmon_refresh_pipeline_updates_the_dom() {
             Ok(obj)
         }),
     );
-    let mut engine = ScriptEngine::new(html, bindings).expect("engine");
+    let mut engine = ScriptEngine::new(html, "", bindings).expect("engine");
 
     // Before refresh: initial script didn't call sample, so cpu is untouched.
     assert!(engine.take_dirty().is_empty());
@@ -2258,7 +2240,7 @@ fn sysmon_refresh_renders_the_progress_bar() {
             Ok(obj)
         }),
     );
-    let mut engine = ScriptEngine::new(html, bindings).expect("engine");
+    let mut engine = ScriptEngine::new(html, "", bindings).expect("engine");
     engine.invoke_action("refresh");
     assert!(
         !engine.take_dirty().is_empty(),
@@ -2633,7 +2615,7 @@ fn click_region(node_id: NodeId, id: &str) -> HitRegion {
 #[test]
 fn inner_html_onclick_wires_after_mutation() {
     let mut engine =
-        ScriptEngine::new(DYNAMIC_WIRING_HTML, EventBindings::default()).expect("engine");
+        ScriptEngine::new(DYNAMIC_WIRING_HTML, "", EventBindings::default()).expect("engine");
     engine
         .eval_source(
             r#"document.getElementById('host').innerHTML =
@@ -2660,7 +2642,7 @@ fn inner_html_onclick_wires_after_mutation() {
 #[test]
 fn set_attribute_onclick_replaces_handler() {
     let mut engine =
-        ScriptEngine::new(DYNAMIC_WIRING_HTML, EventBindings::default()).expect("engine");
+        ScriptEngine::new(DYNAMIC_WIRING_HTML, "", EventBindings::default()).expect("engine");
     let region = click_region(find_node_by_id(&engine.arena(), "b"), "b");
     engine.fire(&region, EventType::Click, 0, 0);
     assert_eq!(
@@ -2690,7 +2672,7 @@ fn set_attribute_onclick_replaces_handler() {
 #[test]
 fn remove_attribute_onclick_unwires_handler() {
     let mut engine =
-        ScriptEngine::new(DYNAMIC_WIRING_HTML, EventBindings::default()).expect("engine");
+        ScriptEngine::new(DYNAMIC_WIRING_HTML, "", EventBindings::default()).expect("engine");
     let region = click_region(find_node_by_id(&engine.arena(), "b"), "b");
     engine.fire(&region, EventType::Click, 0, 0);
     assert_eq!(
@@ -2713,7 +2695,7 @@ fn remove_attribute_onclick_unwires_handler() {
 #[test]
 fn appended_child_onclick_becomes_clickable() {
     let mut engine =
-        ScriptEngine::new(DYNAMIC_WIRING_HTML, EventBindings::default()).expect("engine");
+        ScriptEngine::new(DYNAMIC_WIRING_HTML, "", EventBindings::default()).expect("engine");
     engine
         .eval_source(
             r#"var d = document.createElement('div');

@@ -10,7 +10,7 @@ use htui::tdom::node::NodeType;
 
 /// Build a script engine over `html` (its `<script>` blocks run immediately).
 fn engine(html: &str) -> ScriptEngine {
-    ScriptEngine::new(html, EventBindings::default()).expect("engine initializes")
+    ScriptEngine::new(html, "", EventBindings::default()).expect("engine initializes")
 }
 
 /// Run a statement / declaration script.

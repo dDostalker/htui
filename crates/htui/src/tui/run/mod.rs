@@ -38,8 +38,7 @@ use crate::{
     html::{css_parse::DynamicState, html_parse::Parser},
     layout::layout::{MAX_TERM_COLS, MAX_TERM_ROWS, TermMap},
     resources,
-    script::{ScriptMsg, ScriptResponse, run_script_thread_with_js},
-    source::SourceKind,
+    script::{ScriptMsg, ScriptResponse, run_script_thread},
     tdom::node::{NodeArena, NodeId},
     tui::graph_api::{
         DirtyInfo, InputState, KEY_GATE_TIMEOUT, RenderCmd, apply_focus_requests,
@@ -62,6 +61,14 @@ pub(crate) struct HotReloadPaths<'a> {
     pub html: Option<&'a str>,
     pub css: Option<&'a str>,
     pub js: Option<&'a str>,
+}
+
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SourceKind {
+    Html,
+    Css,
+    Js,
 }
 
 #[cfg_attr(not(debug_assertions), allow(dead_code))]
@@ -182,7 +189,7 @@ fn run_inner(
         let script_registry = Arc::clone(&registry);
         std::thread::spawn(move || {
             resources::with_registry(script_registry, || {
-                run_script_thread_with_js(
+                run_script_thread(
                     script_document,
                     bindings,
                     Arc::clone(&session_js),

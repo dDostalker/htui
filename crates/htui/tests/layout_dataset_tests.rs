@@ -66,6 +66,7 @@ fn canvas_contains(engine: &ScriptEngine, needle: &str) -> bool {
 fn dataset_reads_data_attributes_with_camel_case_mapping() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d" data-foo="bar" data-max-count="3"></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -98,7 +99,7 @@ fn dataset_reads_data_attributes_with_camel_case_mapping() {
 
 #[test]
 fn dataset_empty_when_no_data_attributes() {
-    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
+    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, "", EventBindings::default())
         .expect("engine initializes");
     assert_eq!(
         eval_str(
@@ -122,7 +123,7 @@ fn dataset_empty_when_no_data_attributes() {
 
 #[test]
 fn dataset_write_sets_the_kebab_cased_attribute() {
-    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
+    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, "", EventBindings::default())
         .expect("engine initializes");
     eval_str(
         &mut engine,
@@ -137,6 +138,7 @@ fn dataset_write_sets_the_kebab_cased_attribute() {
     // Existing attributes are updated in place.
     let mut engine = ScriptEngine::new(
         r#"<div id="e" data-src="a"></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -151,6 +153,7 @@ fn dataset_write_sets_the_kebab_cased_attribute() {
 fn dataset_write_uses_webidl_string_conversion() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d" data-tmp="x" data-n="1" data-u="2"></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -187,6 +190,7 @@ fn dataset_write_uses_webidl_string_conversion() {
 fn dataset_delete_and_in_operator() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d" data-a="1" data-b="2"></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -211,6 +215,7 @@ fn dataset_delete_and_in_operator() {
 fn dataset_enumerates_kebab_cased_keys() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d" data-alpha="1" data-max-count="2" data-z="3"></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -228,6 +233,7 @@ fn dataset_enumerates_kebab_cased_keys() {
 fn dataset_unchanged_write_does_not_mark_dirty() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d" data-foo="bar"></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -244,9 +250,12 @@ fn dataset_unchanged_write_does_not_mark_dirty() {
 
 #[test]
 fn dataset_is_live_across_mutations() {
-    let mut engine =
-        ScriptEngine::new(r#"<div id="d" data-a="1"></div>"#, EventBindings::default())
-            .expect("engine initializes");
+    let mut engine = ScriptEngine::new(
+        r#"<div id="d" data-a="1"></div>"#,
+        "",
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
     // A held dataset reference reflects later DOM mutations.
     eval_str(
         &mut engine,
@@ -269,6 +278,7 @@ fn dataset_is_live_across_mutations() {
 fn hidden_reads_the_hidden_attribute() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d" hidden></div><div id="e"></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -286,6 +296,7 @@ fn hidden_reads_the_hidden_attribute() {
 fn hidden_js_property_toggles_rendering() {
     let mut engine = ScriptEngine::new(
         r#"<div id="wrap"><p id="a">visible</p><p id="b">gone</p></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -329,8 +340,9 @@ fn hidden_js_property_toggles_rendering() {
 
 #[test]
 fn hidden_unchanged_write_does_not_mark_dirty() {
-    let mut engine = ScriptEngine::new(r#"<div id="d" hidden></div>"#, EventBindings::default())
-        .expect("engine initializes");
+    let mut engine =
+        ScriptEngine::new(r#"<div id="d" hidden></div>"#, "", EventBindings::default())
+            .expect("engine initializes");
     eval_str(&mut engine, "document.getElementById('d').hidden = true");
     assert!(
         engine.take_dirty().is_empty(),
@@ -345,7 +357,7 @@ fn hidden_unchanged_write_does_not_mark_dirty() {
 
 #[test]
 fn dataset_access_returns_the_same_live_instance() {
-    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
+    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, "", EventBindings::default())
         .expect("engine initializes");
     assert_eq!(
         eval_str(
@@ -361,6 +373,7 @@ fn dataset_access_returns_the_same_live_instance() {
 fn dataset_proto_keys_keep_object_semantics_and_names_are_validated() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d" data-foo="1" data-constructor="x"></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");

@@ -114,7 +114,7 @@ fn eval_str(engine: &mut ScriptEngine, expr: &str) -> String {
 
 /// Build the engine + geometry for a document (mirrors the runtime path).
 fn build_geometry(html: &str) -> (ScriptEngine, Geometry) {
-    let engine = ScriptEngine::new(html, EventBindings::default()).expect("engine initializes");
+    let engine = ScriptEngine::new(html, "", EventBindings::default()).expect("engine initializes");
     let arena = engine.arena();
     let root_id = engine.root_id();
     let term_map = TermMap {
@@ -191,8 +191,12 @@ fn test_output_renders_inline_text() {
 #[test]
 fn test_output_value_property_reads_and_writes_text() {
     init();
-    let mut engine = ScriptEngine::new(r#"<output id="o">42</output>"#, EventBindings::default())
-        .expect("engine");
+    let mut engine = ScriptEngine::new(
+        r#"<output id="o">42</output>"#,
+        "",
+        EventBindings::default(),
+    )
+    .expect("engine");
     assert_eq!(
         eval_str(&mut engine, "document.getElementById('o').value"),
         "42",

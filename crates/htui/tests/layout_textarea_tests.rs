@@ -78,7 +78,7 @@ fn find_box(
 }
 
 fn build_geometry(html: &str) -> (ScriptEngine, Geometry) {
-    let engine = ScriptEngine::new(html, EventBindings::default()).expect("engine initializes");
+    let engine = ScriptEngine::new(html, "", EventBindings::default()).expect("engine initializes");
     let arena = engine.arena();
     let root_id = engine.root_id();
     let term_map = mock_term_map();
@@ -325,6 +325,7 @@ fn test_textarea_value_getter_reads_text_content() {
     // attribute — `el.value` must reflect the text nodes.
     let mut engine = ScriptEngine::new(
         r#"<textarea id="t">first&#10;line</textarea>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -344,6 +345,7 @@ fn test_textarea_value_getter_reads_text_content() {
 fn test_textarea_value_setter_writes_text_content() {
     let mut engine = ScriptEngine::new(
         r#"<textarea id="t">old</textarea>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -375,6 +377,7 @@ fn test_textarea_value_setter_short_circuits_unchanged() {
     // Setting the same value again must not schedule a re-render.
     let mut engine = ScriptEngine::new(
         r#"<textarea id="t">same</textarea>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -393,6 +396,7 @@ fn test_textarea_value_setter_short_circuits_unchanged() {
 fn test_textarea_value_setter_clears_to_empty() {
     let mut engine = ScriptEngine::new(
         r#"<textarea id="t">stuff</textarea>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -402,11 +406,11 @@ fn test_textarea_value_setter_clears_to_empty() {
     );
     assert_eq!(
         eval_str(&mut engine, "document.getElementById('t').value"),
-        ""
+        "",
     );
     assert_eq!(
         eval_str(&mut engine, "document.getElementById('t').textContent"),
-        ""
+        "",
     );
 }
 

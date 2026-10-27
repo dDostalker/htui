@@ -59,7 +59,8 @@ fn el_focus_focuses_the_field_and_fires_focus_event() {
           document.getElementById('a').addEventListener('focus', function () { seen.push('a-focus'); });
           globalThis.__seen = seen;
         </script>
-        <input id="a"><input id="b">"#,
+        <input id="a"><input id="b">"#, "",
+
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -100,6 +101,7 @@ fn el_focus_switches_focus_blurring_the_previous_field() {
           globalThis.__seen = seen;
         </script>
         <input id="a"><input id="b">"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -139,6 +141,7 @@ fn el_focus_on_already_focused_field_is_a_noop() {
           document.getElementById('a').addEventListener('focus', function () { globalThis.__n++; });
         </script>
         <input id="a">"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -161,6 +164,7 @@ fn el_focus_on_already_focused_field_is_a_noop() {
 fn el_focus_works_on_textarea() {
     let mut engine = ScriptEngine::new(
         r#"<textarea id="t">hello</textarea>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -186,6 +190,7 @@ fn el_focus_works_on_textarea() {
 fn el_focus_on_non_focusable_element_is_a_noop() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d"></div><input id="a">"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -219,6 +224,7 @@ fn el_blur_removes_focus_from_the_focused_field() {
           globalThis.__seen = seen;
         </script>
         <input id="a" value="x">"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -256,6 +262,7 @@ fn el_blur_on_non_focused_element_is_a_noop() {
           a.addEventListener('blur', function () { globalThis.__n++; });
         </script>
         <input id="a"><input id="b">"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -368,7 +375,7 @@ fn focus_pseudo_class_rejects_arguments() {
 
 #[test]
 fn el_focus_pushes_focus_command_for_the_render_thread() {
-    let mut engine = ScriptEngine::new(r#"<input id="a">"#, EventBindings::default())
+    let mut engine = ScriptEngine::new(r#"<input id="a">"#, "", EventBindings::default())
         .expect("engine initializes");
     let mut state = InputState::new();
     let arena = engine.arena();
@@ -400,6 +407,7 @@ fn el_focus_pushes_focus_command_for_the_render_thread() {
 fn autofocus_attribute_focuses_the_first_field_on_load() {
     let mut engine = ScriptEngine::new(
         r#"<input id="a" autofocus><input id="b">"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -425,8 +433,12 @@ fn autofocus_attribute_focuses_the_first_field_on_load() {
 #[test]
 fn autofocus_ignores_non_focusable_elements() {
     // `autofocus` on a `<div>` must not focus anything (browser behaviour).
-    let mut engine = ScriptEngine::new(r#"<div id="d" autofocus></div>"#, EventBindings::default())
-        .expect("engine initializes");
+    let mut engine = ScriptEngine::new(
+        r#"<div id="d" autofocus></div>"#,
+        "",
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
     let cmds = engine.take_pending_cmds();
     assert!(
         !cmds
@@ -447,6 +459,7 @@ fn el_blur_commits_edited_value_back_to_the_dom() {
     // dirty marker routes the re-render.
     let mut engine = ScriptEngine::new(
         r#"<textarea id="t">old</textarea>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");

@@ -490,7 +490,7 @@ fn test_template_tag_round_trip() {
 // ============================================================
 
 fn build_geometry(html: &str) -> (ScriptEngine, Geometry) {
-    let engine = ScriptEngine::new(html, EventBindings::default()).expect("engine initializes");
+    let engine = ScriptEngine::new(html, "", EventBindings::default()).expect("engine initializes");
     let arena = engine.arena();
     let root_id = engine.root_id();
     let term_map = TermMap {

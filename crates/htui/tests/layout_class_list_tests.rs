@@ -43,6 +43,7 @@ fn class_name(engine: &ScriptEngine, id: &str) -> String {
 fn class_list_reads_the_class_attribute() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d" class="a b c"></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -92,7 +93,7 @@ fn class_list_reads_the_class_attribute() {
 
 #[test]
 fn class_list_empty_when_no_class() {
-    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, EventBindings::default())
+    let mut engine = ScriptEngine::new(r#"<div id="d"></div>"#, "", EventBindings::default())
         .expect("engine initializes");
     assert_eq!(
         eval_str(&mut engine, "document.getElementById('d').classList.length"),
@@ -115,6 +116,7 @@ fn class_list_empty_when_no_class() {
 fn class_list_add_appends_and_preserves_order() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d" class="a b"></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -139,6 +141,7 @@ fn class_list_add_appends_and_preserves_order() {
 fn class_list_remove_preserves_relative_order() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d" class="a b c d"></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -165,8 +168,12 @@ fn class_list_remove_preserves_relative_order() {
 
 #[test]
 fn class_list_add_unchanged_token_does_not_mark_dirty() {
-    let mut engine = ScriptEngine::new(r#"<div id="d" class="a"></div>"#, EventBindings::default())
-        .expect("engine initializes");
+    let mut engine = ScriptEngine::new(
+        r#"<div id="d" class="a"></div>"#,
+        "",
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
     // Adding an already-present token changes nothing: no re-render.
     eval_str(
         &mut engine,
@@ -187,6 +194,7 @@ fn class_list_add_unchanged_token_does_not_mark_dirty() {
 fn class_list_toggle_returns_the_new_state() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d" class="a b"></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -229,6 +237,7 @@ fn class_list_toggle_returns_the_new_state() {
 fn class_list_replace_swaps_a_present_token() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d" class="a b"></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -259,6 +268,7 @@ fn class_list_replace_swaps_a_present_token() {
 fn class_list_value_setter_replaces_all_tokens() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d" class="a b"></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -277,6 +287,7 @@ fn class_list_value_setter_replaces_all_tokens() {
 fn class_list_is_iterable() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d" class="a b c"></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -331,8 +342,12 @@ fn class_list_is_iterable() {
 
 #[test]
 fn class_list_is_live_across_attribute_changes() {
-    let mut engine = ScriptEngine::new(r#"<div id="d" class="a"></div>"#, EventBindings::default())
-        .expect("engine initializes");
+    let mut engine = ScriptEngine::new(
+        r#"<div id="d" class="a"></div>"#,
+        "",
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
     let held = eval_str(
         &mut engine,
         "(function () {
@@ -359,6 +374,7 @@ fn class_list_is_live_across_attribute_changes() {
 fn class_list_mutations_are_visible_to_inner_html() {
     let mut engine = ScriptEngine::new(
         r#"<div id="d"><p id="p" class="a"></p></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine initializes");
@@ -379,8 +395,12 @@ fn class_list_mutations_are_visible_to_inner_html() {
 
 #[test]
 fn class_list_rejects_empty_and_whitespace_tokens() {
-    let mut engine = ScriptEngine::new(r#"<div id="d" class="a"></div>"#, EventBindings::default())
-        .expect("engine initializes");
+    let mut engine = ScriptEngine::new(
+        r#"<div id="d" class="a"></div>"#,
+        "",
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
     // Empty tokens throw SyntaxError across the API surface.
     for expr in [
         "document.getElementById('d').classList.add('')",
@@ -416,8 +436,12 @@ fn class_list_rejects_empty_and_whitespace_tokens() {
 
 #[test]
 fn class_list_changes_mark_the_element_dirty() {
-    let mut engine = ScriptEngine::new(r#"<div id="d" class="a"></div>"#, EventBindings::default())
-        .expect("engine initializes");
+    let mut engine = ScriptEngine::new(
+        r#"<div id="d" class="a"></div>"#,
+        "",
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
     eval_str(
         &mut engine,
         "(function(){ document.getElementById('d').classList.add('b'); })()",
@@ -433,8 +457,12 @@ fn class_list_changes_mark_the_element_dirty() {
 
 #[test]
 fn class_list_access_returns_the_same_live_instance() {
-    let mut engine = ScriptEngine::new(r#"<div id="d" class="a"></div>"#, EventBindings::default())
-        .expect("engine initializes");
+    let mut engine = ScriptEngine::new(
+        r#"<div id="d" class="a"></div>"#,
+        "",
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
     assert_eq!(
         eval_str(
             &mut engine,

@@ -138,7 +138,7 @@ fn display_none_subtree_also_excluded() {
     assert!(
         !layout_canvas(
             "<div style=\"display: none\"><p>never</p><span>shown</span></div>",
-            ""
+            "",
         )
         .contains("never"),
         "a display: none subtree must not render"
@@ -231,7 +231,7 @@ fn display_contents_classifies_as_transparent_marker() {
     assert!(
         layout_canvas(
             "<div><span style=\"display: contents\">X</span><p>after</p></div>",
-            ""
+            "",
         )
         .contains("X"),
         "the text 'X' must survive flattening"

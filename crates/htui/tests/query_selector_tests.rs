@@ -14,7 +14,7 @@ fn init() {
 
 /// Evaluate a JS snippet in a fresh engine for `html`, returning the engine.
 fn engine(html: &str) -> ScriptEngine {
-    ScriptEngine::new(html, EventBindings::default()).expect("engine initializes")
+    ScriptEngine::new(html, "", EventBindings::default()).expect("engine initializes")
 }
 
 fn eval_str(engine: &mut ScriptEngine, expr: &str) -> String {

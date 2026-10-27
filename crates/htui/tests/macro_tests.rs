@@ -72,6 +72,7 @@ fn commands_module_makes_hosts_callable_from_js() {
         </script>
         <p>x</p>
         "#,
+        "",
         bindings,
     )
     .expect("engine must build");
@@ -105,6 +106,7 @@ fn command_name_attribute_does_not_break_manual_registration() {
 
     let mut engine = ScriptEngine::new(
         r#"<script>globalThis.__p = ping();</script><p>x</p>"#,
+        "",
         bindings,
     )
     .expect("engine must build");
@@ -136,6 +138,7 @@ fn host_fn_returning_command_works_with_manual_registration() {
           globalThis.__c2 = counter();
         </script>
         <p>x</p>"#,
+        "",
         bindings,
     )
     .expect("engine must build");
@@ -280,6 +283,7 @@ fn host_fn_closures_are_fully_boa_free() {
         </script>
         <p>x</p>
         "#,
+        "",
         bindings,
     )
     .expect("engine must build");
@@ -316,6 +320,7 @@ fn host_fn_captures_state_across_calls() {
           globalThis.__b = counter();
         </script>
         <p>x</p>"#,
+        "",
         bindings,
     )
     .expect("engine must build");
@@ -339,6 +344,7 @@ fn host_fn_can_push_render_commands() {
 
     let mut engine = ScriptEngine::new(
         r#"<script>globalThis.__ok = (refresh(), true);</script><p>x</p>"#,
+        "",
         bindings,
     )
     .expect("engine must build");

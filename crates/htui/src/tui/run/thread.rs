@@ -239,17 +239,6 @@ pub(super) fn render_thread(
                         );
                     }
 
-                    RenderCmd::RenderHtml { html } => {
-                        let term_map = match TermMap::get_ter_map() {
-                            Ok(m) => m,
-                            Err(e) => {
-                                log::error!("Failed to get terminal size: {}", e);
-                                break 'snapshot;
-                            }
-                        };
-                        state.render_html(&mut out, &geo_tx, &term_map, html);
-                    }
-
                     RenderCmd::RenderDocument {
                         arena,
                         root_id,

@@ -260,6 +260,7 @@ fn set_value_commits_edited_value_to_the_dom_and_marks_dirty() {
     init();
     let mut engine = ScriptEngine::new(
         r#"<div><input value="initial"></div>"#,
+        "",
         EventBindings::default(),
     )
     .expect("engine");
