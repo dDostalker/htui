@@ -194,10 +194,12 @@ pub(crate) fn paint_block(
         // background loop above, so the box reads as a tall band rather than
         // a 1-row strip.
         let vertical_offset = glyph_row_within_line * cols;
+        let scroll_offset = lb.paint_style.scrollbar.map_or(0, |scroll| scroll.scroll_y);
         let content_row = cell_start
             + (border_top.saturating_add(padding_top)) * cols
             + content_x_offset
             + vertical_offset;
+        let content_row = content_row.saturating_sub(scroll_offset * cols);
         // The runs of a clipping box (`overflow: hidden` / `auto` / `scroll`
         // / `clip`) are additionally bounded by the content-box (the rect
         // minus border + padding): wrapped text that overflows the allocated

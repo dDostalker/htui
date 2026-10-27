@@ -279,6 +279,21 @@ impl CssAttr {
             Overflow::Visible
         }
     }
+
+    /// Whether this box establishes a vertical browser-style scroll
+    /// container. `auto` shows a scrollbar only when content overflows;
+    /// `scroll` reserves one whenever the box has a fixed height.
+    pub fn scrolls_vertically(&self) -> bool {
+        let axis = |key: &str| {
+            self.0
+                .get(key)
+                .map(|s| {
+                    s.trim().eq_ignore_ascii_case("auto") || s.trim().eq_ignore_ascii_case("scroll")
+                })
+                .unwrap_or(false)
+        };
+        axis("overflow-y") || axis("overflow")
+    }
     /// Element width (CSS `width`).
     ///
     /// - `auto` / missing / unsupported unit → `None` (fill available)

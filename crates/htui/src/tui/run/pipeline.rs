@@ -320,6 +320,26 @@ impl RenderState {
         self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom, dirty);
     }
 
+    /// Update one native scroll offset and re-layout the current document.
+    pub(super) fn render_scroll<W: Write>(
+        &mut self,
+        out: &mut BufWriter<W>,
+        geo_tx: &GeometrySender,
+        term_map: &TermMap,
+        node_id: NodeId,
+        scroll_y: u32,
+    ) {
+        let Some(tl) = self.term_layout.as_mut() else {
+            return;
+        };
+        if tl.scroll_offsets.get(&node_id) == Some(&scroll_y) {
+            return;
+        }
+        tl.scroll_offsets.insert(node_id, scroll_y);
+        let (page_scroll_y, zoom) = (tl.scroll_y, tl.zoom);
+        self.redraw(out, geo_tx, term_map, page_scroll_y, zoom);
+    }
+
     /// Replace the session's injected-CSS set with `injected` (host ? css)
     /// and re-parse the combined stylesheet ? but only when the set actually
     /// changed: a timer tick that re-injects identical styles rebuilds the

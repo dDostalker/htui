@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use compact_str::CompactString;
@@ -51,6 +52,8 @@ const TEXT_SEL_DRAG_THRESHOLD: u32 = 2;
 #[derive(Debug)]
 pub struct InputState {
     pub scroll_y: u32,
+    /// Current offsets for native scroll containers.
+    pub scroll_offsets: HashMap<NodeId, u32>,
     pub zoom: f32,
     /// Screen coordinates of the last left-button press; a click is only
     /// recognised when the release lands on the same cell.
@@ -79,6 +82,8 @@ pub struct InputState {
     /// Whether the pointer is mid-drag inside a focused `<input>` (mouse
     /// selection as opposed to a plain click).
     pub drag_selecting: bool,
+    /// Native scrollbar thumb currently dragged: owning node + grab offset.
+    pub scroll_drag: Option<(NodeId, u32)>,
     /// Screen coordinates of the last pointer event (any button state). Lets
     /// the run loop re-validate hover against a freshly rebuilt hit map after
     /// a viewport change by synthesising a `Move` at the known position.
@@ -132,6 +137,7 @@ impl InputState {
     pub fn new() -> Self {
         Self {
             scroll_y: 0,
+            scroll_offsets: HashMap::new(),
             zoom: 1.0,
             pressed: None,
             focused_input: None,
@@ -142,6 +148,7 @@ impl InputState {
             input_sel_anchor: None,
             input_clipboard: String::new(),
             drag_selecting: false,
+            scroll_drag: None,
             last_mouse: None,
             resize_pending: false,
             text_sel_anchor: None,
@@ -166,6 +173,7 @@ impl InputState {
     pub fn invalidate_viewport(&mut self, cmds: &mut Vec<RenderCmd>) {
         self.pressed = None;
         self.drag_selecting = false;
+        self.scroll_drag = None;
         clear_text_selection(self, cmds);
         if let Some(open) = self.open_select.take() {
             cmds.push(RenderCmd::SelectClose {
@@ -183,6 +191,7 @@ impl InputState {
     /// reused to re-validate hover against the fresh hit map.
     pub fn reset_document_state(&mut self, cmds: &mut Vec<RenderCmd>) {
         self.pressed = None;
+        self.scroll_offsets.clear();
         self.focused_input = None;
         self.focused_is_textarea = false;
         self.focused_is_range = false;
@@ -207,6 +216,7 @@ impl InputState {
     pub fn drop_stale_press(&mut self) -> bool {
         if self.pressed.take().is_some() {
             self.drag_selecting = false;
+            self.scroll_drag = None;
             true
         } else {
             false

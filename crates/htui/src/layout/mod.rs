@@ -24,6 +24,7 @@ use crate::{
     layout::layout::TermMap,
     tdom::node::{NodeArena, NodeId},
 };
+use std::collections::HashMap;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub mod layout;
@@ -33,27 +34,36 @@ pub mod paint;
 pub use crate::html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeSizes};
 pub use crate::html::css_parse::{FontContext, Viewport};
 pub use layoutbox::inner_formatting_context;
-pub use layoutbox::inner_formatting_context::{flex::layout_flex_dispatch, flow::layout_tree};
+pub use layoutbox::inner_formatting_context::{
+    flex::layout_flex_dispatch, flow::layout_tree, flow::layout_tree_with_scroll_offsets,
+};
 pub use layoutbox::{
     BoxKind, ColumnLayout, Cursor, FormattingContext, GeneratedBox, GeneratedBoxKind,
     GeneratedPayload, InlineRun, LayoutBox, OuterDisplay, PaintStyle, Rect, ReplacedContent,
-    flatten_contents_children, generate_box_tree, generate_node, layout_generated_box,
-    layout_generated_tree,
+    ScrollbarLayout, flatten_contents_children, generate_box_tree, generate_node,
+    layout_generated_box, layout_generated_tree,
 };
 
 /// Context propagated by the layout phase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LayoutContext {
+pub struct LayoutContext<'a> {
     pub font: FontContext,
     pub viewport: Viewport,
+    /// Session scroll offsets for native `overflow-y` containers.
+    pub scroll_offsets: &'a HashMap<NodeId, u32>,
 }
 
-impl LayoutContext {
+/// Empty offset table for callers that do not create scroll containers.
+pub static NO_SCROLL_OFFSETS: std::sync::LazyLock<std::collections::HashMap<NodeId, u32>> =
+    std::sync::LazyLock::new(std::collections::HashMap::new);
+
+impl<'a> LayoutContext<'a> {
     /// Derive a child context with the given font size, keeping the viewport.
     pub fn child(self, child_font_size_cells: usize) -> Self {
         Self {
             font: self.font.child(child_font_size_cells),
             viewport: self.viewport,
+            scroll_offsets: self.scroll_offsets,
         }
     }
 }

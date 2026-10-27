@@ -85,6 +85,39 @@ pub fn handle_click(
     }
 }
 
+/// Apply a wheel tick to the nearest native scroll container under `x/y`.
+pub(super) fn scroll_at_wheel(
+    state: &mut InputState,
+    hit_map: &HitMap,
+    arena: &NodeArena,
+    x: u32,
+    y: u32,
+    up: bool,
+) -> Option<RenderCmd> {
+    let hit = hit_map.hit_test(x, y)?;
+    let scroll = hit_map.scroll_container(Some(hit.node_id), arena)?;
+    let current = state
+        .scroll_offsets
+        .get(&scroll.node_id)
+        .copied()
+        .unwrap_or(scroll.scroll_y);
+    let next = if up {
+        current.saturating_sub(super::SCROLL_LINES_PER_TICK)
+    } else {
+        current
+            .saturating_add(super::SCROLL_LINES_PER_TICK)
+            .min(scroll.max_scroll)
+    };
+    if next == current {
+        return None;
+    }
+    state.scroll_offsets.insert(scroll.node_id, next);
+    Some(RenderCmd::RenderScroll {
+        node_id: scroll.node_id,
+        scroll_y: next,
+    })
+}
+
 /// End a button press at the release position (screen coordinates in
 /// `release_screen`).
 ///
@@ -105,12 +138,16 @@ pub fn handle_mouse_up(
     cmds: &mut Vec<RenderCmd>,
 ) {
     let range_drag = state.drag_selecting && state.focused_is_range;
+    let scroll_drag = state.scroll_drag.take();
     let pressed = state.pressed.take();
     state.drag_selecting = false;
     let (x, y) = canvas_pos(state, release_screen.0, release_screen.1);
     // Re-validate the hover at the release position (see the doc comment).
     msgs.push(ScriptMsg::Move { x, y });
     if button != MouseButton::Left {
+        return;
+    }
+    if scroll_drag.is_some() {
         return;
     }
     let Some((px, py)) = pressed else {
@@ -223,6 +260,33 @@ pub fn handle_mouse_down(
     cmds: &mut Vec<RenderCmd>,
 ) {
     let clicked = hit_map.hit_test(x, y);
+    // A native scrollbar owns its press before text selection / controls.
+    let scrollbar_hit = (button == MouseButton::Left)
+        .then(|| {
+            hit_map
+                .scrollbars
+                .values()
+                .find(|scroll| scroll.track.contains(x, y))
+                .map(|scroll| {
+                    let grab_offset = y
+                        .saturating_sub(scroll.thumb.y as u32)
+                        .min(scroll.thumb.height as u32);
+                    let offset = scroll.offset_at(y, grab_offset);
+                    (scroll.node_id, grab_offset, offset)
+                })
+        })
+        .flatten();
+    if let Some((node_id, grab_offset, offset)) = scrollbar_hit {
+        state.scroll_drag = Some((node_id, grab_offset));
+        if state.scroll_offsets.get(&node_id) != Some(&offset) {
+            state.scroll_offsets.insert(node_id, offset);
+            cmds.push(RenderCmd::RenderScroll {
+                node_id,
+                scroll_y: offset,
+            });
+        }
+        return;
+    }
 
     // An open dropdown takes priority: a press on an option row picks it, a
     // press on an `<optgroup>` header does nothing (browsers keep the
@@ -402,6 +466,20 @@ pub fn handle_mouse_move(
             node_id: open.node_id,
             highlight: idx,
         });
+    }
+
+    if let Some((node_id, grab_offset)) = state.scroll_drag
+        && let Some(scroll) = hit_map.scrollbars.get(&node_id)
+    {
+        let offset = scroll.offset_at(y, grab_offset);
+        if state.scroll_offsets.get(&node_id) != Some(&offset) {
+            state.scroll_offsets.insert(node_id, offset);
+            cmds.push(RenderCmd::RenderScroll {
+                node_id,
+                scroll_y: offset,
+            });
+        }
+        return;
     }
 
     if state.pressed.is_some() {

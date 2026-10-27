@@ -62,4 +62,4 @@ pub use layout_block::{
 pub use list::{layout_li, layout_menu, layout_ol, layout_ul};
 pub use table::{layout_row_group, layout_table, layout_td, layout_th, layout_tr};
 pub(crate) use tree::dispatch_flow_geometry;
-pub use tree::{dispatch, layout_children, layout_tree};
+pub use tree::{dispatch, layout_children, layout_tree, layout_tree_with_scroll_offsets};

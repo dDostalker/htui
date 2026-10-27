@@ -540,6 +540,33 @@ fn paint_box(
         clip
     };
     paint_children(lb, arena, canvas, effective_bg, children_clip);
+    paint_scrollbar(lb, arena, canvas);
+}
+
+/// Paint the native scrollbar after clipped content so it always overlays the
+/// container's right gutter.
+fn paint_scrollbar(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintCanvas<'_>) {
+    let Some(scroll) = lb.paint_style.scrollbar else {
+        return;
+    };
+    let Some(track) = clamp_rect_to_canvas(scroll.track, canvas.columns as usize) else {
+        return;
+    };
+    let fg = arena
+        .get(lb.node_id)
+        .and_then(|node| node.css_attr.get_color());
+
+    for y in track.y..track.y.saturating_add(track.height) {
+        let inside_thumb =
+            y >= scroll.thumb.y && y < scroll.thumb.y.saturating_add(scroll.thumb.height);
+        put(
+            canvas,
+            cell_index(canvas, track.x, y),
+            Some(if inside_thumb { '\u{2588}' } else { '\u{2502}' }),
+            Some(fg.unwrap_or(crossterm::style::Color::DarkGrey)),
+            None,
+        );
+    }
 }
 
 /// Paint `lb`'s children in stacking order.

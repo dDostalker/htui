@@ -182,6 +182,7 @@ pub fn layout_table(
                 spacing_after: 0,
                 text_align,
                 text_indent: 0,
+                scrollbar: None,
             },
             cnode.css_attr.outer_display(&cnode.node_type),
             Vec::new(),
@@ -235,6 +236,7 @@ pub fn layout_table(
                 spacing_after: 0,
                 text_align,
                 text_indent: 0,
+                scrollbar: None,
             },
             cnode.css_attr.outer_display(&cnode.node_type),
             Vec::new(),
@@ -276,6 +278,7 @@ pub fn layout_table(
         spacing_after: 0,
         text_align: node.css_attr.get_text_align(),
         text_indent: 0,
+        scrollbar: None,
     };
 
     let table_box = LayoutBox::new_normal(

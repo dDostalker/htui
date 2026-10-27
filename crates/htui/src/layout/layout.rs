@@ -4,7 +4,7 @@ use crate::{
     graphics::{Block, FontStyle, ImageCache, TermLayout},
     layout::{
         BoxConstraint, Cursor, LayoutBox, Rect,
-        inner_formatting_context::flow::layout_tree,
+        inner_formatting_context::flow::layout_tree_with_scroll_offsets,
         layoutbox::{pin_fixed_boxes, pin_sticky_boxes},
         paint::{paint_layout_tree, paint_layout_tree_region},
     },
@@ -87,6 +87,7 @@ impl TermLayout {
             zoom,
             image_cache: ImageCache::new(),
             input_states: std::collections::HashMap::new(),
+            scroll_offsets: std::collections::HashMap::new(),
             open_select: None,
         }
     }
@@ -104,7 +105,7 @@ impl TermLayout {
     /// Two-phase pipeline:
     /// 1. Reset every cell to a blank space so stale cells from a previous
     ///    render at rows the new tree does not touch don't bleed through.
-    /// 2. [`layout_tree`] walks the DOM through `DEFAULT_LAYOUT` and builds a
+    /// 2. [`layout_tree_with_scroll_offsets`] walks the DOM through `DEFAULT_LAYOUT` and builds a
     ///    `Vec<LayoutBox>` rooted at `root_id`. Each block claims a row range
     ///    inside the containing block.
     /// 3. [`paint_layout_tree`] writes the resulting rects into `self.layout`
@@ -150,13 +151,14 @@ impl TermLayout {
         assert_eq!(root.node_type, NodeType::Document);
         let containing = BoxConstraint::root(term_map);
         let mut cursor = Cursor::new();
-        let mut boxes = layout_tree(
+        let mut boxes = layout_tree_with_scroll_offsets(
             arena,
             root_id,
             containing,
             &mut cursor,
             term_map.columns as usize,
             term_map.rows as usize,
+            &self.scroll_offsets,
         );
         // Re-anchor `position: fixed` / `sticky` boxes to the *current*
         // scroll offset so they stay pinned to their screen position while the

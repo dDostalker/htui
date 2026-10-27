@@ -19,7 +19,9 @@ use super::field::{
 };
 use super::focus::{blur_input, push_input_render};
 use super::key_info::key_event_info;
-use super::mouse::{canvas_pos, handle_mouse_down, handle_mouse_move, handle_mouse_up};
+use super::mouse::{
+    canvas_pos, handle_mouse_down, handle_mouse_move, handle_mouse_up, scroll_at_wheel,
+};
 use super::page::page_level_builtins;
 use super::select::{OverlayKind, close_select, refresh_datalist};
 use super::{SCROLL_LINES_PER_TICK, reapply_console_modes};
@@ -410,6 +412,19 @@ pub fn trigger_refresh(
                     if ctrl {
                         return cmds;
                     }
+                    if let (Some(hit_map), Some(arena)) = (hit_map, arena)
+                        && let Some(cmd) = scroll_at_wheel(
+                            state,
+                            hit_map,
+                            arena,
+                            mouse.column as u32,
+                            mouse.row as u32 + state.scroll_y,
+                            true,
+                        )
+                    {
+                        cmds.push(cmd);
+                        return cmds;
+                    }
                     if state.scroll_y == 0 {
                         return cmds;
                     }
@@ -426,6 +441,19 @@ pub fn trigger_refresh(
                         close_select(state, arena, None, msgs, &mut cmds);
                     }
                     if ctrl {
+                        return cmds;
+                    }
+                    if let (Some(hit_map), Some(arena)) = (hit_map, arena)
+                        && let Some(cmd) = scroll_at_wheel(
+                            state,
+                            hit_map,
+                            arena,
+                            mouse.column as u32,
+                            mouse.row as u32 + state.scroll_y,
+                            false,
+                        )
+                    {
+                        cmds.push(cmd);
                         return cmds;
                     }
                     if state.scroll_y >= max_scroll {

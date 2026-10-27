@@ -116,6 +116,12 @@ pub enum RenderCmd {
         focused: bool,
         selection: Option<(usize, usize)>,
     },
+    /// Update one native scroll container and re-layout. Stateful because the
+    /// offsets are interaction history, not a DOM mutation.
+    RenderScroll {
+        node_id: NodeId,
+        scroll_y: u32,
+    },
     /// JS `el.focus()` — focus the text field `node_id`. Intercepted by the
     /// input loop (never forwarded to the render thread): it seeds the edit
     /// session and routes the `blur` / `focus` events back through the
@@ -226,6 +232,7 @@ fn merge_dirty(target: &mut DirtyInfo, source: DirtyInfo) {
 #[derive(Debug, Default)]
 pub struct DrainedBatch {
     inputs: Vec<RenderCmd>,
+    scrolls: Vec<RenderCmd>,
     css_reloads: Vec<RenderCmd>,
     selects: Vec<RenderCmd>,
     text_selection: Option<RenderCmd>,
@@ -246,6 +253,7 @@ impl DrainedBatch {
     pub fn absorb(&mut self, cmd: RenderCmd) {
         match cmd {
             RenderCmd::RenderInput { .. } => self.inputs.push(cmd),
+            RenderCmd::RenderScroll { .. } => self.scrolls.push(cmd),
             sel @ (RenderCmd::SelectOpen { .. }
             | RenderCmd::SelectClose { .. }
             | RenderCmd::SelectMove { .. }) => self.selects.push(sel),
@@ -386,6 +394,11 @@ impl DrainedBatch {
     /// Drain the `RenderInput` commands in arrival order.
     pub fn drain_inputs(&mut self) -> impl Iterator<Item = RenderCmd> {
         std::mem::take(&mut self.inputs).into_iter()
+    }
+
+    /// Drain the native scrollbar updates in arrival order.
+    pub fn drain_scrolls(&mut self) -> impl Iterator<Item = RenderCmd> {
+        std::mem::take(&mut self.scrolls).into_iter()
     }
 
     /// Drain session-CSS reload commands in arrival order.

@@ -15,8 +15,9 @@ use crate::{
     },
     layout::{
         BoxConstraint, ColumnLayout, Cursor, InlineRun, LayoutBox, LayoutContext, PaintStyle, Rect,
+        ScrollbarLayout,
         inner_formatting_context::flow::layout_children,
-        layoutbox::{collect_runs, visible_children, wrap_runs},
+        layoutbox::{collect_runs, translate_subtree, visible_children, wrap_runs},
     },
     tdom::node::{Node, NodeArena, NodeId, effective_font_size_cells},
 };
@@ -275,7 +276,7 @@ pub fn layout_block(
             })
     });
     let mut column_layout: Option<ColumnLayout> = None;
-    let (wrapped_lines, children, content_height) = if let Some(spec) = &columns {
+    let (wrapped_lines, mut children, content_height) = if let Some(spec) = &columns {
         let (layout, children, height) = layout_multicol(
             arena,
             node_id,
@@ -436,6 +437,61 @@ pub fn layout_block(
     } else {
         outer_height + opts.spacing_after
     };
+
+    // Native vertical scroll containers keep their fixed frame and translate
+    // overflowing flow content by the current offset. The scrollbar is an
+    // engine-owned component: it is not a DOM child, so paint can draw it
+    // after clipped content and input can hit it independently.
+    let scrollbar = if preallocated_height.is_none() && node.css_attr.scrolls_vertically() {
+        let inner_v = edges.padding.vertical() + edges.border.vertical_thickness();
+        let viewport_height = outer_height.saturating_sub(inner_v);
+        let max_scroll = content_height.saturating_sub(viewport_height);
+        if viewport_height > 0 && max_scroll > 0 {
+            let scroll_y = (context
+                .scroll_offsets
+                .get(&node_id)
+                .copied()
+                .unwrap_or(0)
+                .min(max_scroll as u32)) as usize;
+            let border_rect = build_border_rect(geom, rect_height);
+            let track = Rect::new(
+                border_rect
+                    .x
+                    .saturating_add(border_rect.width.saturating_sub(1)),
+                content_top,
+                1,
+                viewport_height,
+            );
+            let thumb_height = ((viewport_height as f32
+                * (viewport_height as f32 / content_height.max(1) as f32))
+                .round() as usize)
+                .clamp(1, viewport_height);
+            let thumb_y = track.y
+                + if max_scroll == 0 {
+                    0
+                } else {
+                    ((scroll_y as f32 / max_scroll as f32)
+                        * (track.height.saturating_sub(thumb_height) as f32))
+                        .round() as usize
+                }
+                .min(track.height.saturating_sub(thumb_height));
+            for child in &mut children {
+                translate_scroll_content(child, -(scroll_y as i64));
+            }
+            Some(ScrollbarLayout {
+                scroll_y,
+                max_scroll,
+                content_height,
+                viewport_height,
+                track,
+                thumb: Rect::new(track.x, thumb_y, 1, thumb_height),
+            })
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     if preallocated_height.is_none() && opts.spacing_after > 0 {
         cursor.y = cursor.y.saturating_add(opts.spacing_after);
     }
@@ -465,6 +521,7 @@ pub fn layout_block(
         spacing_after: effective_spacing_after,
         text_align: node.css_attr.get_text_align(),
         text_indent,
+        scrollbar,
     };
 
     LayoutBox::new_normal(
@@ -474,6 +531,17 @@ pub fn layout_block(
         node.css_attr.outer_display(&node.node_type),
         children,
     )
+}
+
+/// Shift one scroll-container child and its subtree up by `dy`. Fixed children
+/// remain viewport-anchored and are translated again by the global fixed pass.
+fn translate_scroll_content(child: &mut crate::layout::LayoutBox, dy: i64) {
+    if !matches!(
+        child.positioning.position,
+        crate::html::css_parse::Position::Fixed
+    ) {
+        translate_subtree(child, 0, dy);
+    }
 }
 
 /// Layer the browser UA default border (`opts.ua_border`) onto the resolved

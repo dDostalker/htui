@@ -3,7 +3,7 @@
   htui music player demo — interface + interaction only (no audio).
   Works in the terminal via htui and in a regular browser (standard DOM).
   Theme: "neon night" — charcoal slate + mint/cyan/violet/coral accents.
-  Features: animated spectrum, playlist scrollbar, seek/volume, lyrics, queue,
+  Features: animated spectrum, playlist scrolling, seek/volume, lyrics, queue,
   favorites with filtering, seek, repeat/shuffle, volume, live clock.
   Layout: viewport-fit — the page is exactly 100vh (flex column); panels
   stretch on tall terminals and clip gracefully on small ones, so it never
@@ -180,15 +180,9 @@
   .tab:hover { color: #ffffff; background-color: #26314a; }
   .tab.on { color: #43e5a0; background-color: #0f2a22; }
   .lib-meta { flex: 1; text-align: right; color: #556085; }
-  .lib-body { display: flex; gap: 1ch; align-items: flex-start; }
-  #plist { flex: 1 1 auto; height: 5ch; overflow: hidden; }
-  .playlist-scroll {
-    width: 1ch;
-    height: 5ch;
-    color: #43e5a0;
-    writing-mode: vertical-lr;
-    direction: rtl;
-    appearance: slider-vertical;
+  .plist {
+    height: 12vh;
+    overflow-y: auto;
   }
 
   .row { display: flex; gap: 2ch; padding: 0 1ch; }
@@ -338,12 +332,7 @@
       </span>
       <span id="lib-meta" class="lib-meta"></span>
     </div>
-    <div class="lib-body">
-      <div id="plist"></div>
-      <input id="plist-scroll" class="range playlist-scroll" type="range" orient="vertical"
-        min="0" max="2" step="1" value="0" aria-label="Playlist scroll"
-        oninput="scrollPlaylist(this.value)">
-    </div>
+    <div id="plist" class="plist"></div>
   </div>
   </div>
 
@@ -375,8 +364,6 @@
     var shuffle = false;
     var volume = 80;
     var tab = "all";
-    var PLAYLIST_VISIBLE = 4;
-    var playlistScroll = 0;
 
     var WAVE_N = 48;
     var seeking = false;
@@ -457,18 +444,8 @@
       var count = 0;
       var total = 0;
       var html = "";
-      var visible = [];
       for (var i = 0; i < tracks.length; i++) {
         if (tab === "fav" && !tracks[i].fav) { continue; }
-        visible.push(i);
-      }
-      var maxScroll = Math.max(0, visible.length - PLAYLIST_VISIBLE);
-      playlistScroll = Math.min(playlistScroll, maxScroll);
-      var scrollbar = $("plist-scroll");
-      scrollbar.setAttribute("max", String(maxScroll));
-      scrollbar.value = String(playlistScroll);
-      for (var n = playlistScroll; n < Math.min(visible.length, playlistScroll + PLAYLIST_VISIBLE); n++) {
-        var i = visible[n];
         count++;
         total += tracks[i].dur;
         var mark = (i === current && playing) ? "\u25b6" : String(i + 1);
@@ -488,11 +465,6 @@
       var allTotal = 0;
       for (var j = 0; j < tracks.length; j++) { allTotal += tracks[j].dur; }
       $("lib-meta").textContent = count + " TRACKS \u00b7 " + fmt(total) + (tab === "all" ? " \u00b7 TOTAL " + fmt(allTotal) : "");
-    }
-
-    function scrollPlaylist(value) {
-      playlistScroll = Math.round(Number(value) || 0);
-      renderPlaylist();
     }
 
     function renderQueue() {

@@ -249,6 +249,7 @@ pub fn layout_cell(
         spacing_after: 0,
         text_align,
         text_indent: 0,
+        scrollbar: None,
     };
 
     LayoutBox::new_normal(

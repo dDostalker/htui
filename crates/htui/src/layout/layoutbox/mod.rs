@@ -97,7 +97,7 @@ pub(crate) use inline::{inline_tree_has_forced_break, q_quote_pair, text_node_ru
 pub use inline_run::InlineRun;
 pub use inner_formatting_context::FormattingContext;
 pub use outer_display::OuterDisplay;
-pub use paint_style::{ColumnLayout, PaintStyle};
+pub use paint_style::{ColumnLayout, PaintStyle, ScrollbarLayout};
 pub(crate) use position::translate_subtree;
 pub use position::{
     apply_relative_offset, pin_fixed_boxes, pin_sticky_boxes, resolve_positioned_rects,

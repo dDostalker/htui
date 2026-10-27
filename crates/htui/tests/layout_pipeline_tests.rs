@@ -1,8 +1,11 @@
+use std::collections::HashMap;
+
 use htui::{
     html::{css_parse, html_parse},
     layout::{
         BoxConstraint, Cursor, FormattingContext, GeneratedBoxKind, LayoutBox,
-        inner_formatting_context::flow::layout_tree, layout::TermMap,
+        inner_formatting_context::flow::{layout_tree, layout_tree_with_scroll_offsets},
+        layout::TermMap,
     },
     tdom::node::{Node, NodeArena, NodeId, NodeType},
     tui::graph_api::TermLayout,
@@ -24,6 +27,54 @@ fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
         css_parse::css_into_node(&mut arena, root_id, &rules);
     }
     (root_id, arena)
+}
+
+#[test]
+fn overflow_y_creates_a_native_scrollbar_and_translates_content() {
+    let html = "<div id='list'>\
+                <p>one</p><p>two</p><p>three</p>\
+                <p>four</p><p>five</p><p>six</p>\
+                </div>";
+    let (root_id, arena) = setup(html, "#list { height: 80; overflow-y: auto; }");
+    let list_id = arena
+        .iter()
+        .find(|(_, node)| node.get_id().map(String::as_str) == Some("list"))
+        .map(|(id, _)| id)
+        .expect("list exists");
+    let map = term_map();
+    let offsets = [(list_id, 2u32)].into_iter().collect::<HashMap<_, _>>();
+    let mut cursor = Cursor::new();
+    let boxes = layout_tree_with_scroll_offsets(
+        &arena,
+        root_id,
+        BoxConstraint::root(&map),
+        &mut cursor,
+        map.columns as usize,
+        map.rows as usize,
+        &offsets,
+    );
+    let list = find_layout(&boxes, &arena, |node_type| {
+        matches!(node_type, NodeType::Div)
+    })
+    .expect("scroll container exists");
+    let scroll = list.paint_style.scrollbar.expect("active auto scrollbar");
+    assert_eq!(scroll.scroll_y, 2);
+    assert_eq!(scroll.max_scroll, 3);
+    assert_eq!(scroll.track.height, 10);
+    assert_eq!(scroll.viewport_height, 10);
+    assert_eq!(
+        scroll.content_height,
+        scroll.max_scroll + scroll.viewport_height
+    );
+    assert_eq!(list.children.len(), 6);
+    let first = &list.children[0];
+    let second = &list.children[1];
+    assert_eq!(second.rect.y, first.rect.y + 1);
+    assert!(
+        scroll
+            .track
+            .contains(scroll.thumb.x as u32, scroll.thumb.y as u32)
+    );
 }
 
 /// `NodeId` of the first node matching `predicate`, in document order.

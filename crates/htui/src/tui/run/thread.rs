@@ -108,6 +108,18 @@ pub(super) fn render_thread(
                 state.handle_input(&mut out, node_id, value, cursor, focused, selection);
             }
         }
+        for cmd in batch.drain_scrolls() {
+            if let RenderCmd::RenderScroll { node_id, scroll_y } = cmd {
+                let term_map = match TermMap::get_ter_map() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        log::error!("Failed to get terminal size: {}", e);
+                        break 'frame;
+                    }
+                };
+                state.render_scroll(&mut out, &geo_tx, &term_map, node_id, scroll_y);
+            }
+        }
         for sel_cmd in batch.drain_selects() {
             state.handle_select(&mut out, sel_cmd);
         }
@@ -316,6 +328,9 @@ pub(super) fn render_thread(
                         selection,
                     } => {
                         state.handle_input(&mut out, node_id, value, cursor, focused, selection);
+                    }
+                    RenderCmd::RenderScroll { .. } => {
+                        log::debug!("Scroll command reached the snapshot queue; dropped");
                     }
 
                     // JS `el.focus()` / `el.blur()` requests are intercepted by the

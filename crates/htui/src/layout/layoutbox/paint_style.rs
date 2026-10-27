@@ -30,6 +30,26 @@ pub struct ColumnLayout {
     pub height: usize,
 }
 
+/// Layout facts for a box's native vertical scrollbar.
+///
+/// Layout computes them after measuring overflowing children so the input
+/// layer and paint phase share one canonical thumb geometry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScrollbarLayout {
+    /// Current content offset in rows.
+    pub scroll_y: usize,
+    /// Maximum valid offset (`content_height - viewport_height`).
+    pub max_scroll: usize,
+    /// Full scrollable content height in rows.
+    pub content_height: usize,
+    /// Visible content height in rows, excluding padding / border.
+    pub viewport_height: usize,
+    /// Absolute one-column track rectangle.
+    pub track: crate::layout::Rect,
+    /// Absolute thumb rectangle inside `track`.
+    pub thumb: crate::layout::Rect,
+}
+
 /// Paint-only data carried by every [`crate::layout::LayoutBox`].
 ///
 /// This is the visual chrome of a box: padding / border / margin for box
@@ -80,6 +100,9 @@ pub struct PaintStyle {
     /// line's wrap budget shrank by this many columns at layout time, and
     /// the paint phase shifts its origin right accordingly.
     pub text_indent: usize,
+    /// Native scroll state for `overflow-y: auto/scroll`; `None` for ordinary
+    /// boxes and non-overflowing `auto` containers.
+    pub scrollbar: Option<ScrollbarLayout>,
 }
 
 impl Default for PaintStyle {
@@ -95,6 +118,7 @@ impl Default for PaintStyle {
             spacing_after: 0,
             text_align: TextAlign::Left,
             text_indent: 0,
+            scrollbar: None,
         }
     }
 }

@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    layout::layoutbox::{LayoutBox, Rect},
+    layout::{Rect, ScrollbarLayout, layoutbox::LayoutBox},
     tdom::node::{NodeArena, NodeId},
 };
 
@@ -43,6 +43,8 @@ pub type SharedHitMap = Arc<Mutex<Arc<HitMap>>>;
 #[derive(Default)]
 pub struct HitMap {
     regions: Vec<HitRegion>,
+    /// Native scrollbar controls keyed by their owning scroll container.
+    pub scrollbars: HashMap<NodeId, ScrollbarRegion>,
     /// Hit-test index: region indices bucketed by canvas row (`rows[y]`
     /// lists every region whose rect covers row `y`), so a lookup inspects
     /// only the candidates on the pointer's row instead of scanning every
@@ -93,6 +95,7 @@ impl HitMap {
     ///   [`HitMap::hit_test`] never scans the whole list.
     pub fn build(geometry: &Geometry) -> HitMap {
         let mut regions = Vec::new();
+        let mut scrollbars = HashMap::new();
         // One ancestor-chain resolution per distinct node, shared by every
         // box the node produced.
         let mut paths: HashMap<NodeId, Arc<[ElementRef]>> = HashMap::new();
@@ -102,7 +105,7 @@ impl HitMap {
                 .or_insert_with(|| ancestor_path(&geometry.arena, node_id).into())
                 .clone()
         };
-        collect_regions_roots(&geometry.boxes, &mut path_of, &mut regions);
+        collect_regions_roots(&geometry.boxes, &mut path_of, &mut regions, &mut scrollbars);
         // Inline `<label>` runs get their own small regions (the label's
         // text slice within its block box) so a click on label text resolves
         // to the label for `for=` / wrapped-control delegation. They are
@@ -130,7 +133,11 @@ impl HitMap {
                 bucket.push(idx);
             }
         }
-        HitMap { regions, rows }
+        HitMap {
+            regions,
+            scrollbars,
+            rows,
+        }
     }
 
     /// The topmost region containing the canvas point.
@@ -160,6 +167,23 @@ impl HitMap {
     pub fn resolve_by_id(&self, id: &str) -> Option<&HitRegion> {
         self.regions.iter().find(|r| r.id() == Some(id))
     }
+
+    /// Find the nearest scrollable ancestor (including `start`) whose native
+    /// scrollbar is active.
+    pub fn scroll_container(
+        &self,
+        start: Option<NodeId>,
+        arena: &NodeArena,
+    ) -> Option<&ScrollbarRegion> {
+        let mut current = start;
+        while let Some(node_id) = current {
+            if let Some(scrollbar) = self.scrollbars.get(&node_id) {
+                return Some(scrollbar);
+            }
+            current = arena.get(node_id).and_then(|node| node.parent);
+        }
+        None
+    }
 }
 
 /// Walk the layout forest roots, pushing one region per box in paint
@@ -168,9 +192,10 @@ fn collect_regions_roots(
     roots: &[LayoutBox],
     path_of: &mut impl FnMut(NodeId) -> Arc<[ElementRef]>,
     out: &mut Vec<HitRegion>,
+    scrollbars: &mut HashMap<NodeId, ScrollbarRegion>,
 ) {
     for root in roots {
-        collect_regions(root, path_of, out);
+        collect_regions(root, path_of, out, scrollbars);
     }
 }
 
@@ -181,16 +206,63 @@ fn collect_regions(
     box_tree: &LayoutBox,
     path_of: &mut impl FnMut(NodeId) -> Arc<[ElementRef]>,
     out: &mut Vec<HitRegion>,
+    scrollbars: &mut HashMap<NodeId, ScrollbarRegion>,
 ) {
     out.push(HitRegion {
         node_id: box_tree.node_id,
         rect: box_tree.rect,
         path: path_of(box_tree.node_id),
     });
+    if let Some(scroll) = box_tree.paint_style.scrollbar {
+        scrollbars.insert(
+            box_tree.node_id,
+            ScrollbarRegion::new(box_tree.node_id, scroll),
+        );
+    }
     let mut children: Vec<&LayoutBox> = box_tree.children.iter().collect();
     children.sort_by_key(|c| crate::layout::paint::stacking_key(c));
     for child in children {
-        collect_regions(child, path_of, out);
+        collect_regions(child, path_of, out, scrollbars);
+    }
+}
+
+/// Input-facing geometry for an engine-owned scrollbar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScrollbarRegion {
+    pub node_id: NodeId,
+    pub track: Rect,
+    pub thumb: Rect,
+    pub scroll_y: u32,
+    pub max_scroll: u32,
+}
+
+impl ScrollbarRegion {
+    fn new(node_id: NodeId, scroll: ScrollbarLayout) -> Self {
+        Self {
+            node_id,
+            track: scroll.track,
+            thumb: scroll.thumb,
+            scroll_y: scroll.scroll_y as u32,
+            max_scroll: scroll.max_scroll as u32,
+        }
+    }
+
+    /// Content offset for a pointer row, preserving a thumb-grab offset.
+    pub fn offset_at(&self, y: u32, grab_offset: u32) -> u32 {
+        if self.track.height <= 1 || self.max_scroll == 0 {
+            return 0;
+        }
+        let y = y as usize;
+        let target = y
+            .saturating_sub(grab_offset as usize)
+            .saturating_sub(self.track.y)
+            .min(self.track.height.saturating_sub(self.thumb.height.max(1)));
+        let travel = self
+            .track
+            .height
+            .saturating_sub(self.thumb.height.max(1))
+            .max(1);
+        ((target as u64 * self.max_scroll as u64) / travel as u64) as u32
     }
 }
 

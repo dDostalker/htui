@@ -67,6 +67,7 @@ fn layout_img_clamps_cols_to_containing_width() {
         LayoutContext {
             font: htui::html::css_parse::FontContext::root(),
             viewport: Viewport { cols: 80, rows: 24 },
+            scroll_offsets: &htui::layout::NO_SCROLL_OFFSETS,
         },
     )
     .expect("<img> should produce a LayoutBox");
@@ -118,6 +119,7 @@ fn layout_img_unclamped_when_img_fits() {
         LayoutContext {
             font: htui::html::css_parse::FontContext::root(),
             viewport: Viewport { cols: 80, rows: 24 },
+            scroll_offsets: &htui::layout::NO_SCROLL_OFFSETS,
         },
     )
     .unwrap();
@@ -364,6 +366,7 @@ fn layout_img_default_size_preserves_intrinsic_aspect_ratio() {
             LayoutContext {
                 font: htui::html::css_parse::FontContext::root(),
                 viewport: Viewport { cols: 80, rows: 24 },
+                scroll_offsets: &htui::layout::NO_SCROLL_OFFSETS,
             },
         )
         .expect("<img> should produce a LayoutBox");
@@ -544,6 +547,7 @@ fn svg_intrinsic_aspect_ratio_drives_default_layout() {
             LayoutContext {
                 font: htui::html::css_parse::FontContext::root(),
                 viewport: Viewport { cols: 80, rows: 24 },
+                scroll_offsets: &htui::layout::NO_SCROLL_OFFSETS,
             },
         )
         .expect("<img> should produce a LayoutBox");
@@ -635,6 +639,7 @@ fn layout_img_respects_margin_and_left_aligns() {
         LayoutContext {
             font: htui::html::css_parse::FontContext::root(),
             viewport: Viewport { cols: 80, rows: 24 },
+            scroll_offsets: &htui::layout::NO_SCROLL_OFFSETS,
         },
     )
     .expect("<img> should produce a LayoutBox");
