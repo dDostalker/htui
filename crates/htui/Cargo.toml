@@ -6,7 +6,6 @@ rust-version = "1.89"
 description = "A terminal HTML/CSS renderer with an embedded JavaScript engine — build interactive TUIs from HTML, CSS and JS"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/dDostalker/htui"
-homepage = "https://github.com/dDostalker/htui"
 documentation = "https://docs.rs/htui"
 readme = "README.md"
 keywords = ["tui", "terminal", "html", "css", "javascript"]

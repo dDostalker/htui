@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -23,6 +24,21 @@ pub(crate) struct ScriptState {
     /// The live DOM scripts mutate.
     pub arena: NodeArena,
     pub root_id: NodeId,
+    /// CSS extracted from the document currently owned by this engine.
+    ///
+    /// A whole-document reload changes this source even when JS has not
+    /// touched the new arena yet; the script reply carries it to the render
+    /// thread so `<style>` edits can take effect.
+    pub document_css: Arc<str>,
+    /// Whether the engine replaced its document since the last reply.
+    ///
+    /// Set by `ScriptEngine::reload` and consumed by the script-thread bridge;
+    /// ordinary DOM mutations leave it false.
+    pub document_reload: bool,
+    /// Session-level JS supplied beside the HTML source. It runs after the
+    /// document's inline `<script>` blocks and is re-run after whole-document
+    /// reloads; `ReloadJs` can replace it without replacing the DOM.
+    pub session_js: Arc<str>,
     /// Render commands pushed by host functions during JS execution.
     pub render_cmds: Vec<RenderCmd>,
     /// Nodes whose content or attributes JS changed since the last render.

@@ -6,6 +6,7 @@ pub mod layout;
 pub mod resources;
 pub mod script;
 pub mod session;
+pub mod source;
 pub mod tdom;
 pub mod tui;
 
@@ -23,3 +24,4 @@ pub use config::Config;
 pub use html::html_parse::Parser;
 pub use layout::layout::TermMap;
 pub use session::Session;
+pub use source::{CssSource, HtmlSource, JsSource, Source, SourceKind};

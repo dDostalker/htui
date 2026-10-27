@@ -23,6 +23,8 @@
 //! internally, so `register("app.js", …)` + `load("app.js")` (or
 //! `load("mem://app.js")`) hit the same entry.
 
+#[cfg(debug_assertions)]
+use std::sync::mpsc;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -65,6 +67,11 @@ pub enum ResourceError {
 #[derive(Debug, Default)]
 pub struct ResourceRegistry {
     map: Mutex<HashMap<String, Arc<Vec<u8>>>>,
+    /// Debug-only reload subscriptions installed while a session is running.
+    /// Registering or removing a resource notifies them so the input loop can
+    /// re-parse the current HTML against the updated `mem://` registry.
+    #[cfg(debug_assertions)]
+    reload_txs: Mutex<Vec<mpsc::Sender<()>>>,
 }
 
 impl ResourceRegistry {
@@ -88,17 +95,25 @@ impl ResourceRegistry {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .insert(key, Arc::new(bytes));
+        #[cfg(debug_assertions)]
+        self.notify_reload();
         Ok(())
     }
 
     /// Remove a virtual entry. Returns `true` when it existed. The `mem://`
     /// prefix is optional.
     pub fn unregister(&self, path: &str) -> bool {
-        self.map
+        let removed = self
+            .map
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(&normalize(path))
-            .is_some()
+            .is_some();
+        #[cfg(debug_assertions)]
+        if removed {
+            self.notify_reload();
+        }
+        removed
     }
 
     /// Load the bytes registered under `path`. The `mem://` prefix is
@@ -111,6 +126,40 @@ impl ResourceRegistry {
             .get(&key)
             .cloned()
             .ok_or(ResourceError::MemNotFound { path: key })
+    }
+
+    /// Subscribe to debug-only resource invalidation events.
+    ///
+    /// The render session installs one receiver before the first parse. A
+    /// later `register` / `unregister` emits an event; the input loop responds
+    /// by re-parsing the current HTML source so `<script src>`, `<link>` and
+    /// other `mem://` references resolve again.
+    #[cfg(debug_assertions)]
+    pub(crate) fn subscribe_reloads(&self) -> mpsc::Receiver<()> {
+        let (tx, rx) = mpsc::channel();
+        self.reload_txs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(tx);
+        rx
+    }
+
+    #[cfg(debug_assertions)]
+    fn notify_reload(&self) {
+        let mut senders = self.reload_txs.lock().unwrap_or_else(|e| e.into_inner());
+        // Remove disconnected subscriptions and retain at least one live
+        // notification if several receivers were somehow installed.
+        let mut notified = false;
+        senders.retain(|tx| match tx.send(()) {
+            Ok(()) => {
+                notified = true;
+                true
+            }
+            Err(_) => false,
+        });
+        if !notified {
+            log::trace!("mem:// resource changed without an active reload subscription");
+        }
     }
 
     /// Deliver the bytes for `path` to `tx`, tagged with `id`. Always
@@ -236,4 +285,33 @@ pub fn resolve_url(base_href: Option<&str>, url: &str) -> String {
     }
     let base = normalize(base);
     format!("{}/{url}", base.trim_end_matches('/'))
+}
+
+#[cfg(all(test, debug_assertions))]
+mod reload_tests {
+    use super::*;
+
+    #[test]
+    fn register_and_unregister_notify_reload_subscribers() {
+        let registry = ResourceRegistry::new();
+        let rx = registry.subscribe_reloads();
+
+        registry
+            .register("mem://reload.js", b"globalThis.__x = 1".to_vec())
+            .expect("register resource");
+        assert!(
+            rx.try_recv().is_ok(),
+            "register must invalidate an active debug session"
+        );
+
+        assert!(registry.unregister("mem://reload.js"));
+        assert!(
+            rx.try_recv().is_ok(),
+            "removing an existing resource must invalidate an active debug session"
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "unregistering a missing key must not invalidate"
+        );
+    }
 }

@@ -419,6 +419,114 @@ fn host_render_html_reloads_in_engine_instead_of_render_thread() {
 }
 
 #[test]
+fn initial_session_js_runs_after_document_scripts() {
+    let mut engine = ScriptEngine::new_with_js(
+        r#"<script>globalThis.__order = ["inline"];</script><p>x</p>"#,
+        r#"globalThis.__order.push("session")"#,
+        EventBindings::default(),
+    )
+    .expect("engine initializes");
+    assert_eq!(
+        eval_str(&mut engine, "globalThis.__order.join(',')"),
+        "inline,session"
+    );
+}
+
+#[test]
+fn reload_js_keeps_the_dom_and_reports_mutations() {
+    let (mut engine, _geo) = build_geometry(r#"<p id="value">old</p>"#, EventBindings::default());
+    engine
+        .reload_js(r#"document.getElementById('value').textContent = "fresh";"#)
+        .expect("session JS reloads");
+
+    let dirty = engine.take_dirty();
+    assert!(
+        !dirty.is_empty(),
+        "DOM writes from reloaded JS must report a repaint"
+    );
+    let arena = engine.arena();
+    assert!(
+        arena
+            .iter()
+            .any(|(_, n)| n.text_content(&arena).contains("fresh")),
+        "the live DOM must survive and reflect the reloaded JS"
+    );
+}
+
+#[test]
+fn reload_html_after_mem_change_resolves_the_new_resource() {
+    let registry = Arc::new(ResourceRegistry::new());
+    registry
+        .register("mem-change.js", b"globalThis.__mem = \"old\";".to_vec())
+        .expect("register initial resource");
+
+    let result = with_registry(Arc::clone(&registry), || {
+        let mut parser =
+            htui::html::html_parse::Parser::new(r#"<script src="mem-change.js"></script><p>x</p>"#);
+        let document = parser.parse_with_scripts();
+        let mut engine =
+            ScriptEngine::new_from_document_with_js(document, "", EventBindings::default())
+                .expect("engine initializes");
+        assert_eq!(eval_str(&mut engine, "globalThis.__mem"), "old");
+
+        registry
+            .register("mem-change.js", b"globalThis.__mem = \"new\";".to_vec())
+            .expect("register changed resource");
+
+        let mut hover = HoverState::new();
+        let map = HitMap::new();
+        let event = apply_message(
+            &mut engine,
+            &mut hover,
+            &map,
+            ScriptMsg::ReloadHtml {
+                html: Arc::from(r#"<script src="mem-change.js"></script><p id="fresh">fresh</p>"#),
+            },
+        );
+        assert!(event.dirty.is_some(), "a mem-driven reparse must repaint");
+        eval_str(&mut engine, "globalThis.__mem")
+    });
+    assert_eq!(result, "new", "reparse must read the changed mem resource");
+}
+
+#[test]
+fn reload_html_message_reports_document_css_and_clears_hover() {
+    let (mut engine, geo) = build_geometry(r#"<div id="old">old</div>"#, EventBindings::default());
+    let map = HitMap::build(&geo);
+    let old = map.resolve_by_id("old").expect("old region");
+    let (x, y) = center(old.rect);
+    let mut hover = HoverState::new();
+
+    let entered = apply_message(&mut engine, &mut hover, &map, ScriptMsg::Move { x, y });
+    assert_eq!(entered.hovered, Some(old.node_id));
+
+    let reloaded = apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::ReloadHtml {
+            html: Arc::from(r#"<style>p { color: red; }</style><p id="fresh">fresh</p>"#),
+        },
+    );
+    assert_eq!(reloaded.hovered, None, "old node ids cannot survive reload");
+
+    let dirty = reloaded.dirty.expect("reload marks the fresh root dirty");
+    let document_css = dirty
+        .document_css
+        .as_deref()
+        .expect("reload carries document CSS");
+    assert!(
+        document_css.contains("color: red"),
+        "document CSS must reach the render bridge: {document_css}"
+    );
+    assert!(
+        dirty.dirty.nodes.contains(&dirty.root_id),
+        "the fresh root must be marked dirty"
+    );
+    find_node_by_id(&dirty.arena, "fresh");
+}
+
+#[test]
 fn set_timeout_fires_once_then_clears() {
     // `setTimeout` fires exactly once when the deadline passes.
     let (mut engine, _geo) = build_geometry(

@@ -1,0 +1,4 @@
+/* Session-level terminal tweak; the browser demo keeps its embedded styles. */
+#state-label.off {
+  color: #556085;
+}

@@ -6,6 +6,8 @@
 //!  and the input loop that translates keys mouse
 //! events into `RenderCmd`s.
 
+#[cfg(debug_assertions)]
+mod hot_reload;
 mod overlay;
 mod pipeline;
 mod region;
@@ -13,7 +15,6 @@ mod selection;
 mod state;
 mod thread;
 
-use self::pipeline::combined_css_source;
 use self::thread::{fold_script_event, hit_test_thread, render_thread};
 
 use std::io::stdout;
@@ -37,7 +38,8 @@ use crate::{
     html::{css_parse::DynamicState, html_parse::Parser},
     layout::layout::{MAX_TERM_COLS, MAX_TERM_ROWS, TermMap},
     resources,
-    script::{ScriptMsg, ScriptResponse, run_script_thread},
+    script::{ScriptMsg, ScriptResponse, run_script_thread_with_js},
+    source::SourceKind,
     tdom::node::{NodeArena, NodeId},
     tui::graph_api::{
         DirtyInfo, InputState, KEY_GATE_TIMEOUT, RenderCmd, apply_focus_requests,
@@ -52,7 +54,63 @@ static TERMINAL_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// thread. Extra moves are dropped.
 const MAX_IN_FLIGHT_MOVES: usize = 8;
 
-pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
+/// Debug source paths retained by `include_html!` / `include_css!` /
+/// `include_js!`. Release sources carry no paths.
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct HotReloadPaths<'a> {
+    pub html: Option<&'a str>,
+    pub css: Option<&'a str>,
+    pub js: Option<&'a str>,
+}
+
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+impl<'a> HotReloadPaths<'a> {
+    fn watches(self) -> Vec<(SourceKind, &'a str)> {
+        [
+            self.html.map(|path| (SourceKind::Html, path)),
+            self.css.map(|path| (SourceKind::Css, path)),
+            self.js.map(|path| (SourceKind::Js, path)),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+
+    pub(crate) fn any(self) -> bool {
+        self.html.is_some() || self.css.is_some() || self.js.is_some()
+    }
+}
+
+pub(crate) fn run(html: &str, css: &str, js: &str, session: &mut Session) {
+    run_inner(html, css, js, session, HotReloadPaths::default());
+}
+
+/// Start a debug render with hot reload for every source that has a path.
+///
+/// The watcher is part of the debug-only branch: release binaries never
+/// reference this entry point.
+#[cfg(debug_assertions)]
+pub(crate) fn run_hot(
+    paths: HotReloadPaths<'_>,
+    html: &str,
+    css: &str,
+    js: &str,
+    session: &mut Session,
+) {
+    run_inner(html, css, js, session, paths);
+}
+
+fn run_inner(
+    html: &str,
+    css: &str,
+    js: &str,
+    session: &mut Session,
+    hot_reload_paths: HotReloadPaths<'_>,
+) {
+    // The paths are consumed only by the debug watcher below.
+    #[cfg(not(debug_assertions))]
+    let _ = hot_reload_paths;
     // register log hook
     install_panic_hook();
 
@@ -77,13 +135,27 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
     //
     TERMINAL_ACTIVE.store(true, Ordering::SeqCst);
 
-    // load source
+    // Keep the original HTML available for debug `mem://` re-parses. A
+    // registry change cannot carry the document text, so this source is sent
+    // back through the script engine to resolve every resource again.
+    let html_source: Arc<str> = Arc::from(html);
     let document = session.with_registry(|| {
-        let mut parser = Parser::new(html);
+        let mut parser = Parser::new(&html_source);
         parser.parse_with_scripts()
     });
-    let css_source: Arc<str> = Arc::from(combined_css_source(&document.css, css));
+    let session_css: Arc<str> = Arc::from(css);
+    let session_js: Arc<str> = Arc::from(js);
     let config = *session.config();
+
+    // A debug-only side channel reads stable source edits. HTML goes to the
+    // script thread, JS re-evaluates in the script thread, and CSS is applied
+    // by the render thread. Release builds compile this to no watcher.
+    #[cfg(debug_assertions)]
+    let hot_reload = (config.events && hot_reload_paths.any())
+        .then(|| hot_reload::spawn(hot_reload_paths.watches()));
+    #[cfg(debug_assertions)]
+    let mut hot_css: Option<String> = None;
+
     let registry = session.registry_handle();
     let bindings = if config.events {
         Some(session.take_bindings())
@@ -110,9 +182,10 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
         let script_registry = Arc::clone(&registry);
         std::thread::spawn(move || {
             resources::with_registry(script_registry, || {
-                run_script_thread(
+                run_script_thread_with_js(
                     script_document,
                     bindings,
+                    Arc::clone(&session_js),
                     script_rx,
                     script_out_tx,
                     hit_map_thread,
@@ -143,6 +216,13 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
         std::thread::spawn(move || hit_test_thread(geo_rx, hit_map_thread));
     }
 
+    // Subscribe after the engine is ready so debug `mem://` invalidation only
+    // runs when a script engine exists to perform the whole-document reparse.
+    #[cfg(debug_assertions)]
+    let mem_reload_rx = events_active.then(|| registry.subscribe_reloads());
+    #[cfg(debug_assertions)]
+    let mut mem_reload;
+
     // Text of the current page selection, refreshed by the render thread and
     // read by the input loop on `Ctrl+C` (shared through `Arc<Mutex<_>>`).
     let selection_text: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
@@ -154,7 +234,7 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
     let render_beat: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
     let render_handle = std::thread::spawn({
         let render_document = document;
-        let css_clone = Arc::clone(&css_source);
+        let css_clone = Arc::clone(&session_css);
         let max_scroll_clone = Arc::clone(&max_scroll);
         let selection_text_clone = Arc::clone(&selection_text);
         let render_beat_clone = Arc::clone(&render_beat);
@@ -263,6 +343,48 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
         }
 
         let mut msgs: Vec<ScriptMsg> = Vec::new();
+        // Coalesce mem:// invalidations into one reparse. Resource registration
+        // may happen from a host callback thread while the input loop sleeps.
+        #[cfg(debug_assertions)]
+        if let Some(rx) = &mem_reload_rx {
+            mem_reload = false;
+            while rx.try_recv().is_ok() {
+                mem_reload = true;
+            }
+            if mem_reload {
+                log::info!("Hot reloading mem:// resources by re-parsing HTML");
+                msgs.push(ScriptMsg::ReloadHtml {
+                    html: Arc::clone(&html_source),
+                });
+            }
+        }
+        // Coalesce every watcher update that arrived while the input loop was
+        // blocked / processing into the latest HTML. Rapid saves produce one
+        // script-thread reload rather than a queue of obsolete documents.
+        #[cfg(debug_assertions)]
+        if let Some(watcher) = &hot_reload {
+            let mut latest_html: Option<String> = None;
+            let mut latest_js: Option<String> = None;
+            while let Ok(event) = watcher.receiver().try_recv() {
+                match event {
+                    hot_reload::HotReloadEvent::Html(html) => latest_html = Some(html),
+                    hot_reload::HotReloadEvent::Css(css) => hot_css = Some(css),
+                    hot_reload::HotReloadEvent::Js(js) => latest_js = Some(js),
+                }
+            }
+            if let Some(html) = latest_html {
+                log::info!("Hot reloading HTML document");
+                msgs.push(ScriptMsg::ReloadHtml {
+                    html: Arc::from(html.as_str()),
+                });
+            }
+            if let Some(js) = latest_js {
+                log::info!("Hot reloading session JS");
+                msgs.push(ScriptMsg::ReloadJs {
+                    js: Arc::from(js.as_str()),
+                });
+            }
+        }
         // Detect terminal size changes ourselves instead of relying solely on
         // `Event::Resize`: some resize paths never emit the event (a legacy
         // Windows console can resize its window without changing the buffer),
@@ -356,6 +478,16 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
             state.invalidate_viewport(&mut cmds);
         }
 
+        // Queue a CSS source replacement after any viewport invalidation, but
+        // before a forced redraw so both changes merge into the same frame.
+        #[cfg(debug_assertions)]
+        if let Some(css) = hot_css.take() {
+            log::info!("Hot reloading session CSS");
+            cmds.push(RenderCmd::ReloadCss {
+                css: Arc::from(css.as_str()),
+            });
+        }
+
         // Force a re-layout against the new viewport. When the script engine
         // owns the document this is converted into a `RenderArena` below (so
         // JS DOM mutations survive the re-layout); the render thread merges it
@@ -412,7 +544,7 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
                 {
                     Ok(ScriptResponse::Event(ev)) => {
                         let verdict = ev.key_gate.filter(|(id, _)| *id == gate.id);
-                        fold_script_event(&state, &mut cmds, &mut hovered, &mut live_dom, ev);
+                        fold_script_event(&mut state, &mut cmds, &mut hovered, &mut live_dom, ev);
                         moves_in_flight = moves_in_flight.saturating_sub(1);
                         if let Some((_, prevented)) = verdict {
                             if !prevented {
@@ -453,7 +585,7 @@ pub(crate) fn run(html: &str, css: &str, session: &mut Session) {
         for resp in script_out_rx.try_iter() {
             match resp {
                 ScriptResponse::Event(ev) => {
-                    fold_script_event(&state, &mut cmds, &mut hovered, &mut live_dom, ev);
+                    fold_script_event(&mut state, &mut cmds, &mut hovered, &mut live_dom, ev);
                     moves_in_flight = moves_in_flight.saturating_sub(1);
                 }
                 ScriptResponse::Ready { .. } | ScriptResponse::Failed(_) => {
