@@ -5,7 +5,7 @@ use crossterm::event::KeyCode;
 
 use crate::layout::Rect;
 use crate::layout::paint::{
-    range_spec, textarea_caret_position, textarea_char_at, textarea_scroll_row,
+    range_is_vertical, range_spec, textarea_caret_position, textarea_char_at, textarea_scroll_row,
     textarea_visual_lines, value_window,
 };
 use crate::tdom::node::{NodeArena, NodeId, NodeType};
@@ -162,8 +162,9 @@ pub(super) fn normalize_range_state(
     changed
 }
 
-/// Apply a keyboard adjustment to a focused range. Left/Down move one step
-/// left, Right/Up move one step right, and Home/End jump to the boundaries.
+/// Apply a keyboard adjustment to a focused range. Horizontal sliders use
+/// Left/Down then Right/Up; vertical sliders invert Up/Down so the keys follow
+/// track direction. Home/End jump to the boundaries.
 pub(super) fn apply_range_key(
     state: &mut InputState,
     arena: &NodeArena,
@@ -174,9 +175,14 @@ pub(super) fn apply_range_key(
         return false;
     };
     let mut spec = range_spec(node, Some(state.input_value.as_str()));
+    let vertical = range_is_vertical(node);
     let changed = match key {
-        KeyCode::Left | KeyCode::Down => spec.advance(-1, false, false),
-        KeyCode::Right | KeyCode::Up => spec.advance(1, false, false),
+        KeyCode::Left => spec.advance(-1, false, false),
+        KeyCode::Down if vertical => spec.advance(1, false, false),
+        KeyCode::Down => spec.advance(-1, false, false),
+        KeyCode::Right => spec.advance(1, false, false),
+        KeyCode::Up if vertical => spec.advance(-1, false, false),
+        KeyCode::Up => spec.advance(1, false, false),
         KeyCode::Home => spec.advance(0, true, false),
         KeyCode::End => spec.advance(0, false, true),
         _ => false,
@@ -197,13 +203,22 @@ pub(super) fn set_range_at_pointer(
     node_id: NodeId,
     rect: crate::layout::Rect,
     x: u32,
+    y: u32,
 ) -> bool {
     let Some(node) = arena.get(node_id) else {
         return false;
     };
     let spec = range_spec(node, Some(state.input_value.as_str()));
-    let local_x = ((x as usize).saturating_sub(rect.x)).min(rect.width.max(1).saturating_sub(1));
-    let value = spec.value_at_x(local_x, rect.width.max(1)).value_string();
+    let value = if range_is_vertical(node) {
+        let local_y =
+            ((y as usize).saturating_sub(rect.y)).min(rect.height.max(1).saturating_sub(1));
+        spec.value_at(local_y, rect.height.max(1))
+    } else {
+        let local_x =
+            ((x as usize).saturating_sub(rect.x)).min(rect.width.max(1).saturating_sub(1));
+        spec.value_at(local_x, rect.width.max(1))
+    }
+    .value_string();
     let changed = state.input_value != value;
     state.input_value = value;
     state.input_cursor = state.input_value.chars().count();
@@ -399,6 +414,27 @@ mod range_key_tests {
         assert!(apply_range_key(&mut state, &arena, id, KeyCode::Right));
         assert_eq!(state.input_value, "1");
         assert!(!apply_range_key(&mut state, &arena, id, KeyCode::Char('x')));
+        assert_eq!(state.input_value, "1");
+    }
+
+    #[test]
+    fn vertical_range_keys_follow_the_track() {
+        let mut arena = NodeArena::default();
+        let mut node = crate::tdom::node::Node::from(NodeType::Input);
+        node.attributes
+            .insert("type".to_string(), "range".to_string());
+        node.attributes
+            .insert("orient".to_string(), "vertical".to_string());
+        node.attributes.insert("min".to_string(), "0".to_string());
+        node.attributes.insert("max".to_string(), "2".to_string());
+        node.attributes.insert("value".to_string(), "1".to_string());
+        let id = arena.insert(node);
+
+        let mut state = InputState::new();
+        state.input_value = CompactString::from("1");
+        assert!(apply_range_key(&mut state, &arena, id, KeyCode::Up));
+        assert_eq!(state.input_value, "0");
+        assert!(apply_range_key(&mut state, &arena, id, KeyCode::Down));
         assert_eq!(state.input_value, "1");
     }
 }

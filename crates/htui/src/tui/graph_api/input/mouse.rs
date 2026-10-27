@@ -65,7 +65,7 @@ pub fn handle_click(
             } else if is_range_input(arena, node_id) {
                 focus_input(state, node_id, arena, msgs, cmds);
                 if let Some(region) = clicked
-                    && set_range_at_pointer(state, arena, node_id, region.rect, x)
+                    && set_range_at_pointer(state, arena, node_id, region.rect, x, y)
                 {
                     push_input_render(state, node_id, cmds);
                     msgs.push(ScriptMsg::RangeInput {
@@ -121,7 +121,7 @@ pub fn handle_mouse_up(
     if range_drag
         && let Some(focused) = state.focused_input
         && let Some(region) = hit_map.iter().find(|r| r.node_id == focused)
-        && set_range_at_pointer(state, arena, focused, region.rect, x)
+        && set_range_at_pointer(state, arena, focused, region.rect, x, y)
     {
         push_input_render(state, focused, cmds);
         msgs.push(ScriptMsg::RangeInput {
@@ -273,7 +273,7 @@ pub fn handle_mouse_down(
                         focus_input(state, node_id, arena, msgs, cmds);
                         if let Some(region) = clicked {
                             state.drag_selecting = true;
-                            if set_range_at_pointer(state, arena, node_id, region.rect, x) {
+                            if set_range_at_pointer(state, arena, node_id, region.rect, x, y) {
                                 push_input_render(state, node_id, cmds);
                                 msgs.push(ScriptMsg::RangeInput {
                                     node_id,
@@ -412,7 +412,7 @@ pub fn handle_mouse_move(
                 && let Some(region) = hit_map.iter().find(|r| r.node_id == focused)
             {
                 if state.focused_is_range {
-                    if set_range_at_pointer(state, arena, focused, region.rect, x) {
+                    if set_range_at_pointer(state, arena, focused, region.rect, x, y) {
                         push_input_render(state, focused, cmds);
                         msgs.push(ScriptMsg::RangeInput {
                             node_id: focused,

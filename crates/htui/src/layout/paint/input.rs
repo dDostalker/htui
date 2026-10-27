@@ -66,10 +66,10 @@ impl RangeSpec {
         }
     }
 
-    /// Thumb column for a track of `width` cells (zero-based; a one-cell track
-    /// contains only the thumb).
-    pub(crate) fn thumb_x(&self, width: usize) -> usize {
-        if width <= 1 {
+    /// Thumb position along a track of `length` cells (zero-based; a one-cell
+    /// track contains only the thumb).
+    pub(crate) fn thumb_at(&self, length: usize) -> usize {
+        if length <= 1 {
             return 0;
         }
         let span = self.max - self.min;
@@ -78,21 +78,22 @@ impl RangeSpec {
         } else {
             0.0
         };
-        ((fraction * (width - 1) as f64).round() as isize).clamp(0, (width - 1) as isize) as usize
+        ((fraction * (length - 1) as f64).round() as isize).clamp(0, (length - 1) as isize) as usize
     }
 
-    /// Value for a thumb column, using the same rounding as [`Self::thumb_x`].
-    pub(crate) fn value_at_x(&self, x: usize, width: usize) -> Self {
+    /// Value for a thumb position, using the same rounding as
+    /// [`Self::thumb_at`].
+    pub(crate) fn value_at(&self, position: usize, length: usize) -> Self {
         let mut snapped = *self;
-        if width <= 1 {
+        if length <= 1 {
             snapped.value = self.min;
             return snapped.normalized();
         }
-        let x = x.min(width - 1);
+        let position = position.min(length - 1);
         let span = self.max - self.min;
         snapped.value = self.min
             + if span > 0.0 {
-                x as f64 / (width - 1) as f64 * span
+                position as f64 / (length - 1) as f64 * span
             } else {
                 0.0
             };
@@ -121,6 +122,13 @@ impl RangeSpec {
 
 fn finite_number(value: &str) -> Option<f64> {
     value.trim().parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
+/// `true` for a Firefox-style vertical slider (`<input type=range orient=vertical>`).
+pub(crate) fn range_is_vertical(node: &Node) -> bool {
+    node.attributes
+        .get("orient")
+        .is_some_and(|v| v.eq_ignore_ascii_case("vertical"))
 }
 
 fn fractional_digits(value: &str) -> usize {
@@ -239,7 +247,33 @@ pub(crate) fn paint_input(
         } else {
             Some(fg.unwrap_or(Color::White))
         };
-        let thumb_x = content.x.saturating_add(spec.thumb_x(content.width.max(1)));
+
+        if range_is_vertical(node) {
+            let track_x = content.x;
+            let thumb_y = content
+                .y
+                .saturating_add(spec.thumb_at(content.height.max(1)));
+            for row in 0..content.height.max(1) {
+                let abs_row = content.y.saturating_add(row);
+                let (glyph, color) = if abs_row == thumb_y {
+                    ('\u{25CF}', track_fg)
+                } else {
+                    ('\u{2502}', Some(Color::DarkGrey))
+                };
+                put(
+                    canvas,
+                    cell_index(canvas, track_x, abs_row),
+                    Some(glyph),
+                    color,
+                    None,
+                );
+            }
+            return;
+        }
+
+        let thumb_x = content
+            .x
+            .saturating_add(spec.thumb_at(content.width.max(1)));
         let track_y = content.y;
         for col in 0..content.width.max(1) {
             let abs_col = content.x.saturating_add(col);
@@ -449,13 +483,29 @@ mod range_tests {
         node
     }
 
+    fn range_vertical_node() -> Node {
+        let mut node = range_node("0", "4", "1", "2");
+        node.attributes
+            .insert("orient".to_string(), "vertical".to_string());
+        node
+    }
+
     #[test]
     fn range_thumb_and_pointer_use_the_same_track_mapping() {
         let node = range_node("0", "4", "1", "2");
         let spec = range_spec(&node, None);
-        assert_eq!(spec.thumb_x(9), 4);
-        assert_eq!(spec.value_at_x(8, 9).value_string(), "4");
-        assert_eq!(spec.value_at_x(0, 9).value_string(), "0");
+        assert_eq!(spec.thumb_at(9), 4);
+        assert_eq!(spec.value_at(8, 9).value_string(), "4");
+        assert_eq!(spec.value_at(0, 9).value_string(), "0");
+    }
+
+    #[test]
+    fn range_vertical_mapping_uses_track_rows() {
+        assert!(range_is_vertical(&range_vertical_node()));
+        let spec = range_spec(&range_vertical_node(), None);
+        assert_eq!(spec.thumb_at(5), 2);
+        assert_eq!(spec.value_at(0, 5).value_string(), "0");
+        assert_eq!(spec.value_at(4, 5).value_string(), "4");
     }
 
     #[test]
