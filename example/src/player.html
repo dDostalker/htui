@@ -5,27 +5,34 @@
   Theme: "neon night" — charcoal slate + mint/cyan/violet/coral accents.
   Features: animated spectrum, playlist scrolling, seek/volume, lyrics, queue,
   favorites with filtering, seek, repeat/shuffle, volume, live clock.
-  Layout: viewport-fit — the page is exactly 100vh (flex column); panels
-  stretch on tall terminals and clip gracefully on small ones, so it never
-  scrolls.
+  Layout: viewport-fit — a 100vh flex column; flexible panels degrade
+  gracefully and use scroll containers when a terminal is very small.
 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>htui wave</title>
 <style>
-  body { background-color: #0b0e14; color: #e4eaf7; margin: 0; }
+  body {
+    background-color: #0b0e14;
+    color: #e4eaf7;
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
 
   /* ---------- viewport-fit frame ----------
-     Each region is a plain block with a definite vh height. Definite
-     blocks never grow with their content: inner layout may overflow, but
-     the paint clip chain drops everything past the region's border box,
-     so rendered rows never exceed the viewport and the page never
-     scrolls at any terminal size. The footer is viewport-fixed. */
+     The shell is a flex column: now playing absorbs the remaining height
+     while the playlist gets a bounded viewport-relative height. Small
+     terminals use clipping and native scroll containers instead of letting
+     the page overflow or controls overlap. */
 
   /* ---------- top bar ---------- */
   .top {
-    height: 1ch;
+    flex: 0 0 auto;
+    min-height: 1ch;
     margin: 0 1ch;
     border: 1ch solid #1f2740;
     border-radius: 1;
@@ -35,17 +42,44 @@
     padding: 0 1ch;
     background-color: #0e121c;
   }
+  .brand, .feed, .clock {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    flex-shrink: 1;
+  }
   .brand { color: #43e5a0; font-weight: bold; }
   .feed { color: #556085; margin-left: auto; }
-  #state-label { color: #43e5a0; margin-left: 2ch; }
+  #state-label {
+    color: #43e5a0;
+    margin-left: 2ch;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
+  }
   #state-label.off { color: #8b96b5; }
   .clock { color: #56c8f5; font-weight: bold; margin-left: 2ch; }
 
   /* ---------- layout ---------- */
-  .main-wrap { margin: 1ch 1ch 0 1ch; height: 40vh; overflow: hidden; }
-  .main { display: flex; gap: 1ch; align-items: flex-start; }
+  .main-wrap {
+    flex: 1 1 auto;
+    min-height: 4ch;
+    margin: 1ch 1ch 0 1ch;
+    overflow-y: auto;
+  }
+  .main { display: flex; gap: 1ch; align-items: stretch; }
   .np { flex: 1 1 0; display: flex; flex-direction: column; }
-  .side { width: 30ch; flex-shrink: 0; display: flex; flex-direction: column; gap: 1ch; }
+  .side {
+    flex: 0 1 30%;
+    min-width: 12ch;
+    display: flex;
+    flex-direction: column;
+    gap: 1ch;
+    overflow-y: auto;
+  }
 
   .card {
     border: 1ch solid #1f2740;
@@ -63,10 +97,17 @@
   .head-extra { color: #43e5a0; }
 
   /* ---------- now playing ---------- */
-  .np-body { flex: 1 1 auto; min-height: 0; display: flex; gap: 1ch; align-items: flex-start; }
+  .np-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    gap: 1ch;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
   .art {
-    width: 14ch;
-    flex-shrink: 0;
+    flex: 0 1 20%;
+    min-width: 5ch;
     border: 1ch solid #2a3554;
     border-radius: 1;
     display: flex;
@@ -75,6 +116,10 @@
     overflow: hidden;
   }
   .band { flex: 0 0 auto; height: 1ch; }
+  .band, .art-cap {
+    overflow: hidden;
+    white-space: nowrap;
+  }
   .band1 { background-color: #101c2e; color: #1d3a5f; }
   .band2 { background-color: #0f2438; color: #1f5f8a; }
   .band3 { background-color: #0d3346; color: #1f8fb8; }
@@ -91,14 +136,26 @@
     text-align: center;
   }
 
-  .np-info { flex: 1; display: flex; flex-direction: column; }
+  .np-info {
+    flex: 1 1 12ch;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
   .np-titlerow { display: flex; justify-content: space-between; align-items: center; }
-  .np-title { color: #ffffff; font-weight: bold; }
+  .np-title {
+    color: #ffffff;
+    font-weight: bold;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
   .like { color: #556085; }
   .like:hover { color: #ff7a90; }
   .like.on { color: #ff7a90; }
   .np-artist { color: #8b96b5; }
-  .badges { display: flex; gap: 1ch; margin-top: 1ch; }
+  .badges { display: flex; gap: 1ch; margin-top: 1ch; flex-wrap: wrap; }
   .badge {
     border-radius: 1;
     padding: 0 1ch;
@@ -127,7 +184,11 @@
     border-radius: 1;
     background-color: #1a2233;
     color: #c3cde8;
-    flex-shrink: 0;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
   .btn:hover { background-color: #26314a; color: #ffffff; }
   .btn-main {
@@ -140,7 +201,7 @@
   .btn.on { color: #f5c169; background-color: #2a2410; }
 
   .vol { display: flex; gap: 1ch; align-items: center; margin-top: 1ch; }
-  .vol-label { color: #556085; }
+  .vol-label { color: #556085; flex-shrink: 0; }
   .vol-range { flex: 1; color: #43e5a0; }
   .vol-pct { color: #56c8f5; }
 
@@ -155,8 +216,22 @@
   .qrow.next { border-left: 1ch solid #43e5a0; background-color: #0f1a24; }
   .qrow.next .qtitle { color: #43e5a0; }
   .qidx { width: 3ch; flex-shrink: 0; color: #556085; text-align: right; }
-  .qtitle { flex: 1; color: #c3cde8; }
-  .qartist { color: #556085; }
+  .qtitle {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: #c3cde8;
+  }
+  .qartist {
+    flex: 0 1 12ch;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: #556085;
+  }
 
   .card-lyr { flex: 1; }
   .ly { color: #4a5372; }
@@ -165,7 +240,7 @@
   .ly.on::before { content: "▸  "; }
 
   /* ---------- library ---------- */
-  .lib-wrap { margin: 1ch 1ch 0 1ch; height: 18vh; overflow: hidden; }
+  .lib-wrap { flex: 0 0 auto; margin: 1ch 1ch 0 1ch; overflow: hidden; }
   .lib { display: flex; flex-direction: column; }
   .lib-head { flex: 0 0 auto; display: flex; align-items: center; gap: 2ch; margin-bottom: 1ch; }
   .lib-title { font-weight: bold; color: #ffffff; text-transform: uppercase; }
@@ -181,7 +256,7 @@
   .tab.on { color: #43e5a0; background-color: #0f2a22; }
   .lib-meta { flex: 1; text-align: right; color: #556085; }
   .plist {
-    height: 12vh;
+    height: clamp(2ch, 18vh, 8ch);
     overflow-y: auto;
   }
 
@@ -191,27 +266,50 @@
   .row.active { background-color: #0f2a22; border-radius: 1; }
   .idx { width: 4ch; flex-shrink: 0; text-align: right; color: #556085; }
   .row.active .idx { color: #43e5a0; }
-  .ptitle { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ptitle {
+    flex: 1 1 auto;
+    min-width: 4ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .row.active .ptitle { color: #43e5a0; font-weight: bold; }
   .heart { color: #ff7a90; }
   .heart.off { color: #556085; }
   .heart:hover { color: #ff7a90; }
-  .partist { width: 20ch; flex-shrink: 0; color: #8b96b5; }
+  .partist {
+    flex: 2 1 20ch;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #8b96b5;
+  }
   .ptag {
-    width: 10ch;
-    flex-shrink: 0;
+    flex: 0 1 10ch;
+    min-width: 0;
+    overflow: hidden;
     text-align: center;
     border-radius: 1;
   }
-  .pq { width: 8ch; flex-shrink: 0; text-align: center; color: #556085; }
-  .pdur { width: 5ch; flex-shrink: 0; text-align: right; color: #556085; }
+  .pq {
+    flex: 0 1 8ch;
+    min-width: 0;
+    overflow: hidden;
+    text-align: center;
+    color: #556085;
+  }
+  .pdur {
+    flex: 0 0 auto;
+    min-width: 4ch;
+    text-align: right;
+    color: #556085;
+  }
 
   /* ---------- footer ---------- */
   .footer {
-    position: fixed;
-    bottom: 0;
-    left: 1ch;
-    right: 1ch;
+    flex: 0 0 auto;
+    margin: 1ch 1ch 0 1ch;
     border: 1ch solid #1f2740;
     border-radius: 1;
     display: flex;

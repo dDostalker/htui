@@ -372,7 +372,15 @@ pub(super) fn layout_flex_container(
                 + edges.border.bottom.thickness();
             height.max(lines_total_height.saturating_add(inner_v))
         }
-        None if has_explicit_height => container_css_height.unwrap_or(0).max(lines_total_height),
+        None if has_explicit_height => {
+            if node.css_attr.get_overflow() == crate::html::css_parse::Overflow::Clip {
+                // A clipping flex shell owns its definite height; content that
+                // exceeds it is handled by overflow/scroll containers.
+                container_css_height.unwrap_or(lines_total_height)
+            } else {
+                container_css_height.unwrap_or(0).max(lines_total_height)
+            }
+        }
         None => lines_total_height,
     };
     // `min-height` / `max-height` clamp the border-box height. `outer_height`

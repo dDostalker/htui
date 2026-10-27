@@ -2,6 +2,7 @@ use crossterm::terminal;
 
 use crate::{
     graphics::{Block, FontStyle, ImageCache, TermLayout},
+    html::css_parse::Overflow,
     layout::{
         BoxConstraint, Cursor, LayoutBox, Rect,
         inner_formatting_context::flow::layout_tree_with_scroll_offsets,
@@ -121,7 +122,7 @@ impl TermLayout {
     ) -> Vec<LayoutBox> {
         self.reset_canvas();
         let boxes = self.layout_only(arena, root_id, term_map);
-        self.ensure_capacity(&boxes);
+        self.ensure_capacity(arena, &boxes);
         paint_layout_tree(&boxes, arena, self);
         boxes
     }
@@ -184,7 +185,7 @@ impl TermLayout {
     /// is cleared first (stale text from a shortened value would otherwise
     /// stay on screen), then re-painted with writes gated to it.
     pub fn repaint_region(&mut self, arena: &NodeArena, boxes: &[LayoutBox], region: Rect) {
-        self.ensure_capacity(boxes);
+        self.ensure_capacity(arena, boxes);
         self.clear_region(region);
         paint_layout_tree_region(boxes, arena, self, region);
     }
@@ -197,7 +198,7 @@ impl TermLayout {
     /// arena this picks up `:hover` backgrounds without re-layout.
     pub fn repaint_from(&mut self, arena: &NodeArena, boxes: &[LayoutBox]) {
         self.reset_canvas();
-        self.ensure_capacity(boxes);
+        self.ensure_capacity(arena, boxes);
         paint_layout_tree(boxes, arena, self);
     }
 
@@ -211,15 +212,29 @@ impl TermLayout {
     /// than 4× the needed size is truncated back down (bounded below by the
     /// viewport) and released. Freshly added cells are blank, so the
     /// subsequent paint pass fills them exactly like the rest of the buffer.
-    fn ensure_capacity(&mut self, boxes: &[LayoutBox]) {
-        fn walk(boxes: &[LayoutBox], bottom: &mut usize) {
+    fn ensure_capacity(&mut self, arena: &NodeArena, boxes: &[LayoutBox]) {
+        fn walk(arena: &NodeArena, boxes: &[LayoutBox], bottom: &mut usize) {
             for b in boxes {
                 *bottom = (*bottom).max(b.rect.y.saturating_add(b.rect.height.max(1)));
-                walk(&b.children, bottom);
+                if arena[b.node_id].css_attr.get_overflow() == Overflow::Clip {
+                    // Descendants outside a clipping box cannot affect canvas
+                    // capacity. Positioned descendants escape that clip, so
+                    // they still need to reserve their own rows.
+                    for child in &b.children {
+                        if !matches!(
+                            child.positioning.position,
+                            crate::html::css_parse::Position::Static
+                        ) {
+                            walk(arena, std::slice::from_ref(child), bottom);
+                        }
+                    }
+                    continue;
+                }
+                walk(arena, &b.children, bottom);
             }
         }
         let mut bottom = self.rows as usize;
-        walk(boxes, &mut bottom);
+        walk(arena, boxes, &mut bottom);
 
         let cols = self.columns as usize;
         let viewport = cols.saturating_mul(self.rows as usize);

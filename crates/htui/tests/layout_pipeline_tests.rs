@@ -110,6 +110,24 @@ fn overflow_y_works_on_a_fixed_flex_item() {
     assert_eq!(list.children.len(), 6);
 }
 
+#[test]
+fn clipping_flex_shell_does_not_grow_the_document_scroll_height() {
+    let html = "<body><div>one</div><div>two</div><div>three</div>\
+                <div>four</div><div>five</div><div>six</div></body>";
+    let (root_id, arena) = setup(
+        html,
+        "body { height: 8; display: flex; flex-direction: column; overflow: hidden; }",
+    );
+    let map = term_map();
+    let mut terminal = TermLayout::new(&map, 1.0);
+    terminal.draw(&arena, root_id, &map);
+    assert_eq!(
+        terminal.max_scroll(),
+        0,
+        "a clipping viewport-fit shell must not create document scroll"
+    );
+}
+
 /// `NodeId` of the first node matching `predicate`, in document order.
 fn find_node(arena: &NodeArena, predicate: impl Fn(&NodeType) -> bool + Copy) -> NodeId {
     arena
