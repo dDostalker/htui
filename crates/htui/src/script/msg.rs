@@ -26,6 +26,7 @@ use crate::events::{
 use crate::html::html_parse::ParsedDocument;
 use crate::layout::Rect;
 use crate::script::ScriptEngine;
+use crate::script::{SharedUiState, set_ui_state};
 use crate::source::SharedSourceText;
 use crate::tdom::node::{NodeArena, NodeId, NodeType, SharedNodeArena};
 use crate::tui::graph_api::{DirtyInfo, RenderCmd};
@@ -85,6 +86,11 @@ pub enum ScriptMsg {
         target: Option<NodeId>,
         key: KeyEventInfo,
     },
+    /// The terminal viewport changed size. Carries no data — the script
+    /// thread reads the live values from the shared [`SharedUiState`]; the
+    /// message's job is dispatching the `resize` event and re-evaluating
+    /// `matchMedia` lists.
+    Resize,
     /// Replace the whole document owned by the script engine.
     ///
     /// Used by the debug hot-reload watcher. The engine re-parses the HTML,
@@ -315,6 +321,13 @@ pub fn apply_message(
             let region = region_for(&engine.arena(), *node_id);
             (engine.fire(&region, EventType::Focus, 0, 0), None)
         }
+        ScriptMsg::Resize => {
+            let mut cmds = engine.fire_resize();
+            engine.evaluate_media_changes();
+            let mut st_cmds = engine.take_pending_cmds();
+            cmds.append(&mut st_cmds);
+            (cmds, None)
+        }
         ScriptMsg::InputKeystroke { node_id } => {
             let region = region_for(&engine.arena(), *node_id);
             (engine.fire(&region, EventType::Input, 0, 0), None)
@@ -478,7 +491,9 @@ pub fn apply_message(
 /// Run the page's JS engine with required initial session-level JS.
 ///
 /// Build the engine, run top-level scripts, then handle `ScriptMsg` requests,
-/// timers, and fetches until `Quit` or channel disconnect.
+/// timers, and fetches until `Quit` or channel disconnect. `ui` is the
+/// input loop's shared UI state (viewport / scroll offset) that the
+/// `window.innerWidth` & co getters read.
 pub fn run_script_thread(
     document: ParsedDocument,
     bindings: EventBindings,
@@ -486,7 +501,9 @@ pub fn run_script_thread(
     rx: Receiver<ScriptMsg>,
     tx: Sender<ScriptResponse>,
     hit_map: SharedHitMap,
+    ui: Arc<SharedUiState>,
 ) {
+    set_ui_state(ui);
     let mut engine = match ScriptEngine::new_from_document(document, &session_js, bindings) {
         Ok(engine) => engine,
         Err(err) => {

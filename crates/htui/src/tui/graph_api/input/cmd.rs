@@ -131,6 +131,14 @@ pub enum RenderCmd {
         target: super::scroll_anim::ScrollTarget,
         to: u32,
     },
+    /// Jump the page viewport to `to` instantly (the `behavior: "auto"`
+    /// variant of JS `window.scrollTo`). Intercepted by the run loop like
+    /// [`RenderCmd::ScrollAnimate`](Self::ScrollAnimate): the input side
+    /// writes its own `scroll_y` (capped at the live scroll ceiling) and
+    /// emits the `Rerender`.
+    ScrollSet {
+        to: u32,
+    },
     /// JS `el.focus()` — focus the text field `node_id`. Intercepted by the
     /// input loop (never forwarded to the render thread): it seeds the edit
     /// session and routes the `blur` / `focus` events back through the
@@ -266,7 +274,7 @@ impl DrainedBatch {
             // Never forwarded (the run loop intercepts markers before the
             // channel) — dropped here so a leaked one cannot displace a real
             // snapshot.
-            RenderCmd::ScrollAnimate { .. } => {}
+            RenderCmd::ScrollAnimate { .. } | RenderCmd::ScrollSet { .. } => {}
             sel @ (RenderCmd::SelectOpen { .. }
             | RenderCmd::SelectClose { .. }
             | RenderCmd::SelectMove { .. }) => self.selects.push(sel),

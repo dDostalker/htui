@@ -24,6 +24,7 @@ mod mutation;
 mod style;
 mod timers;
 mod traverse;
+mod view;
 mod wrapper;
 
 // Kept reachable for `super::dom::…` imports from engine.rs / bindings.rs /
@@ -36,6 +37,7 @@ pub(crate) use events::{
     set_attr_handler,
 };
 pub(crate) use fetch::response_object;
+pub(crate) use view::{get_window_listeners, mql_last_matches, mql_matches_now, mql_query};
 
 use boa_engine::{
     Context, JsNativeError, JsObject, JsResult, JsValue, NativeFunction, js_string,

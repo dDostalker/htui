@@ -38,6 +38,7 @@ use crate::{
     html::{css_parse::DynamicState, css_parse::Viewport, html_parse::Parser},
     layout::layout::{MAX_TERM_COLS, MAX_TERM_ROWS, TermMap},
     resources,
+    script::SharedUiState,
     script::{ScriptMsg, ScriptResponse, run_script_thread},
     source::SharedSourceText,
     tdom::node::{NodeId, SharedNodeArena},
@@ -178,10 +179,15 @@ fn run_inner(
     // on the second channel. Start that thread only when event bindings exist.
     let (script_tx, script_rx) = mpsc::channel::<ScriptMsg>();
     let (script_out_tx, script_out_rx) = mpsc::channel::<ScriptResponse>();
+    // The viewport / scroll offset the input loop owns, shared with the
+    // script thread for the `window.innerWidth` & co getters (relaxed
+    // atomics — advisory values, no synchronization).
+    let ui_state = Arc::new(SharedUiState::default());
     let script_thread: Option<std::thread::JoinHandle<()>> = bindings.map(|bindings| {
         let script_document = document.clone();
         let hit_map_thread = Arc::clone(&hit_map);
         let script_registry = Arc::clone(&registry);
+        let ui_state_thread = Arc::clone(&ui_state);
         std::thread::spawn(move || {
             resources::with_registry(script_registry, || {
                 run_script_thread(
@@ -191,6 +197,7 @@ fn run_inner(
                     script_rx,
                     script_out_tx,
                     hit_map_thread,
+                    ui_state_thread,
                 )
             });
         })
@@ -431,6 +438,12 @@ fn run_inner(
         // no-op, so scrolling appears dead after a resize.
         let max_scroll_val = max_scroll.load(Ordering::Relaxed);
         state.clamp_scroll_to(max_scroll_val);
+        // Publish the UI state the script thread's view getters read
+        // (`window.innerWidth` / `innerHeight` / `scrollY`). Cheap relaxed
+        // stores every iteration; the values are advisory.
+        ui_state.cols.store(u32::from(columns), Ordering::Relaxed);
+        ui_state.rows.store(u32::from(rows), Ordering::Relaxed);
+        ui_state.scroll_y.store(state.scroll_y, Ordering::Relaxed);
         // While a scroll animation is active the loop wakes at the animation
         // frame rate instead of the idle poll cadence; eased positions are
         // wall-clock based, so a late wake self-corrects next frame.
@@ -486,6 +499,12 @@ fn run_inner(
         // click events go silent), and a stale text selection / open dropdown
         // overlay would paint wrong cells.
         if size_changed {
+            // Notify the script thread so `resize` listeners and `matchMedia`
+            // re-evaluate against the new viewport (the message itself is
+            // dataless; the getters read the shared UI state published above).
+            if events_active {
+                msgs.push(ScriptMsg::Resize);
+            }
             state.invalidate_viewport(&mut cmds);
         }
 
@@ -604,8 +623,16 @@ fn run_inner(
         // state, then emit this frame's tick — before the script-response
         // fold, so a DOM-mutation arena appended below still supersedes the
         // tick's viewport command (the render batch folds the newer scroll
-        // offset into a pending arena instead of dropping either).
+        // offset into a pending arena instead of dropping either). A
+        // `ScrollSet` marker (JS `scrollTo` without `behavior: "smooth"`)
+        // jumps directly: it cancels a running page glide, writes
+        // `state.scroll_y` capped at the live ceiling and emits the
+        // `Rerender` here.
         let now = Instant::now();
+        // `ScrollSet` jumps emit their `Rerender` after the sweep (the
+        // closure borrows `cmds`); the animation tick below merges into the
+        // same batch (snapshot commands supersede, latest wins).
+        let mut set_rerenders: Vec<RenderCmd> = Vec::new();
         cmds.retain_mut(|cmd| {
             if let RenderCmd::ScrollAnimate { target, to } = cmd {
                 match &mut state.scroll_anim {
@@ -621,10 +648,19 @@ fn run_inner(
                     }
                 }
                 false
+            } else if let RenderCmd::ScrollSet { to } = cmd {
+                let to = (*to).min(max_scroll_val);
+                state.scroll_anim = None;
+                if to != state.scroll_y {
+                    state.scroll_y = to;
+                    set_rerenders.push(RenderCmd::Rerender { scroll_y: to });
+                }
+                false
             } else {
                 true
             }
         });
+        cmds.splice(0..0, set_rerenders);
         if let Some(anim) = state.scroll_anim.take() {
             // A page glide is capped by the live scroll ceiling (the document
             // may have shrunk since the trigger); a container glide already

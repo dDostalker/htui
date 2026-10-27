@@ -3591,9 +3591,7 @@ fn test_media_query_matches_features_and_or() {
     init();
     let list = MediaQueryList(vec![MediaQuery {
         max_width: Some(70.0),
-        min_width: None,
-        max_height: None,
-        min_height: None,
+        ..Default::default()
     }]);
     assert!(
         list.matches(&Viewport { cols: 70, rows: 24 }),
@@ -3606,8 +3604,7 @@ fn test_media_query_matches_features_and_or() {
     let both = MediaQueryList(vec![MediaQuery {
         max_width: Some(70.0),
         min_width: Some(40.0),
-        max_height: None,
-        min_height: None,
+        ..Default::default()
     }]);
     assert!(both.matches(&Viewport { cols: 60, rows: 24 }));
     assert!(!both.matches(&Viewport { cols: 39, rows: 24 }));
@@ -3617,15 +3614,11 @@ fn test_media_query_matches_features_and_or() {
     let or = MediaQueryList(vec![
         MediaQuery {
             max_width: Some(40.0),
-            min_width: None,
-            max_height: None,
-            min_height: None,
+            ..Default::default()
         },
         MediaQuery {
-            max_width: None,
-            min_width: None,
             max_height: Some(10.0),
-            min_height: None,
+            ..Default::default()
         },
     ]);
     assert!(or.matches(&Viewport { cols: 39, rows: 24 }), "first query");
@@ -3780,13 +3773,40 @@ fn test_media_unsupported_query_drops_the_block() {
 
     // An unknown feature also drops its query; the other comma alternative
     // still works.
-    let media = media_queries(
-        "@media (orientation: landscape), (max-width: 40) { .side { display: none; } }",
-    );
+    let media =
+        media_queries("@media (hover: hover), (max-width: 40) { .side { display: none; } }");
     assert_eq!(media.len(), 1);
     let list = media[0].as_ref().expect("condition attached");
     assert!(list.matches(&Viewport { cols: 30, rows: 24 }));
     assert!(!list.matches(&Viewport { cols: 80, rows: 24 }));
+
+    // `orientation` is supported: landscape (cols >= rows) and portrait.
+    let media = media_queries("@media (orientation: landscape) { .side { display: none; } }");
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(list.matches(&Viewport { cols: 80, rows: 24 }));
+    assert!(!list.matches(&Viewport { cols: 30, rows: 40 }), "portrait");
+    let media = media_queries("@media (orientation: portrait) { .side { display: none; } }");
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(list.matches(&Viewport { cols: 30, rows: 40 }));
+
+    // Media types: `screen` / `all` match, `print` never does.
+    let media = media_queries("@media screen and (max-width: 40) { .side { display: none; } }");
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(list.matches(&Viewport { cols: 30, rows: 24 }));
+    assert!(!list.matches(&Viewport { cols: 80, rows: 24 }));
+    let media = media_queries("@media print { .side { display: none; } }");
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(!list.matches(&Viewport { cols: 30, rows: 24 }));
+
+    // `not` inverts the whole query; `only` is an ignored legacy prefix.
+    let media = media_queries("@media not (max-width: 40) { .side { display: none; } }");
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(!list.matches(&Viewport { cols: 30, rows: 24 }));
+    assert!(list.matches(&Viewport { cols: 80, rows: 24 }));
+    let media =
+        media_queries("@media only screen and (max-width: 40) { .side { display: none; } }");
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(list.matches(&Viewport { cols: 30, rows: 24 }));
 
     // An empty prelude drops the whole block (no rules at all). A query that
     // cannot parse (missing value) leaves the rule in place but its empty

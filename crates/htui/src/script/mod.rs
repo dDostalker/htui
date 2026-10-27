@@ -51,6 +51,7 @@ pub use host::{HostCtx, HostFn, host_fn};
 pub use msg::{
     ScriptDirty, ScriptEvent, ScriptMsg, ScriptResponse, apply_message, run_script_thread,
 };
-pub(crate) use state::{ENGINE_STATE, ScriptState, TimerEntry};
+pub use state::SharedUiState;
+pub(crate) use state::{ENGINE_STATE, ScriptState, TimerEntry, set_ui_state, with_ui};
 
 use state::{EngineBuildError, EngineParts};

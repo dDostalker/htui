@@ -585,8 +585,10 @@ let x = find(b).unwrap();
 | `EventBindings`    | `events`                | 宿主函数注册表（host: 名字 → HostFn）                     |
 | `HoverState`       | `events::interaction`   | 指针悬停跟踪（enter / leave 判定，不产生视觉）；生产环境归脚本线程所有 |
 | `ScriptEngine`     | `script`                | Boa 引擎封装：live NodeArena + DOM 绑定 + fire/invoke_action/run_due_timers + eval_source（脚本线程独占） |
-| `ScriptMsg`        | `script::msg`           | 脚本线程消息协议：Move / Click / FocusInput / BlurInput / InputKeystroke / SelectPick / Quit |
+| `ScriptMsg`        | `script::msg`           | 脚本线程消息协议：Move / Click / FocusInput / BlurInput / InputKeystroke / SelectPick / Resize / Quit |
 | `ScriptResponse`   | `script::msg`           | 脚本线程回复：Ready / Failed / Event{cmds, dirty{arena,root_id}, hovered} |
+| `SharedUiState`    | `script`                | 输入循环与脚本线程共享的 UI 状态（cols/rows/scroll_y 原子）；`window.innerWidth` & co 读它 |
+| `matchMedia(q)`    | `script::dom::view`     | JS 媒体查询（复用 CSS `@media` 解析）；`change` 事件在 resize 时经 `evaluate_media_changes` 重评估派发 |
 | `HostFn`           | `script::host`          | 宿主函数类型：`Box<dyn FnMut(&mut HostCtx) -> JsResult<JsValue> + Send>`（Err → JS throw；由 host_fn/宏生成，勿手写） |
 | `HostCtx`          | `script::host`          | Boa 无关调用句柄（`host_fn` 闭包参数）：arg/arg_required/event/render/object，不暴露 Context |
 | `host_fn`          | `script::host`          | Boa 无关宿主函数构造器：`host_fn(|ctx| ...) -> HostFn`，用户侧不出现任何 Boa 类型（参数/返回值/对象/错误均纯 Rust） |

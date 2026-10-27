@@ -30,6 +30,11 @@ use super::{
         native_get_elements_by_class_name, native_get_elements_by_tag_name, native_query_selector,
         native_query_selector_all,
     },
+    view::{
+        native_add_window_event_listener, native_inner_height, native_inner_width,
+        native_match_media, native_remove_window_event_listener, native_scroll_by,
+        native_scroll_to, native_scroll_y,
+    },
     with_state,
 };
 
@@ -288,6 +293,48 @@ pub(crate) fn install_builtins(context: &mut Context) -> JsResult<()> {
         1,
         NativeFunction::from_fn_ptr(native_cancel_animation_frame),
     )?;
+
+    // Window view API: viewport / scroll getters and window-level events.
+    // The getters read the shared UI state the input loop publishes (see
+    // `SharedUiState`); `matchMedia` reuses the CSS `@media` grammar, so
+    // JS and stylesheet queries agree by construction.
+    for (name, native) in [
+        (
+            "innerWidth",
+            NativeFunction::from_fn_ptr(native_inner_width),
+        ),
+        (
+            "innerHeight",
+            NativeFunction::from_fn_ptr(native_inner_height),
+        ),
+        ("scrollY", NativeFunction::from_fn_ptr(native_scroll_y)),
+    ] {
+        let desc = PropertyDescriptorBuilder::new()
+            .get(js_fn(context, native))
+            .enumerable(true)
+            .configurable(true)
+            .build();
+        let global = context.global_object();
+        global.define_property_or_throw(js_string!(name), desc, context)?;
+    }
+    for (name, native) in [
+        (
+            "matchMedia",
+            NativeFunction::from_fn_ptr(native_match_media),
+        ),
+        ("scrollTo", NativeFunction::from_fn_ptr(native_scroll_to)),
+        ("scrollBy", NativeFunction::from_fn_ptr(native_scroll_by)),
+        (
+            "addEventListener",
+            NativeFunction::from_fn_ptr(native_add_window_event_listener),
+        ),
+        (
+            "removeEventListener",
+            NativeFunction::from_fn_ptr(native_remove_window_event_listener),
+        ),
+    ] {
+        context.register_global_builtin_callable(js_string!(name), 1, native)?;
+    }
 
     // XMLSerializer: `new XMLSerializer().serializeToString(node)` — the
     // node's outer-HTML form.

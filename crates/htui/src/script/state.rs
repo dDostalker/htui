@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -90,6 +91,45 @@ pub(crate) struct TimerEntry {
 thread_local! {
     /// The active engine state for the current thread (the input loop).
     pub(crate) static ENGINE_STATE: RefCell<Option<Rc<RefCell<ScriptState>>>> = const {RefCell::new(None)} ;
+    /// The terminal UI state shared with the input loop (set on the script
+    /// thread by `run_script_thread`). Natives read it for
+    /// `window.innerWidth` / `innerHeight` / `scrollY`; unset (direct
+    /// `ScriptEngine::new` in tests) reads as zeros.
+    static UI_STATE: RefCell<Option<std::sync::Arc<SharedUiState>>> = const { RefCell::new(None) };
+}
+
+/// Terminal UI state the input loop owns but JS needs to read: the viewport
+/// in cells and the page scroll offset. Shared as `Arc` (the input loop and
+/// the script thread hold clones) and updated with relaxed atomics — the
+/// values are advisory for scripts, never used for synchronization.
+#[derive(Debug, Default)]
+pub struct SharedUiState {
+    pub cols: AtomicU32,
+    pub rows: AtomicU32,
+    pub scroll_y: AtomicU32,
+}
+
+impl SharedUiState {
+    /// Snapshot the three values in one read.
+    pub fn load(&self) -> (u32, u32, u32) {
+        (
+            self.cols.load(Ordering::Relaxed),
+            self.rows.load(Ordering::Relaxed),
+            self.scroll_y.load(Ordering::Relaxed),
+        )
+    }
+}
+
+/// Publish the UI state for the current (script) thread; natives read it via
+/// [`with_ui`].
+pub(crate) fn set_ui_state(ui: std::sync::Arc<SharedUiState>) {
+    UI_STATE.with(|cell| *cell.borrow_mut() = Some(ui));
+}
+
+/// The UI state snapshot for `window.innerWidth` & co. `None` when no input
+/// loop is attached (a bare `ScriptEngine::new` in tests).
+pub(crate) fn with_ui() -> Option<(u32, u32, u32)> {
+    UI_STATE.with(|cell| cell.borrow().as_ref().map(|ui| ui.load()))
 }
 
 /// Engine pieces produced by a successful build: the Boa context and the

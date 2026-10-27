@@ -345,11 +345,11 @@ pub(super) fn render_thread(
                         log::debug!("Focus request reached the render thread — dropping");
                     }
 
-                    // Scroll-animation markers are intercepted by the run loop
-                    // (the animation lives on the input side); a leaked one
+                    // Scroll markers are intercepted by the run loop (the
+                    // scroll state lives on the input side); a leaked one
                     // renders nothing.
-                    RenderCmd::ScrollAnimate { .. } => {
-                        log::debug!("ScrollAnimate marker reached the render thread — dropping");
+                    RenderCmd::ScrollAnimate { .. } | RenderCmd::ScrollSet { .. } => {
+                        log::debug!("Scroll marker reached the render thread — dropping");
                     }
                 }
             }

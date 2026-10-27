@@ -107,6 +107,11 @@ pub enum EventType {
     /// engine's native dialog default action when a `<form method="dialog">`
     /// submit button removes the `open` attribute.
     Close,
+    /// Fired when the terminal viewport changes size (`onresize`).
+    /// Dispatched to the window listeners (`window.addEventListener`) and
+    /// along the `<body>` ancestor chain; the event target is `<body>` (htui
+    /// has no separate window node).
+    Resize,
 }
 
 /// Terminal-agnostic keyboard payload carried by [`EventType::KeyDown`] /

@@ -4,3 +4,4 @@
 example/target/
 # Mimosa hook session state (scan baselines, regenerated per commit)
 .mimosa/
+.zcode/

@@ -436,6 +436,147 @@ impl ScriptEngine {
         self.dispatch(region, event_type, x, y, None).0
     }
 
+    /// Fire `event.resize` on the window listeners and the document body.
+    ///
+    /// `window.addEventListener("resize", fn)` handlers run first (no node
+    /// target), then the `<body>` → root ancestor chain — the dispatch shape
+    /// key events use for their no-focused-field fallback. Returns the render
+    /// commands pushed by host functions during the dispatch.
+    pub fn fire_resize(&mut self) -> Vec<RenderCmd> {
+        // Window-level listeners: same event object, no node target.
+        let window_cmd = {
+            let window_listeners =
+                super::dom::get_window_listeners(&mut self.context, "resize").unwrap_or_default();
+            let target = JsValue::undefined();
+            let Ok(event) = make_event_object(&mut self.context, EventType::Resize, &target, 0, 0)
+            else {
+                return Vec::new();
+            };
+            let mut cmds = Vec::new();
+            for listener in window_listeners {
+                let Ok(f) = listener.to_object(&mut self.context) else {
+                    continue;
+                };
+                if let Err(e) = f.call(&target, std::slice::from_ref(&event), &mut self.context) {
+                    log::warn!("window resize listener threw: {e}");
+                }
+            }
+            let mut st = self.state.borrow_mut();
+            cmds.extend(std::mem::take(&mut st.render_cmds));
+            cmds
+        };
+        // Document-level chain (target = `<body>`, like the keydown fallback).
+        let region = {
+            let arena = self.arena();
+            let body_id = arena
+                .iter()
+                .find(|(_, n)| n.node_type == NodeType::Body)
+                .map(|(id, _)| id)
+                .unwrap_or_else(|| self.root_id());
+            super::msg::region_for(&arena, body_id)
+        };
+        let mut cmds = self.fire(&region, EventType::Resize, 0, 0);
+        cmds.extend(window_cmd);
+        cmds
+    }
+
+    /// Re-evaluate every registered `matchMedia` list against the current
+    /// viewport and fire `change` on the ones that flipped. Backed by the
+    /// `__htuiMQLs` GC-rooted array; the current viewport comes from the
+    /// shared UI state (zeros match nothing, so a missing input loop never
+    /// spurious-fires).
+    pub fn evaluate_media_changes(&mut self) {
+        // `mql_matches_now` reads the shared UI state itself; the presence
+        // check only avoids spurious change events with no input loop attached.
+        if super::with_ui().is_none() {
+            return;
+        }
+        let Ok(mqls) = self
+            .context
+            .global_object()
+            .get(js_string!("__htuiMQLs"), &mut self.context)
+            .and_then(|v| v.to_object(&mut self.context))
+        else {
+            return;
+        };
+        let Ok(len) = mqls
+            .get(js_string!("length"), &mut self.context)
+            .and_then(|v| v.to_u32(&mut self.context))
+        else {
+            return;
+        };
+        for i in 0..len {
+            let Ok(obj) = mqls
+                .get(i, &mut self.context)
+                .and_then(|v| v.to_object(&mut self.context))
+            else {
+                continue;
+            };
+            let Some(query) = super::dom::mql_query(&obj, &mut self.context) else {
+                continue;
+            };
+            let matches = super::dom::mql_matches_now(&query);
+            let last = super::dom::mql_last_matches(&obj, &mut self.context);
+            if matches == last {
+                continue;
+            }
+            if let Err(e) = obj.set(
+                js_string!("_lastMatches"),
+                matches,
+                false,
+                &mut self.context,
+            ) {
+                log::warn!("Failed to store matchMedia state: {e}");
+                continue;
+            }
+            let event = {
+                let mut init = boa_engine::object::ObjectInitializer::new(&mut self.context);
+                init.property(
+                    js_string!("type"),
+                    js_string!("change"),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    js_string!("matches"),
+                    matches,
+                    boa_engine::property::Attribute::all(),
+                )
+                .build()
+            };
+            let listeners = obj
+                .get(js_string!("_listeners"), &mut self.context)
+                .and_then(|v| v.to_object(&mut self.context));
+            if let Ok(list) = listeners {
+                let len = list
+                    .get(js_string!("length"), &mut self.context)
+                    .and_then(|v| v.to_u32(&mut self.context))
+                    .unwrap_or(0);
+                for li in 0..len {
+                    let Ok(listener) = list.get(li, &mut self.context) else {
+                        continue;
+                    };
+                    let Ok(f) = listener.to_object(&mut self.context) else {
+                        continue;
+                    };
+                    if let Err(e) = f.call(
+                        &obj.clone().into(),
+                        &[event.clone().into()],
+                        &mut self.context,
+                    ) {
+                        log::warn!("matchMedia change listener threw: {e}");
+                    }
+                }
+            }
+            if let Ok(onchange) = obj.get(js_string!("onchange"), &mut self.context)
+                && onchange.is_callable()
+                && let Ok(f) = onchange.to_object(&mut self.context)
+                && let Err(e) = f.call(&obj.clone().into(), &[event.into()], &mut self.context)
+            {
+                log::warn!("matchMedia onchange handler threw: {e}");
+            }
+        }
+    }
+
     /// Dispatch a keyboard event ([`EventType::KeyDown`] / [`EventType::KeyUp`])
     /// along the hit region's ancestor path.
     ///
