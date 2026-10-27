@@ -122,6 +122,15 @@ pub enum RenderCmd {
         node_id: NodeId,
         scroll_y: u32,
     },
+    /// Glide the page viewport or one native scroll container to `to` with an
+    /// ease-out animation. Intercepted by the run loop (never forwarded to the
+    /// render thread): the animation lives on the input side and emits one
+    /// viewport command (`Rerender` / `RenderScroll`) per frame while it
+    /// runs. `target` picks the page viewport or the scroll container.
+    ScrollAnimate {
+        target: super::scroll_anim::ScrollTarget,
+        to: u32,
+    },
     /// JS `el.focus()` — focus the text field `node_id`. Intercepted by the
     /// input loop (never forwarded to the render thread): it seeds the edit
     /// session and routes the `blur` / `focus` events back through the
@@ -254,6 +263,10 @@ impl DrainedBatch {
         match cmd {
             RenderCmd::RenderInput { .. } => self.inputs.push(cmd),
             RenderCmd::RenderScroll { .. } => self.scrolls.push(cmd),
+            // Never forwarded (the run loop intercepts markers before the
+            // channel) — dropped here so a leaked one cannot displace a real
+            // snapshot.
+            RenderCmd::ScrollAnimate { .. } => {}
             sel @ (RenderCmd::SelectOpen { .. }
             | RenderCmd::SelectClose { .. }
             | RenderCmd::SelectMove { .. }) => self.selects.push(sel),

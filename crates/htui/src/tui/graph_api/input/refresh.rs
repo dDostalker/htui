@@ -23,6 +23,7 @@ use super::mouse::{
     canvas_pos, handle_mouse_down, handle_mouse_move, handle_mouse_up, scroll_at_wheel,
 };
 use super::page::page_level_builtins;
+use super::scroll_anim::{ScrollTarget, active_scroll_target, step_target};
 use super::select::{OverlayKind, close_select, refresh_datalist};
 use super::{SCROLL_LINES_PER_TICK, reapply_console_modes};
 
@@ -425,6 +426,22 @@ pub fn trigger_refresh(
                         cmds.push(cmd);
                         return cmds;
                     }
+                    if state.smooth_scroll {
+                        // Glide: the run loop converts the marker into the
+                        // eased page animation (a repeat tick builds on the
+                        // animation's target, not the mid-flight position).
+                        let base = active_scroll_target(state, ScrollTarget::Page)
+                            .unwrap_or(state.scroll_y);
+                        if let Some(to) =
+                            step_target(base, -(SCROLL_LINES_PER_TICK as i32), 0, max_scroll)
+                        {
+                            cmds.push(RenderCmd::ScrollAnimate {
+                                target: ScrollTarget::Page,
+                                to,
+                            });
+                        }
+                        return cmds;
+                    }
                     if state.scroll_y == 0 {
                         return cmds;
                     }
@@ -454,6 +471,19 @@ pub fn trigger_refresh(
                         )
                     {
                         cmds.push(cmd);
+                        return cmds;
+                    }
+                    if state.smooth_scroll {
+                        let base = active_scroll_target(state, ScrollTarget::Page)
+                            .unwrap_or(state.scroll_y);
+                        if let Some(to) =
+                            step_target(base, SCROLL_LINES_PER_TICK as i32, 0, max_scroll)
+                        {
+                            cmds.push(RenderCmd::ScrollAnimate {
+                                target: ScrollTarget::Page,
+                                to,
+                            });
+                        }
                         return cmds;
                     }
                     if state.scroll_y >= max_scroll {

@@ -7,7 +7,28 @@ use super::InputState;
 use super::cmd::{RenderCmd, SelectionMode};
 use super::field::{clear_text_selection, collect_input_ids};
 use super::focus::focus_input;
+use super::scroll_anim::{ScrollTarget, active_scroll_target};
 use super::{ZOOM_MAX, ZOOM_MIN, ZOOM_STEP};
+
+/// Route a page-jump key through the smooth-scroll animation: push a
+/// `ScrollAnimate` marker toward `to` (capped at `max_scroll`) unless the
+/// page already sits at — or is already gliding to — that offset. Returns
+/// `true` when the smooth path consumed the key; `false` when smooth
+/// scrolling is disabled and the caller must run its instant path.
+fn glide(state: &mut InputState, to: u32, max_scroll: u32, cmds: &mut Vec<RenderCmd>) -> bool {
+    if !state.smooth_scroll {
+        return false;
+    }
+    let base = active_scroll_target(state, ScrollTarget::Page).unwrap_or(state.scroll_y);
+    let to = to.min(max_scroll);
+    if to != base {
+        cmds.push(RenderCmd::ScrollAnimate {
+            target: ScrollTarget::Page,
+            to,
+        });
+    }
+    true
+}
 
 /// The page-level built-in action for a key that no `<select>` dropdown or
 /// focused `<input>` consumed: `Ctrl` zoom / document jumps, page text-
@@ -76,7 +97,7 @@ pub(super) fn page_level_builtins(
             // `Ctrl` + Home / End jump to the top / bottom of the page
             // (matching most editors' document navigation).
             KeyCode::Home => {
-                if state.scroll_y == 0 {
+                if glide(state, 0, u32::MAX, &mut cmds) || state.scroll_y == 0 {
                     return cmds;
                 }
                 state.scroll_y = 0;
@@ -85,7 +106,7 @@ pub(super) fn page_level_builtins(
                 }];
             }
             KeyCode::End => {
-                if state.scroll_y >= max_scroll {
+                if glide(state, max_scroll, u32::MAX, &mut cmds) || state.scroll_y >= max_scroll {
                     return cmds;
                 }
                 state.scroll_y = max_scroll;
@@ -111,7 +132,7 @@ pub(super) fn page_level_builtins(
         // (shifted `g` — the shift modifier is read via the `Char('G')` code
         // crossterm reports).
         KeyCode::Char('g') => {
-            if state.scroll_y == 0 {
+            if glide(state, 0, u32::MAX, &mut cmds) || state.scroll_y == 0 {
                 return cmds;
             }
             state.scroll_y = 0;
@@ -120,7 +141,7 @@ pub(super) fn page_level_builtins(
             });
         }
         KeyCode::Char('G') => {
-            if state.scroll_y >= max_scroll {
+            if glide(state, max_scroll, u32::MAX, &mut cmds) || state.scroll_y >= max_scroll {
                 return cmds;
             }
             state.scroll_y = max_scroll;
@@ -163,6 +184,8 @@ pub(super) fn page_level_builtins(
         }
 
         KeyCode::Up => {
+            // Manual single-line stepping cancels a glide in progress.
+            state.scroll_anim = None;
             // Already at the top boundary — drop the event instead of
             // forwarding a no-op scroll to the render thread.
             if state.scroll_y == 0 {
@@ -174,6 +197,7 @@ pub(super) fn page_level_builtins(
             });
         }
         KeyCode::Down => {
+            state.scroll_anim = None;
             // Already at the bottom boundary — drop the event.
             if state.scroll_y >= max_scroll {
                 return cmds;
@@ -184,20 +208,26 @@ pub(super) fn page_level_builtins(
             });
         }
         KeyCode::PageUp => {
-            if state.scroll_y == 0 {
+            let step = (rows as u32).saturating_sub(1).max(1);
+            let base = active_scroll_target(state, ScrollTarget::Page).unwrap_or(state.scroll_y);
+            // `saturating_sub` already floors at 0, so the glide cap stays
+            // unbounded.
+            if glide(state, base.saturating_sub(step), u32::MAX, &mut cmds) || state.scroll_y == 0 {
                 return cmds;
             }
-            let step = (rows as u32).saturating_sub(1).max(1);
             state.scroll_y = state.scroll_y.saturating_sub(step);
             cmds.push(RenderCmd::Rerender {
                 scroll_y: state.scroll_y,
             });
         }
         KeyCode::PageDown => {
-            if state.scroll_y >= max_scroll {
+            let step = (rows as u32).saturating_sub(1).max(1);
+            let base = active_scroll_target(state, ScrollTarget::Page).unwrap_or(state.scroll_y);
+            if glide(state, base.saturating_add(step), max_scroll, &mut cmds)
+                || state.scroll_y >= max_scroll
+            {
                 return cmds;
             }
-            let step = (rows as u32).saturating_sub(1).max(1);
             state.scroll_y = state.scroll_y.saturating_add(step);
             cmds.push(RenderCmd::Rerender {
                 scroll_y: state.scroll_y,
@@ -205,7 +235,7 @@ pub(super) fn page_level_builtins(
         }
         KeyCode::Home => {
             // No-op move — drop to avoid a wasted rerender.
-            if state.scroll_y == 0 {
+            if glide(state, 0, u32::MAX, &mut cmds) || state.scroll_y == 0 {
                 return cmds;
             }
             state.scroll_y = 0;
@@ -215,7 +245,7 @@ pub(super) fn page_level_builtins(
         }
         KeyCode::End => {
             // No-op move (already at the bottom) — drop.
-            if state.scroll_y >= max_scroll {
+            if glide(state, max_scroll, u32::MAX, &mut cmds) || state.scroll_y >= max_scroll {
                 return cmds;
             }
             // Use the actual upper bound rather than u32::MAX so the render

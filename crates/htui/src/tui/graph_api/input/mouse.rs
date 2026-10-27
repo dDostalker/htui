@@ -12,6 +12,7 @@ use super::field::{
     is_text_field, is_textarea_node, is_toggle_input, set_range_at_pointer, textarea_index_at,
 };
 use super::focus::{blur_input, focus_input, push_input_render};
+use super::scroll_anim::{ScrollTarget, active_scroll_target, step_target};
 use super::select::{close_select, hit_select_option, open_select, refresh_datalist, row_option};
 
 /// Handle a completed left-button click at canvas coordinates `(x, y)`.
@@ -86,6 +87,9 @@ pub fn handle_click(
 }
 
 /// Apply a wheel tick to the nearest native scroll container under `x/y`.
+///
+/// With smooth scrolling enabled the tick returns a `ScrollAnimate` marker
+/// for the run loop's eased animation instead of moving the container here.
 pub(super) fn scroll_at_wheel(
     state: &mut InputState,
     hit_map: &HitMap,
@@ -101,6 +105,19 @@ pub(super) fn scroll_at_wheel(
         .get(&scroll.node_id)
         .copied()
         .unwrap_or(scroll.scroll_y);
+    if state.smooth_scroll {
+        let base =
+            active_scroll_target(state, ScrollTarget::Container(scroll.node_id)).unwrap_or(current);
+        let delta = if up {
+            -(super::SCROLL_LINES_PER_TICK as i32)
+        } else {
+            super::SCROLL_LINES_PER_TICK as i32
+        };
+        return step_target(base, delta, 0, scroll.max_scroll).map(|to| RenderCmd::ScrollAnimate {
+            target: ScrollTarget::Container(scroll.node_id),
+            to,
+        });
+    }
     let next = if up {
         current.saturating_sub(super::SCROLL_LINES_PER_TICK)
     } else {
@@ -277,6 +294,8 @@ pub fn handle_mouse_down(
         })
         .flatten();
     if let Some((node_id, grab_offset, offset)) = scrollbar_hit {
+        // Grabbing the thumb takes over from any glide in progress.
+        state.scroll_anim = None;
         state.scroll_drag = Some((node_id, grab_offset));
         if state.scroll_offsets.get(&node_id) != Some(&offset) {
             state.scroll_offsets.insert(node_id, offset);

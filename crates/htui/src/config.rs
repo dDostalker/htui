@@ -27,6 +27,10 @@ pub struct Config {
     /// Whether the block (right-drag) rectangle selection and its `Ctrl+C`
     /// copy are enabled (vim `Ctrl+V` / tmux style). Default `true`.
     pub copy_block: bool,
+    /// Whether wheel and page-jump scrolling glide to the target offset with
+    /// an ease-out animation instead of jumping instantly (browser smooth
+    /// scrolling). Default `true`.
+    pub smooth_scroll: bool,
 }
 
 impl Default for Config {
@@ -37,6 +41,7 @@ impl Default for Config {
             frame_gap: Duration::from_millis(16),
             copy_flow: true,
             copy_block: true,
+            smooth_scroll: true,
         }
     }
 }

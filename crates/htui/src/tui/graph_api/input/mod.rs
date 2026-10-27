@@ -13,6 +13,7 @@ mod key_info;
 mod mouse;
 mod page;
 mod refresh;
+mod scroll_anim;
 mod select;
 
 pub use cmd::{DirtyInfo, DrainedBatch, RenderCmd, SelectionMode};
@@ -27,6 +28,10 @@ pub use focus::apply_focus_requests;
 pub use key_info::key_event_info;
 pub use mouse::{handle_click, handle_mouse_down, handle_mouse_move, handle_mouse_up};
 pub use refresh::trigger_refresh;
+pub use scroll_anim::{
+    ANIM_POLL_MS, ScrollAnim, ScrollTarget, active_scroll_target, ease_out_cubic,
+    scroll_anim_duration, step_target,
+};
 pub use select::{OverlayKind, SelectOpenState};
 
 use field::clear_text_selection;
@@ -54,6 +59,10 @@ pub struct InputState {
     pub scroll_y: u32,
     /// Current offsets for native scroll containers.
     pub scroll_offsets: HashMap<NodeId, u32>,
+    /// Active eased scroll animation (`None` = none). Wheel and page-jump
+    /// input glides toward its target through this state; any direct scroll
+    /// write (arrow keys, scrollbar drag) cancels it.
+    pub scroll_anim: Option<ScrollAnim>,
     pub zoom: f32,
     /// Screen coordinates of the last left-button press; a click is only
     /// recognised when the release lands on the same cell.
@@ -110,6 +119,9 @@ pub struct InputState {
     /// over page content never starts a selection (and `Ctrl+C` copies
     /// nothing).
     pub copy_flow: bool,
+    /// Whether wheel and page-jump scrolling glides (`Config`'s
+    /// `smooth_scroll`); when `false` those inputs scroll instantly.
+    pub smooth_scroll: bool,
     /// Whether the block (right-drag) rectangle selection + copy is enabled.
     /// Seeded from [`Config`](crate::config::Config); when `false` a right
     /// drag never starts a rectangle selection (and `Ctrl+C` copies nothing).
@@ -138,6 +150,7 @@ impl InputState {
         Self {
             scroll_y: 0,
             scroll_offsets: HashMap::new(),
+            scroll_anim: None,
             zoom: 1.0,
             pressed: None,
             focused_input: None,
@@ -156,6 +169,7 @@ impl InputState {
             text_sel_mode: SelectionMode::Flow,
             text_sel_armed: false,
             copy_flow: true,
+            smooth_scroll: true,
             copy_block: true,
             selection_text: Arc::new(Mutex::new(String::new())),
             open_select: None,
@@ -174,6 +188,15 @@ impl InputState {
         self.pressed = None;
         self.drag_selecting = false;
         self.scroll_drag = None;
+        // A resize re-lays out every container, so a container-targeted glide
+        // would keep scrolling by stale geometry; it is cancelled. A page
+        // glide survives — the viewport offset stays meaningful across a
+        // re-layout.
+        if let Some(anim) = &self.scroll_anim
+            && matches!(anim.target(), ScrollTarget::Container(_))
+        {
+            self.scroll_anim = None;
+        }
         clear_text_selection(self, cmds);
         if let Some(open) = self.open_select.take() {
             cmds.push(RenderCmd::SelectClose {
@@ -186,12 +209,14 @@ impl InputState {
     ///
     /// A whole-document reload (hot reload or `ScriptMsg::ReloadHtml`)
     /// replaces the arena, so focused-field edit buffers, an open dropdown,
-    /// drag state and page-selection coordinates must not survive. Scroll,
-    /// zoom, clipboard and the last pointer position do survive; the latter is
-    /// reused to re-validate hover against the fresh hit map.
+    /// drag state, an active scroll animation and page-selection coordinates
+    /// must not survive. Scroll, zoom, clipboard and the last pointer position
+    /// do survive; the latter is reused to re-validate hover against the fresh
+    /// hit map.
     pub fn reset_document_state(&mut self, cmds: &mut Vec<RenderCmd>) {
         self.pressed = None;
         self.scroll_offsets.clear();
+        self.scroll_anim = None;
         self.focused_input = None;
         self.focused_is_textarea = false;
         self.focused_is_range = false;
