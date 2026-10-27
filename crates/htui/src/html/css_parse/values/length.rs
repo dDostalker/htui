@@ -611,7 +611,7 @@ pub enum Length {
     /// Mirrors [`Length::Vw`] on the row axis.
     Vh(f32),
     /// A `calc()` / `min()` / `max()` / `clamp()` expression (the supported
-    /// subset — see [`MathFn`]). Kept unevaluated at parse time (the units
+    /// subset — see `MathFn`). Kept unevaluated at parse time (the units
     /// need a [`LengthContext`]) and resolved cell-exact at
     /// [`resolve`](Self::resolve) time.
     Math(MathFn),

@@ -32,10 +32,10 @@ const BOOTSTRAP: &str = include_str!("bootstrap.js");
 impl ScriptEngine {
     /// Create an engine from an HTML document and the application bindings.
     ///
-    /// Parses the document , installs the DOM globals and host functions,
-    /// compiles on* attribute bodies into listeners, then runs every <script> block.
-    /// Errors are returned as Boa errors ,
-    /// individual script failures log a warning and continue.
+    /// Parses the document, installs the DOM globals and host functions,
+    /// compiles `on*` attribute bodies into listeners, then runs every
+    /// `<script>` block. Errors are returned as Boa errors; individual script
+    /// failures log a warning and continue.
     pub fn new(html: &str, bindings: EventBindings) -> JsResult<Self> {
         Self::new_with_js(html, "", bindings)
     }
