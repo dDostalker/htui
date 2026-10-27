@@ -77,6 +77,39 @@ fn overflow_y_creates_a_native_scrollbar_and_translates_content() {
     );
 }
 
+#[test]
+fn overflow_y_works_on_a_fixed_flex_item() {
+    let html = "<section><div id='list'>\
+                <p>one</p><p>two</p><p>three</p>\
+                <p>four</p><p>five</p><p>six</p>\
+                </div></section>";
+    let (root_id, arena) = setup(
+        html,
+        "section { display: flex; flex-direction: column; } \
+         #list { height: 24; overflow-y: auto; }",
+    );
+    let map = term_map();
+    let mut cursor = Cursor::new();
+    let boxes = layout_tree(
+        &arena,
+        root_id,
+        BoxConstraint::root(&map),
+        &mut cursor,
+        map.columns as usize,
+        map.rows as usize,
+    );
+    let list = find_layout(&boxes, &arena, |node_type| {
+        matches!(node_type, NodeType::Div)
+    })
+    .expect("scrollable flex item exists");
+    let scroll = list
+        .paint_style
+        .scrollbar
+        .expect("flex item keeps its scroll container");
+    assert!(scroll.max_scroll > 0);
+    assert_eq!(list.children.len(), 6);
+}
+
 /// `NodeId` of the first node matching `predicate`, in document order.
 fn find_node(arena: &NodeArena, predicate: impl Fn(&NodeType) -> bool + Copy) -> NodeId {
     arena
