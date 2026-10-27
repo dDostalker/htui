@@ -51,6 +51,12 @@ pub enum ScriptMsg {
     },
     /// Editing keystroke on a focused `<input>` (fire `input`).
     InputKeystroke { node_id: NodeId },
+    /// A range slider committed a snapped value: write the DOM `value`, then
+    /// fire `input` (and `change` when the value actually changed).
+    RangeInput {
+        node_id: NodeId,
+        value: CompactString,
+    },
     /// A `<select>` option was picked: `set_value_dirty` + fire `change` when
     /// the value actually changed.
     SelectPick {
@@ -312,6 +318,22 @@ pub fn apply_message(
         ScriptMsg::InputKeystroke { node_id } => {
             let region = region_for(&engine.arena(), *node_id);
             (engine.fire(&region, EventType::Input, 0, 0), None)
+        }
+        ScriptMsg::RangeInput { node_id, value } => {
+            let node_id = *node_id;
+            let old = engine
+                .arena()
+                .get(node_id)
+                .and_then(|n| n.attributes.get("value"))
+                .cloned()
+                .unwrap_or_default();
+            engine.set_value_dirty(node_id, value);
+            let region = region_for(&engine.arena(), node_id);
+            let mut cmds = engine.fire(&region, EventType::Input, 0, 0);
+            if old != *value {
+                cmds.extend(engine.fire(&region, EventType::Change, 0, 0));
+            }
+            (cmds, None)
         }
         ScriptMsg::BlurInput { node_id, value } => {
             let arena = engine.arena();

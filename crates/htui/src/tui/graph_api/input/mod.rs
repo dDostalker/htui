@@ -61,6 +61,8 @@ pub struct InputState {
     /// Whether the focused node is a `<textarea>` (multi-line editing:
     /// Enter inserts a newline, ↑/↓ move the caret, click maps to rows).
     pub focused_is_textarea: bool,
+    /// Whether the focused node is a discrete `<input type=range>` slider.
+    pub focused_is_range: bool,
     /// Edit buffer of the focused input; the DOM `value` attribute is the
     pub input_value: CompactString,
     /// Caret position in [`InputState::input_value`] (character index).
@@ -134,6 +136,7 @@ impl InputState {
             pressed: None,
             focused_input: None,
             focused_is_textarea: false,
+            focused_is_range: false,
             input_value: CompactString::new(""),
             input_cursor: 0,
             input_sel_anchor: None,
@@ -182,6 +185,7 @@ impl InputState {
         self.pressed = None;
         self.focused_input = None;
         self.focused_is_textarea = false;
+        self.focused_is_range = false;
         self.input_value = CompactString::new("");
         self.input_cursor = 0;
         self.input_sel_anchor = None;

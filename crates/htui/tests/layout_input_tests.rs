@@ -1112,3 +1112,31 @@ fn input_without_css_keeps_attribute_or_default_size() {
     assert_eq!(r.rect.width, 8);
     assert_eq!(r.rect.x, 0);
 }
+
+#[test]
+fn collect_input_ids_includes_range_sliders() {
+    init();
+    let (root, arena) = setup(
+        r#"<input value="text"><input type="range" min="0" max="4" value="2"><input type="checkbox">"#,
+    );
+    let ids = collect_input_ids(&arena);
+    assert_eq!(
+        ids.len(),
+        2,
+        "text and range are focusable; checkbox is not"
+    );
+    assert_ne!(ids[0], ids[1]);
+    let _ = root;
+}
+
+#[test]
+fn range_input_renders_track_and_thumb() {
+    init();
+    let (rows, _) =
+        render_rows(r#"<input type="range" min="0" max="4" step="1" value="2" width="9">"#);
+    let slider: String = rows[0].chars().take(9).collect();
+    assert_eq!(
+        slider, "\u{2501}\u{2501}\u{2501}\u{2501}\u{25CF}\u{2500}\u{2500}\u{2500}\u{2500}",
+        "value 2 of 4 places the thumb halfway across a 9-cell track"
+    );
+}

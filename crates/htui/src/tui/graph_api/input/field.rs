@@ -5,8 +5,8 @@ use crossterm::event::KeyCode;
 
 use crate::layout::Rect;
 use crate::layout::paint::{
-    textarea_caret_position, textarea_char_at, textarea_scroll_row, textarea_visual_lines,
-    value_window,
+    range_spec, textarea_caret_position, textarea_char_at, textarea_scroll_row,
+    textarea_visual_lines, value_window,
 };
 use crate::tdom::node::{NodeArena, NodeId, NodeType};
 use crate::tui::graph_api::char_width;
@@ -135,6 +135,79 @@ pub(super) fn is_number_input(arena: Option<&NodeArena>, node_id: NodeId) -> boo
                 .is_some_and(|t| t.eq_ignore_ascii_case("number"))
         })
     })
+}
+
+/// `true` for `<input type=range>` — a discrete slider, not a text field.
+pub(super) fn is_range_input(arena: &NodeArena, node_id: NodeId) -> bool {
+    arena.get(node_id).is_some_and(|n| {
+        n.get_type()
+            .is_some_and(|t| t.eq_ignore_ascii_case("range"))
+    })
+}
+
+/// Normalize the focused slider's edit buffer to its current constraints.
+pub(super) fn normalize_range_state(
+    state: &mut InputState,
+    arena: &NodeArena,
+    node_id: NodeId,
+) -> bool {
+    let Some(node) = arena.get(node_id) else {
+        return false;
+    };
+    let spec = range_spec(node, Some(state.input_value.as_str()));
+    let value = spec.value_string();
+    let changed = state.input_value != value;
+    state.input_value = value;
+    state.input_cursor = state.input_value.chars().count();
+    changed
+}
+
+/// Apply a keyboard adjustment to a focused range. Left/Down move one step
+/// left, Right/Up move one step right, and Home/End jump to the boundaries.
+pub(super) fn apply_range_key(
+    state: &mut InputState,
+    arena: &NodeArena,
+    node_id: NodeId,
+    key: KeyCode,
+) -> bool {
+    let Some(node) = arena.get(node_id) else {
+        return false;
+    };
+    let mut spec = range_spec(node, Some(state.input_value.as_str()));
+    let changed = match key {
+        KeyCode::Left | KeyCode::Down => spec.advance(-1, false, false),
+        KeyCode::Right | KeyCode::Up => spec.advance(1, false, false),
+        KeyCode::Home => spec.advance(0, true, false),
+        KeyCode::End => spec.advance(0, false, true),
+        _ => false,
+    };
+    if changed {
+        state.input_value = spec.value_string();
+        state.input_cursor = state.input_value.chars().count();
+    }
+    changed
+}
+
+/// Set a range from a pointer column over its laid-out rectangle. The helper
+/// uses the same track mapping as the painter so clicks and drags land on the
+/// thumb position the user sees.
+pub(super) fn set_range_at_pointer(
+    state: &mut InputState,
+    arena: &NodeArena,
+    node_id: NodeId,
+    rect: crate::layout::Rect,
+    x: u32,
+) -> bool {
+    let Some(node) = arena.get(node_id) else {
+        return false;
+    };
+    let spec = range_spec(node, Some(state.input_value.as_str()));
+    let local_x = ((x as usize).saturating_sub(rect.x)).min(rect.width.max(1).saturating_sub(1));
+    let value = spec.value_at_x(local_x, rect.width.max(1)).value_string();
+    let changed = state.input_value != value;
+    state.input_value = value;
+    state.input_cursor = state.input_value.chars().count();
+    changed
 }
 
 /// The character set an `<input type=number>` field accepts while typing:
@@ -297,5 +370,35 @@ pub(super) fn clear_text_selection(state: &mut InputState, cmds: &mut Vec<Render
             end: None,
             mode: state.text_sel_mode,
         });
+    }
+}
+
+#[cfg(test)]
+mod range_key_tests {
+    use super::*;
+    use crate::tdom::node::NodeType;
+
+    #[test]
+    fn range_keys_step_and_clamp_without_text_editing() {
+        let mut arena = NodeArena::default();
+        let mut node = crate::tdom::node::Node::from(NodeType::Input);
+        node.attributes
+            .insert("type".to_string(), "range".to_string());
+        node.attributes.insert("min".to_string(), "0".to_string());
+        node.attributes.insert("max".to_string(), "2".to_string());
+        node.attributes.insert("step".to_string(), "1".to_string());
+        node.attributes.insert("value".to_string(), "1".to_string());
+        let id = arena.insert(node);
+
+        let mut state = InputState::new();
+        state.input_value = CompactString::from("1");
+        assert!(apply_range_key(&mut state, &arena, id, KeyCode::Left));
+        assert_eq!(state.input_value, "0");
+        assert!(!apply_range_key(&mut state, &arena, id, KeyCode::Left));
+        assert_eq!(state.input_value, "0");
+        assert!(apply_range_key(&mut state, &arena, id, KeyCode::Right));
+        assert_eq!(state.input_value, "1");
+        assert!(!apply_range_key(&mut state, &arena, id, KeyCode::Char('x')));
+        assert_eq!(state.input_value, "1");
     }
 }

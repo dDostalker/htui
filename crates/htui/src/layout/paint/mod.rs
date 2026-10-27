@@ -98,7 +98,7 @@ pub(super) fn paint_control_chrome(
 
 /// Shared caret-centred value-window computation for `<input>` fields, used by
 /// both the painter and the input loop's column→character mapping.
-pub(crate) use self::input::value_window;
+pub(crate) use self::input::{range_spec, value_window};
 /// Shared `<textarea>` line math (visual lines / caret position / scroll /
 /// inverse mapping), used by the painter and the input loop's caret movement
 /// and click placement.

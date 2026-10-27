@@ -8,8 +8,8 @@ use super::InputState;
 use super::TEXT_SEL_DRAG_THRESHOLD;
 use super::cmd::{RenderCmd, SelectionMode};
 use super::field::{
-    char_index_at_x, clear_text_selection, is_button_input, is_disabled_control, is_text_field,
-    is_textarea_node, is_toggle_input, textarea_index_at,
+    char_index_at_x, clear_text_selection, is_button_input, is_disabled_control, is_range_input,
+    is_text_field, is_textarea_node, is_toggle_input, set_range_at_pointer, textarea_index_at,
 };
 use super::focus::{blur_input, focus_input, push_input_render};
 use super::select::{close_select, hit_select_option, open_select, refresh_datalist, row_option};
@@ -62,6 +62,17 @@ pub fn handle_click(
                 if state.focused_input.is_some() {
                     blur_input(state, msgs, cmds);
                 }
+            } else if is_range_input(arena, node_id) {
+                focus_input(state, node_id, arena, msgs, cmds);
+                if let Some(region) = clicked
+                    && set_range_at_pointer(state, arena, node_id, region.rect, x)
+                {
+                    push_input_render(state, node_id, cmds);
+                    msgs.push(ScriptMsg::RangeInput {
+                        node_id,
+                        value: state.input_value.clone(),
+                    });
+                }
             } else {
                 focus_input(state, node_id, arena, msgs, cmds);
                 // Clicking an `<input list>` opens its autocomplete dropdown
@@ -93,6 +104,7 @@ pub fn handle_mouse_up(
     msgs: &mut Vec<ScriptMsg>,
     cmds: &mut Vec<RenderCmd>,
 ) {
+    let range_drag = state.drag_selecting && state.focused_is_range;
     let pressed = state.pressed.take();
     state.drag_selecting = false;
     let (x, y) = canvas_pos(state, release_screen.0, release_screen.1);
@@ -104,6 +116,19 @@ pub fn handle_mouse_up(
     let Some((px, py)) = pressed else {
         return;
     };
+    // A range drag commits at the release coordinate as well as during moves;
+    // this covers consoles that coalesce or drop the final drag event.
+    if range_drag
+        && let Some(focused) = state.focused_input
+        && let Some(region) = hit_map.iter().find(|r| r.node_id == focused)
+        && set_range_at_pointer(state, arena, focused, region.rect, x)
+    {
+        push_input_render(state, focused, cmds);
+        msgs.push(ScriptMsg::RangeInput {
+            node_id: focused,
+            value: state.input_value.clone(),
+        });
+    }
     // Press-drag-release over a dropdown row picks it (the browser's native
     // `<select>` interaction), even when the release lands off the press
     // cell. Rows map to option indices like the mousedown pick above:
@@ -244,6 +269,18 @@ pub fn handle_mouse_down(
                     } else if is_button_input(arena, node_id) {
                         // Button input: the click handler activates it — no
                         // text focus or drag selection here.
+                    } else if is_range_input(arena, node_id) {
+                        focus_input(state, node_id, arena, msgs, cmds);
+                        if let Some(region) = clicked {
+                            state.drag_selecting = true;
+                            if set_range_at_pointer(state, arena, node_id, region.rect, x) {
+                                push_input_render(state, node_id, cmds);
+                                msgs.push(ScriptMsg::RangeInput {
+                                    node_id,
+                                    value: state.input_value.clone(),
+                                });
+                            }
+                        }
                     } else {
                         focus_input(state, node_id, arena, msgs, cmds);
                         // Pressing an `<input list>` opens its autocomplete
@@ -323,9 +360,9 @@ pub fn handle_mouse_down(
 
 /// Handle a pointer move at canvas coordinates `(x, y)`.
 ///
-/// While the left button is held this drives the active drag: inside a
-/// focused `<input>` the caret (and with it the character selection) follows
-/// the pointer; over page content the text selection rectangle tracks the
+/// While the left button is held this drives the active drag: a focused range
+/// follows the pointer, other focused fields move their caret / character
+/// selection, and over page content the text selection rectangle tracks the
 /// pointer. A page text selection starts only once the drag has moved past
 /// `TEXT_SEL_DRAG_THRESHOLD` cells from the press point — a press alone
 /// never creates one. Without a press it queues a [`ScriptMsg::Move`] for the
@@ -335,6 +372,7 @@ pub fn handle_mouse_down(
 pub fn handle_mouse_move(
     state: &mut InputState,
     hit_map: &HitMap,
+    arena: &NodeArena,
     x: u32,
     y: u32,
     msgs: &mut Vec<ScriptMsg>,
@@ -373,6 +411,16 @@ pub fn handle_mouse_move(
             if let Some(focused) = state.focused_input
                 && let Some(region) = hit_map.iter().find(|r| r.node_id == focused)
             {
+                if state.focused_is_range {
+                    if set_range_at_pointer(state, arena, focused, region.rect, x) {
+                        push_input_render(state, focused, cmds);
+                        msgs.push(ScriptMsg::RangeInput {
+                            node_id: focused,
+                            value: state.input_value.clone(),
+                        });
+                    }
+                    return;
+                }
                 let idx = if state.focused_is_textarea {
                     textarea_index_at(state, region.rect, x, y)
                 } else {

@@ -1513,9 +1513,10 @@ fn mouse_move(
     x: u32,
     y: u32,
 ) -> Vec<RenderCmd> {
+    let arena = engine.arena();
     let mut msgs = Vec::new();
     let mut cmds = Vec::new();
-    handle_mouse_move(state, map, x, y, &mut msgs, &mut cmds);
+    handle_mouse_move(state, map, &arena, x, y, &mut msgs, &mut cmds);
     cmds.extend(drive_msgs(state, engine, map, msgs));
     cmds
 }
@@ -2111,8 +2112,9 @@ fn stale_press_from_lost_release_does_not_kill_hover() {
     // (the console delivered the `Down` but lost the `Up`). The input loop
     // clears it on the next button-free `Moved` event, so hover tracking
     // (`ScriptMsg::Move`) resumes instead of every move being read as a drag.
-    let (_, geo) = build_geometry("<div id='a'>a</div>", EventBindings::default());
+    let (engine, geo) = build_geometry("<div id='a'>a</div>", EventBindings::default());
     let map = HitMap::build(&geo);
+    let arena = engine.arena();
     let region = map.resolve_by_id("a").expect("a region");
     let (x, y) = center(region.rect);
     let mut state = InputState::new();
@@ -2125,7 +2127,7 @@ fn stale_press_from_lost_release_does_not_kill_hover() {
 
     let mut msgs = Vec::new();
     let mut cmds = Vec::new();
-    handle_mouse_move(&mut state, &map, x, y, &mut msgs, &mut cmds);
+    handle_mouse_move(&mut state, &map, &arena, x, y, &mut msgs, &mut cmds);
     assert!(
         msgs.iter().any(|m| matches!(m, ScriptMsg::Move { .. })),
         "hover tracking must resume after a stale press is cleared"
@@ -2520,7 +2522,7 @@ fn press_and_drag_away_clears_the_button_hover_on_release() {
 
     // Drag away while the button is held: hover must stay frozen on it.
     let mut drag_msgs = Vec::new();
-    handle_mouse_move(&mut state, &map, ox, oy, &mut drag_msgs, &mut cmds);
+    handle_mouse_move(&mut state, &map, &arena, ox, oy, &mut drag_msgs, &mut cmds);
     assert!(
         drag_msgs.is_empty(),
         "no hover updates may be queued while a button is held"
@@ -2710,5 +2712,56 @@ fn appended_child_onclick_becomes_clickable() {
         eval_str(&mut engine, "document.getElementById('status').textContent"),
         "1",
         "an appended element whose onclick was set before insertion must fire"
+    );
+}
+
+#[test]
+fn range_slider_drag_commits_value_and_dispatches_events() {
+    let html = r#"
+      <script>
+        window.events = [];
+        const range = document.getElementById('range');
+        range.addEventListener('input', () => {
+          window.events.push('input:' + range.value);
+        });
+        range.addEventListener('change', () => {
+          window.events.push('change:' + range.value);
+        });
+      </script>
+      <input id="range" type="range" min="0" max="10" step="1" value="0" width="11">
+    "#;
+    let (mut engine, geo) = build_geometry(html, EventBindings::default());
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("range").expect("range region");
+    let y = center(region.rect).1;
+    let left = region.rect.x as u32;
+    let right = left + region.rect.width.max(1) as u32 - 1;
+
+    let mut state = InputState::new();
+    state.pressed = Some((left as u16, y as u16));
+    let _ = mouse_down(&mut state, &mut engine, &map, left, y, MouseButton::Left);
+    assert_eq!(
+        eval_str(&mut engine, "range.value").as_str(),
+        "0",
+        "clicking on the initial thumb does not change the value"
+    );
+
+    let middle = left + 5;
+    state.pressed = Some((middle as u16, y as u16));
+    let _ = mouse_move(&mut state, &mut engine, &map, middle, y);
+    assert_eq!(eval_str(&mut engine, "range.value"), "5");
+    assert_eq!(
+        eval_str(&mut engine, "window.events.join(',')"),
+        "input:5,change:5"
+    );
+
+    // The console may deliver release without a final drag event; the slider
+    // must still commit at the release coordinate.
+    state.pressed = Some((right as u16, y as u16));
+    let _ = mouse_up(&mut state, &mut engine, &map, right as u16, y as u16);
+    assert_eq!(eval_str(&mut engine, "range.value"), "10");
+    assert_eq!(
+        eval_str(&mut engine, "window.events.join(',')"),
+        "input:5,change:5,input:10,change:10"
     );
 }

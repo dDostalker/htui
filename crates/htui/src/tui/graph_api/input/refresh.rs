@@ -14,8 +14,8 @@ use super::edit::{
     is_input_field_key, paste_into_field,
 };
 use super::field::{
-    KeyGate, apply_textarea_key, focused_form, is_disabled_control, is_number_input,
-    is_readonly_input, number_input_allows_char, textarea_content_width,
+    KeyGate, apply_range_key, apply_textarea_key, focused_form, is_disabled_control,
+    is_number_input, is_readonly_input, number_input_allows_char, textarea_content_width,
 };
 use super::focus::{blur_input, push_input_render};
 use super::key_info::key_event_info;
@@ -217,6 +217,25 @@ pub fn trigger_refresh(
                     return cmds;
                 }
                 let content_width = textarea_content_width(arena, focused);
+
+                // A focused range owns its discrete value changes. All other
+                // field editing keys are swallowed so typing cannot corrupt a
+                // numeric slider value; page navigation is also suppressed
+                // because the slider has keyboard focus.
+                if state.focused_is_range {
+                    let Some(arena) = arena else {
+                        return cmds;
+                    };
+                    if apply_range_key(state, arena, focused, key.code) {
+                        state.input_sel_anchor = None;
+                        push_input_render(state, focused, &mut cmds);
+                        msgs.push(ScriptMsg::RangeInput {
+                            node_id: focused,
+                            value: state.input_value.clone(),
+                        });
+                    }
+                    return cmds;
+                }
 
                 // Word-level editing: Ctrl / Alt + ←/→/Home/End/Backspace/
                 // Delete, with optional Shift extending the selection. Must
@@ -472,12 +491,12 @@ pub fn trigger_refresh(
                 // here, otherwise every later move is misread as a drag and
                 // hover / click events stay silent forever.
                 MouseEventKind::Drag(_) | MouseEventKind::Moved => {
-                    if let (Some(hit_map), Some(_)) = (hit_map, arena) {
+                    if let (Some(hit_map), Some(arena)) = (hit_map, arena) {
                         if !matches!(mouse.kind, MouseEventKind::Drag(_)) {
                             state.drop_stale_press();
                         }
                         let (x, y) = canvas_pos(state, mouse.column, mouse.row);
-                        handle_mouse_move(state, hit_map, x, y, msgs, &mut cmds);
+                        handle_mouse_move(state, hit_map, arena, x, y, msgs, &mut cmds);
                     }
                 }
                 _ => {}
