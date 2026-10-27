@@ -35,6 +35,8 @@ struct FileSignature {
 /// Debug-only watchers owned by the input loop.
 pub(super) struct HotReloadWatcher {
     rx: Receiver<HotReloadEvent>,
+    #[cfg_attr(not(test), allow(dead_code))]
+    ready_rx: Receiver<()>,
     stop_flags: Vec<Arc<AtomicBool>>,
     handles: Vec<JoinHandle<()>>,
 }
@@ -43,6 +45,12 @@ impl HotReloadWatcher {
     /// Stable updates destined for the input loop.
     pub(super) fn receiver(&self) -> &Receiver<HotReloadEvent> {
         &self.rx
+    }
+
+    /// Wait until the initial metadata/content baseline has been established.
+    #[cfg(test)]
+    pub(super) fn ready_receiver(&self) -> &Receiver<()> {
+        &self.ready_rx
     }
 }
 
@@ -62,6 +70,7 @@ impl Drop for HotReloadWatcher {
 /// Watch every `(kind, path)` pair and send stable updates on one channel.
 pub(super) fn spawn(watches: Vec<(SourceKind, &str)>) -> HotReloadWatcher {
     let (tx, rx) = mpsc::channel();
+    let (ready_tx, ready_rx) = mpsc::channel();
     let mut stop_flags = Vec::new();
     let mut handles = Vec::new();
 
@@ -70,9 +79,10 @@ pub(super) fn spawn(watches: Vec<(SourceKind, &str)>) -> HotReloadWatcher {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
         let tx = tx.clone();
+        let ready_tx = ready_tx.clone();
         let result = thread::Builder::new()
             .name(format!("htui-hot-reload-{:?}", kind))
-            .spawn(move || watch(kind, path, tx, thread_stop));
+            .spawn(move || watch(kind, path, tx, ready_tx, thread_stop));
         match result {
             Ok(handle) => {
                 stop_flags.push(stop);
@@ -84,14 +94,25 @@ pub(super) fn spawn(watches: Vec<(SourceKind, &str)>) -> HotReloadWatcher {
 
     HotReloadWatcher {
         rx,
+        ready_rx,
         stop_flags,
         handles,
     }
 }
 
-fn watch(kind: SourceKind, path: PathBuf, tx: Sender<HotReloadEvent>, stop: Arc<AtomicBool>) {
+fn watch(
+    kind: SourceKind,
+    path: PathBuf,
+    tx: Sender<HotReloadEvent>,
+    ready_tx: Sender<()>,
+    stop: Arc<AtomicBool>,
+) {
     let mut last_signature = signature(&path).ok();
     let mut last_content: Option<String> = read(&path).ok();
+    // The initial baseline must exist before a caller starts a negative-test
+    // window; otherwise a slow CI scheduler could make a later write look like
+    // the watcher's first observation.
+    let _ = ready_tx.send(());
     let mut pending: Option<String> = None;
 
     while !stop.load(Ordering::Relaxed) {
@@ -185,7 +206,10 @@ mod tests {
             path.to_str().expect("temp path is UTF-8"),
         )]);
         let rx = watcher.receiver();
-        // Let the watcher establish the initial metadata/content baseline.
+        watcher
+            .ready_receiver()
+            .recv_timeout(Duration::from_secs(2))
+            .expect("watcher establishes its initial baseline");
         assert!(
             rx.recv_timeout(POLL_INTERVAL * 2).is_err(),
             "startup must not emit an immediate reload"
@@ -202,7 +226,7 @@ mod tests {
     }
 
     #[test]
-    fn metadata_change_with_identical_content_does_not_emit() {
+    fn metadata_change_with_identical_content_does_not_emit() -> std::io::Result<()> {
         let unique = format!(
             "htui-hot-reload-metadata-{}-{:?}.css",
             std::process::id(),
@@ -219,14 +243,24 @@ mod tests {
             path.to_str().expect("temp path is UTF-8"),
         )]);
         let rx = watcher.receiver();
+        watcher
+            .ready_receiver()
+            .recv_timeout(Duration::from_secs(2))
+            .expect("watcher establishes its initial baseline");
         assert!(
             rx.recv_timeout(POLL_INTERVAL * 2).is_err(),
             "startup must not emit"
         );
 
-        // Rewrite the identical payload so mtime changes but content does not.
-        thread::sleep(POLL_INTERVAL);
+        // Rewrite the identical payload and force a metadata change so the
+        // test does not depend on filesystem mtime precision.
         fs::write(&path, css).expect("rewrite identical fixture");
+        let file = fs::OpenOptions::new().write(true).open(&path)?;
+        file.set_modified(
+            SystemTime::now()
+                .checked_add(Duration::from_secs(1))
+                .expect("valid future timestamp"),
+        )?;
         assert!(
             rx.recv_timeout(POLL_INTERVAL * 3).is_err(),
             "metadata-only changes must not reset the page"
@@ -234,5 +268,6 @@ mod tests {
 
         let _ = fs::remove_file(path);
         drop(watcher);
+        Ok(())
     }
 }
