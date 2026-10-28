@@ -11,7 +11,8 @@ use crate::{
 };
 
 use super::{
-    PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put,
+    PaintCanvas, cell_index, clamp_rect_to_canvas, control_background, control_background_at,
+    intersect_rects, paint_control_chrome, put,
 };
 
 /// Frame colour for an open (focused) dropdown (Tokyo Night accent cyan).
@@ -44,10 +45,7 @@ pub(crate) fn paint_select(
     let open = canvas.open_select == Some(lb.node_id);
 
     let content = paint_control_chrome(lb, arena, canvas, r, fg);
-    let bg = node
-        .css_attr
-        .get_bg_color()
-        .or(Some(super::CONTROL_DEFAULT_BG));
+    let background = control_background(node);
     // While the dropdown is open the label is drawn with the accent colour
     // (a border, when declared, keeps its own colour from the chrome).
     let label_fg = if open {
@@ -91,7 +89,7 @@ pub(crate) fn paint_select(
                 cell_index(canvas, abs_col, content.y),
                 if sub == 0 { Some(ch) } else { None },
                 label_fg,
-                bg,
+                control_background_at(&background, abs_col, content.y, r),
             );
         }
         col += w;
@@ -106,7 +104,7 @@ pub(crate) fn paint_select(
             cell_index(canvas, chevron_col, content.y),
             Some('▾'),
             label_fg,
-            bg,
+            control_background_at(&background, chevron_col, content.y, r),
         );
     }
 }

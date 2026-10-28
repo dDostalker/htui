@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use crossterm::style::Color;
 use htui::html::css_parse::{
-    BorderStyle, BoxSizing, Combinator, CornerRadii, CssAttr, CssRule, CssRuleEntry, CssSelector,
-    DynamicState, EdgeAuto, EdgeSizes, FontContext, FontStyleKind, FontWeight, INHERITED_PROPS,
-    Length, LengthContext, LineHeight, MarginSizes, NthExpr, PX_PER_CELL, Parser,
-    SUPPORTED_PROPERTIES, Selector, TextAlign, TextDecoration, TextTransform, Viewport, WhiteSpace,
-    css_into_node, css_into_node_with_state, parse_color_str, parse_declaration_text,
-    reset_css_attr, resolve_line_height_cells, selector_chain_matches,
-    selector_chain_matches_with_state,
+    Background, BorderStyle, BoxSizing, Combinator, CornerRadii, CssAttr, CssRule, CssRuleEntry,
+    CssSelector, DynamicState, EdgeAuto, EdgeSizes, FontContext, FontStyleKind, FontWeight,
+    GradientKind, INHERITED_PROPS, Length, LengthContext, LineHeight, MarginSizes, NthExpr,
+    PX_PER_CELL, Parser, SUPPORTED_PROPERTIES, Selector, TextAlign, TextDecoration, TextTransform,
+    Viewport, WhiteSpace, css_into_node, css_into_node_with_state, parse_background_str,
+    parse_color_str, parse_declaration_text, reset_css_attr, resolve_line_height_cells,
+    selector_chain_matches, selector_chain_matches_with_state,
 };
 use htui::html::html_parse;
 use htui::tdom::node::{Node, NodeArena, NodeId, NodeType, effective_font_size_cells};
@@ -662,6 +662,50 @@ fn test_color_transparent_and_malformed() {
     assert_eq!(parse_color_str("hsl(0, 100%)"), None);
     assert_eq!(parse_color_str("rgba(0, 0, 0, 1.5)"), None);
     assert_eq!(parse_color_str("hsl(0, 0%, 0%, 2)"), None);
+}
+
+#[test]
+fn test_linear_gradient_parsing_and_sampling() {
+    let Some(Background::Gradient(gradient)) =
+        parse_background_str("linear-gradient(to right, #ff0000 0%, rgb(0, 0, 255) 100%)")
+    else {
+        panic!("linear gradient should parse");
+    };
+    assert_eq!(gradient.kind, GradientKind::Linear { angle_deg: 90.0 });
+    assert_eq!(gradient.stops.len(), 2);
+    assert_eq!(gradient.stops[0].color, Color::Rgb { r: 255, g: 0, b: 0 });
+    assert_eq!(gradient.stops[1].color, Color::Rgb { r: 0, g: 0, b: 255 });
+    let left = gradient.color_at(0, 0, 10, 1).unwrap();
+    let right = gradient.color_at(9, 0, 10, 1).unwrap();
+    assert_ne!(left, right);
+}
+
+#[test]
+fn test_radial_gradient_parsing_with_center() {
+    let Some(Background::Gradient(gradient)) =
+        parse_background_str("radial-gradient(circle at 25% 75%, red, blue)")
+    else {
+        panic!("radial gradient should parse");
+    };
+    assert_eq!(
+        gradient.kind,
+        GradientKind::Radial {
+            center_x: 0.25,
+            center_y: 0.75
+        }
+    );
+    assert_eq!(gradient.stops.len(), 2);
+    assert!(parse_background_str("linear-gradient(red)").is_none());
+}
+
+#[test]
+fn test_background_clip_text_getter() {
+    let mut attr = CssAttr::new();
+    attr.add(&CssAttr(parse_declaration_text(
+        "background-clip: text; color: transparent;",
+    )));
+    assert!(attr.background_clips_to_text());
+    assert_eq!(attr.get_color(), None);
 }
 
 #[test]

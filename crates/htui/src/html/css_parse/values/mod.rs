@@ -12,7 +12,9 @@ pub use box_values::{
     Positioning, TableLayout, Visibility, parse_box_sizing, parse_caption_side, parse_empty_cells,
     parse_overflow, parse_position, parse_table_layout, parse_visibility,
 };
-pub use color::parse_color_str;
+pub use color::{
+    Background, Gradient, GradientKind, GradientStop, parse_background_str, parse_color_str,
+};
 pub use flex::{
     AlignContent, AlignItems, FlexBasis, FlexDirection, FlexShorthand, FlexWrap, GapSizes,
     JustifyContent, parse_align_content, parse_align_items, parse_flex_basis, parse_flex_direction,

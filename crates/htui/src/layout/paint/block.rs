@@ -1,34 +1,32 @@
-use crossterm::style::Color;
-
 use crate::{
     graphics::{FontStyle, block_style},
-    html::css_parse::TextAlign,
+    html::css_parse::{Background, TextAlign},
     layout::{LayoutBox, Rect},
     tdom::node::NodeArena,
 };
 
-use super::{PaintCanvas, border::paint_borders, intersect_rects, text::paint_runs};
+use super::{
+    BackgroundFill, PaintCanvas, background_at, border::paint_borders, intersect_rects,
+    text::paint_runs,
+};
 
 pub(crate) fn paint_block(
     lb: &LayoutBox,
     arena: &NodeArena,
     canvas: &mut PaintCanvas<'_>,
-    my_bg: Option<Color>,
-    parent_bg: Option<Color>,
+    my_bg: Option<&Background>,
+    parent_bg: Option<BackgroundFill<'_>>,
     clip: Rect,
 ) {
     let node = &arena[lb.node_id];
     let fg = node.css_attr.get_color();
+    let background_clipped_to_text = node.css_attr.background_clips_to_text();
     let style = block_style(&node.css_attr);
     // The resolved alignment comes from the paint style, not the cascade:
     // user-agent defaults the layout phase resolved (`<th>`'s `center`) are
     // not stored in the node's `css_attr`, so the paint style is the single
     // source the paint phase may consult.
     let align = lb.paint_style.text_align;
-
-    // Effective bg: own bg wins; otherwise inherit the parent's bg so child
-    // text appears on the rect's background rather than the terminal default.
-    let effective_bg = my_bg.or(parent_bg);
 
     let cols = canvas.columns as usize;
     // A box can be wider than the terminal when a parent formatting context
@@ -51,6 +49,26 @@ pub(crate) fn paint_block(
         Some(r) => r,
         None => return,
     };
+    // Own background wins; otherwise inherit the parent's full fill descriptor
+    // so a descendant keeps sampling the ancestor gradient's coordinates.
+    let effective_bg = if background_clipped_to_text {
+        parent_bg
+    } else {
+        my_bg
+            .map(|background| BackgroundFill {
+                background,
+                rect: r,
+            })
+            .or(parent_bg)
+    };
+    let text_fill = if background_clipped_to_text {
+        my_bg.map(|background| BackgroundFill {
+            background,
+            rect: r,
+        })
+    } else {
+        None
+    };
     let cell_start = canvas.cell_index(r.x, r.y);
 
     // `fill_bg` is a layout-time flag: whether the base cascade gave the
@@ -59,7 +77,7 @@ pub(crate) fn paint_block(
     // without re-laying-out, so the fill must also run when the *current*
     // cascade carries one — otherwise the padding cells of e.g. a bordered
     // `.btn:hover` keep the parent background and the highlight looks hollow.
-    let fill_bg = lb.paint_style.fill_bg || my_bg.is_some();
+    let fill_bg = !background_clipped_to_text && (lb.paint_style.fill_bg || my_bg.is_some());
     let spacing_after = lb.paint_style.spacing_after;
     let box_edges = &lb.paint_style.box_edges;
     let font = lb.paint_style.font_size_cells.max(1);
@@ -96,7 +114,10 @@ pub(crate) fn paint_block(
             + box_edges.padding.bottom
             + box_edges.padding.left
             > 0;
-        let text_clamped = my_bg.is_some() && !has_padding && lb.paint_style.font_size_cells > 1;
+        let text_clamped = !background_clipped_to_text
+            && my_bg.is_some()
+            && !has_padding
+            && lb.paint_style.font_size_cells > 1;
         let text_row_offset: usize = if text_clamped {
             glyph_row_within_line
         } else {
@@ -137,7 +158,6 @@ pub(crate) fn paint_block(
             // Default: bg covers the padding-box (border-box minus border).
             (r.x + border_left, r.width.saturating_sub(border_horizontal))
         };
-        let bg_to_use = effective_bg;
         let rows_to_fill = r
             .height
             .saturating_sub(spacing_after)
@@ -148,6 +168,8 @@ pub(crate) fn paint_block(
             }
             let row_cell_start = cell_start + (row_offset + border_top) * cols;
             for i in 0..bg_width {
+                let x = bg_start_x + i;
+                let y = r.y + row_offset + border_top;
                 let idx = row_cell_start + (bg_start_x - r.x) + i;
                 if idx < canvas.layout.len() && canvas.in_region(idx) {
                     // Mutate in place: `clear()` keeps the 4-byte buffer from
@@ -158,7 +180,7 @@ pub(crate) fn paint_block(
                     cell.word.clear();
                     cell.word.push(' ');
                     cell.fcolor = fg;
-                    cell.bcolor = bg_to_use;
+                    cell.bcolor = background_at(effective_bg, x, y);
                     cell.style = style;
                 }
             }
@@ -176,6 +198,7 @@ pub(crate) fn paint_block(
             box_edges,
             align,
             effective_bg,
+            text_fill,
             r,
             cell_start,
             style,
@@ -230,6 +253,7 @@ pub(crate) fn paint_block(
                 content_width,
                 align,
                 effective_bg,
+                text_fill,
                 lb.paint_style.font_size_cells,
                 lb.paint_style.line_height_cells,
                 clip,
@@ -244,6 +268,7 @@ pub(crate) fn paint_block(
                 content_width,
                 align,
                 effective_bg,
+                text_fill,
                 lb.paint_style.font_size_cells,
                 lb.paint_style.line_height_cells,
                 runs_clip,
@@ -276,7 +301,8 @@ fn paint_column_layout(
     clip: Rect,
     box_edges: &crate::html::box_edges::BoxEdges,
     align: TextAlign,
-    effective_bg: Option<Color>,
+    effective_bg: Option<BackgroundFill<'_>>,
+    text_fill: Option<BackgroundFill<'_>>,
     r: Rect,
     cell_start: usize,
     style: FontStyle,
@@ -315,6 +341,7 @@ fn paint_column_layout(
                 col_width,
                 align,
                 effective_bg,
+                text_fill,
                 font,
                 line_h,
                 col_clip,
@@ -358,7 +385,7 @@ fn paint_column_layout(
                     cell.word.clear();
                     cell.word.push('│');
                     cell.fcolor = rule_color;
-                    cell.bcolor = effective_bg;
+                    cell.bcolor = background_at(effective_bg, rule_x, y);
                     cell.style = style;
                 }
             }

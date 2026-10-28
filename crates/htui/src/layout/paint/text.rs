@@ -7,7 +7,7 @@ use crate::{
     layout::{InlineRun, Rect},
 };
 
-use super::PaintCanvas;
+use super::{BackgroundFill, PaintCanvas, background_at, text_color_at};
 
 /// Render each visual line in `lines` with its own style, colour and
 /// background.
@@ -43,7 +43,8 @@ pub(crate) fn paint_runs(
     cell_start: usize,
     block_width: usize,
     align: TextAlign,
-    effective_bg: Option<Color>,
+    effective_bg: Option<BackgroundFill<'_>>,
+    text_fill: Option<BackgroundFill<'_>>,
     font_size_cells: usize,
     line_height_cells: usize,
     clip: Rect,
@@ -88,6 +89,7 @@ pub(crate) fn paint_runs(
             block_width.saturating_sub(indent),
             align,
             effective_bg,
+            text_fill,
             font_size_cells,
             overflow_visible,
         );
@@ -102,7 +104,8 @@ fn paint_one_line(
     cell_start: usize,
     block_width: usize,
     align: TextAlign,
-    effective_bg: Option<Color>,
+    effective_bg: Option<BackgroundFill<'_>>,
+    text_fill: Option<BackgroundFill<'_>>,
     font_size_cells: usize,
     overflow_visible: bool,
 ) {
@@ -134,13 +137,14 @@ fn paint_one_line(
         if run.is_empty() {
             continue;
         }
-        let run_bg = run.bg.or(effective_bg);
         paint_text_row(
             canvas,
             index,
             &run.text,
             run.fg,
-            run_bg,
+            run.bg,
+            effective_bg,
+            text_fill,
             run.style,
             font_size_cells,
             row_end,
@@ -157,7 +161,9 @@ fn paint_text_row(
     start: usize,
     text: &str,
     fg: Option<Color>,
-    bg: Option<Color>,
+    run_bg: Option<Color>,
+    inherited_bg: Option<BackgroundFill<'_>>,
+    text_fill: Option<BackgroundFill<'_>>,
     style: FontStyle,
     font_size_cells: usize,
     row_end: usize,
@@ -165,6 +171,7 @@ fn paint_text_row(
     word_spacing: isize,
 ) {
     let max = canvas.layout.len();
+    let cols = canvas.columns as usize;
     let mut idx = start;
     let font_size = font_size_cells.max(1);
     for g in text.graphemes(true) {
@@ -205,8 +212,8 @@ fn paint_text_row(
         let cell = &mut canvas.layout[idx];
         cell.word.clear();
         cell.word.push_str(g);
-        cell.fcolor = fg;
-        cell.bcolor = bg;
+        cell.fcolor = text_color_at(fg, text_fill, idx % cols, idx / cols);
+        cell.bcolor = run_bg.or_else(|| background_at(inherited_bg, idx % cols, idx / cols));
         cell.style = style;
         if w == 2 {
             // Wide clusters (CJK ideographs, 2-column emoji, ZWJ ligatures)
@@ -216,8 +223,9 @@ fn paint_text_row(
             if canvas.in_region(idx + 1) {
                 let pad = &mut canvas.layout[idx + 1];
                 pad.word.clear();
-                pad.fcolor = fg;
-                pad.bcolor = bg;
+                pad.fcolor = text_color_at(fg, text_fill, (idx + 1) % cols, (idx + 1) / cols);
+                pad.bcolor = run_bg
+                    .or_else(|| background_at(inherited_bg, (idx + 1) % cols, (idx + 1) / cols));
                 pad.style = style;
             }
         }
@@ -249,8 +257,9 @@ fn paint_text_row(
             let pad_cell = &mut canvas.layout[target];
             pad_cell.word.clear();
             pad_cell.word.push(' ');
-            pad_cell.fcolor = fg;
-            pad_cell.bcolor = bg;
+            pad_cell.fcolor = text_color_at(fg, text_fill, target % cols, target / cols);
+            pad_cell.bcolor =
+                run_bg.or_else(|| background_at(inherited_bg, target % cols, target / cols));
             pad_cell.style = style;
         }
         // Advance to the next cluster: the slot is `font_size` columns wide

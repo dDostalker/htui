@@ -45,15 +45,15 @@ use super::values::{
     CssDisplay, EmptyCells, FlexBasis, FlexDirection, FlexShorthand, FlexWrap, FontStyleKind,
     FontWeight, GapSizes, JustifyContent, Length, LineHeight, ListStyleType, OverflowWrap,
     TableLayout, TextAlign, TextDecoration, TextTransform, Visibility, WhiteSpace, WordBreak,
-    merge_border_longhand, parse_align_content, parse_align_items, parse_border_radius,
-    parse_border_side, parse_border_style, parse_border_width, parse_box_sizing,
-    parse_caption_side, parse_color_str, parse_column_count, parse_column_fill, parse_column_rule,
-    parse_columns_shorthand, parse_edge_auto, parse_edge_sizes, parse_empty_cells,
-    parse_flex_basis, parse_flex_direction, parse_flex_flow, parse_flex_shorthand, parse_flex_wrap,
-    parse_gap_shorthand, parse_justify_content, parse_line_height, parse_list_style_type,
-    parse_margin_sizes, parse_non_negative_number, parse_order, parse_overflow_wrap,
-    parse_table_layout, parse_text_transform, parse_visibility, parse_white_space,
-    parse_word_break, resolve_flex_basis,
+    merge_border_longhand, parse_align_content, parse_align_items, parse_background_str,
+    parse_border_radius, parse_border_side, parse_border_style, parse_border_width,
+    parse_box_sizing, parse_caption_side, parse_color_str, parse_column_count, parse_column_fill,
+    parse_column_rule, parse_columns_shorthand, parse_edge_auto, parse_edge_sizes,
+    parse_empty_cells, parse_flex_basis, parse_flex_direction, parse_flex_flow,
+    parse_flex_shorthand, parse_flex_wrap, parse_gap_shorthand, parse_justify_content,
+    parse_line_height, parse_list_style_type, parse_margin_sizes, parse_non_negative_number,
+    parse_order, parse_overflow_wrap, parse_table_layout, parse_text_transform, parse_visibility,
+    parse_white_space, parse_word_break, resolve_flex_basis,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -108,6 +108,15 @@ impl CssAttr {
     pub fn get_color(&self) -> Option<Color> {
         self.0.get("color").and_then(|c| parse_color_str(c))
     }
+    /// Whether the element's background is clipped to its text glyphs.
+    pub fn background_clips_to_text(&self) -> bool {
+        self.0.get("background-clip").is_some_and(|value| {
+            value
+                .split_whitespace()
+                .last()
+                .is_some_and(|keyword| keyword.eq_ignore_ascii_case("text"))
+        })
+    }
 
     /// Cursor colour (CSS `caret-color`). `None` for `auto` / unset — the
     /// painter then uses the default inverted-cell caret.
@@ -126,6 +135,13 @@ impl CssAttr {
             .get("background-color")
             .or_else(|| self.0.get("background"))
             .and_then(|c| parse_color_str(c))
+    }
+    /// Background paint source, including CSS gradients.
+    pub fn get_background(&self) -> Option<crate::html::css_parse::Background> {
+        self.0
+            .get("background-color")
+            .or_else(|| self.0.get("background"))
+            .and_then(|value| parse_background_str(value))
     }
     /// Text alignment (CSS `text-align`).
     ///

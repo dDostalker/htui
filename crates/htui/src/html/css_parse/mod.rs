@@ -26,12 +26,13 @@ pub use selector::{
 };
 pub use stylesheet::{CssRule, CssRuleEntry, Parser, parse_declaration_text};
 pub use values::{
-    AlignContent, AlignItems, BoxSizing, CaptionSide, ColumnFill, ColumnsResolved, CornerRadii,
-    CssDisplay, EmptyCells, FlexBasis, FlexDirection, FlexShorthand, FlexWrap, FontContext,
-    FontStyleKind, FontWeight, GapSizes, InsetSides, JustifyContent, Length, LengthContext,
-    LineHeight, ListStyleType, Overflow, OverflowWrap, PX_PER_CELL, Position, Positioning,
-    TableLayout, TextAlign, TextDecoration, TextOverflow, TextTransform, Viewport, Visibility,
-    WhiteSpace, WordBreak, parse_align_content, parse_align_items, parse_color_str,
-    parse_flex_direction, parse_flex_flow, parse_flex_shorthand, parse_flex_wrap, parse_overflow,
-    parse_position, parse_text_overflow, parse_visibility, resolve_line_height_cells,
+    AlignContent, AlignItems, Background, BoxSizing, CaptionSide, ColumnFill, ColumnsResolved,
+    CornerRadii, CssDisplay, EmptyCells, FlexBasis, FlexDirection, FlexShorthand, FlexWrap,
+    FontContext, FontStyleKind, FontWeight, GapSizes, Gradient, GradientKind, GradientStop,
+    InsetSides, JustifyContent, Length, LengthContext, LineHeight, ListStyleType, Overflow,
+    OverflowWrap, PX_PER_CELL, Position, Positioning, TableLayout, TextAlign, TextDecoration,
+    TextOverflow, TextTransform, Viewport, Visibility, WhiteSpace, WordBreak, parse_align_content,
+    parse_align_items, parse_background_str, parse_color_str, parse_flex_direction,
+    parse_flex_flow, parse_flex_shorthand, parse_flex_wrap, parse_overflow, parse_position,
+    parse_text_overflow, parse_visibility, resolve_line_height_cells,
 };

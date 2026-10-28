@@ -7,11 +7,12 @@ use crossterm::style::Color;
 use crate::{
     graphics::char_width,
     layout::{LayoutBox, Rect},
-    tdom::node::{Node, NodeArena, NodeType},
+    tdom::node::{NodeArena, NodeType},
 };
 
 use super::{
-    PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put,
+    PaintCanvas, cell_index, clamp_rect_to_canvas, control_background, control_background_at,
+    intersect_rects, paint_control_chrome, put,
 };
 
 pub(crate) fn paint_button(
@@ -48,6 +49,7 @@ pub(crate) fn paint_button(
     };
     let fg = node.css_attr.get_color().unwrap_or(Color::White);
     let text_fg = if disabled { Color::DarkGrey } else { fg };
+    let background = control_background(node);
 
     // The label is centred inside the chrome's content area, like a browser
     // button.
@@ -72,17 +74,9 @@ pub(crate) fn paint_button(
                 cell_index(canvas, abs, content.y),
                 if sub == 0 { Some(c) } else { None },
                 Some(text_fg),
-                Some(bg_for(node)),
+                control_background_at(&background, abs, content.y, r),
             );
         }
         col += w;
     }
-}
-
-/// The background the button's text cells sit on — the CSS `background-color`
-/// or the default control grey the chrome painted.
-fn bg_for(node: &Node) -> Color {
-    node.css_attr
-        .get_bg_color()
-        .unwrap_or(super::CONTROL_DEFAULT_BG)
 }

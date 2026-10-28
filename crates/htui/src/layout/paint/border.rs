@@ -5,7 +5,7 @@ use crate::{
     layout::{BorderStyle, LayoutBox, Rect},
 };
 
-use super::PaintCanvas;
+use super::{BackgroundFill, PaintCanvas, background_at};
 
 /// Render the four border edges of a block-level box.
 ///
@@ -20,7 +20,7 @@ pub(crate) fn paint_borders(
     r: Rect,
     canvas: &mut PaintCanvas<'_>,
     fg: Option<Color>,
-    bg: Option<Color>,
+    bg: Option<BackgroundFill<'_>>,
 ) {
     let sides = &lb.paint_style.box_edges.border;
     if !sides.any_visible() {
@@ -66,7 +66,7 @@ pub(crate) fn paint_borders(
                     cell.word.clear();
                     cell.word.push('─');
                     cell.fcolor = top_color;
-                    cell.bcolor = bg;
+                    cell.bcolor = background_at(bg, idx % cols, idx / cols);
                     cell.style = style;
                 }
             }
@@ -85,7 +85,7 @@ pub(crate) fn paint_borders(
                     cell.word.clear();
                     cell.word.push('─');
                     cell.fcolor = bottom_color;
-                    cell.bcolor = bg;
+                    cell.bcolor = background_at(bg, idx % cols, idx / cols);
                     cell.style = style;
                 }
             }
@@ -103,7 +103,7 @@ pub(crate) fn paint_borders(
                     cell.word.clear();
                     cell.word.push('│');
                     cell.fcolor = left_color;
-                    cell.bcolor = bg;
+                    cell.bcolor = background_at(bg, idx % cols, idx / cols);
                     cell.style = style;
                 }
             }
@@ -121,7 +121,7 @@ pub(crate) fn paint_borders(
                     cell.word.clear();
                     cell.word.push('│');
                     cell.fcolor = right_color;
-                    cell.bcolor = bg;
+                    cell.bcolor = background_at(bg, idx % cols, idx / cols);
                     cell.style = style;
                 }
             }
@@ -159,7 +159,7 @@ pub(crate) fn paint_borders(
             cell.word.clear();
             cell.word.push(ch);
             cell.fcolor = color;
-            cell.bcolor = bg;
+            cell.bcolor = background_at(bg, idx % cols, idx / cols);
             cell.style = style;
         }
     }

@@ -14,7 +14,8 @@ use crate::{
 
 use super::button::paint_button;
 use super::{
-    PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put,
+    PaintCanvas, cell_index, clamp_rect_to_canvas, control_background, control_background_at,
+    intersect_rects, paint_control_chrome, put,
 };
 
 /// Highlight colour for the selected character range (Tokyo Night selection).
@@ -243,6 +244,7 @@ pub(crate) fn paint_input(
     // steps, and click positions agree.
     if input_type == "range" {
         let content = paint_control_chrome(lb, arena, canvas, r, fg);
+        let background = control_background(node);
         let state = canvas.input_states.get(&lb.node_id);
         let spec = range_spec(node, state.map(|s| s.value.as_str()));
         let disabled = node.attributes.contains_key("disabled");
@@ -272,7 +274,7 @@ pub(crate) fn paint_input(
                     cell_index(canvas, track_x, abs_row),
                     Some(glyph),
                     color,
-                    None,
+                    control_background_at(&background, track_x, abs_row, r),
                 );
             }
             return;
@@ -297,7 +299,7 @@ pub(crate) fn paint_input(
                 cell_index(canvas, abs_col, track_y),
                 Some(glyph),
                 color,
-                None,
+                control_background_at(&background, abs_col, track_y, r),
             );
         }
         return;
@@ -339,10 +341,7 @@ pub(crate) fn paint_input(
     }
 
     let content = paint_control_chrome(lb, arena, canvas, r, fg);
-    let bg = node
-        .css_attr
-        .get_bg_color()
-        .or(Some(super::CONTROL_DEFAULT_BG));
+    let background = control_background(node);
 
     // Live edit state wins while focused, and an unfocused entry covers only
     // the single repaint right after a blur (so the committed text doesn't
@@ -415,18 +414,19 @@ pub(crate) fn paint_input(
             if abs_col < visible.x || abs_col >= visible.x.saturating_add(visible.width) {
                 continue;
             }
+            let sampled_bg = control_background_at(&background, abs_col, inner_y, r);
             let (cell_fg, cell_bg) = if inverted {
                 // Inverted caret cell so the caret position is visible even at
                 // the end of the value (a blank inverted cell).
-                caret_cell(fg, bg)
+                caret_cell(fg, sampled_bg)
             } else if selection.is_some_and(|(s, e)| i >= s && i < e) {
                 // Selected characters are highlighted (Tokyo Night selection
                 // blue) over the field's own colours.
                 (Some(Color::White), Some(SELECTION_BG))
             } else if showing_placeholder {
-                (Some(Color::DarkGrey), bg)
+                (Some(Color::DarkGrey), sampled_bg)
             } else {
-                (text_fg, bg)
+                (text_fg, sampled_bg)
             };
             // ASCII glyphs write one cell. The second column of a wide CJK
             // glyph is marked with an *empty* word (not a space) so the
@@ -450,7 +450,8 @@ pub(crate) fn paint_input(
     if focused && cursor == value.chars().count() && col < inner_width {
         let abs_col = inner_x.saturating_add(col);
         if abs_col < inner_x.saturating_add(inner_width) {
-            let (cf, cb) = caret_cell(fg, bg);
+            let sampled_bg = control_background_at(&background, abs_col, inner_y, r);
+            let (cf, cb) = caret_cell(fg, sampled_bg);
             put(
                 canvas,
                 cell_index(canvas, abs_col, inner_y),
