@@ -91,6 +91,10 @@ pub enum ScriptMsg {
     /// message's job is dispatching the `resize` event and re-evaluating
     /// `matchMedia` lists.
     Resize,
+    /// The page scroll offset changed (sent by the input loop after a
+    /// wheel / key / animation / `scrollTo` frame). Dispatches the `scroll`
+    /// event; handlers read `window.scrollY`.
+    Scroll,
     /// Replace the whole document owned by the script engine.
     ///
     /// Used by the debug hot-reload watcher. The engine re-parses the HTML,
@@ -328,6 +332,7 @@ pub fn apply_message(
             cmds.append(&mut st_cmds);
             (cmds, None)
         }
+        ScriptMsg::Scroll => (engine.fire_scroll(), None),
         ScriptMsg::InputKeystroke { node_id } => {
             let region = region_for(&engine.arena(), *node_id);
             (engine.fire(&region, EventType::Input, 0, 0), None)

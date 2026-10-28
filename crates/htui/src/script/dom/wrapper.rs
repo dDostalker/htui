@@ -47,6 +47,7 @@ use super::{
         native_get_tag_name, native_has_child_nodes, native_is_equal_node, native_is_same_node,
         native_matches, native_query_selector, native_query_selector_all,
     },
+    view::native_scroll_into_view,
     with_state,
 };
 
@@ -466,6 +467,11 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
             NativeFunction::from_fn_ptr(native_click),
             js_string!("click"),
             0,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_scroll_into_view),
+            js_string!("scrollIntoView"),
+            1,
         );
         init.function(
             NativeFunction::from_fn_ptr(native_insert_adjacent_element),

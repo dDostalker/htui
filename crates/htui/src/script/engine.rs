@@ -437,19 +437,29 @@ impl ScriptEngine {
     }
 
     /// Fire `event.resize` on the window listeners and the document body.
-    ///
-    /// `window.addEventListener("resize", fn)` handlers run first (no node
-    /// target), then the `<body>` → root ancestor chain — the dispatch shape
-    /// key events use for their no-focused-field fallback. Returns the render
-    /// commands pushed by host functions during the dispatch.
     pub fn fire_resize(&mut self) -> Vec<RenderCmd> {
+        self.fire_window_and_body("resize", EventType::Resize)
+    }
+
+    /// Fire `event.scroll` on the window listeners and the document body
+    /// (after the page scroll offset changed; handlers read `window.scrollY`).
+    pub fn fire_scroll(&mut self) -> Vec<RenderCmd> {
+        self.fire_window_and_body("scroll", EventType::Scroll)
+    }
+
+    /// Shared dispatch of the document-level events (`resize` / `scroll`)
+    /// that have no node target: `window.addEventListener(type, fn)` handlers
+    /// run first (no node target), then the `<body>` → root ancestor chain —
+    /// the dispatch shape key events use for their no-focused-field fallback.
+    /// Returns the render commands pushed by host functions during the
+    /// dispatch.
+    fn fire_window_and_body(&mut self, type_name: &str, event_type: EventType) -> Vec<RenderCmd> {
         // Window-level listeners: same event object, no node target.
         let window_cmd = {
             let window_listeners =
-                super::dom::get_window_listeners(&mut self.context, "resize").unwrap_or_default();
+                super::dom::get_window_listeners(&mut self.context, type_name).unwrap_or_default();
             let target = JsValue::undefined();
-            let Ok(event) = make_event_object(&mut self.context, EventType::Resize, &target, 0, 0)
-            else {
+            let Ok(event) = make_event_object(&mut self.context, event_type, &target, 0, 0) else {
                 return Vec::new();
             };
             let mut cmds = Vec::new();
@@ -458,7 +468,7 @@ impl ScriptEngine {
                     continue;
                 };
                 if let Err(e) = f.call(&target, std::slice::from_ref(&event), &mut self.context) {
-                    log::warn!("window resize listener threw: {e}");
+                    log::warn!("window {type_name} listener threw: {e}");
                 }
             }
             let mut st = self.state.borrow_mut();
@@ -475,7 +485,7 @@ impl ScriptEngine {
                 .unwrap_or_else(|| self.root_id());
             super::msg::region_for(&arena, body_id)
         };
-        let mut cmds = self.fire(&region, EventType::Resize, 0, 0);
+        let mut cmds = self.fire(&region, event_type, 0, 0);
         cmds.extend(window_cmd);
         cmds
     }

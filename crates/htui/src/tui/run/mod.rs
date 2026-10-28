@@ -44,7 +44,7 @@ use crate::{
     tdom::node::{NodeId, SharedNodeArena},
     tui::graph_api::{
         ANIM_POLL_MS, DirtyInfo, InputState, KEY_GATE_TIMEOUT, RenderCmd, ScrollAnim, ScrollTarget,
-        apply_focus_requests, reapply_console_modes, trigger_refresh,
+        apply_focus_requests, reapply_console_modes, scroll_into_view_target, trigger_refresh,
     },
 };
 
@@ -312,6 +312,9 @@ fn run_inner(
     // Any script response can free a slot, so the count never rises above
     // `MAX_IN_FLIGHT_MOVES`.
     let mut moves_in_flight: usize = 0;
+    // Scroll offset at the previous loop pass: the input loop notifies the
+    // script thread (`ScriptMsg::Scroll`) when it differs.
+    let mut scroll_y_prev: u32 = 0;
     // Render-stall watchdog state: `(heartbeat at last command send, when it
     // was sent)`. The render thread bumps its heartbeat after each processed
     // batch, so a send followed by no heartbeat for a while means the render
@@ -444,6 +447,15 @@ fn run_inner(
         ui_state.cols.store(u32::from(columns), Ordering::Relaxed);
         ui_state.rows.store(u32::from(rows), Ordering::Relaxed);
         ui_state.scroll_y.store(state.scroll_y, Ordering::Relaxed);
+        // The page scroll offset changed since the previous iteration (wheel,
+        // keys, animation tick, `scrollTo`): notify the script thread so
+        // `scroll` listeners run. One frame behind the paint — the detection
+        // runs before this iteration's animation tick — which matches how
+        // browsers coalesce scroll events.
+        if events_active && state.scroll_y != scroll_y_prev {
+            msgs.push(ScriptMsg::Scroll);
+        }
+        scroll_y_prev = state.scroll_y;
         // While a scroll animation is active the loop wakes at the animation
         // frame rate instead of the idle poll cadence; eased positions are
         // wall-clock based, so a late wake self-corrects next frame.
@@ -629,6 +641,36 @@ fn run_inner(
         // `state.scroll_y` capped at the live ceiling and emits the
         // `Rerender` here.
         let now = Instant::now();
+        // Resolve JS `scrollIntoView` markers against the current hit map
+        // (the element's document rect lives there, not on the script side)
+        // into concrete page-scroll markers the sweep below understands.
+        cmds.retain_mut(|cmd| {
+            if let RenderCmd::ScrollIntoView {
+                node_id,
+                block,
+                smooth,
+            } = cmd
+            {
+                let resolved = hit_map.lock().ok().and_then(|map| {
+                    map.iter()
+                        .find(|r| r.node_id == *node_id)
+                        .map(|region| scroll_into_view_target(region.rect, *block, u32::from(rows)))
+                });
+                match resolved {
+                    Some(to) if *smooth => {
+                        *cmd = RenderCmd::ScrollAnimate {
+                            target: ScrollTarget::Page,
+                            to,
+                        };
+                    }
+                    Some(to) => *cmd = RenderCmd::ScrollSet { to },
+                    // The element produced no hit region (removed / never
+                    // laid out): nothing to scroll to.
+                    None => return false,
+                }
+            }
+            true
+        });
         // `ScrollSet` jumps emit their `Rerender` after the sweep (the
         // closure borrows `cmds`); the animation tick below merges into the
         // same batch (snapshot commands supersede, latest wins).

@@ -139,6 +139,16 @@ pub enum RenderCmd {
     ScrollSet {
         to: u32,
     },
+    /// Scroll the page so the element `node_id` lands at `block` alignment
+    /// (JS `element.scrollIntoView`). The input loop resolves the element's
+    /// document rect from the hit map and converts it into a
+    /// [`RenderCmd::ScrollSet`](Self::ScrollSet) /
+    /// [`RenderCmd::ScrollAnimate`](Self::ScrollAnimate) (per `smooth`).
+    ScrollIntoView {
+        node_id: NodeId,
+        block: super::scroll_anim::ScrollIntoViewBlock,
+        smooth: bool,
+    },
     /// JS `el.focus()` — focus the text field `node_id`. Intercepted by the
     /// input loop (never forwarded to the render thread): it seeds the edit
     /// session and routes the `blur` / `focus` events back through the
@@ -274,7 +284,9 @@ impl DrainedBatch {
             // Never forwarded (the run loop intercepts markers before the
             // channel) — dropped here so a leaked one cannot displace a real
             // snapshot.
-            RenderCmd::ScrollAnimate { .. } | RenderCmd::ScrollSet { .. } => {}
+            RenderCmd::ScrollAnimate { .. }
+            | RenderCmd::ScrollSet { .. }
+            | RenderCmd::ScrollIntoView { .. } => {}
             sel @ (RenderCmd::SelectOpen { .. }
             | RenderCmd::SelectClose { .. }
             | RenderCmd::SelectMove { .. }) => self.selects.push(sel),

@@ -29,8 +29,8 @@ pub use key_info::key_event_info;
 pub use mouse::{handle_click, handle_mouse_down, handle_mouse_move, handle_mouse_up};
 pub use refresh::trigger_refresh;
 pub use scroll_anim::{
-    ANIM_POLL_MS, ScrollAnim, ScrollTarget, active_scroll_target, ease_out_cubic,
-    scroll_anim_duration, step_target,
+    ANIM_POLL_MS, ScrollAnim, ScrollIntoViewBlock, ScrollTarget, active_scroll_target,
+    ease_out_cubic, scroll_anim_duration, scroll_into_view_target, step_target,
 };
 pub use select::{OverlayKind, SelectOpenState};
 

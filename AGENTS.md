@@ -576,6 +576,7 @@ let x = find(b).unwrap();
 | `InputState`       | `tui::graph_api::input` | 输入循环状态（scroll_y / scroll_offsets / scroll_anim / zoom / pressed / 焦点输入框 / 编辑缓冲 / 选择 / open_select；hover 归脚本线程） |
 | `ScrollAnim`       | `tui::graph_api` | 单次缓动滚动 tween（ease-out-cubic，位置按墙钟计算；输入循环持有，输入重定向/手动滚动取消） |
 | `ScrollTarget`     | `tui::graph_api` | 滚动动画目标轴（`Page` / `Container(NodeId)`） |
+| `ScrollIntoViewBlock` | `tui::graph_api` | `scrollIntoView` 对齐（`Start` / `Center` / `End`）；`scroll_into_view_target` 纯函数换算页偏移 |
 | `InputRenderState` | `graphics::canvas`      | `<input>` 渲染状态（value / cursor / focused），`TermLayout.input_states` |
 | `EventType`        | `events`                | DOM 事件类型（Click / MouseOver / MouseOut）               |
 | `HtmlEvent`        | `events`                | 事件对象（event_type / target / current_target / x / y / bubbles）|

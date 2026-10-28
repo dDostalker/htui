@@ -348,7 +348,9 @@ pub(super) fn render_thread(
                     // Scroll markers are intercepted by the run loop (the
                     // scroll state lives on the input side); a leaked one
                     // renders nothing.
-                    RenderCmd::ScrollAnimate { .. } | RenderCmd::ScrollSet { .. } => {
+                    RenderCmd::ScrollAnimate { .. }
+                    | RenderCmd::ScrollSet { .. }
+                    | RenderCmd::ScrollIntoView { .. } => {
                         log::debug!("Scroll marker reached the render thread — dropping");
                     }
                 }

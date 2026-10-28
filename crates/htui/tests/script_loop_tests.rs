@@ -1568,3 +1568,71 @@ fn scroll_to_pushes_scroll_markers() {
     tx.send(ScriptMsg::Quit).expect("send quit");
     handle.join().expect("script thread must exit cleanly");
 }
+
+#[test]
+fn scroll_into_view_pushes_a_marker_with_block_alignment() {
+    let html = r#"<body><div id="target">t</div><script>
+      document.getElementById('target').scrollIntoView();
+      document.getElementById('target').scrollIntoView({ block: 'center', behavior: 'smooth' });
+    </script></body>"#;
+    let (tx, out_rx, handle) = spawn_script_with_ui(
+        html,
+        EventBindings::default(),
+        empty_hit_map(),
+        Arc::new(SharedUiState::default()),
+    );
+    match out_rx.recv().expect("ready must arrive") {
+        ScriptResponse::Ready { .. } => {}
+        other => panic!("expected Ready, got {other:?}"),
+    }
+    // The markers ride out with the next message reply; the run loop (not
+    // covered here) resolves them against the hit map.
+    tx.send(ScriptMsg::Resize).expect("send resize");
+    let ev = recv_event(&out_rx);
+    let has = |want: &str| ev.cmds.iter().any(|c| format!("{c:?}").contains(want));
+    assert!(
+        has("ScrollIntoView") && has("Start"),
+        "default block is start, got {:?}",
+        ev.cmds
+    );
+    assert!(
+        has("Center") && has("smooth: true"),
+        "options object parsed, got {:?}",
+        ev.cmds
+    );
+
+    tx.send(ScriptMsg::Quit).expect("send quit");
+    handle.join().expect("script thread must exit cleanly");
+}
+
+#[test]
+fn scroll_event_fires_window_and_body_listeners() {
+    let html = r#"<body><div id="out">init</div><script>
+      window.addEventListener('scroll', function () {
+        document.getElementById('out').textContent = 'win-scroll:' + window.scrollY;
+      });
+      document.body.addEventListener('scroll', function () {
+        var el = document.getElementById('out');
+        el.textContent = 'body-scroll:' + window.scrollY;
+      });
+    </script></body>"#;
+    let (tx, out_rx, handle) = spawn_script_with_ui(
+        html,
+        EventBindings::default(),
+        empty_hit_map(),
+        Arc::new(SharedUiState::default()),
+    );
+    match out_rx.recv().expect("ready must arrive") {
+        ScriptResponse::Ready { .. } => {}
+        other => panic!("expected Ready, got {other:?}"),
+    }
+    tx.send(ScriptMsg::Scroll).expect("send scroll");
+    let ev = recv_event(&out_rx);
+    let d = ev.dirty.expect("scroll listener wrote the output node");
+    // The body listener runs after the window one (the bubbling chain), so
+    // its write is the final text; both read the shared scroll offset.
+    assert_eq!(dirty_text(&d.arena, "out"), "body-scroll:0");
+
+    tx.send(ScriptMsg::Quit).expect("send quit");
+    handle.join().expect("script thread must exit cleanly");
+}

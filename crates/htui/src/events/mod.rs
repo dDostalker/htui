@@ -112,6 +112,10 @@ pub enum EventType {
     /// along the `<body>` ancestor chain; the event target is `<body>` (htui
     /// has no separate window node).
     Resize,
+    /// Fired after the page scroll offset changed (`onscroll`). Same dispatch
+    /// shape as [`EventType::Resize`] (window listeners + `<body>` chain);
+    /// the event carries no payload — handlers read `window.scrollY`.
+    Scroll,
 }
 
 /// Terminal-agnostic keyboard payload carried by [`EventType::KeyDown`] /

@@ -15,13 +15,65 @@ use boa_engine::{
 };
 
 use crate::html::css_parse::{Viewport, parse_media_query_list};
-use crate::tui::graph_api::{RenderCmd, ScrollTarget};
+use crate::tui::graph_api::{RenderCmd, ScrollIntoViewBlock, ScrollTarget};
 
 use super::super::with_ui;
-use super::js_fn;
+use super::{js_fn, this_node_id};
 
 /// Registry key holding the window-level listeners.
 const WINDOW_KEY: &str = "window";
+
+/// `element.scrollIntoView([arg])` — scroll the page so this element lands at
+/// the requested alignment. `arg` is `true` (`'start'`), `false` (`'end'`) or
+/// an options object (`{block: 'start'|'center'|'end', behavior}`). The
+/// element's document rect is resolved by the input loop from the hit map
+/// (the script side has no geometry); `smooth` rides the scroll animation.
+pub(crate) fn native_scroll_into_view(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let first = args.first().cloned().unwrap_or_else(JsValue::undefined);
+    let (block, smooth) = if first.is_object() {
+        let obj = first.as_object().expect("is_object");
+        let block = if obj.has_property(js_string!("block"), context)? {
+            let keyword = obj
+                .get(js_string!("block"), context)?
+                .to_string(context)?
+                .to_std_string_escaped();
+            match keyword.as_str() {
+                "center" => ScrollIntoViewBlock::Center,
+                "end" => ScrollIntoViewBlock::End,
+                _ => ScrollIntoViewBlock::Start,
+            }
+        } else {
+            ScrollIntoViewBlock::Start
+        };
+        let smooth = if obj.has_property(js_string!("behavior"), context)? {
+            let behavior = obj
+                .get(js_string!("behavior"), context)?
+                .to_string(context)?
+                .to_std_string_escaped();
+            behavior.eq_ignore_ascii_case("smooth")
+        } else {
+            false
+        };
+        (block, smooth)
+    } else if first.as_boolean() == Some(false) {
+        (ScrollIntoViewBlock::End, false)
+    } else {
+        (ScrollIntoViewBlock::Start, false)
+    };
+    if let Some(rc) = super::with_state() {
+        rc.borrow_mut().render_cmds.push(RenderCmd::ScrollIntoView {
+            node_id,
+            block,
+            smooth,
+        });
+    }
+    Ok(JsValue::undefined())
+}
 
 // ============================================================
 // viewport / scroll getters

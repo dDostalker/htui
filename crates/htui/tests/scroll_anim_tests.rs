@@ -4,9 +4,10 @@
 
 use std::time::{Duration, Instant};
 
+use htui::layout::Rect;
 use htui::tui::graph_api::{
-    InputState, ScrollAnim, ScrollTarget, active_scroll_target, ease_out_cubic,
-    scroll_anim_duration, step_target,
+    InputState, ScrollAnim, ScrollIntoViewBlock, ScrollTarget, active_scroll_target,
+    ease_out_cubic, scroll_anim_duration, scroll_into_view_target, step_target,
 };
 
 #[test]
@@ -140,4 +141,38 @@ fn active_scroll_target_reports_only_the_running_axis() {
     let now = Instant::now();
     state.scroll_anim = Some(ScrollAnim::start(ScrollTarget::Page, 0, 90, now));
     assert_eq!(active_scroll_target(&state, ScrollTarget::Page), Some(90));
+}
+
+#[test]
+fn scroll_into_view_target_aligns_by_block() {
+    // A 10-row element at document row 100 in a 24-row viewport.
+    let rect = Rect::new(0, 100, 40, 10);
+    assert_eq!(
+        scroll_into_view_target(rect, ScrollIntoViewBlock::Start, 24),
+        100,
+        "start: element top at the viewport top"
+    );
+    assert_eq!(
+        scroll_into_view_target(rect, ScrollIntoViewBlock::Center, 24),
+        93,
+        "center: (24 - 10) / 2 = 7 rows above the element"
+    );
+    assert_eq!(
+        scroll_into_view_target(rect, ScrollIntoViewBlock::End, 24),
+        86,
+        "end: element bottom 100 + 10 at the viewport bottom"
+    );
+    // An element taller than the viewport centers to its own top (no
+    // negative scroll).
+    let tall = Rect::new(0, 100, 40, 60);
+    assert_eq!(
+        scroll_into_view_target(tall, ScrollIntoViewBlock::Center, 24),
+        100
+    );
+    // The end alignment of a document-top element floors at 0.
+    let top = Rect::new(0, 0, 40, 10);
+    assert_eq!(
+        scroll_into_view_target(top, ScrollIntoViewBlock::End, 24),
+        0
+    );
 }

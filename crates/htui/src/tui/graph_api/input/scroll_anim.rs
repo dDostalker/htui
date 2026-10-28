@@ -24,6 +24,37 @@ pub enum ScrollTarget {
     Container(NodeId),
 }
 
+/// The `block` alignment of JS `element.scrollIntoView(arg)`: where the
+/// element lands inside the viewport.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollIntoViewBlock {
+    /// Align the element's top with the viewport top (also `true`'s meaning).
+    Start,
+    /// Center the element in the viewport.
+    Center,
+    /// Align the element's bottom with the viewport bottom (also `false`'s
+    /// meaning).
+    End,
+}
+
+/// The page scroll offset that puts `rect` (a document-space element rect)
+/// at `block` alignment inside a `viewport_rows`-tall viewport.
+pub fn scroll_into_view_target(
+    rect: crate::layout::Rect,
+    block: ScrollIntoViewBlock,
+    viewport_rows: u32,
+) -> u32 {
+    let (y, height) = (
+        u32::try_from(rect.y).unwrap_or(u32::MAX),
+        u32::try_from(rect.height).unwrap_or(u32::MAX),
+    );
+    match block {
+        ScrollIntoViewBlock::Start => y,
+        ScrollIntoViewBlock::Center => y.saturating_sub(viewport_rows.saturating_sub(height) / 2),
+        ScrollIntoViewBlock::End => y.saturating_add(height).saturating_sub(viewport_rows),
+    }
+}
+
 /// Input-loop poll cadence while a scroll animation is active (~60 fps, the
 /// same beat the script layer's `requestAnimationFrame` runs at).
 pub const ANIM_POLL_MS: u64 = 16;
