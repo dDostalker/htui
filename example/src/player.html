@@ -65,8 +65,9 @@
 
   /* ---------- layout ---------- */
   .main-wrap {
-    flex: 1 1 auto;
-    min-height: 4ch;
+    flex: 0 0 auto;
+    height: clamp(3ch, 40vh, 10ch);
+    min-height: 3ch;
     margin: 1ch 1ch 0 1ch;
     overflow-y: auto;
   }
@@ -256,7 +257,7 @@
   .tab.on { color: #43e5a0; background-color: #0f2a22; }
   .lib-meta { flex: 1; text-align: right; color: #556085; }
   .plist {
-    height: clamp(2ch, 18vh, 8ch);
+    height: clamp(2ch, 10vh, 5ch);
     overflow-y: auto;
   }
 
@@ -321,17 +322,157 @@
   .foot-key { color: #8b96b5; }
 
   /* ---------- small-window behavior (@media, htui supports
-     max/min-width/height in cell counts) — shrink the terminal to see the
-     cards drop out in priority order: spectrum first, then lyrics ---------- */
-  @media (max-width: 60ch) {
-    .viz { display: none; }
+     max/min-width/height in cell counts) — shrink the terminal and controls
+     drop out in priority order: decorative metadata first, then side cards,
+     then page chrome. */
+  @media (max-width: 72ch) {
+    .feed,
+    .partist {
+      display: none;
+    }
   }
-  @media (max-height: 14) {
-    .card-lyr, .viz { display: none; }
+
+  @media (max-width: 64ch) {
+    .side {
+      flex-basis: 24ch;
+      min-width: 0;
+    }
+    .pq { display: none; }
   }
+
+  @media (max-width: 56ch) {
+    .side,
+    .ptag {
+      display: none;
+    }
+  }
+
+  @media (max-width: 48ch) {
+    .controls { flex-wrap: wrap; }
+    .btn-main {
+      flex: 1 1 auto;
+      text-align: center;
+    }
+    #btn-repeat,
+    #btn-shuffle {
+      display: none;
+    }
+  }
+
   @media (max-width: 40ch) {
-    .foot-key { display: none; }
+    .foot-key,
+    .badges,
+    .times,
+    .vol {
+      display: none;
+    }
   }
+
+  @media (max-width: 32ch) {
+    #state-label,
+    .heart,
+    .idx {
+      display: none;
+    }
+    .row { gap: 1ch; }
+    .aux,
+    .transport {
+      display: none;
+    }
+  }
+
+  @media (max-height: 16ch) {
+    .viz { display: none; }
+    .main-wrap,
+    .lib-wrap,
+    .footer {
+      margin: 0 1ch;
+    }
+    .main-wrap {
+      flex: 0 0 auto !important;
+      height: 5ch !important;
+      min-height: 3ch !important;
+    }
+    .plist { height: clamp(2ch, 8vh, 3ch); }
+  }
+
+  @media (max-height: 12ch) {
+    .footer,
+    .card-lyr {
+      display: none;
+    }
+    .top {
+      border-width: 0;
+      padding: 0 1ch;
+    }
+    .main-wrap,
+    .lib-wrap,
+    .seek {
+      margin-top: 0;
+    }
+    .main-wrap {
+      height: 3ch !important;
+      min-height: 2ch !important;
+    }
+    .card-head { margin-bottom: 0; }
+    .np.card {
+      border-width: 0;
+      padding: 0;
+    }
+    .card-head,
+    .art,
+    .np-titlerow,
+    .np-artist,
+    .badges,
+    .spacer,
+    .wave,
+    .seek {
+      display: none;
+    }
+    .np-body { height: 3ch; }
+    .controls { margin-top: 0; }
+    .plist { height: 2ch; }
+  }
+
+  @media (max-height: 9ch) {
+    .main-wrap {
+      height: 2ch !important;
+      min-height: 2ch !important;
+    }
+    .lib-head { margin-bottom: 0; }
+    .np.card {
+      border-width: 0;
+      padding: 0;
+    }
+    .card-head,
+    .art,
+    .np-titlerow,
+    .np-artist,
+    .badges,
+    .spacer,
+    .wave,
+    .times,
+    .seek,
+    .vol {
+      display: none;
+    }
+    .np-body {
+      height: 2ch;
+      min-height: 2ch;
+      overflow: hidden;
+      align-items: center;
+    }
+    .np-info {
+      flex: 1 1 auto;
+      height: 2ch;
+    }
+    .controls {
+      height: 2ch;
+      margin-top: 0;
+      flex-wrap: nowrap;
+    }
+  }
+
 </style>
 </head>
 <body>
@@ -383,11 +524,11 @@
             aria-label="Seek" oninput="scrub(this.value)">
 
           <div class="controls">
-            <span class="btn" onclick="seek(-10)">-10</span>
-            <span class="btn" onclick="prev()">&#9664;&#9664;</span>
+            <span class="btn aux" onclick="seek(-10)">-10</span>
+            <span class="btn transport" onclick="prev()">&#9664;&#9664;</span>
             <span id="btn-play" class="btn btn-main" onclick="togglePlay()">&#9654; PLAY</span>
-            <span class="btn" onclick="next()">&#9654;&#9654;</span>
-            <span class="btn" onclick="seek(10)">+10</span>
+            <span class="btn transport" onclick="next()">&#9654;&#9654;</span>
+            <span class="btn aux" onclick="seek(10)">+10</span>
             <span id="btn-repeat" class="btn" onclick="toggleRepeat()">rep</span>
             <span id="btn-shuffle" class="btn" onclick="toggleShuffle()">shuf</span>
           </div>
