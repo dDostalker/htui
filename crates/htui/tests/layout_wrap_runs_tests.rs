@@ -225,3 +225,41 @@ fn cjk_kinsoku_applies_under_break_all() {
         "no visual line may open with the comma: {lines:?}"
     );
 }
+
+#[test]
+fn word_spacing_wrap_budget_matches_painted_advance() {
+    // Regression: the collapsed space token was re-counted at bare font
+    // width while the reconstructed space run advances 1 + word spacing
+    // cells — wrap packed a..j onto one "cheap" line (19 ≤ 20) whose real
+    // painted width was 60, so the paint pass truncated every letter after
+    // d. The budget must equal the painted advance.
+    let runs = ["a b c d e f g h i j k"]
+        .iter()
+        .map(|s| {
+            let mut r = InlineRun::new(*s, FontStyle::empty(), None, None);
+            r.word_spacing = 4;
+            r
+        })
+        .collect::<Vec<_>>();
+    let lines = wrap_runs(
+        &runs,
+        20,
+        1,
+        WhiteSpace::Normal,
+        WordBreak::Normal,
+        OverflowWrap::Normal,
+        0,
+    );
+    for (i, line) in lines.iter().enumerate() {
+        let sum: usize = line.iter().map(|r| r.width_at(1)).sum();
+        assert!(sum <= 20, "line {i} exceeds width ({sum}): {line:?}");
+    }
+    let joined: String = lines
+        .iter()
+        .flat_map(|l| l.iter().map(|r| r.text.as_str()))
+        .collect();
+    // Spaces legitimately drop at wrap points; every letter must survive.
+    for ch in "abcdefghijk".chars() {
+        assert!(joined.contains(ch), "letter {ch} lost: {joined:?}");
+    }
+}

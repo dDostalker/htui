@@ -461,3 +461,58 @@ fn text_overflow_ellipsis_clips_nowrap() {
         "clipped nowrap line ends with ellipsis, got {row:?}"
     );
 }
+
+#[test]
+fn word_spacing_wrap_keeps_every_word_and_fits() {
+    // Regression (right-overflow / silent content loss): the collapsed
+    // space used to be re-counted at bare font width (1 cell) while paint
+    // advanced by the real 5-cell space, so wrap packed far more words per
+    // line than the row could hold — the paint pass then truncated the
+    // line tail (whole letters vanished) and spaced lines ran past the box
+    // edge. 26 letters × 5-cell gaps = 151 cells force wrapping at 80.
+    init();
+    let (rows, _) = render_rows(
+        "<p style=\"word-spacing: 4ch\">a b c d e f g h i j k l m n o p q r s t u v w x y z</p>",
+        "",
+    );
+    let canvas: String = rows.concat();
+    for ch in "abcdefghijklmnopqrstuvwxyz".chars() {
+        assert!(canvas.contains(ch), "letter {ch} lost, rows={rows:?}");
+    }
+    // Every content row must respect the 80-cell budget: at 5-cell gaps
+    // that means at most 16 letters per row.
+    for row in rows.iter() {
+        let letters = row.chars().filter(|c| c.is_ascii_lowercase()).count();
+        assert!(
+            letters <= 16,
+            "row overflows the width ({letters} letters): {row:?}"
+        );
+    }
+}
+
+#[test]
+fn letter_spacing_wrap_keeps_every_word() {
+    // Same class of regression on the letter axis: the wrap budget must
+    // include the per-grapheme letter spacing so wrapped lines keep all
+    // their words within the width.
+    init();
+    let (rows, _) = render_rows(
+        "<p style=\"letter-spacing: 1ch\">aaa bbb ccc ddd eee fff ggg hhh iii jjj kkk lll mmm nnn ooo ppp</p>",
+        "",
+    );
+    // Spacing columns paint as blank cells, so compare with blanks removed.
+    let canvas: String = rows.concat().replace(' ', "");
+    for word in [
+        "aaa", "bbb", "ccc", "ddd", "eee", "fff", "ggg", "hhh", "iii", "jjj", "kkk", "lll", "mmm",
+        "nnn", "ooo", "ppp",
+    ] {
+        assert!(canvas.contains(word), "word {word} lost, rows={rows:?}");
+    }
+    // No content row may exceed the terminal width.
+    for row in rows.iter() {
+        assert!(
+            row.trim_end().chars().count() <= 80,
+            "row exceeds the width: {row:?}"
+        );
+    }
+}
