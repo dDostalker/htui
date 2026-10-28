@@ -147,7 +147,10 @@ impl ScrollAnim {
         let t =
             now.saturating_duration_since(self.start).as_secs_f64() / self.duration.as_secs_f64();
         let eased = ease_out_cubic(t);
-        (f64::from(self.from) + f64::from(self.to - self.from) * eased).round() as u32
+        let distance = self.to as i64 - self.from as i64;
+        (self.from as f64 + distance as f64 * eased)
+            .max(0.0)
+            .round() as u32
     }
 
     /// Whether the tween has run its full duration (the position is then

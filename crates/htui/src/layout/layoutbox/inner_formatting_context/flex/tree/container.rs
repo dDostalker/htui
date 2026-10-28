@@ -360,17 +360,28 @@ pub(super) fn layout_flex_container(
 
     let mut outer_height = match preallocated_height {
         Some(height) => {
-            // A pre-allocated rect (this flex container is itself a flex
-            // item) fixes the border-box height, but the lines laid out
-            // inside can grow taller than the parent's max-content measure
-            // assumed (text wrapping at the item's final width). Grow the
-            // rect to cover the actual content instead of clipping the last
-            // rows — mirrors `layout_block`'s pre-allocated growth.
             let inner_v = edges.padding.top
                 + edges.padding.bottom
                 + edges.border.top.thickness()
                 + edges.border.bottom.thickness();
-            height.max(lines_total_height.saturating_add(inner_v))
+            let owns_height = node.css_attr.scrolls_vertically()
+                || node.css_attr.get_overflow() == crate::html::css_parse::Overflow::Clip
+                || node
+                    .css_attr
+                    .get_height(Some(height), child_context.font, child_context.viewport)
+                    .is_some();
+            if owns_height {
+                // A scrollable / clipping / explicitly sized flex container
+                // keeps the rectangle selected by the parent. Content taller
+                // than that rectangle belongs to its scroll viewport or to
+                // overflow handling; growing the box here would push sibling
+                // panels out of a viewport-fit shell.
+                height
+            } else {
+                // Otherwise the parent's max-content measure can under-count
+                // lines rewrapped at the final width; grow to expose content.
+                height.max(lines_total_height.saturating_add(inner_v))
+            }
         }
         None if has_explicit_height => {
             if node.css_attr.get_overflow() == crate::html::css_parse::Overflow::Clip {

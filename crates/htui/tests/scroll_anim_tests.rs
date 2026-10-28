@@ -75,6 +75,19 @@ fn position_hits_both_endpoints_exactly() {
 }
 
 #[test]
+fn position_interpolates_upward_scrolls_without_overflow() {
+    let start = Instant::now();
+    let anim = ScrollAnim::start(ScrollTarget::Page, 500, 100, start);
+    assert_eq!(anim.position(start), 500, "starts at `from`");
+    let mid = anim.position(start + Duration::from_millis(140));
+    assert!(
+        (100..=500).contains(&mid),
+        "midpoint stays in the tween range"
+    );
+    assert_eq!(anim.position(start + Duration::from_millis(280)), 100);
+}
+
+#[test]
 fn position_is_monotonic_and_front_loaded() {
     let start = Instant::now();
     // 300 rows * 3ms = 900ms, clamped to the 280ms maximum.

@@ -2462,3 +2462,29 @@ fn test_unlayouttable_flex_item_does_not_desync_align_content() {
          container even when a sibling item failed to lay out, got row {a_row}"
     );
 }
+
+#[test]
+fn flex_column_honors_explicit_item_height_with_clipped_overflow() {
+    init();
+    // A definite flex item with clipping owns its main-axis size. Content
+    // taller than that size must not grow the item and push later siblings
+    // out of a viewport-fit shell.
+    let html = r#"
+        <div class="container">
+            <div class="panel"><p>one</p><p>two</p><p>three</p><p>four</p><p>five</p></div>
+            <div class="footer">FOOT</div>
+        </div>
+    "#;
+    let css = r#"
+        .container { display: flex; flex-direction: column; height: 8ch; overflow: hidden; }
+        .panel { height: 3ch; overflow: hidden; }
+    "#;
+    let (rows, _) = render_rows(html, css);
+    assert!(rows[1].starts_with("one"));
+    assert!(rows[3].starts_with("FOOT"));
+    assert!(
+        rows[3].starts_with("FOOT"),
+        "the next flex item must start immediately below the fixed panel: {:?}",
+        &rows[0..5]
+    );
+}

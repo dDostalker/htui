@@ -217,6 +217,10 @@ pub(crate) fn paint_input(
     let Some(visible) = intersect_rects(Rect::new(r.x, r.y, r.width, r.height), clip) else {
         return;
     };
+    // Control chrome and replaced glyphs are painted directly by cell; reduce
+    // the control rect to the inherited clip so a partially visible field
+    // cannot overwrite a parent border or sibling cell.
+    let r = visible;
 
     let node = &arena[lb.node_id];
     let input_type = node
@@ -249,6 +253,9 @@ pub(crate) fn paint_input(
         };
 
         if range_is_vertical(node) {
+            if content.height == 0 {
+                return;
+            }
             let track_x = content.x;
             let thumb_y = content
                 .y
@@ -271,11 +278,12 @@ pub(crate) fn paint_input(
             return;
         }
 
-        let thumb_x = content
-            .x
-            .saturating_add(spec.thumb_at(content.width.max(1)));
+        if content.width == 0 {
+            return;
+        }
+        let thumb_x = content.x.saturating_add(spec.thumb_at(content.width));
         let track_y = content.y;
-        for col in 0..content.width.max(1) {
+        for col in 0..content.width {
             let abs_col = content.x.saturating_add(col);
             let (glyph, color) = if abs_col == thumb_x {
                 ('\u{25CF}', track_fg)

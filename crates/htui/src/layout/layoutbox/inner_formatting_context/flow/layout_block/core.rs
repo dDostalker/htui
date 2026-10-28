@@ -351,19 +351,32 @@ pub fn layout_block(
 
     let outer_height = match preallocated_height {
         Some(height) => {
+            let inner_v = edges.padding.vertical() + edges.border.vertical_thickness();
+            let sizing = node.css_attr.get_box_sizing();
+            let to_border = |h: usize| match sizing {
+                BoxSizing::BorderBox => h,
+                BoxSizing::ContentBox => h.saturating_add(inner_v),
+            };
             if node.css_attr.scrolls_vertically() {
                 // A scrollable flex item owns its allocated height; growing
                 // it to fit content would bypass the scroll container.
-                let inner_v = edges.padding.vertical() + edges.border.vertical_thickness();
                 height.max(inner_v).max(1)
+            } else if let Some(declared) = node
+                .css_attr
+                .get_height(Some(height), child_context.font, child_context.viewport)
+                .map(to_border)
+            {
+                // An explicit CSS height wins over a stretched / distributed
+                // pre-allocation. Content that is taller overflows the fixed
+                // frame (and is clipped when the element requests clipping);
+                // this is also what lets viewport-sized shells remain the
+                // same height as their content changes.
+                declared.max(1)
             } else {
-                // A pre-allocated rect (flex item placement) fixes the item's
-                // border-box height, but it must never clip the item's own
-                // content: the measured intrinsic size can under-count the
-                // real layout (e.g. `<hr>` reserves a trailing row, wide runs
-                // wrap to more lines than the max-content measure assumed).
-                // Grow the rect to fit the content instead of letting the last
-                // row bleed into the border.
+                // Without a declared height, a measured intrinsic size can
+                // under-count the real layout (e.g. `<hr>` reserves a trailing
+                // row, wide runs wrap after max-content measurement). Keep the
+                // flex-compatible growth so the last row is not clipped.
                 let content_border = content_height
                     .max(line_height_cells.max(1))
                     .saturating_add(edges.padding.top)

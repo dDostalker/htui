@@ -155,6 +155,10 @@ pub(crate) fn paint_textarea(
     let Some(visible) = intersect_rects(Rect::new(r.x, r.y, r.width, r.height), clip) else {
         return;
     };
+    // Control chrome and replaced glyphs are painted directly by cell; reduce
+    // the control rect to the inherited clip so a partially visible field
+    // cannot overwrite a parent border or sibling cell.
+    let r = visible;
 
     let node = &arena[lb.node_id];
     // Focused editing state wins; otherwise the value is the node's text

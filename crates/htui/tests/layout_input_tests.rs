@@ -1140,3 +1140,26 @@ fn range_input_renders_track_and_thumb() {
         "value 2 of 4 places the thumb halfway across a 9-cell track"
     );
 }
+
+#[test]
+fn clipped_range_control_does_not_paint_over_parent_border() {
+    init();
+    let html = r#"<style>
+        #shell { width: 10ch; height: 3ch; overflow: hidden; border: 1ch solid #888; }
+        input { width: 20ch; margin-left: 1ch; }
+    </style>
+    <div id="shell"><input type="range" min="0" max="9" step="1" value="4"></div>"#;
+    let (_, tl) = render_rows(html);
+    let cols = 80;
+    let word = |x: usize, y: usize| tl.layout[y * cols + x].word.as_str().to_string();
+
+    assert_eq!(word(0, 1), "\u{2502}", "left border stays intact");
+    assert_eq!(word(9, 1), "\u{2502}", "right border stays intact");
+    assert_eq!(word(10, 1), " ", "control must stop at its inherited clip");
+    assert_ne!(
+        word(2, 1),
+        " ",
+        "the visible track starts inside the parent"
+    );
+    assert_ne!(word(8, 1), " ", "the visible track ends inside the parent");
+}
