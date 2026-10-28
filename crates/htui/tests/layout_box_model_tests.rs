@@ -884,3 +884,39 @@ fn overflow_hidden_clips_nowrap_at_the_box_width() {
         "the first ten columns render: {row0:?}"
     );
 }
+
+#[test]
+fn overflow_visible_bordered_box_clips_at_the_frame_edge() {
+    init();
+    // A visibly-overflowing **bordered** box must not let its own glyphs
+    // paint past the drawn frame into the neighbouring area (the terminal
+    // "出框" artefact): a long word wider than the content width may
+    // underlap the right border column but stops at the border-box right
+    // edge. A borderless box keeps the browser-faithful spill (covered by
+    // `overflow_visible_lets_nowrap_paint_past_the_box_width` above).
+    let (term_map, tl) = draw(
+        r#"<div class="n">short supercalifragilistic word</div>"#,
+        "body { margin: 0ch; } .n { width: 12ch; border: 1ch solid red; }",
+    );
+    let cols = term_map.columns as usize;
+    let row1: String = tl.layout[cols..2 * cols]
+        .iter()
+        .map(|b| b.word.as_str())
+        .collect();
+    // Border-box width 12 = 2 border columns + 10 content columns: the long
+    // word fills the whole content row up to the right border.
+    assert!(
+        row1.contains("short supe"),
+        "the long word renders up to the frame edge: {row1:?}"
+    );
+    assert!(
+        row1.trim_end().ends_with('│'),
+        "the right border glyph survives: {row1:?}"
+    );
+    // Nothing renders right of the frame's border-box right edge (col 11).
+    let tail: String = row1.chars().skip(12).collect();
+    assert!(
+        tail.trim().is_empty(),
+        "no glyphs escape the frame: {row1:?}"
+    );
+}

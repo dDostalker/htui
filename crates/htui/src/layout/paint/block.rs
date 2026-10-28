@@ -250,6 +250,24 @@ pub(crate) fn paint_block(
         );
         let overflow_visible =
             node.css_attr.get_overflow() != crate::html::css_parse::Overflow::Clip;
+        // Horizontal bound for the box's own glyph stream, in columns from
+        // the row start (the paint pass re-bases it on every visual line).
+        // - clipping box: the content-box right edge (historic behaviour);
+        // - visibly-overflowing **bordered** box: the frame (border-box)
+        //   right edge — a long / nowrap word may underlap the right border
+        //   column but must not paint past the drawn frame into the
+        //   neighbouring area (the terminal's "出框" artefact);
+        // - visibly-overflowing borderless box: the row's canvas edge —
+        //   browser-faithful `overflow: visible` spill into the page,
+        //   still row-bounded so the flat buffer never wraps a row.
+        let has_right_frame = box_edges.border.right.thickness() > 0;
+        let h_bound_cols = if !overflow_visible {
+            (content_row % cols).saturating_add(content_width)
+        } else if has_right_frame {
+            r.x.saturating_add(r.width).min(cols)
+        } else {
+            cols
+        };
         if overflow_visible {
             paint_runs(
                 canvas,
@@ -262,7 +280,7 @@ pub(crate) fn paint_block(
                 lb.paint_style.font_size_cells,
                 lb.paint_style.line_height_cells,
                 clip,
-                true,
+                h_bound_cols,
                 lb.paint_style.text_indent,
             );
         } else if let Some(runs_clip) = intersect_rects(content_clip, clip) {
@@ -277,7 +295,7 @@ pub(crate) fn paint_block(
                 lb.paint_style.font_size_cells,
                 lb.paint_style.line_height_cells,
                 runs_clip,
-                false,
+                h_bound_cols,
                 lb.paint_style.text_indent,
             );
         }
@@ -352,7 +370,7 @@ fn paint_column_layout(
                 col_clip,
                 // Multicol fragmentation is intrinsic clipping: each column
                 // bounds its own lines regardless of the box's overflow.
-                false,
+                (col_cell_start % cols).saturating_add(col_width),
                 0,
             );
         }

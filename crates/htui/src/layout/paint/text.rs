@@ -48,7 +48,7 @@ pub(crate) fn paint_runs(
     font_size_cells: usize,
     line_height_cells: usize,
     clip: Rect,
-    overflow_visible: bool,
+    h_bound_cols: usize,
     first_line_indent: usize,
 ) {
     if lines.is_empty() {
@@ -78,6 +78,10 @@ pub(crate) fn paint_runs(
         }
         let line_start =
             cell_start.saturating_add(line_idx.saturating_mul(line_h).saturating_mul(cols));
+        // The bound is row-relative (columns from the row start), so every
+        // visual line resolves it against its own row.
+        let line_row_base = line_start.saturating_sub(line_start % cols);
+        let h_end = line_row_base.saturating_add(h_bound_cols.min(cols));
         // `text-indent` shifts the first visual line right and narrows its
         // alignment basis (the wrap pass already reserved the budget).
         let indent = if line_idx == 0 { first_line_indent } else { 0 };
@@ -91,12 +95,17 @@ pub(crate) fn paint_runs(
             effective_bg,
             text_fill,
             font_size_cells,
-            overflow_visible,
+            h_end,
         );
     }
 }
 
 /// Render a single visual line's runs.
+///
+/// `h_end` is the exclusive flat-index bound the glyph stream stops at —
+/// the caller decides the overflow policy (content-box edge for clipping
+/// boxes, the frame edge for a visibly-overflowing bordered box, the row's
+/// canvas edge for a borderless one).
 #[allow(clippy::too_many_arguments)]
 fn paint_one_line(
     canvas: &mut PaintCanvas<'_>,
@@ -107,7 +116,7 @@ fn paint_one_line(
     effective_bg: Option<BackgroundFill<'_>>,
     text_fill: Option<BackgroundFill<'_>>,
     font_size_cells: usize,
-    overflow_visible: bool,
+    h_end: usize,
 ) {
     let total_width: usize = runs.iter().map(|r| r.width_at(font_size_cells)).sum();
     let total_width = total_width.min(block_width);
@@ -116,22 +125,7 @@ fn paint_one_line(
         TextAlign::Center => block_width.saturating_sub(total_width) / 2,
         TextAlign::Right => block_width.saturating_sub(total_width),
     };
-    // The text sits inside the content area (rect shrunk by border + padding);
-    // `cell_start` is the first column of the content row and `block_width`
-    // is the content-box width. Clip the painted text to this range so a long
-    // inline run does not bleed into subsequent rows (or off the right edge
-    // of the canvas) and overwrite neighbouring boxes. An `overflow: visible`
-    // box extends the bound to the row's canvas edge instead — a nowrap line
-    // wider than the box paints beyond it (still bounded by the row so the
-    // flat buffer never wraps into the next row).
-    let cols = canvas.columns as usize;
-    let row_end = if overflow_visible {
-        cell_start
-            .saturating_sub(cell_start % cols)
-            .saturating_add(cols)
-    } else {
-        cell_start.saturating_add(block_width)
-    };
+    let row_end = h_end;
     let mut index = cell_start + offset;
     for run in runs {
         if run.is_empty() {
