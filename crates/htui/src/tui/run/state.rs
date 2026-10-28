@@ -18,7 +18,9 @@ use crate::layout::layoutbox::geometry::{
 };
 use crate::source::SharedSourceText;
 use crate::tdom::node::{NodeArena, NodeId};
-use crate::tui::graph_api::{InputRenderState, RenderCmd, SelectionMode, TermLayout};
+use crate::tui::graph_api::{
+    InputRenderState, RenderCmd, SelectionMode, SharedScrollbarVisibility, TermLayout,
+};
 
 use super::overlay::apply_select_overlay;
 use super::pipeline::flush_frame;
@@ -207,6 +209,8 @@ pub(super) struct RenderState {
     pub(super) selection_text: Arc<Mutex<String>>,
     /// The `<select>` dropdown overlay currently painted (`None` = none).
     pub(super) open_select: Option<OpenSelect>,
+    /// Shared with the input loop; controls which scrollbar chrome paints.
+    pub(super) scrollbars_visible: SharedScrollbarVisibility,
     pub(super) max_scroll: Arc<AtomicU32>,
 }
 

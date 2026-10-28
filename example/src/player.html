@@ -5,8 +5,8 @@
   Theme: "neon night" — charcoal slate + mint/cyan/violet/coral accents.
   Features: animated spectrum, playlist scrolling, seek/volume, lyrics, queue,
   favorites with filtering, seek, repeat/shuffle, volume, live clock.
-  Layout: viewport-fit — a 100vh flex column; flexible panels degrade
-  gracefully and use scroll containers when a terminal is very small.
+  Layout: viewport-fit with a collapsible library sidebar and fixed playback dock.
+  Inner lists scroll instead of allowing controls to leave the screen.
 -->
 <html lang="en">
 <head>
@@ -18,16 +18,16 @@
     color: #e4eaf7;
     margin: 0;
     height: 100vh;
+    padding-bottom: 4ch;
     display: flex;
     flex-direction: column;
     overflow: hidden;
   }
 
   /* ---------- viewport-fit frame ----------
-     The shell is a flex column: now playing absorbs the remaining height
-     while the playlist gets a bounded viewport-relative height. Small
-     terminals use clipping and native scroll containers instead of letting
-     the page overflow or controls overlap. */
+     The playback dock is pinned to the viewport so seek and volume cannot be
+     pushed off screen. Now-playing and library use viewport-relative heights;
+     their inner lists scroll when decorative content does not fit. */
 
   /* ---------- top bar ---------- */
   .top {
@@ -66,27 +66,69 @@
   /* ---------- layout ---------- */
   .main-wrap {
     flex: 0 0 auto;
-    height: clamp(3ch, 40vh, 10ch);
-    min-height: 3ch;
+    height: 60vh;
+    min-height: 0;
     margin: 1ch 1ch 0 1ch;
-    overflow-y: auto;
+    overflow: hidden;
   }
-  .main { display: flex; gap: 1ch; align-items: stretch; }
-  .np { flex: 1 1 0; display: flex; flex-direction: column; }
+  .main { height: 60vh; display: flex; gap: 1ch; align-items: stretch; overflow: hidden; }
+  .np { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .np-expand { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
   .side {
-    flex: 0 1 30%;
-    min-width: 12ch;
+    flex: 0 0 30%;
+    min-width: 14ch;
+    height: 60vh;
+    padding-right: 1ch;
     display: flex;
     flex-direction: column;
     gap: 1ch;
+    overflow: hidden;
+  }
+  .side.collapsed { display: none; }
+  .side-scroll {
+    flex: 0 0 auto;
+    height: 15vh;
+    min-height: 0;
     overflow-y: auto;
   }
+  .side .card + .card { margin-top: 1ch; }
 
   .card {
     border: 1ch solid #1f2740;
     border-radius: 1;
     background-color: #10141d;
     padding: 1ch;
+  }
+
+  /* The dock is intentionally frameless: these control rows are the
+     guaranteed minimum UI. Borders would waste rows at terminal heights
+     where every row matters. */
+  .playbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+    padding: 0 1ch;
+    display: flex;
+    flex-direction: column;
+    background-color: #10141d;
+  }
+  .playbar-row {
+    display: flex;
+    gap: 1ch;
+    align-items: center;
+    margin-top: 1ch;
+  }
+  .playbar .controls { flex: 0 1 auto; margin-top: 0; }
+  #lib-toggle {
+    flex-shrink: 0;
+    min-width: 5ch;
+  }
+  .playbar .vol {
+    flex: 1 1 10ch;
+    min-width: 0;
+    margin-top: 0;
   }
   .card-head {
     display: flex;
@@ -176,7 +218,7 @@
   .wave-off { color: #24304e; }
   .times { display: flex; justify-content: space-between; color: #556085; }
   .range { height: 1ch; }
-  .seek { width: 100%; margin-top: 1ch; color: #43e5a0; }
+  .seek { width: 100%; color: #43e5a0; }
 
   .controls { display: flex; gap: 1ch; align-items: center; margin-top: 1ch; }
   .btn {
@@ -201,7 +243,7 @@
   .btn-main:hover { background-color: #6ff0b8; color: #0b0e14; }
   .btn.on { color: #f5c169; background-color: #2a2410; }
 
-  .vol { display: flex; gap: 1ch; align-items: center; margin-top: 1ch; }
+  .vol { display: flex; gap: 1ch; align-items: center; }
   .vol-label { color: #556085; flex-shrink: 0; }
   .vol-range { flex: 1; color: #43e5a0; }
   .vol-pct { color: #56c8f5; }
@@ -234,15 +276,21 @@
     color: #556085;
   }
 
-  .card-lyr { flex: 1; }
+  .card-lyr { min-height: 6ch; }
   .ly { color: #4a5372; }
   .ly::before { content: "   "; }
   .ly.on { color: #43e5a0; font-weight: bold; }
   .ly.on::before { content: "▸  "; }
 
-  /* ---------- library ---------- */
-  .lib-wrap { flex: 0 0 auto; margin: 1ch 1ch 0 1ch; overflow: hidden; }
-  .lib { display: flex; flex-direction: column; }
+  /* ---------- library sidebar ---------- */
+  .library {
+    flex: 0 0 auto;
+    height: 45vh;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .lib { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
   .lib-head { flex: 0 0 auto; display: flex; align-items: center; gap: 2ch; margin-bottom: 1ch; }
   .lib-title { font-weight: bold; color: #ffffff; text-transform: uppercase; }
   .tabs { display: flex; gap: 1ch; }
@@ -255,9 +303,11 @@
   }
   .tab:hover { color: #ffffff; background-color: #26314a; }
   .tab.on { color: #43e5a0; background-color: #0f2a22; }
-  .lib-meta { flex: 1; text-align: right; color: #556085; }
+  .lib-meta { display: none; }
   .plist {
-    height: clamp(2ch, 10vh, 5ch);
+    flex: 0 0 auto;
+    height: 20vh;
+    min-height: 2ch;
     overflow-y: auto;
   }
 
@@ -321,158 +371,80 @@
   }
   .foot-key { color: #8b96b5; }
 
-  /* ---------- small-window behavior (@media, htui supports
-     max/min-width/height in cell counts) — shrink the terminal and controls
-     drop out in priority order: decorative metadata first, then side cards,
-     then page chrome. */
+  /* ---------- responsive behaviour ----------
+     @media units are terminal cells (1ch = 1 column / 1 row).
+     Core playback controls (.playbar) are NEVER hidden — only decorative
+     content is progressively removed as the viewport shrinks. */
   @media (max-width: 72ch) {
     .feed,
-    .partist {
-      display: none;
-    }
+    .partist { display: none; }
   }
 
   @media (max-width: 64ch) {
-    .side {
-      flex-basis: 24ch;
-      min-width: 0;
-    }
+    .side { flex-basis: 24ch; min-width: 0; }
     .pq { display: none; }
   }
 
   @media (max-width: 56ch) {
-    .side,
-    .ptag {
-      display: none;
-    }
+    .ptag { display: none; }
   }
 
   @media (max-width: 48ch) {
+    .clock { display: none; }
+    .playbar-row { flex-wrap: wrap; }
     .controls { flex-wrap: wrap; }
-    .btn-main {
-      flex: 1 1 auto;
-      text-align: center;
-    }
+    .playbar .vol { flex-basis: 100%; }
+    .btn-main { flex: 1 1 auto; text-align: center; }
     #btn-repeat,
-    #btn-shuffle {
-      display: none;
-    }
+    #btn-shuffle { display: none; }
   }
 
   @media (max-width: 40ch) {
     .foot-key,
     .badges,
-    .times,
-    .vol {
-      display: none;
-    }
+    .times { display: none; }
   }
 
   @media (max-width: 32ch) {
     #state-label,
     .heart,
-    .idx {
-      display: none;
-    }
+    .idx { display: none; }
     .row { gap: 1ch; }
     .aux,
-    .transport {
-      display: none;
-    }
+    .transport { display: none; }
+  }
+
+  @media (max-height: 24ch) {
+    .library { height: 60vh; }
+    .side-scroll { display: none; }
   }
 
   @media (max-height: 16ch) {
     .viz { display: none; }
     .main-wrap,
     .lib-wrap,
-    .footer {
-      margin: 0 1ch;
-    }
-    .main-wrap {
-      flex: 0 0 auto !important;
-      height: 5ch !important;
-      min-height: 3ch !important;
-    }
-    .plist { height: clamp(2ch, 8vh, 3ch); }
+    .footer { margin: 0 1ch; }
   }
 
   @media (max-height: 12ch) {
     .footer,
-    .card-lyr {
-      display: none;
-    }
-    .top {
-      border-width: 0;
-      padding: 0 1ch;
-    }
+    .side { display: none; }
+    .card-lyr { display: none; }
+    .card { border: 0; padding: 0; }
+    .top { height: 1ch; border: 0; padding: 0 1ch; }
     .main-wrap,
-    .lib-wrap,
-    .seek {
-      margin-top: 0;
-    }
-    .main-wrap {
-      height: 3ch !important;
-      min-height: 2ch !important;
-    }
+    .lib-wrap { height: 2ch; }
+    .plist { min-height: 1ch; }
     .card-head { margin-bottom: 0; }
-    .np.card {
-      border-width: 0;
-      padding: 0;
-    }
-    .card-head,
-    .art,
-    .np-titlerow,
-    .np-artist,
-    .badges,
-    .spacer,
-    .wave,
-    .seek {
-      display: none;
-    }
-    .np-body { height: 3ch; }
-    .controls { margin-top: 0; }
-    .plist { height: 2ch; }
+    .np-body { gap: 1ch; }
+    .art { min-width: 4ch; }
+    .lib-head { margin-bottom: 0; }
   }
 
   @media (max-height: 9ch) {
-    .main-wrap {
-      height: 2ch !important;
-      min-height: 2ch !important;
-    }
-    .lib-head { margin-bottom: 0; }
-    .np.card {
-      border-width: 0;
-      padding: 0;
-    }
-    .card-head,
-    .art,
-    .np-titlerow,
-    .np-artist,
-    .badges,
-    .spacer,
-    .wave,
-    .times,
-    .seek,
-    .vol {
-      display: none;
-    }
-    .np-body {
-      height: 2ch;
-      min-height: 2ch;
-      overflow: hidden;
-      align-items: center;
-    }
-    .np-info {
-      flex: 1 1 auto;
-      height: 2ch;
-    }
-    .controls {
-      height: 2ch;
-      margin-top: 0;
-      flex-wrap: nowrap;
-    }
+    .np-expand,
+    .lib-wrap { display: none; }
   }
-
 </style>
 </head>
 <body>
@@ -480,112 +452,116 @@
     <span class="brand">&#9679; HTUI&middot;WAVE &middot; DEMO</span>
     <span class="feed">44.1 kHz &middot; 24-BIT &middot; STEREO</span>
     <span id="state-label">&#9679; PAUSED</span>
+    <span id="lib-toggle" class="btn lib-toggle" onclick="toggleLibrary()">&#171; LIB</span>
     <span id="clock" class="clock">00:00:00</span>
   </div>
 
   <div class="main-wrap">
   <div class="main">
     <div class="np card">
-      <div class="card-head">
-        <span class="head-label">Now Playing</span>
-        <span id="np-state" class="head-extra">IDLE</span>
-      </div>
-      <div class="np-body">
-        <div class="art">
-          <div class="band band1">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
-          <div class="band band2">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
-          <div class="band band3">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
-          <div class="band band4">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
-          <div class="band band5">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
-          <div class="band band6">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
-          <div class="band band7">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
-          <div class="art-cap">NEON NIGHTS</div>
+      <div class="np-expand">
+        <div class="card-head">
+          <span class="head-label">Now Playing</span>
+          <span id="np-state" class="head-extra">IDLE</span>
         </div>
-
-        <div class="np-info">
-          <div class="np-titlerow">
-            <span id="title" class="np-title">-</span>
-            <span id="btn-like" class="like" onclick="toggleLike()">&#9825;</span>
+        <div class="np-body">
+          <div class="art">
+            <div class="band band1">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+            <div class="band band2">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+            <div class="band band3">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+            <div class="band band4">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+            <div class="band band5">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+            <div class="band band6">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+            <div class="band band7">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+            <div class="art-cap">NEON NIGHTS</div>
           </div>
-          <div id="artist" class="np-artist">-</div>
-          <div class="badges">
-            <span id="badge-genre" class="badge">-</span>
-            <span id="badge-q" class="badge">-</span>
-            <span id="badge-bpm" class="badge">-</span>
-          </div>
-
-          <div class="spacer"></div>
-          <div class="wave"><span id="wave-on" class="wave-on"></span><span id="wave-off" class="wave-off"></span></div>
-          <div class="times">
-            <span id="t-cur">0:00</span>
-            <span id="t-rem">-0:00</span>
-          </div>
-          <input id="seek" class="range seek" type="range" min="0" max="214" step="1" value="0"
-            aria-label="Seek" oninput="scrub(this.value)">
-
-          <div class="controls">
-            <span class="btn aux" onclick="seek(-10)">-10</span>
-            <span class="btn transport" onclick="prev()">&#9664;&#9664;</span>
-            <span id="btn-play" class="btn btn-main" onclick="togglePlay()">&#9654; PLAY</span>
-            <span class="btn transport" onclick="next()">&#9654;&#9654;</span>
-            <span class="btn aux" onclick="seek(10)">+10</span>
-            <span id="btn-repeat" class="btn" onclick="toggleRepeat()">rep</span>
-            <span id="btn-shuffle" class="btn" onclick="toggleShuffle()">shuf</span>
-          </div>
-
-          <div class="vol">
-            <span class="vol-label">VOL</span>
-            <input id="volume" class="range vol-range" type="range" min="0" max="100" step="10" value="80"
-              aria-label="Volume" oninput="setVolume(this.value)">
-            <span id="vol-pct" class="vol-pct">80%</span>
+          <div class="np-info">
+            <div class="np-titlerow">
+              <span id="title" class="np-title">-</span>
+              <span id="btn-like" class="like" onclick="toggleLike()">&#9825;</span>
+            </div>
+            <div id="artist" class="np-artist">-</div>
+            <div class="badges">
+              <span id="badge-genre" class="badge">-</span>
+              <span id="badge-q" class="badge">-</span>
+              <span id="badge-bpm" class="badge">-</span>
+            </div>
+            <div class="spacer"></div>
+            <div class="wave"><span id="wave-on" class="wave-on"></span><span id="wave-off" class="wave-off"></span></div>
+            <div class="times">
+              <span id="t-cur">0:00</span>
+              <span id="t-rem">-0:00</span>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="side">
-      <div class="card">
-        <div class="card-head">
-          <span class="head-label">Spectrum</span>
-          <span class="head-extra">L / R</span>
+    <div id="music-side" class="side">
+      <div class="library card">
+        <div class="lib-head">
+          <span class="lib-title">Library</span>
+          <span class="tabs">
+            <span id="tab-all" class="tab on" onclick="setTab('all')">All</span>
+            <span id="tab-fav" class="tab" onclick="setTab('fav')">Fav</span>
+          </span>
+          <span id="lib-meta" class="lib-meta"></span>
         </div>
-        <div class="viz">
-          <div id="viz-l" class="viz-pre"> </div>
-          <div id="viz-r" class="viz-pre"> </div>
-        </div>
+        <div id="plist" class="plist"></div>
       </div>
 
-      <div class="card">
-        <div class="card-head">
-          <span class="head-label">Up Next</span>
-          <span class="head-extra">AUTO</span>
+      <div class="side-scroll">
+        <div class="card">
+          <div class="card-head">
+            <span class="head-label">Spectrum</span>
+            <span class="head-extra">L / R</span>
+          </div>
+          <div class="viz">
+            <div id="viz-l" class="viz-pre"> </div>
+            <div id="viz-r" class="viz-pre"> </div>
+          </div>
         </div>
-        <div id="queue"></div>
-      </div>
 
-      <div class="card card-lyr">
-        <div class="card-head">
-          <span class="head-label">Lyrics</span>
-          <span class="head-extra">&#9835;</span>
+        <div class="card">
+          <div class="card-head">
+            <span class="head-label">Up Next</span>
+            <span class="head-extra">AUTO</span>
+          </div>
+          <div id="queue"></div>
         </div>
-        <div id="lyr"></div>
+
+        <div class="card card-lyr">
+          <div class="card-head">
+            <span class="head-label">Lyrics</span>
+            <span class="head-extra">&#9835;</span>
+          </div>
+          <div id="lyr"></div>
+        </div>
       </div>
     </div>
   </div>
   </div>
 
-  <div class="lib-wrap">
-  <div class="lib">
-    <div class="lib-head">
-      <span class="lib-title">Library</span>
-      <span class="tabs">
-        <span id="tab-all" class="tab on" onclick="setTab('all')">All</span>
-        <span id="tab-fav" class="tab" onclick="setTab('fav')">&#9825; Fav</span>
-      </span>
-      <span id="lib-meta" class="lib-meta"></span>
+  <div class="playbar">
+    <input id="seek" class="range seek" type="range" min="0" max="214" step="1" value="0"
+      aria-label="Seek" oninput="scrub(this.value)">
+    <div class="playbar-row">
+      <div class="controls">
+        <span class="btn aux" onclick="seek(-10)">-10</span>
+        <span class="btn transport" onclick="prev()">&#9664;&#9664;</span>
+        <span id="btn-play" class="btn btn-main" onclick="togglePlay()">&#9654; PLAY</span>
+        <span class="btn transport" onclick="next()">&#9654;&#9654;</span>
+        <span class="btn aux" onclick="seek(10)">+10</span>
+        <span id="btn-repeat" class="btn" onclick="toggleRepeat()">rep</span>
+        <span id="btn-shuffle" class="btn" onclick="toggleShuffle()">shuf</span>
+      </div>
+      <div class="vol">
+        <span class="vol-label">VOL</span>
+        <input id="volume" class="range vol-range" type="range" min="0" max="100" step="10" value="80"
+          aria-label="Volume" oninput="setVolume(this.value)">
+        <span id="vol-pct" class="vol-pct">80%</span>
+      </div>
     </div>
-    <div id="plist" class="plist"></div>
-  </div>
   </div>
 
   <div class="footer">
@@ -818,6 +794,14 @@
     function setVolume(value) {
       volume = Math.min(100, Math.max(0, Math.round(Number(value) || 0)));
       updateVolume();
+    }
+
+    var libraryOpen = true;
+
+    function toggleLibrary() {
+      libraryOpen = !libraryOpen;
+      document.getElementById("music-side").classList.toggle("collapsed", !libraryOpen);
+      document.getElementById("lib-toggle").textContent = libraryOpen ? "\u00ab LIB" : "LIB \u00bb";
     }
 
     function toggleRepeat() { repeat = !repeat; update(); }

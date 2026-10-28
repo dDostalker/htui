@@ -90,6 +90,7 @@ impl TermLayout {
             input_states: std::collections::HashMap::new(),
             scroll_offsets: std::collections::HashMap::new(),
             open_select: None,
+            scrollbars_visible: std::collections::HashMap::new(),
         }
     }
 }

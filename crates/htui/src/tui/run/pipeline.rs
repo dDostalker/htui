@@ -97,6 +97,35 @@ pub(super) fn viewport_of(map: &TermMap) -> Viewport {
     }
 }
 
+/// Browser overflow propagation for the terminal viewport: `hidden` / `clip`
+/// on `<html>` (or on `<body>` when `<html>` does not specify overflow)
+/// disables page scrolling. Native container scrolling is unaffected.
+fn document_scroll_locked(arena: &NodeArena, root_id: NodeId) -> bool {
+    let root = &arena[root_id];
+    let html_id = root
+        .children
+        .iter()
+        .copied()
+        .find(|&child| arena[child].node_type == NodeType::Html);
+
+    let Some(html_id) = html_id else {
+        return root.children.iter().any(|&child| {
+            arena[child].node_type == NodeType::Body
+                && arena[child].css_attr.locks_vertical_scroll()
+        });
+    };
+    let html = &arena[html_id];
+    if html.css_attr.locks_vertical_scroll() {
+        return true;
+    }
+    if !html.css_attr.vertical_scroll_visible() {
+        return false;
+    }
+    html.children.iter().any(|&child| {
+        arena[child].node_type == NodeType::Body && arena[child].css_attr.locks_vertical_scroll()
+    })
+}
+
 impl RenderState {
     /// Re-layout, re-paint, publish the geometry and flush a frame.
     ///
@@ -160,6 +189,16 @@ impl RenderState {
             return;
         };
 
+        tl.scrollbars_visible = self
+            .scrollbars_visible
+            .lock()
+            .map(|visible| {
+                visible
+                    .iter()
+                    .filter_map(|(&node_id, &is_visible)| is_visible.then_some((node_id, true)))
+                    .collect()
+            })
+            .unwrap_or_default();
         let boxes = tl.layout_only(&arena, root_id, term_map);
         // Whether the document contains any `position: fixed` box: scrolling
         // re-pins fixed / sticky boxes to the new scroll offset (a targeted
@@ -246,9 +285,15 @@ impl RenderState {
         // until some later re-layout republished it. u32::MAX is the startup
         // placeholder (no upper bound known yet), overwritten by the first
         // successful layout with the real value.
-        tl.scroll_y = scroll_y;
+        let page_scroll_locked = document_scroll_locked(&geo.arena, geo.root_id);
+        tl.scroll_y = if page_scroll_locked { 0 } else { scroll_y };
         tl.clamp_scroll();
-        self.max_scroll.store(tl.max_scroll(), Ordering::Relaxed);
+        let page_max_scroll = if page_scroll_locked {
+            0
+        } else {
+            tl.max_scroll()
+        };
+        self.max_scroll.store(page_max_scroll, Ordering::Relaxed);
 
         // Re-apply the active page selection: the paint pass has no knowledge
         // of it, so any freshly painted canvas needs the highlight overlaid.
@@ -347,9 +392,17 @@ impl RenderState {
         let Some(tl) = self.term_layout.as_mut() else {
             return;
         };
-        if tl.scroll_offsets.get(&node_id) == Some(&scroll_y) {
+        let shared_visible = self
+            .scrollbars_visible
+            .lock()
+            .map(|visible| visible.get(&node_id).copied().unwrap_or(false))
+            .unwrap_or(false);
+        let reveals_hidden_chrome =
+            shared_visible && tl.scrollbars_visible.get(&node_id) != Some(&true);
+        if tl.scroll_offsets.get(&node_id) == Some(&scroll_y) && !reveals_hidden_chrome {
             return;
         }
+        tl.scrollbars_visible.insert(node_id, shared_visible);
         tl.scroll_offsets.insert(node_id, scroll_y);
         let (page_scroll_y, zoom) = (tl.scroll_y, tl.zoom);
         self.redraw(out, geo_tx, term_map, page_scroll_y, zoom);
@@ -624,8 +677,24 @@ mod tests {
             text_selection: None,
             selection_text: Arc::new(Mutex::new(String::new())),
             open_select: None,
+            scrollbars_visible: Arc::new(Mutex::new(std::collections::HashMap::new())),
             max_scroll: Arc::new(AtomicU32::new(0)),
         }
+    }
+
+    #[test]
+    fn body_overflow_hidden_locks_document_scrolling() {
+        let mut parser = Parser::new(
+            "<html><head><style>body { overflow: hidden; }</style></head>\
+             <body><p>one</p><p>two</p><p>three</p>\
+             <p>four</p><p>five</p><p>six</p></body></html>",
+        );
+        let document = parser.parse_with_scripts();
+        let mut arena = (*document.arena).clone();
+        let mut css_parser = css_parse::Parser::new(&document.css);
+        let rules = css_parser.parse();
+        css_parse::css_into_node(&mut arena, document.root_id, &rules);
+        assert!(document_scroll_locked(&arena, document.root_id));
     }
 
     #[test]

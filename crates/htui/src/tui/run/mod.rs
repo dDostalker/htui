@@ -17,6 +17,7 @@ mod thread;
 
 use self::thread::{fold_script_event, hit_test_thread, render_thread};
 
+use std::collections::HashMap;
 use std::io::stdout;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -235,6 +236,11 @@ fn run_inner(
     // Text of the current page selection, refreshed by the render thread and
     // read by the input loop on `Ctrl+C` (shared through `Arc<Mutex<_>>`).
     let selection_text: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    // Scrollbar chrome starts hidden and is revealed by interaction. Sharing
+    // the flag with the render thread makes the hide transition atomic with
+    // the repaint that removes it.
+    let scrollbars_visible: crate::tui::graph_api::SharedScrollbarVisibility =
+        Arc::new(Mutex::new(HashMap::new()));
 
     let (tx, rx) = mpsc::channel::<RenderCmd>();
     // Frame-completion heartbeat: the render thread bumps it after every
@@ -246,6 +252,7 @@ fn run_inner(
         let css_clone = Arc::clone(&session_css);
         let max_scroll_clone = Arc::clone(&max_scroll);
         let selection_text_clone = Arc::clone(&selection_text);
+        let scrollbars_visible_clone = Arc::clone(&scrollbars_visible);
         let render_beat_clone = Arc::clone(&render_beat);
         let render_registry = Arc::clone(&registry);
         let geo_tx = events_active.then_some(geo_tx);
@@ -258,6 +265,7 @@ fn run_inner(
                     max_scroll_clone,
                     geo_tx,
                     selection_text_clone,
+                    scrollbars_visible_clone,
                     render_beat_clone,
                     config,
                 );
@@ -271,6 +279,7 @@ fn run_inner(
     state.copy_block = config.copy_block;
     state.smooth_scroll = config.smooth_scroll;
     state.selection_text = Arc::clone(&selection_text);
+    state.scrollbars_visible = Arc::clone(&scrollbars_visible);
     let (mut columns, mut rows): (u16, u16) = match TermMap::get_ter_map() {
         Ok(m) => (m.columns, m.rows),
         Err(e) => {
@@ -505,6 +514,16 @@ fn run_inner(
             )
         };
 
+        // The input loop owns the timeout and supplies the repaint at hide
+        // time; the shared atomic is already false when this frame renders.
+        let hidden_scrollbars = state.take_expired_scrollbar_visibility();
+        if !hidden_scrollbars.is_empty() {
+            cmds.push(RenderCmd::Redraw {
+                scroll_y: state.scroll_y,
+                zoom: state.zoom,
+            });
+        }
+
         // A resize invalidates every canvas coordinate the input loop caches:
         // without this a press whose release the console dropped during the
         // resize would stick and turn all later motion into a drag (hover /
@@ -720,6 +739,7 @@ fn run_inner(
                     }
                 }
                 ScrollTarget::Container(id) => {
+                    state.show_scrollbar(id);
                     if state.scroll_offsets.get(&id) != Some(&pos) {
                         state.scroll_offsets.insert(id, pos);
                         cmds.push(RenderCmd::RenderScroll {

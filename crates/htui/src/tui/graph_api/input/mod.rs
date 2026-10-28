@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use compact_str::CompactString;
 
@@ -37,6 +38,10 @@ pub use select::{OverlayKind, SelectOpenState};
 use field::clear_text_selection;
 
 const SCROLL_LINES_PER_TICK: u32 = 3;
+const SCROLLBAR_VISIBLE_FOR: Duration = Duration::from_millis(900);
+
+/// Shared visible-scrollbar set. A missing node is hidden.
+pub type SharedScrollbarVisibility = Arc<Mutex<HashMap<NodeId, bool>>>;
 const ZOOM_STEP: f32 = 0.1;
 const ZOOM_MIN: f32 = 0.2;
 const ZOOM_MAX: f32 = 5.0;
@@ -63,6 +68,11 @@ pub struct InputState {
     /// input glides toward its target through this state; any direct scroll
     /// write (arrow keys, scrollbar drag) cancels it.
     pub scroll_anim: Option<ScrollAnim>,
+    /// Per-container scrollbar visibility shared with the render thread. A
+    /// missing node is hidden; geometry remains hittable while chrome is off.
+    pub scrollbars_visible: SharedScrollbarVisibility,
+    /// Per-container wall-clock deadlines after which the shared flag clears.
+    pub scrollbar_hide_at: HashMap<NodeId, Instant>,
     pub zoom: f32,
     /// Screen coordinates of the last left-button press; a click is only
     /// recognised when the release lands on the same cell.
@@ -151,6 +161,8 @@ impl InputState {
             scroll_y: 0,
             scroll_offsets: HashMap::new(),
             scroll_anim: None,
+            scrollbars_visible: Arc::new(Mutex::new(HashMap::new())),
+            scrollbar_hide_at: HashMap::new(),
             zoom: 1.0,
             pressed: None,
             focused_input: None,
@@ -175,6 +187,51 @@ impl InputState {
             open_select: None,
             next_key_id: 0,
             key_gate: None,
+        }
+    }
+
+    /// Make one scrollbar visible and restart only its auto-hide deadline.
+    ///
+    /// Visibility is shared with the render thread so the reveal is atomic with
+    /// the frame that draws the changed chrome.
+    pub fn show_scrollbar(&mut self, node_id: NodeId) {
+        if let Ok(mut visible) = self.scrollbars_visible.lock() {
+            visible.insert(node_id, true);
+        }
+        self.scrollbar_hide_at
+            .insert(node_id, Instant::now() + SCROLLBAR_VISIBLE_FOR);
+    }
+
+    /// Clear expired deadlines and return the ids whose visibility changed.
+    /// The caller must emit a repaint covering those scroll containers.
+    pub fn take_expired_scrollbar_visibility(&mut self) -> Vec<NodeId> {
+        let now = Instant::now();
+        let expired: Vec<NodeId> = self
+            .scrollbar_hide_at
+            .iter()
+            .filter(|(_, deadline)| **deadline <= now)
+            .map(|(node_id, _)| *node_id)
+            .collect();
+        if expired.is_empty() {
+            return expired;
+        }
+        for node_id in &expired {
+            self.scrollbar_hide_at.remove(node_id);
+        }
+        if let Ok(mut visible) = self.scrollbars_visible.lock() {
+            for node_id in &expired {
+                visible.insert(*node_id, false);
+            }
+        }
+        expired
+    }
+
+    /// Clear the auto-hide state immediately. Used when replaced document node
+    /// ids make previous reveal state stale.
+    pub fn hide_scrollbars(&mut self) {
+        self.scrollbar_hide_at.clear();
+        if let Ok(mut visible) = self.scrollbars_visible.lock() {
+            visible.clear();
         }
     }
 
@@ -217,6 +274,7 @@ impl InputState {
         self.pressed = None;
         self.scroll_offsets.clear();
         self.scroll_anim = None;
+        self.hide_scrollbars();
         self.focused_input = None;
         self.focused_is_textarea = false;
         self.focused_is_range = false;
@@ -316,3 +374,33 @@ pub(crate) fn reapply_console_modes() {
 /// Non-Windows resize does not touch the terminal modes; nothing to re-apply.
 #[cfg(not(windows))]
 pub(crate) fn reapply_console_modes() {}
+
+#[cfg(test)]
+mod scrollbar_visibility_tests {
+    use slotmap::Key;
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn expired_scrollbar_visibility_transitions_once() {
+        let mut state = InputState::new();
+        let node_id = NodeId::null();
+
+        state.show_scrollbar(node_id);
+        assert_eq!(
+            state.scrollbars_visible.lock().unwrap().get(&node_id),
+            Some(&true)
+        );
+
+        state
+            .scrollbar_hide_at
+            .insert(node_id, Instant::now() - Duration::from_millis(1));
+        assert_eq!(state.take_expired_scrollbar_visibility(), vec![node_id]);
+        assert_eq!(
+            state.scrollbars_visible.lock().unwrap().get(&node_id),
+            Some(&false)
+        );
+        assert!(state.take_expired_scrollbar_visibility().is_empty());
+    }
+}

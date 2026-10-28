@@ -20,7 +20,8 @@ use super::field::{
 use super::focus::{blur_input, push_input_render};
 use super::key_info::key_event_info;
 use super::mouse::{
-    canvas_pos, handle_mouse_down, handle_mouse_move, handle_mouse_up, scroll_at_wheel,
+    canvas_pos, handle_mouse_down, handle_mouse_move, handle_mouse_up, reveal_scrollbar_at,
+    scroll_at_wheel,
 };
 use super::page::page_level_builtins;
 use super::scroll_anim::{ScrollTarget, active_scroll_target, step_target};
@@ -402,6 +403,15 @@ pub fn trigger_refresh(
         Ok(Event::Mouse(mouse)) => {
             let ctrl = mouse.modifiers.contains(event::KeyModifiers::CONTROL);
             state.last_mouse = Some((mouse.column, mouse.row));
+            if let Some(hit_map) = hit_map {
+                reveal_scrollbar_at(
+                    state,
+                    hit_map,
+                    mouse.column as u32,
+                    mouse.row as u32 + state.scroll_y,
+                    &mut cmds,
+                );
+            }
             match mouse.kind {
                 MouseEventKind::ScrollUp => {
                     // Scrolling dismisses an open dropdown (focus loss).

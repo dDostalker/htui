@@ -78,6 +78,46 @@ fn overflow_y_creates_a_native_scrollbar_and_translates_content() {
 }
 
 #[test]
+fn scrollbar_chrome_follows_visibility_while_track_geometry_stays_hittable() {
+    let html = "<div id='list'>\
+                <p>one</p><p>two</p><p>three</p>\
+                <p>four</p><p>five</p><p>six</p>\
+                </div>";
+    let (root_id, arena) = setup(html, "#list { height: 10; overflow-y: auto; }");
+    let map = term_map();
+    let mut terminal = TermLayout::new(&map, 1.0);
+    let boxes = terminal.draw(&arena, root_id, &map);
+    let list = find_layout(&boxes, &arena, |node_type| {
+        matches!(node_type, NodeType::Div)
+    })
+    .expect("scroll container exists");
+    let track = list
+        .paint_style
+        .scrollbar
+        .expect("overflowing container has a scrollbar")
+        .track;
+
+    terminal.scrollbars_visible.insert(list.node_id, false);
+    terminal.draw(&arena, root_id, &map);
+    let hidden = scrollbar_glyph_count(&terminal, &track);
+    assert_eq!(hidden, 0, "idle scrollbar chrome must stay hidden");
+
+    terminal.scrollbars_visible.insert(list.node_id, true);
+    terminal.draw(&arena, root_id, &map);
+    let visible = scrollbar_glyph_count(&terminal, &track);
+    assert!(visible >= track.height.min(1));
+}
+
+fn scrollbar_glyph_count(terminal: &TermLayout, track: &htui::layout::Rect) -> usize {
+    let width = terminal.columns as usize;
+    (track.y..track.y + track.height)
+        .map(|y| y * width + track.x)
+        .filter_map(|index| terminal.layout.get(index))
+        .filter(|cell| cell.word == "\u{2502}" || cell.word == "\u{2588}")
+        .count()
+}
+
+#[test]
 fn overflow_y_works_on_a_fixed_flex_item() {
     let html = "<section><div id='list'>\
                 <p>one</p><p>two</p><p>three</p>\

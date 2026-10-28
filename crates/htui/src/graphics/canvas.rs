@@ -54,6 +54,9 @@ pub struct TermLayout {
     /// The `<select>` node whose dropdown is open (rendered as an overlay),
     /// set by the render thread while a dropdown is expanded.
     pub open_select: Option<NodeId>,
+    /// Whether each engine-owned scrollbar paints in this pass. Layout always
+    /// derives scrollbar geometry so hidden controls remain hoverable.
+    pub scrollbars_visible: HashMap<NodeId, bool>,
 }
 
 impl TermLayout {

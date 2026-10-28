@@ -16,7 +16,7 @@ use crate::html::html_parse::ParsedDocument;
 use crate::layout::layout::TermMap;
 use crate::source::SharedSourceText;
 use crate::tdom::node::NodeId;
-use crate::tui::graph_api::{DrainedBatch, InputState, RenderCmd};
+use crate::tui::graph_api::{DrainedBatch, InputState, RenderCmd, SharedScrollbarVisibility};
 
 use super::GeometrySender;
 use super::LiveDocument;
@@ -30,6 +30,7 @@ pub(super) fn render_thread(
     max_scroll: Arc<AtomicU32>,
     geo_tx: GeometrySender,
     selection_text: Arc<Mutex<String>>,
+    scrollbars_visible: SharedScrollbarVisibility,
     render_beat: Arc<AtomicU64>,
     config: Config,
 ) {
@@ -58,6 +59,7 @@ pub(super) fn render_thread(
         text_selection: None,
         selection_text,
         open_select: None,
+        scrollbars_visible,
         max_scroll,
     };
 

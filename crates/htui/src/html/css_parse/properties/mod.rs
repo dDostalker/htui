@@ -280,6 +280,37 @@ impl CssAttr {
         }
     }
 
+    /// Whether the vertical axis explicitly prevents viewport scrolling.
+    /// This is the root/body propagation rule for `overflow: hidden` / `clip`;
+    /// `auto` / `scroll` still create a scrollable viewport.
+    pub fn locks_vertical_scroll(&self) -> bool {
+        let axis = |key: &str| {
+            self.0
+                .get(key)
+                .map(|s| {
+                    let value = s.trim().to_ascii_lowercase();
+                    value == "hidden" || value == "clip"
+                })
+                .unwrap_or(false)
+        };
+        axis("overflow-y") || (!self.0.contains_key("overflow-y") && axis("overflow"))
+    }
+
+    /// Whether the resolved vertical overflow is `visible` when no axis value
+    /// prevents scrolling. Root propagation consults this before applying the
+    /// body rule.
+    pub fn vertical_scroll_visible(&self) -> bool {
+        let key = if self.0.contains_key("overflow-y") {
+            "overflow-y"
+        } else {
+            "overflow"
+        };
+        self.0.get(key).is_none_or(|s| {
+            let value = s.trim().to_ascii_lowercase();
+            value != "hidden" && value != "clip"
+        })
+    }
+
     /// Whether this box establishes a vertical browser-style scroll
     /// container. `auto` shows a scrollbar only when content overflows;
     /// `scroll` reserves one whenever the box has a fixed height.

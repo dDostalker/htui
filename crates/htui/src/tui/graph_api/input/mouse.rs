@@ -113,9 +113,12 @@ pub(super) fn scroll_at_wheel(
         } else {
             super::SCROLL_LINES_PER_TICK as i32
         };
-        return step_target(base, delta, 0, scroll.max_scroll).map(|to| RenderCmd::ScrollAnimate {
-            target: ScrollTarget::Container(scroll.node_id),
-            to,
+        return step_target(base, delta, 0, scroll.max_scroll).map(|to| {
+            state.show_scrollbar(scroll.node_id);
+            RenderCmd::ScrollAnimate {
+                target: ScrollTarget::Container(scroll.node_id),
+                to,
+            }
         });
     }
     let next = if up {
@@ -128,11 +131,43 @@ pub(super) fn scroll_at_wheel(
     if next == current {
         return None;
     }
+    state.show_scrollbar(scroll.node_id);
     state.scroll_offsets.insert(scroll.node_id, next);
     Some(RenderCmd::RenderScroll {
         node_id: scroll.node_id,
         scroll_y: next,
     })
+}
+
+/// Reveal a scrollbar when the pointer is over its track, even while idle.
+///
+/// The layout geometry remains in the hit map while chrome is hidden, so the
+/// track is the hover affordance that brings it back. A same-offset scroll
+/// update is harmless when the chrome is already visible and performs the
+/// reveal repaint when it is hidden.
+pub(super) fn reveal_scrollbar_at(
+    state: &mut InputState,
+    hit_map: &HitMap,
+    x: u32,
+    y: u32,
+    cmds: &mut Vec<RenderCmd>,
+) {
+    if let Some(scroll) = hit_map
+        .scrollbars
+        .values()
+        .find(|scroll| scroll.track.contains(x, y))
+    {
+        state.show_scrollbar(scroll.node_id);
+        let offset = state
+            .scroll_offsets
+            .get(&scroll.node_id)
+            .copied()
+            .unwrap_or(scroll.scroll_y);
+        cmds.push(RenderCmd::RenderScroll {
+            node_id: scroll.node_id,
+            scroll_y: offset,
+        });
+    }
 }
 
 /// End a button press at the release position (screen coordinates in
@@ -294,16 +329,16 @@ pub fn handle_mouse_down(
         })
         .flatten();
     if let Some((node_id, grab_offset, offset)) = scrollbar_hit {
-        // Grabbing the thumb takes over from any glide in progress.
+        // Grabbing the thumb takes over from any glide in progress. A same-
+        // offset command still reveals chrome that a previous timeout hid.
         state.scroll_anim = None;
+        state.show_scrollbar(node_id);
         state.scroll_drag = Some((node_id, grab_offset));
-        if state.scroll_offsets.get(&node_id) != Some(&offset) {
-            state.scroll_offsets.insert(node_id, offset);
-            cmds.push(RenderCmd::RenderScroll {
-                node_id,
-                scroll_y: offset,
-            });
-        }
+        state.scroll_offsets.insert(node_id, offset);
+        cmds.push(RenderCmd::RenderScroll {
+            node_id,
+            scroll_y: offset,
+        });
         return;
     }
 
@@ -490,6 +525,7 @@ pub fn handle_mouse_move(
     if let Some((node_id, grab_offset)) = state.scroll_drag
         && let Some(scroll) = hit_map.scrollbars.get(&node_id)
     {
+        state.show_scrollbar(node_id);
         let offset = scroll.offset_at(y, grab_offset);
         if state.scroll_offsets.get(&node_id) != Some(&offset) {
             state.scroll_offsets.insert(node_id, offset);

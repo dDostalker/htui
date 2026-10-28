@@ -129,6 +129,9 @@ pub(super) struct PaintCanvas<'a> {
     /// The `<select>` node whose dropdown is currently open (`None` = none).
     /// Read by the select painter for the open-frame colour.
     pub open_select: Option<NodeId>,
+    /// Whether each native scrollbar paints in this pass. Their geometry stays
+    /// available for hit-testing while the chrome is hidden.
+    pub scrollbars_visible: &'a HashMap<NodeId, bool>,
 }
 
 impl<'a> PaintCanvas<'a> {
@@ -221,6 +224,7 @@ pub fn paint_layout_tree(boxes: &[LayoutBox], arena: &NodeArena, term_layout: &m
         region: None,
         input_states: &term_layout.input_states,
         open_select: term_layout.open_select,
+        scrollbars_visible: &term_layout.scrollbars_visible,
     };
     for b in boxes {
         paint_box(b, arena, &mut canvas, None, None);
@@ -264,6 +268,7 @@ pub fn paint_layout_tree_region(
         region: Some(region),
         input_states: &term_layout.input_states,
         open_select: term_layout.open_select,
+        scrollbars_visible: &term_layout.scrollbars_visible,
     };
     for b in boxes {
         if intersect_rects(b.rect, region).is_some() {
@@ -546,6 +551,14 @@ fn paint_box(
 /// Paint the native scrollbar after clipped content so it always overlays the
 /// container's right gutter.
 fn paint_scrollbar(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintCanvas<'_>) {
+    if !canvas
+        .scrollbars_visible
+        .get(&lb.node_id)
+        .copied()
+        .unwrap_or(false)
+    {
+        return;
+    }
     let Some(scroll) = lb.paint_style.scrollbar else {
         return;
     };
