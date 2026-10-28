@@ -79,9 +79,13 @@ pub(crate) fn paint_runs(
         let line_start =
             cell_start.saturating_add(line_idx.saturating_mul(line_h).saturating_mul(cols));
         // The bound is row-relative (columns from the row start), so every
-        // visual line resolves it against its own row.
+        // visual line resolves it against its own row. A clipping ancestor
+        // (`overflow: hidden` card wrapping a `visible` spill) narrows it
+        // further: the glyph stream must stop at the clip's right edge, not
+        // the canvas edge, or it would paint over the ancestor's frame.
         let line_row_base = line_start.saturating_sub(line_start % cols);
-        let h_end = line_row_base.saturating_add(h_bound_cols.min(cols));
+        let clip_right = clip.x.saturating_add(clip.width).min(cols);
+        let h_end = line_row_base.saturating_add(h_bound_cols.min(clip_right));
         // `text-indent` shifts the first visual line right and narrows its
         // alignment basis (the wrap pass already reserved the budget).
         let indent = if line_idx == 0 { first_line_indent } else { 0 };
