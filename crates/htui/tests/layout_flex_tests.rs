@@ -243,6 +243,71 @@ fn test_flex_basis_content_sizes_to_the_content() {
     );
 }
 
+#[test]
+fn clipping_scroll_item_can_shrink_to_the_remaining_flex_height() {
+    init();
+    let html = r#"
+        <div class="outer">
+            <div class="library">library</div>
+            <div class="scroll"><div class="content">content</div></div>
+        </div>
+    "#;
+    let css = r#"
+        .outer { display: flex; flex-direction: column; height: 12ch; overflow: hidden; }
+        .library { flex: 0 0 auto; height: 6ch; }
+        .scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+        .content { height: 30ch; }
+    "#;
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let boxes = htui::layout::inner_formatting_context::flow::layout_tree(
+        &arena,
+        root_id,
+        htui::layout::BoxConstraint::root(&term_map),
+        &mut htui::layout::Cursor::new(),
+        term_map.columns as usize,
+        term_map.rows as usize,
+    );
+
+    fn find_class<'a>(
+        arena: &NodeArena,
+        boxes: &'a [htui::layout::LayoutBox],
+        class_name: &str,
+    ) -> Option<&'a htui::layout::LayoutBox> {
+        for lb in boxes {
+            let class = arena[lb.node_id]
+                .attributes
+                .get("class")
+                .map(String::as_str)
+                .unwrap_or("");
+            if class.split_whitespace().any(|part| part == class_name) {
+                return Some(lb);
+            }
+            if let Some(found) = find_class(arena, &lb.children, class_name) {
+                return Some(found);
+            }
+        }
+        None
+    }
+
+    let outer = find_class(&arena, &boxes, "outer").expect("outer flex column");
+    let scroll = find_class(&arena, &boxes, "scroll").expect("scroll flex item");
+    assert_eq!(outer.rect.height, 12);
+    assert_eq!(
+        scroll.rect.height, 6,
+        "min-height: 0 + overflow-y: auto must allow the item to take the remaining height"
+    );
+    assert_eq!(
+        scroll.rect.y + scroll.rect.height,
+        outer.rect.y + outer.rect.height,
+        "the scroll item must not extend past its flex parent"
+    );
+    assert!(
+        scroll.paint_style.scrollbar.is_some(),
+        "the bounded item remains a native scroll container"
+    );
+}
+
 fn setup(html: &str, css: &str) -> (NodeId, NodeArena) {
     let mut html_parser = html_parse::Parser::new(html);
     let (root_id, mut arena, embedded) = html_parser.parse();

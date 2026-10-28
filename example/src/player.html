@@ -91,8 +91,7 @@
   }
   .side.collapsed { display: none; }
   .side-scroll {
-    flex: 0 0 auto;
-    height: 15vh;
+    flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
   }
@@ -254,8 +253,26 @@
   .vol-pct { color: #56c8f5; }
 
   /* ---------- spectrum ---------- */
-  .viz { display: flex; gap: 2ch; }
-  .viz-pre { white-space: pre; height: 4ch; }
+  .spectrum-card {
+    flex: 0 0 auto;
+    border: 0;
+    padding: 0;
+    background-color: transparent;
+  }
+  .viz {
+    display: flex;
+    justify-content: center;
+    gap: 1ch;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .viz-pre {
+    flex: 0 1 8ch;
+    min-width: 0;
+    height: 4ch;
+    overflow: hidden;
+    white-space: pre;
+  }
   #viz-l { color: #43e5a0; }
   #viz-r { color: #a78bfa; }
 
@@ -290,7 +307,7 @@
   /* ---------- library sidebar ---------- */
   .library {
     flex: 0 0 auto;
-    height: 45vh;
+    height: 30vh;
     min-height: 0;
     display: flex;
     flex-direction: column;
@@ -420,12 +437,14 @@
   }
 
   @media (max-height: 24ch) {
-    .library { height: 60vh; }
-    .side-scroll { display: none; }
+    .library { height: 25vh; }
+    .queue-card,
+    .card-lyr { display: none; }
   }
 
   @media (max-height: 16ch) {
     .viz { display: none; }
+    .side-scroll { display: none; }
     .main-wrap,
     .lib-wrap,
     .footer { margin: 0 1ch; }
@@ -516,7 +535,7 @@
       </div>
 
       <div class="side-scroll">
-        <div class="card">
+        <div class="card spectrum-card">
           <div class="card-head">
             <span class="head-label">Spectrum</span>
             <span class="head-extra">L / R</span>
@@ -527,7 +546,7 @@
           </div>
         </div>
 
-        <div class="card">
+        <div class="card queue-card">
           <div class="card-head">
             <span class="head-label">Up Next</span>
             <span class="head-extra">AUTO</span>

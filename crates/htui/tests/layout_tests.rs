@@ -1047,3 +1047,82 @@ fn test_background_clip_text_paints_gradient_glyphs() {
         "background-clip: text must not paint the box background"
     );
 }
+
+#[test]
+fn example_spectrum_stays_inside_sidebar_scroll_area() {
+    init();
+    let html = include_str!("../../../example/src/player.html")
+        .replace(
+            "<div id=\"viz-l\" class=\"viz-pre\"> </div>",
+            "<div id=\"viz-l\" class=\"viz-pre\">1&#9601;2&#9602;3&#9603;4&#9604;</div>",
+        )
+        .replace(
+            "<div id=\"viz-r\" class=\"viz-pre\"> </div>",
+            "<div id=\"viz-r\" class=\"viz-pre\">8&#9608;7&#9607;6&#9606;5&#9605;</div>",
+        );
+    let mut html_parser = html_parse::Parser::new(&html);
+    let (root_id, base_arena, embedded_css) = html_parser.parse();
+
+    for (cols, rows) in [(100, 30), (80, 24), (60, 20), (50, 20), (40, 20)] {
+        let mut arena = base_arena.clone();
+        let mut css_parser = css_parse::Parser::new(&embedded_css);
+        let rules = css_parser.parse();
+        css_parse::css_into_node_with_state(
+            &mut arena,
+            root_id,
+            &rules,
+            &css_parse::DynamicState {
+                viewport: css_parse::Viewport { cols, rows },
+                ..Default::default()
+            },
+        );
+        let term_map = TermMap {
+            columns: cols as u16,
+            rows: rows as u16,
+        };
+        let mut tl = TermLayout::new(&term_map, 1.0);
+        let boxes = tl.draw(&arena, root_id, &term_map);
+
+        fn find<'a>(
+            arena: &NodeArena,
+            boxes: &'a [htui::layout::LayoutBox],
+            class_name: &str,
+        ) -> Option<&'a htui::layout::LayoutBox> {
+            for lb in boxes {
+                let class = arena[lb.node_id]
+                    .attributes
+                    .get("class")
+                    .map(String::as_str)
+                    .unwrap_or("");
+                if class.split_whitespace().any(|part| part == class_name) {
+                    return Some(lb);
+                }
+                if let Some(found) = find(arena, &lb.children, class_name) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+
+        let side = find(&arena, &boxes, "side").expect("sidebar exists");
+        let scroll = find(&arena, &boxes, "side-scroll").expect("sidebar scroll exists");
+        let spectrum = find(&arena, &boxes, "spectrum-card").expect("spectrum card exists");
+        let viz = find(&arena, &boxes, "viz-pre").expect("spectrum bars exist");
+
+        assert!(
+            scroll.rect.y.saturating_add(scroll.rect.height)
+                <= side.rect.y.saturating_add(side.rect.height),
+            "{cols}x{rows}: sidebar scroll must stay inside the sidebar"
+        );
+        assert!(
+            spectrum.rect.y.saturating_add(spectrum.rect.height)
+                <= scroll.rect.y.saturating_add(scroll.rect.height),
+            "{cols}x{rows}: spectrum card must fit in the initial scroll viewport"
+        );
+        assert!(
+            viz.rect.x.saturating_add(viz.rect.width)
+                <= scroll.rect.x.saturating_add(scroll.rect.width),
+            "{cols}x{rows}: spectrum must not paint outside the scroll area"
+        );
+    }
+}

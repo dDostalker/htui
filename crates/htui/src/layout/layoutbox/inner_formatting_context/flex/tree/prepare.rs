@@ -6,7 +6,8 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::{
     graphics::{char_width, grapheme_width},
     html::css_parse::{
-        AlignItems, AlignSelf, CssDisplay, FlexDirection, Length, LengthContext, WhiteSpace,
+        AlignItems, AlignSelf, CssDisplay, FlexDirection, Length, LengthContext, Overflow,
+        WhiteSpace,
     },
     layout::{
         InlineRun, LayoutContext,
@@ -84,19 +85,6 @@ pub(super) fn prepare_flex_item(
         })
         .unwrap_or(FLEX_ITEM_MIN_CROSS);
 
-    // The automatic minimum main size (CSS `min-height` / `min-width: auto`):
-    // an item must never shrink below its min-content size. For `column`
-    // direction the natural height is already content-sized (block content
-    // stacks without compressing), so it doubles as the floor. For `row`
-    // direction the floor is the widest unbreakable word (text wraps at
-    // smaller widths). Without these floors, a definite-sized flex column
-    // whose items' basis sums exceed its height would crush every item below
-    // its content (e.g. stat cards collapsing to a 2-row strip).
-    let min_main = match direction.is_row() {
-        true => longest_breakable_width(arena, item_id),
-        false => natural.height,
-    };
-
     // `align-self: auto` defers to the container's `align-items` (CSS
     // default for `align-items` is `stretch`, so without an explicit
     // `align-items` this still ends up as `Stretch`).
@@ -107,6 +95,19 @@ pub(super) fn prepare_flex_item(
     let css_max_main = match direction.is_row() {
         true => css.get_max_width(containing_main, context.font, context.viewport),
         false => css.get_max_height(containing_height, context.font, context.viewport),
+    };
+    // Automatic minimum main size (`min-width` / `min-height: auto`). It is
+    // the min-content floor only while the computed minimum remains `auto`;
+    // an explicit `min-*` replaces it through `css_min_main`. Scroll/clipping
+    // containers also use a zero automatic minimum, allowing a bounded flex
+    // child to shrink and scroll instead of extending past its parent.
+    let min_main = if css_min_main.is_some() || css.get_overflow() == Overflow::Clip {
+        0
+    } else {
+        match direction.is_row() {
+            true => longest_breakable_width(arena, item_id),
+            false => natural.height,
+        }
     };
     // Explicit cross-axis size (row: `height`; column: `width`). A definite
     // cross size opts the item out of `align-items: stretch` (CSS Flexbox
