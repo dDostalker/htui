@@ -1115,9 +1115,9 @@ fn example_spectrum_stays_inside_sidebar_scroll_area() {
             "{cols}x{rows}: sidebar scroll must stay inside the sidebar"
         );
         assert!(
-            spectrum.rect.y.saturating_add(spectrum.rect.height)
-                <= scroll.rect.y.saturating_add(scroll.rect.height),
-            "{cols}x{rows}: spectrum card must fit in the initial scroll viewport"
+            spectrum.rect.y >= scroll.rect.y
+                && spectrum.rect.y < scroll.rect.y.saturating_add(scroll.rect.height),
+            "{cols}x{rows}: spectrum card must start inside the scroll viewport"
         );
         assert!(
             viz.rect.x.saturating_add(viz.rect.width)

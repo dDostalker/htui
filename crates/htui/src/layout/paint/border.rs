@@ -15,12 +15,19 @@ use super::{BackgroundFill, PaintCanvas, background_at};
 /// color. Borders with width > 1 currently render as a single row/column —
 /// terminals cannot express thicker edges without mis-aligning the inner
 /// content area, so any width > 1 is treated as 1.
+///
+/// `clip` bounds where glyphs may land. Edge / corner positions always come
+/// from the box's own `r`: a box that overflows a clipping ancestor has its
+/// out-of-clip glyphs *dropped*, never relocated — shrinking the rect before
+/// painting would drag the bottom edge up to the clip boundary and fabricate
+/// a border row on top of whatever else paints there.
 pub(crate) fn paint_borders(
     lb: &LayoutBox,
     r: Rect,
     canvas: &mut PaintCanvas<'_>,
     fg: Option<Color>,
     bg: Option<BackgroundFill<'_>>,
+    clip: Rect,
 ) {
     let sides = &lb.paint_style.box_edges.border;
     if !sides.any_visible() {
@@ -33,6 +40,14 @@ pub(crate) fn paint_borders(
     let cols = canvas.columns as usize;
     let cell_start = canvas.cell_index(r.x, r.y);
     let max_cells = canvas.layout.len();
+
+    // Whether the canvas cell at absolute (x, y) may receive a border glyph.
+    let in_clip = |x: usize, y: usize| -> bool {
+        x >= clip.x
+            && y >= clip.y
+            && x < clip.x.saturating_add(clip.width)
+            && y < clip.y.saturating_add(clip.height)
+    };
 
     // Effective border thickness per side, clamped to the rect size and
     // collapsed to 1 — see function-level note.
@@ -58,7 +73,8 @@ pub(crate) fn paint_borders(
             let row_start = cell_start + row_offset * cols;
             for col in left_t..right_col_start {
                 let idx = row_start + col;
-                if idx < max_cells && canvas.in_region(idx) {
+                if idx < max_cells && canvas.in_region(idx) && in_clip(r.x + col, r.y + row_offset)
+                {
                     // In-place: capsule-reuse the 4-byte buffer from
                     // `Block::default()` to push `─` (3 bytes) without
                     // reallocating.
@@ -76,11 +92,15 @@ pub(crate) fn paint_borders(
     // Bottom edge: rows (height-bottom_t)..height, columns left_t..right_col_start.
     if sides.bottom.style == BorderStyle::Solid && bottom_t > 0 {
         let bottom_row = cell_start + (r.height - bottom_t) * cols;
+        let bottom_y = r.y + r.height - bottom_t;
         for row_offset in 0..bottom_t {
             let row_start = bottom_row + row_offset * cols;
             for col in left_t..right_col_start {
                 let idx = row_start + col;
-                if idx < max_cells && canvas.in_region(idx) {
+                if idx < max_cells
+                    && canvas.in_region(idx)
+                    && in_clip(r.x + col, bottom_y + row_offset)
+                {
                     let cell = &mut canvas.layout[idx];
                     cell.word.clear();
                     cell.word.push('─');
@@ -98,7 +118,10 @@ pub(crate) fn paint_borders(
             let row_start = cell_start + row_offset * cols;
             for col_offset in 0..left_t {
                 let idx = row_start + col_offset;
-                if idx < max_cells && canvas.in_region(idx) {
+                if idx < max_cells
+                    && canvas.in_region(idx)
+                    && in_clip(r.x + col_offset, r.y + row_offset)
+                {
                     let cell = &mut canvas.layout[idx];
                     cell.word.clear();
                     cell.word.push('│');
@@ -116,7 +139,10 @@ pub(crate) fn paint_borders(
             let row_start = cell_start + row_offset * cols;
             for col_offset in 0..right_t {
                 let idx = row_start + right_col_start + col_offset;
-                if idx < max_cells && canvas.in_region(idx) {
+                if idx < max_cells
+                    && canvas.in_region(idx)
+                    && in_clip(r.x + right_col_start + col_offset, r.y + row_offset)
+                {
                     let cell = &mut canvas.layout[idx];
                     cell.word.clear();
                     cell.word.push('│');
@@ -154,7 +180,7 @@ pub(crate) fn paint_borders(
         let (cx, cy) = corner_positions[i];
         let color = corner_colors[i];
         let idx = cell_start + cy * cols + cx;
-        if idx < max_cells && canvas.in_region(idx) {
+        if idx < max_cells && canvas.in_region(idx) && in_clip(r.x + cx, r.y + cy) {
             let cell = &mut canvas.layout[idx];
             cell.word.clear();
             cell.word.push(ch);

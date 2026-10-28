@@ -42,6 +42,11 @@ pub(crate) fn paint_block(
         return;
     }
     let r = Rect::new(r.x, r.y, r.width.min(cols - r.x), r.height);
+    // Border glyphs sit on this full border-box — [`paint_borders`] cuts
+    // them against `clip` per cell, so the rect itself must stay unshrunk
+    // (an intersected rect would relocate the bottom edge to the clip
+    // boundary instead of clipping it away).
+    let border_rect = r;
     // Inherited clip (ancestors' border-boxes) narrows the paint region
     // further: when a box overflows its parent, the cells beyond the clip are
     // dropped instead of painting over the sibling below.
@@ -284,7 +289,7 @@ pub(crate) fn paint_block(
     // clamped rect is passed down so edges never extend past the terminal
     // width. Painting last guarantees a frame cell keeps its glyph even if
     // wrapped content reached it.
-    paint_borders(lb, r, canvas, fg, effective_bg);
+    paint_borders(lb, border_rect, canvas, fg, effective_bg, clip);
 }
 
 /// Paint a multi-column box's fragmented inline content and column rules.

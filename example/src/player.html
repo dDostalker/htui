@@ -98,6 +98,9 @@
   .side .card + .card { margin-top: 1ch; }
 
   .card {
+    /* The vh heights below assume browser content-box math; keep it explicit
+       so terminal engines defaulting to border-box agree with the browser. */
+    box-sizing: content-box;
     border: 1ch solid #1f2740;
     border-radius: 1;
     background-color: #10141d;
@@ -438,6 +441,9 @@
 
   @media (max-height: 24ch) {
     .library { height: 25vh; }
+    /* Let the list yield rows (it scrolls internally) so it stays inside
+       the shrunken card instead of spilling past its bottom border. */
+    .plist { height: auto; flex: 0 1 auto; }
     .queue-card,
     .card-lyr { display: none; }
   }

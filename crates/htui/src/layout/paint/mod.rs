@@ -86,7 +86,10 @@ pub(super) fn paint_control_chrome(
     // resolved at layout time).
     let sides = &lb.paint_style.box_edges.border;
     if sides.any_visible() {
-        paint_borders(lb, rect, canvas, fg, Some(bg_fill));
+        // `rect` arrives pre-clipped from the control painters; clipping the
+        // glyphs to the rect itself is a no-op that keeps every cell they
+        // already painted reachable.
+        paint_borders(lb, rect, canvas, fg, Some(bg_fill), rect);
     }
     Rect::new(
         rect.x.saturating_add(sides.left.thickness()),

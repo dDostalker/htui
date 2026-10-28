@@ -47,6 +47,27 @@ pub(super) fn prepare_flex_item(
     // the intrinsic measurement (CSS Flexbox §9.9.1: the container's main
     // size is definite for base-size calculation).
     let natural = natural_intrinsic_size(arena, item_id, context, Some(containing_main));
+    // Percentage margins / paddings resolve against the container's content
+    // width (CSS inline-size axis, both directions).
+    let edges = css.get_box_edges(containing_main, context.font, context.viewport);
+    let margin = edges.margin;
+    // Declared lengths (`width` / `height` / `flex-basis` / `min-*` /
+    // `max-*`) are content-box under the default `box-sizing`, while the
+    // flex algorithm distributes border-box extents — the distributed main
+    // size becomes the item's border-box rect and `css_cross` becomes its
+    // border-box cross size. Convert each declared size by the item's own
+    // edges along the axis it sizes; otherwise a bordered item laid out
+    // from its CSS `height` (e.g. a sidebar card's `height: 25vh`) is
+    // allocated `inner` rows too few and its content paints past the frame.
+    let sizing = css.get_box_sizing();
+    let (inner_main, inner_cross) = match direction.is_row() {
+        true => (edges.inner_horizontal(), edges.inner_vertical()),
+        false => (edges.inner_vertical(), edges.inner_horizontal()),
+    };
+    let to_border = |declared: usize, inner: usize| match sizing {
+        crate::html::css_parse::BoxSizing::BorderBox => declared,
+        crate::html::css_parse::BoxSizing::ContentBox => declared.saturating_add(inner),
+    };
     // Percentage bases resolve against the axis they are declared on: the
     // main axis — definite width for rows, definite height (when known) for
     // columns.
@@ -57,6 +78,7 @@ pub(super) fn prepare_flex_item(
     };
     let basis_resolved = css
         .get_flex_basis_resolved(main_containing, context.font, context.viewport)
+        .map(|basis| to_border(basis, inner_main))
         .or_else(|| {
             // `auto` fallback chain depends on the direction:
             // - `row` direction: main axis is horizontal, so an explicit
@@ -79,8 +101,12 @@ pub(super) fn prepare_flex_item(
                 false => css.get_height(containing_height, context.font, context.viewport),
             };
             match direction.is_row() {
-                true => explicit.or(Some(natural.width)),
-                false => explicit.or(Some(natural.height)),
+                true => explicit
+                    .map(|w| to_border(w, inner_main))
+                    .or(Some(natural.width)),
+                false => explicit
+                    .map(|h| to_border(h, inner_main))
+                    .or(Some(natural.height)),
             }
         })
         .unwrap_or(FLEX_ITEM_MIN_CROSS);
@@ -89,12 +115,20 @@ pub(super) fn prepare_flex_item(
     // default for `align-items` is `stretch`, so without an explicit
     // `align-items` this still ends up as `Stretch`).
     let css_min_main = match direction.is_row() {
-        true => css.get_min_width(containing_main, context.font, context.viewport),
-        false => css.get_min_height(containing_height, context.font, context.viewport),
+        true => css
+            .get_min_width(containing_main, context.font, context.viewport)
+            .map(|v| to_border(v, inner_main)),
+        false => css
+            .get_min_height(containing_height, context.font, context.viewport)
+            .map(|v| to_border(v, inner_main)),
     };
     let css_max_main = match direction.is_row() {
-        true => css.get_max_width(containing_main, context.font, context.viewport),
-        false => css.get_max_height(containing_height, context.font, context.viewport),
+        true => css
+            .get_max_width(containing_main, context.font, context.viewport)
+            .map(|v| to_border(v, inner_main)),
+        false => css
+            .get_max_height(containing_height, context.font, context.viewport)
+            .map(|v| to_border(v, inner_main)),
     };
     // Automatic minimum main size (`min-width` / `min-height: auto`). It is
     // the min-content floor only while the computed minimum remains `auto`;
@@ -116,8 +150,12 @@ pub(super) fn prepare_flex_item(
     // container's definite height for `height`, its content width for
     // `width`.
     let css_cross = match direction.is_row() {
-        true => css.get_height(containing_height, context.font, context.viewport),
-        false => css.get_width(containing_main, context.font, context.viewport),
+        true => css
+            .get_height(containing_height, context.font, context.viewport)
+            .map(|v| to_border(v, inner_cross)),
+        false => css
+            .get_width(containing_main, context.font, context.viewport)
+            .map(|v| to_border(v, inner_cross)),
     };
     // Baseline (rows from the box top to the first text row), for
     // `align-items: baseline`: border-top + padding-top place the content
@@ -137,10 +175,6 @@ pub(super) fn prepare_flex_item(
     } else {
         (font - 1) / 2
     };
-    // Percentage margins / paddings resolve against the container's content
-    // width (CSS inline-size axis, both directions).
-    let edges = css.get_box_edges(containing_main, context.font, context.viewport);
-    let margin = edges.margin;
     // Flex-item margins are clamped to 0 when negative: the item-sizing /
     // line-placement algorithm keeps its non-negative space model, so a
     // negative margin on a flex item degenerates to 0 (the horizontal

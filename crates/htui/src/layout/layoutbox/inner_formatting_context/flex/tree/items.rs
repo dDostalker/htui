@@ -176,14 +176,16 @@ pub(super) fn layout_flex_items(
             true => {
                 if has_explicit_height && line_count == 1 {
                     // A single-line row container with an explicit height
-                    // sizes its line to that height (so `align-items:
-                    // stretch` fills the container). But never smaller than
-                    // the line's natural cross size: a flex item taller than
-                    // the container (e.g. nested content that measures
-                    // larger than the viewport-height constraint) must not
-                    // overflow into the paint clip, or its last rows are
-                    // silently dropped.
-                    container_height.max(natural_line_cross)
+                    // sizes its line to that height exactly (CSS Flexbox
+                    // §9.4): `align-items: stretch` fills the container and
+                    // must not grow past it — an item stretched to the
+                    // container height whose content is taller keeps its
+                    // assigned rect, and the content is bounded by that
+                    // item's own clip / scroll handling (or spills past it
+                    // browser-style when it does not clip; the item's own
+                    // height resolution grows non-clipping items back to
+                    // their content).
+                    container_height
                 } else {
                     natural_line_cross.saturating_add(stretch_extra)
                 }
