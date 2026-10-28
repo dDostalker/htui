@@ -154,7 +154,10 @@ pub(crate) fn paint_borders(
         }
     }
 
-    // Corners: overwrite the 4 corner cells so the edges join cleanly.
+    // Corners: overwrite the 4 corner cells so the edges join cleanly. A
+    // corner belongs to the pair of sides meeting there, so it only paints
+    // when both are visible — a `border-left`-only box must not grow
+    // fabricated `┌` / `└` corner glyphs (the browser draws just the edge).
     // `border-radius: …` (any non-zero corner) swaps the square glyphs for
     // the rounded box-drawing set; radii larger than 1 render identically
     // to radius 1 because the terminal grid has no finer rounding primitive.
@@ -175,7 +178,20 @@ pub(crate) fn paint_borders(
         bottom_color.or(left_color),
         bottom_color.or(right_color),
     ];
+    let top_visible = sides.top.style == BorderStyle::Solid && top_t > 0;
+    let bottom_visible = sides.bottom.style == BorderStyle::Solid && bottom_t > 0;
+    let left_visible = sides.left.style == BorderStyle::Solid && left_t > 0;
+    let right_visible = sides.right.style == BorderStyle::Solid && right_t > 0;
+    let corner_visible = [
+        top_visible && left_visible,
+        top_visible && right_visible,
+        bottom_visible && left_visible,
+        bottom_visible && right_visible,
+    ];
     for i in 0..4 {
+        if !corner_visible[i] {
+            continue;
+        }
         let ch = corner_chars[i];
         let (cx, cy) = corner_positions[i];
         let color = corner_colors[i];

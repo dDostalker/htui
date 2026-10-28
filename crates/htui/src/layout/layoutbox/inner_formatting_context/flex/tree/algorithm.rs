@@ -132,14 +132,16 @@ pub(super) fn distribute_main_axis(
                 distributed += share;
             }
             // Distribute any floor-truncation remainder one cell at a
-            // time across the first items, so the line exactly fills
-            // the available main-axis size.
+            // time across the growing items, so the line exactly fills
+            // the available main-axis size. `flex-grow: 0` items never
+            // receive grow cells.
             let mut leftover = (free as isize) - distributed;
-            let mut k = 0;
-            while leftover > 0 && k < n {
+            while leftover > 0 {
+                let Some(k) = (0..n).filter(|&i| line[i].grow > 0.0).min() else {
+                    break;
+                };
                 sizes[k] += 1;
                 leftover -= 1;
-                k += 1;
             }
         }
     } else if used_after_basis > available {
@@ -155,17 +157,20 @@ pub(super) fn distribute_main_axis(
                 distributed += (sizes[i] as isize) - (new_size as isize);
                 sizes[i] = new_size;
             }
-            // If the floor-truncation sum is short of the overflow,
-            // trim additional cells from the largest items to make
-            // up the difference.
+            // If the floor-truncation sum is short of the overflow, trim
+            // the shortfall from the shrinkable items only (`flex-shrink:
+            // 0` never yields), largest current size first — the ordering
+            // the proportional pass would have continued with.
             let mut leftover = overflow as isize - distributed;
-            let mut k = 0;
-            while leftover > 0 && k < n {
-                if sizes[k] > 1 {
-                    sizes[k] -= 1;
-                    leftover -= 1;
-                }
-                k += 1;
+            while leftover > 0 {
+                let Some(k) = (0..n)
+                    .filter(|&i| line[i].shrink > 0.0 && sizes[i] > 1)
+                    .max_by_key(|&i| sizes[i])
+                else {
+                    break;
+                };
+                sizes[k] -= 1;
+                leftover -= 1;
             }
             // CSS `min-width` / `min-height: auto`: no item may shrink
             // below its min-content floor. Clamp the violated items and
@@ -340,8 +345,12 @@ fn enforce_min_main_sizes(
             break;
         }
         let overflow = total - available;
-        // Items still above their floor can absorb more shrink.
-        let candidates: Vec<usize> = (0..n).filter(|&i| sizes[i] > mins[i]).collect();
+        // Items still above their floor can absorb more shrink — but only
+        // the shrinkable ones: `flex-shrink: 0` never yields (CSS), even
+        // when the line keeps overflowing.
+        let candidates: Vec<usize> = (0..n)
+            .filter(|&i| line[i].shrink > 0.0 && sizes[i] > mins[i])
+            .collect();
         if candidates.is_empty() {
             break; // everything at its floor; the line overflows.
         }
