@@ -269,7 +269,9 @@ fn progress_ratio(node: &Node) -> (f32, Option<Color>) {
         } else {
             0.0
         };
-        (ratio, None)
+        // `accent-color` themes the fill; `None` means "use element fg".
+        let color = node.css_attr.get_accent_color();
+        (ratio, color)
     }
 }
 

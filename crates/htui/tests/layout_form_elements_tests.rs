@@ -293,6 +293,21 @@ fn test_progress_author_width_controls_bar() {
 }
 
 #[test]
+fn test_progress_accent_color() {
+    init();
+    let tl = draw(
+        r#"<progress value="0.5"></progress>"#,
+        "progress { accent-color: #ff0000; }",
+    );
+    let filled: Vec<_> = tl.layout.iter().filter(|b| b.word == "█").collect();
+    assert!(!filled.is_empty());
+    assert!(
+        filled.iter().all(|b| b.fcolor == Some(Color::Rgb { r: 0xff, g: 0x00, b: 0x00 })),
+        "accent-color themes the progress fill"
+    );
+}
+
+#[test]
 fn test_meter_ratio_from_min_max() {
     init();
     let tl = draw(

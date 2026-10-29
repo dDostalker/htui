@@ -274,9 +274,10 @@ pub(crate) fn paint_input(
                 .or_else(|| node_css.0.get(&fg_key))
                 .and_then(|v| parse_color_str(v))
         };
-        let thumb_fg = pseudo_color("thumb").or(track_fg);
-        let fill_fg = pseudo_color("progress").or(track_fg);
-        let empty_fg = pseudo_color("track").or(Some(Color::DarkGrey));
+        let accent = node.css_attr.get_accent_color();
+        let thumb_fg = pseudo_color("thumb").or(accent).or(track_fg);
+        let fill_fg = pseudo_color("progress").or(accent).or(track_fg);
+        let empty_fg = pseudo_color("track").or(accent).or(Some(Color::DarkGrey));
 
         if range_is_vertical(node) {
             if content.height == 0 {
@@ -346,7 +347,10 @@ pub(crate) fn paint_input(
         let toggle_fg = if disabled {
             Color::DarkGrey
         } else {
-            fg.unwrap_or(Color::White)
+            node.css_attr
+                .get_accent_color()
+                .or(fg)
+                .unwrap_or(Color::White)
         };
         // The glyph carries no background of its own: the surrounding page
         // background shows through, like a browser checkbox.

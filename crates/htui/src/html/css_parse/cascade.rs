@@ -313,6 +313,7 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "background",
     "background-clip",
     "caret-color",
+    "accent-color",
     "text-align",
     "font-weight",
     "font-style",
@@ -462,6 +463,7 @@ pub const INHERITED_PROPS: &[&str] = &[
     "letter-spacing",
     "word-spacing",
     "text-indent",
+    "accent-color",
 ];
 
 fn inherit_css(arena: &mut NodeArena, root_id: NodeId) {
