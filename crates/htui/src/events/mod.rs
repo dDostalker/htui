@@ -112,6 +112,13 @@ pub enum EventType {
     /// along the `<body>` ancestor chain; the event target is `<body>` (htui
     /// has no separate window node).
     Resize,
+    /// Fired when a mouse button is pressed on an element (`onmousedown`).
+    MouseDown,
+    /// Fired when a held mouse button is released (`onmouseup`).
+    MouseUp,
+    /// Fired when the pointer moves (`onmousemove`). Fires on every move
+    /// (subject to the input loop's in-flight cap), not just hover changes.
+    MouseMove,
     /// Fired after the page scroll offset changed (`onscroll`). Same dispatch
     /// shape as [`EventType::Resize`] (window listeners + `<body>` chain);
     /// the event carries no payload — handlers read `window.scrollY`.

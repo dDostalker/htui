@@ -566,7 +566,7 @@ fn run_inner(
         // Send engine work to the script thread. Move messages are capped so
         // a busy script thread cannot accumulate a large pointer backlog.
         for msg in msgs {
-            if let ScriptMsg::Move { .. } = msg {
+            if let ScriptMsg::Move { .. } | ScriptMsg::MouseMove { .. } = msg {
                 if moves_in_flight >= MAX_IN_FLIGHT_MOVES {
                     log::debug!(
                         "Script thread busy: dropping pointer move ({moves_in_flight} in flight)"

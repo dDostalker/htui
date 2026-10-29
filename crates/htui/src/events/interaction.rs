@@ -63,6 +63,46 @@ pub fn on_move(
     cmds
 }
 
+/// Dispatch a `MouseDown` event at `(x, y)`.
+pub fn on_mouse_down(
+    hit_map: &HitMap,
+    engine: &mut ScriptEngine,
+    x: u32,
+    y: u32,
+) -> Vec<RenderCmd> {
+    let Some(region) = hit_map.hit_test(x, y) else {
+        return Vec::new();
+    };
+    engine.fire(region, EventType::MouseDown, x, y)
+}
+
+/// Dispatch a `MouseUp` event at `(x, y)`.
+pub fn on_mouse_up(
+    hit_map: &HitMap,
+    engine: &mut ScriptEngine,
+    x: u32,
+    y: u32,
+) -> Vec<RenderCmd> {
+    let Some(region) = hit_map.hit_test(x, y) else {
+        return Vec::new();
+    };
+    engine.fire(region, EventType::MouseUp, x, y)
+}
+
+/// Dispatch a `MouseMove` event at `(x, y)`. Fires on every call (the input
+/// loop's in-flight cap provides the back-pressure), not just on hover change.
+pub fn on_mouse_move_dispatch(
+    hit_map: &HitMap,
+    engine: &mut ScriptEngine,
+    x: u32,
+    y: u32,
+) -> Vec<RenderCmd> {
+    let Some(region) = hit_map.hit_test(x, y) else {
+        return Vec::new();
+    };
+    engine.fire(region, EventType::MouseMove, x, y)
+}
+
 /// Process a click at canvas coordinates `(x, y)`.
 ///
 /// A click implies the pointer is over the target, so the hover state is

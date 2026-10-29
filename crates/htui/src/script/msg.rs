@@ -42,6 +42,12 @@ pub enum ScriptMsg {
     Move { x: u32, y: u32 },
     /// Completed click: hover sync + `Click` dispatch.
     Click { x: u32, y: u32 },
+    /// Mouse button pressed at `(x, y)` (`MouseDown` dispatch).
+    MouseDown { x: u32, y: u32 },
+    /// Held mouse button released at `(x, y)` (`MouseUp` dispatch).
+    MouseUp { x: u32, y: u32 },
+    /// Pointer moved to `(x, y)` with the button held (`MouseMove` dispatch).
+    MouseMove { x: u32, y: u32 },
     /// Focus an `<input>` field (fire `focus`).
     FocusInput { node_id: NodeId },
     /// Blur `node_id`, committing the edited `value` into the DOM and firing
@@ -286,6 +292,18 @@ pub fn apply_message(
 ) -> ScriptEvent {
     let (cmds, key_gate) = match &msg {
         ScriptMsg::Move { x, y } => (interaction::on_move(hover, hit_map, engine, *x, *y), None),
+        ScriptMsg::MouseDown { x, y } => {
+            let cmds = interaction::on_mouse_down(hit_map, engine, *x, *y);
+            (cmds, None)
+        }
+        ScriptMsg::MouseUp { x, y } => {
+            let cmds = interaction::on_mouse_up(hit_map, engine, *x, *y);
+            (cmds, None)
+        }
+        ScriptMsg::MouseMove { x, y } => {
+            let cmds = interaction::on_mouse_move_dispatch(hit_map, engine, *x, *y);
+            (cmds, None)
+        }
         ScriptMsg::Click { x, y } => {
             let mut cmds = interaction::on_click(hover, hit_map, engine, *x, *y);
             // `<summary>` default action: after the click handlers, clicking

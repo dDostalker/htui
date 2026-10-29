@@ -8,7 +8,7 @@ use boa_engine::JsValue;
 use crossterm::style::Color;
 use htui::events::{
     ElementRef, EventBindings, EventType, Geometry, HitMap, HitRegion,
-    interaction::{HoverState, on_click, on_move},
+    interaction::{HoverState, on_click, on_mouse_down, on_mouse_move_dispatch, on_mouse_up, on_move},
 };
 use htui::html::css_parse::{
     DynamicState, Parser as CssParser, PseudoClass, Selector, css_into_node,
@@ -2961,4 +2961,100 @@ fn range_slider_drag_commits_value_and_dispatches_events() {
         eval_str(&mut engine, "window.events.join(',')"),
         "input:5,change:5,input:10,change:10"
     );
+}
+
+#[test]
+fn mousedown_dispatches_to_listener() {
+    let seen = Arc::new(Mutex::new(false));
+    let s2 = Arc::clone(&seen);
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="pad" onmousedown="go()">press</div>"#,
+        host_bindings("go", move |_| {
+            *s2.lock().unwrap() = true;
+            JsValue::undefined()
+        }),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("pad").expect("region");
+    let (x, y) = center(region.rect);
+    on_mouse_down(&map, &mut engine, x, y);
+    assert!(*seen.lock().unwrap(), "mousedown listener fires");
+}
+
+#[test]
+fn mouseup_dispatches_to_listener() {
+    let seen = Arc::new(Mutex::new(false));
+    let s2 = Arc::clone(&seen);
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="pad" onmouseup="go()">release</div>"#,
+        host_bindings("go", move |_| {
+            *s2.lock().unwrap() = true;
+            JsValue::undefined()
+        }),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("pad").expect("region");
+    let (x, y) = center(region.rect);
+    on_mouse_up(&map, &mut engine, x, y);
+    assert!(*seen.lock().unwrap(), "mouseup listener fires");
+}
+
+#[test]
+fn mousemove_dispatches_to_listener() {
+    let seen = Arc::new(Mutex::new(0usize));
+    let s2 = Arc::clone(&seen);
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="pad" onmousemove="go()">move</div>"#,
+        host_bindings("go", move |_| {
+            *s2.lock().unwrap() += 1;
+            JsValue::undefined()
+        }),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("pad").expect("region");
+    let (x, y) = center(region.rect);
+    on_mouse_move_dispatch(&map, &mut engine, x, y);
+    on_mouse_move_dispatch(&map, &mut engine, x + 1, y);
+    assert_eq!(*seen.lock().unwrap(), 2, "mousemove fires on every dispatch");
+}
+
+#[test]
+fn mouse_events_work_via_apply_message() {
+    let count = Arc::new(Mutex::new(0usize));
+    let c2 = Arc::clone(&count);
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="pad" onmousedown="go()" onmouseup="go()" onmousemove="go()">x</div>"#,
+        host_bindings("go", move |_| {
+            *c2.lock().unwrap() += 1;
+            JsValue::undefined()
+        }),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("pad").expect("region");
+    let (x, y) = center(region.rect);
+    let mut hover = HoverState::new();
+    apply_message(&mut engine, &mut hover, &map, ScriptMsg::MouseDown { x, y });
+    apply_message(&mut engine, &mut hover, &map, ScriptMsg::MouseMove { x, y });
+    apply_message(&mut engine, &mut hover, &map, ScriptMsg::MouseUp { x, y });
+    assert_eq!(*count.lock().unwrap(), 3, "all three mouse events fire");
+}
+
+#[test]
+fn addEventListener_mousemove_works() {
+    let count = Arc::new(Mutex::new(0usize));
+    let c2 = Arc::clone(&count);
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="pad">x</div>
+        <script>document.getElementById("pad").addEventListener("mousemove", function() { go() })</script>"#,
+        host_bindings("go", move |_| {
+            *c2.lock().unwrap() += 1;
+            JsValue::undefined()
+        }),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("pad").expect("region");
+    let (x, y) = center(region.rect);
+    let mut hover = HoverState::new();
+    apply_message(&mut engine, &mut hover, &map, ScriptMsg::MouseMove { x, y });
+    assert_eq!(*count.lock().unwrap(), 1, "addEventListener('mousemove') fires");
 }

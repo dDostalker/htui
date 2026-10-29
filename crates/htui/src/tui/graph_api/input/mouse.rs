@@ -41,6 +41,7 @@ pub fn handle_click(
     if clicked.is_some_and(|r| is_disabled_control(Some(arena), r.node_id)) {
         return;
     }
+    msgs.push(ScriptMsg::MouseDown { x, y });
     msgs.push(ScriptMsg::Click { x, y });
     // Clicking an `<input>` / `<textarea>` focuses it; a click on a `<label>`
     // delegates to its associated control (`for` or a wrapped element). Any
@@ -204,6 +205,7 @@ pub fn handle_mouse_up(
     let (x, y) = canvas_pos(state, release_screen.0, release_screen.1);
     // Re-validate the hover at the release position (see the doc comment).
     msgs.push(ScriptMsg::Move { x, y });
+    msgs.push(ScriptMsg::MouseUp { x, y });
     if button != MouseButton::Left {
         // Right-drag block selection ends here; field drags are left-only.
         if page_selection_drag {
@@ -633,6 +635,7 @@ pub fn handle_mouse_move(
                             value: state.input_value.clone(),
                         });
                     }
+                    msgs.push(ScriptMsg::MouseMove { x, y });
                     return;
                 }
                 let idx = if state.focused_is_textarea {
