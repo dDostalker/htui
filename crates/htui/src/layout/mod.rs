@@ -213,16 +213,7 @@ fn collect_box_lines<'a>(arena: &'a NodeArena, lb: &'a LayoutBox, out: &mut Vec<
     // ordinary text in a page flow selection.
     if matches!(lb.kind, crate::layout::BoxKind::Replaced(_))
         || user_select_is_none(arena, lb.node_id)
-        || matches!(
-            arena[lb.node_id].node_type,
-            NodeType::Input
-                | NodeType::Textarea
-                | NodeType::Select
-                | NodeType::Button
-                | NodeType::Img
-                | NodeType::Progress
-                | NodeType::Meter
-        )
+        || matches!(arena[lb.node_id].node_type, NodeType::Progress | NodeType::Meter)
     {
         return;
     }

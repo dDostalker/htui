@@ -504,7 +504,7 @@ pub fn handle_mouse_down(
                 // target's selection policy.
                 let selection_node = click_node.or_else(|| find_body(arena));
                 let selected = selection_node.is_some_and(|node_id| {
-                    !blocks_page_selection(arena, node_id) && !hit_map.is_user_select_none(node_id)
+                    !blocks_page_selection(arena, node_id)
                 });
                 if state.copy_flow && selected {
                     state.text_sel_mode = SelectionMode::Flow;

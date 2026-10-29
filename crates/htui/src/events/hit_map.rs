@@ -46,7 +46,6 @@ pub struct HitMap {
     /// Nodes whose cascaded CSS resolves `user-select: none`. Hit-map build
     /// sees the same styled arena used by layout, so the input loop can apply
     /// author selection policy without needing a cascaded DOM snapshot.
-    user_select_none: std::collections::HashSet<NodeId>,
     /// Native scrollbar controls keyed by their owning scroll container.
     pub scrollbars: HashMap<NodeId, ScrollbarRegion>,
     /// Hit-test index: region indices bucketed by canvas row (`rows[y]`
@@ -98,8 +97,6 @@ impl HitMap {
     /// - the finished regions are bucketed by canvas row so
     ///   [`HitMap::hit_test`] never scans the whole list.
     pub fn build(geometry: &Geometry) -> HitMap {
-        let mut user_select_none = std::collections::HashSet::new();
-        collect_user_select_none(&geometry.arena, &geometry.boxes, &mut user_select_none);
         let mut regions = Vec::new();
         let mut scrollbars = HashMap::new();
         // One ancestor-chain resolution per distinct node, shared by every
@@ -141,7 +138,6 @@ impl HitMap {
         }
         HitMap {
             regions,
-            user_select_none,
             scrollbars,
             rows,
         }
@@ -175,10 +171,6 @@ impl HitMap {
         self.regions.iter().find(|r| r.id() == Some(id))
     }
 
-    /// Whether a node resolved CSS `user-select: none` in this geometry.
-    pub fn is_user_select_none(&self, node_id: NodeId) -> bool {
-        self.user_select_none.contains(&node_id)
-    }
 
     /// Find the nearest scrollable ancestor (including `start`) whose native
     /// scrollbar is active.
@@ -195,24 +187,6 @@ impl HitMap {
             current = arena.get(node_id).and_then(|node| node.parent);
         }
         None
-    }
-}
-
-/// Collect every laid-out node that resolves CSS `user-select: none`.
-///
-/// `HitMap` is built from the render thread's cascaded geometry, so this is
-/// the input loop's authoritative view of author selection policy.
-fn collect_user_select_none(
-    arena: &NodeArena,
-    roots: &[LayoutBox],
-    out: &mut std::collections::HashSet<NodeId>,
-) {
-    let mut stack = roots.iter().collect::<Vec<_>>();
-    while let Some(box_tree) = stack.pop() {
-        if crate::layout::user_select_is_none(arena, box_tree.node_id) {
-            out.insert(box_tree.node_id);
-        }
-        stack.extend(box_tree.children.iter());
     }
 }
 
