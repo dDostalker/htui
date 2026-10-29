@@ -25,7 +25,7 @@ use crate::tui::graph_api::{
 use super::overlay::apply_select_overlay;
 use super::pipeline::flush_frame;
 use super::region::{find_box_rect, union_rect};
-use super::selection::{extract_selection, highlight_lines, lines_bounds, selection_lines};
+use super::selection::{highlight_lines, lines_bounds, selection_lines};
 
 pub(super) fn cascade_document(
     document: &ParsedDocument,
@@ -422,10 +422,7 @@ impl RenderState {
             None => Vec::new(),
         };
         let text = match &new_sel {
-            Some(n) if n.mode == SelectionMode::Flow => {
-                crate::layout::extract_flow_text(&geo.arena, &geo.boxes, &raw_lines)
-            }
-            Some(_) => extract_selection(tl, &new_lines),
+            Some(_) => crate::layout::extract_flow_text(&geo.arena, &geo.boxes, &raw_lines),
             None => String::new(),
         };
         if let Ok(mut guard) = self.selection_text.lock() {
