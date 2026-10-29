@@ -83,16 +83,30 @@ impl<'a> LayoutContext<'a> {
 /// carrying the parent block's node id during generation and never produce a
 /// `LayoutBox` of their own, so the `node_id` of every box carrying inline
 /// runs is exactly its owning DOM block.
-pub fn extract_flow_text(
-    arena: &NodeArena,
-    boxes: &[LayoutBox],
+/// One clipped selection fragment: a text run slice that overlaps the
+/// selection band on a given row.
+struct ClippedFragment<'a> {
+    row: u32,
+    lo: u32,
+    hi: u32,
+    node_id: NodeId,
+    runs: &'a [InlineRun],
+    font: usize,
+    col_start: u32,
+}
+
+/// Collect the selection's overlapping text fragments (the shared inner loop
+/// of [`extract_flow_text`] and [`selection_text_lines`]): for every selection
+/// band that intersects a laid-out text line, compute the clipped `lo..hi`
+/// column range and yield the fragment.
+fn clipped_fragments<'a>(
+    arena: &'a NodeArena,
+    boxes: &'a [LayoutBox],
     lines: &[(u32, u32, u32)],
-) -> String {
+) -> Vec<ClippedFragment<'a>> {
     let mut text_lines: Vec<FlowTextLine> = Vec::new();
     collect_flow_lines(arena, boxes, &mut text_lines);
-
-    // Fragments: (row, first selected column, owning block, text).
-    let mut frags: Vec<(u32, u32, NodeId, String)> = Vec::new();
+    let mut out = Vec::new();
     for &(sel_row, sel_cs, sel_ce) in lines {
         for tl in &text_lines {
             if tl.row != sel_row {
@@ -102,17 +116,36 @@ pub fn extract_flow_text(
             let line_end = tl.col_start.saturating_add(line_width);
             let lo = sel_cs.max(tl.col_start);
             let hi = sel_ce.min(line_end);
-            if lo >= hi {
-                continue;
-            }
-            let text = extract_line_text(tl.runs, tl.font, lo, hi, tl.col_start);
-            if !text.is_empty() {
-                frags.push((tl.row, lo, tl.node_id, text));
+            if lo < hi {
+                out.push(ClippedFragment {
+                    row: tl.row,
+                    lo,
+                    hi,
+                    node_id: tl.node_id,
+                    runs: tl.runs,
+                    font: tl.font,
+                    col_start: tl.col_start,
+                });
             }
         }
     }
+    out
+}
 
-    // Assemble in visual order: same block → concatenate, new block → newline.
+pub fn extract_flow_text(
+    arena: &NodeArena,
+    boxes: &[LayoutBox],
+    lines: &[(u32, u32, u32)],
+) -> String {
+    let mut frags: Vec<(u32, u32, NodeId, String)> = Vec::new();
+    for f in clipped_fragments(arena, boxes, lines) {
+        let text = extract_line_text(f.runs, f.font, f.lo, f.hi, f.col_start);
+        if !text.is_empty() {
+            frags.push((f.row, f.lo, f.node_id, text));
+        }
+    }
+
+    // Assemble in visual order: same block \u{2192} concatenate, new block \u{2192} newline.
     frags.sort_by_key(|&(row, col, _, _)| (row, col));
     let mut out = String::new();
     let mut prev_block: Option<NodeId> = None;
@@ -126,11 +159,6 @@ pub fn extract_flow_text(
     out
 }
 
-/// Resolve CSS `user-select` for a node, including the `auto` ancestor walk.
-///
-/// `user-select` is not inherited, but `auto` resolves its *used* value from
-/// the nearest explicit non-`auto` declaration. This lets a `text` descendant
-/// opt back in beneath `none`, while an `auto` descendant remains unselectable.
 pub fn user_select_is_none(arena: &NodeArena, start: NodeId) -> bool {
     let mut current = Some(start);
     while let Some(node_id) = current {
@@ -159,29 +187,28 @@ pub fn user_select_is_none(arena: &NodeArena, start: NodeId) -> bool {
 ///
 /// Block selections (right-drag rectangles) are *not* passed through this:
 /// their highlight intentionally follows the dragged rectangle.
+/// Clip a flow selection's row bands down to the columns each row actually
+/// covers with text.
+///
+/// The selection tracking works in whole rows (`col_start..canvas_width` for
+/// full rows), but painting the highlight over an entire row would wash the
+/// block's border, padding, indentation and trailing whitespace with the
+/// selection background. This maps every input band onto the text columns of
+/// the matching visual line (each overlapping text fragment becomes its own
+/// band), so the highlight covers exactly the cells whose glyphs the copy
+/// would yield \u{2014} and nothing beyond the block's own text.
+///
+/// Block selections (right-drag rectangles) are *not* passed through this:
+/// their highlight intentionally follows the dragged rectangle.
 pub fn selection_text_lines(
     arena: &NodeArena,
     boxes: &[LayoutBox],
     lines: &[(u32, u32, u32)],
 ) -> Vec<(u32, u32, u32)> {
-    let mut text_lines: Vec<FlowTextLine> = Vec::new();
-    collect_flow_lines(arena, boxes, &mut text_lines);
-    let mut out: Vec<(u32, u32, u32)> = Vec::new();
-    for &(sel_row, sel_cs, sel_ce) in lines {
-        for tl in &text_lines {
-            if tl.row != sel_row {
-                continue;
-            }
-            let line_width: u32 = tl.runs.iter().map(|r| r.width_at(tl.font) as u32).sum();
-            let text_end = tl.col_start.saturating_add(line_width);
-            let lo = sel_cs.max(tl.col_start);
-            let hi = sel_ce.min(text_end);
-            if lo < hi {
-                out.push((sel_row, lo, hi));
-            }
-        }
-    }
-    out
+    clipped_fragments(arena, boxes, lines)
+        .into_iter()
+        .map(|f| (f.row, f.lo, f.hi))
+        .collect()
 }
 
 /// One laid-out visual line of text, positioned exactly as the paint phase
