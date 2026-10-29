@@ -856,50 +856,46 @@
     }
 
     var libraryOpen = true;
-    var sideAnim = null;
+    var sideTimer = null;
+
+    /* Ease-out cubic: fast start, decelerating stop (same curve as scroll). */
+    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
     function toggleLibrary() {
       libraryOpen = !libraryOpen;
-      if (sideAnim) { cancelAnimationFrame(sideAnim); sideAnim = null; }
+      if (sideTimer) { clearTimeout(sideTimer); sideTimer = null; }
       var side = document.getElementById("music-side");
       var toggle = document.getElementById("lib-toggle");
       toggle.textContent = libraryOpen ? "\u00ab LIB" : "LIB \u00bb";
 
-      if (libraryOpen) {
-        /* Slide open: 0% \u2192 30% flex-basis over ~10 frames (~160ms). */
-        side.style.display = "flex";
-        side.style.minWidth = "0";
-        var w = 0;
-        var step = function () {
-          w += 3;
-          if (w >= 30) {
-            side.style.flexBasis = "";
-            side.style.minWidth = "";
-            sideAnim = null;
-          } else {
-            side.style.flexBasis = w + "%";
-            sideAnim = requestAnimationFrame(step);
-          }
-        };
-        sideAnim = requestAnimationFrame(step);
-      } else {
-        /* Slide close: 30% \u2192 0% flex-basis, then display:none. */
-        side.style.minWidth = "0";
-        var w = 30;
-        var step = function () {
-          w -= 3;
-          if (w <= 0) {
-            side.style.display = "none";
-            side.style.flexBasis = "";
-            side.style.minWidth = "";
-            sideAnim = null;
-          } else {
-            side.style.flexBasis = w + "%";
-            sideAnim = requestAnimationFrame(step);
-          }
-        };
-        sideAnim = requestAnimationFrame(step);
+      var FRAME_MS = 16;
+      var DURATION = 240;
+      var MAX_BASIS = 30;
+      var start = Date.now();
+
+      if (libraryOpen) side.style.display = "flex";
+      side.style.minWidth = "0";
+
+      function step() {
+        var t = Math.min(1, (Date.now() - start) / DURATION);
+        var eased = easeOutCubic(t);
+        var basis;
+        if (libraryOpen) {
+          basis = Math.round(eased * MAX_BASIS);
+        } else {
+          basis = Math.round((1 - eased) * MAX_BASIS);
+        }
+        side.style.flexBasis = basis + "%";
+        if (t < 1) {
+          sideTimer = setTimeout(step, FRAME_MS);
+        } else {
+          if (!libraryOpen) side.style.display = "none";
+          side.style.flexBasis = "";
+          side.style.minWidth = "";
+          sideTimer = null;
+        }
       }
+      step();
     }
 
     function toggleRepeat() { repeat = !repeat; update(); }
