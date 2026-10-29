@@ -856,11 +856,50 @@
     }
 
     var libraryOpen = true;
+    var sideAnim = null;
 
     function toggleLibrary() {
       libraryOpen = !libraryOpen;
-      document.getElementById("music-side").classList.toggle("collapsed", !libraryOpen);
-      document.getElementById("lib-toggle").textContent = libraryOpen ? "\u00ab LIB" : "LIB \u00bb";
+      if (sideAnim) { cancelAnimationFrame(sideAnim); sideAnim = null; }
+      var side = document.getElementById("music-side");
+      var toggle = document.getElementById("lib-toggle");
+      toggle.textContent = libraryOpen ? "\u00ab LIB" : "LIB \u00bb";
+
+      if (libraryOpen) {
+        /* Slide open: 0% \u2192 30% flex-basis over ~10 frames (~160ms). */
+        side.style.display = "flex";
+        side.style.minWidth = "0";
+        var w = 0;
+        var step = function () {
+          w += 3;
+          if (w >= 30) {
+            side.style.flexBasis = "";
+            side.style.minWidth = "";
+            sideAnim = null;
+          } else {
+            side.style.flexBasis = w + "%";
+            sideAnim = requestAnimationFrame(step);
+          }
+        };
+        sideAnim = requestAnimationFrame(step);
+      } else {
+        /* Slide close: 30% \u2192 0% flex-basis, then display:none. */
+        side.style.minWidth = "0";
+        var w = 30;
+        var step = function () {
+          w -= 3;
+          if (w <= 0) {
+            side.style.display = "none";
+            side.style.flexBasis = "";
+            side.style.minWidth = "";
+            sideAnim = null;
+          } else {
+            side.style.flexBasis = w + "%";
+            sideAnim = requestAnimationFrame(step);
+          }
+        };
+        sideAnim = requestAnimationFrame(step);
+      }
     }
 
     function toggleRepeat() { repeat = !repeat; update(); }
