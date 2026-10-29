@@ -425,6 +425,34 @@ fn pressing_elsewhere_replaces_the_page_selection() {
 }
 
 #[test]
+fn blank_body_press_can_anchor_an_upward_flow_drag() {
+    // A browser can start a drag in body whitespace outside the text box. The
+    // terminal hit map has no box there, but body remains the implicit target;
+    // dragging upward may then enter text and produce a selection.
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="text">some text</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let mut state = InputState::new();
+    mouse_down(&mut state, &mut engine, &map, 5, 5, MouseButton::Left);
+    state.pressed = Some((5, 5));
+    let cmds = mouse_move(&mut state, &mut engine, &map, 3, 0);
+
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            RenderCmd::TextSelection {
+                anchor: Some((5, 5)),
+                end: Some((3, 0)),
+                mode: SelectionMode::Flow
+            }
+        )),
+        "body whitespace must be usable as a flow-selection origin"
+    );
+}
+
+#[test]
 fn right_drag_emits_a_block_selection() {
     // Right-drag is the rectangle (block) selection: the command must carry
     // `SelectionMode::Block` so the render thread highlights a rectangle.

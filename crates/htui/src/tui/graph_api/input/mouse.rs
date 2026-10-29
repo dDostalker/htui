@@ -235,8 +235,10 @@ pub fn handle_mouse_up(
         close_select(state, arena, Some(option_idx), msgs, cmds);
         return;
     }
-    // A click is a small jitter on the same logical element, not necessarily
-    // the exact same terminal cell. Once the shared threshold has been
+    // A click is a small jitter, not necessarily on the exact terminal cell.
+    // The queued `Click` dispatch resolves its bubbling target from the
+    // release hit path, so a tiny move onto an inline sibling reaches their
+    // common ancestor like a browser. Once the shared threshold has been
     // crossed, the gesture is a drag: a selection may survive, but the release
     // must not also activate a button / field.
     let within_click_threshold = press_origin.is_some_and(|(px, py)| {
@@ -247,8 +249,7 @@ pub fn handle_mouse_up(
                 .max(release_screen.1.abs_diff(py)),
         ) < TEXT_SEL_DRAG_THRESHOLD
     });
-    let release_target = resolve_click_node(arena, hit_map.hit_test(x, y).map(|r| r.node_id));
-    if within_click_threshold && press_target.is_some() && press_target == release_target {
+    if within_click_threshold && press_target.is_some() {
         handle_click(state, hit_map, arena, x, y, msgs, cmds);
     }
     // A real drag ended elsewhere: the selection (field-internal or page
@@ -268,6 +269,20 @@ fn resolve_click_node(arena: &NodeArena, clicked: Option<NodeId>) -> Option<Node
     } else {
         Some(id)
     }
+}
+
+/// The document `<body>` (or root fallback), used when no box was hit.
+fn find_body(arena: &NodeArena) -> Option<NodeId> {
+    arena
+        .iter()
+        .find(|(_, node)| node.node_type == NodeType::Body)
+        .map(|(id, _)| id)
+        .or_else(|| {
+            arena
+                .iter()
+                .find(|(_, node)| node.parent.is_none())
+                .map(|(id, _)| id)
+        })
 }
 
 /// The control a `<label>` activates: the element named by `for` (when it is
@@ -469,7 +484,12 @@ pub fn handle_mouse_down(
                     blur_input(state, msgs, cmds);
                 }
                 clear_text_selection(state, cmds);
-                let selected = click_node.is_some_and(|node_id| {
+                // Outside a laid-out box, the browser's implicit target is the
+                // document body. Anchoring there still allows an upward drag
+                // to select content, while normal box hits use their own
+                // target's selection policy.
+                let selection_node = click_node.or_else(|| find_body(arena));
+                let selected = selection_node.is_some_and(|node_id| {
                     !blocks_page_selection(arena, node_id) && !hit_map.is_user_select_none(node_id)
                 });
                 if state.copy_flow && selected {

@@ -112,8 +112,8 @@ pub struct InputState {
     /// Before this, pointer motion remains a jittery click; at/after it the
     /// field selection follows the pointer.
     field_drag_started: bool,
-    /// Resolved click target of the active press. A click must end on the
-    /// same logical element, not on the exact same terminal cell.
+    /// Whether the active press resolved to an actionable click target.
+    /// Disabled controls and scrollbar/dropdown-only presses leave it clear.
     pressed_target: Option<NodeId>,
     /// Native scrollbar thumb currently dragged: owning node + grab offset.
     pub scroll_drag: Option<(NodeId, u32)>,
