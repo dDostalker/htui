@@ -392,6 +392,39 @@ fn drag_on_page_text_emits_text_selection() {
 }
 
 #[test]
+fn page_drag_fires_selectionchange_at_gesture_end() {
+    // Browser selectionchange is a coalesced change notification rather than
+    // one event per pointer pixel. The terminal gesture boundary is mouse-up.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+             globalThis.selectionChanges = 0;
+             window.addEventListener('selectionchange', () => {
+               globalThis.selectionChanges += 1;
+             });
+           </script>
+           <div id="a">some text</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let mut state = InputState::new();
+    mouse_down(&mut state, &mut engine, &map, 0, 0, MouseButton::Left);
+    state.pressed = Some((0, 0));
+    let _ = mouse_move(&mut state, &mut engine, &map, 4, 0);
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.selectionChanges)"),
+        "0",
+        "drag motion must not flood selectionchange"
+    );
+
+    mouse_up(&mut state, &mut engine, &map, 4, 0);
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.selectionChanges)"),
+        "1",
+        "selectionchange fires once when the drag gesture ends"
+    );
+}
+
+#[test]
 fn pressing_elsewhere_replaces_the_page_selection() {
     // A second press clears the previous selection (rendering it away); the
     // new selection is anchored only once its drag begins — the render thread

@@ -116,6 +116,10 @@ pub enum EventType {
     /// shape as [`EventType::Resize`] (window listeners + `<body>` chain);
     /// the event carries no payload — handlers read `window.scrollY`.
     Scroll,
+    /// Fired when a page or field selection changes (`onselectionchange`).
+    /// The event has no payload; it is a change notification, matching the
+    /// browser's document-level event shape.
+    SelectionChange,
 }
 
 /// Terminal-agnostic keyboard payload carried by [`EventType::KeyDown`] /

@@ -406,9 +406,12 @@ pub(super) fn char_index_at_x(value: &str, cursor: usize, inner_width: usize, x:
 }
 
 /// Clear the page text selection, queueing a repaint only when one existed.
-pub(super) fn clear_text_selection(state: &mut InputState, cmds: &mut Vec<RenderCmd>) {
+/// Returns whether a visible selection was removed (the caller can notify the
+/// script layer with `selectionchange`).
+pub(super) fn clear_text_selection(state: &mut InputState, cmds: &mut Vec<RenderCmd>) -> bool {
     state.text_sel_armed = false;
-    if state.text_sel_anchor.is_some() || state.text_sel_end.is_some() {
+    let had_selection = state.text_sel_anchor.is_some() || state.text_sel_end.is_some();
+    if had_selection {
         state.text_sel_anchor = None;
         state.text_sel_end = None;
         cmds.push(RenderCmd::TextSelection {
@@ -417,6 +420,7 @@ pub(super) fn clear_text_selection(state: &mut InputState, cmds: &mut Vec<Render
             mode: state.text_sel_mode,
         });
     }
+    had_selection
 }
 
 #[cfg(test)]

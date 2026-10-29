@@ -95,6 +95,9 @@ pub enum ScriptMsg {
     /// wheel / key / animation / `scrollTo` frame). Dispatches the `scroll`
     /// event; handlers read `window.scrollY`.
     Scroll,
+    /// A page or field selection changed. Dispatches the browser-shaped
+    /// document-level `selectionchange` notification (no payload).
+    SelectionChange,
     /// Replace the whole document owned by the script engine.
     ///
     /// Used by the debug hot-reload watcher. The engine re-parses the HTML,
@@ -333,6 +336,7 @@ pub fn apply_message(
             (cmds, None)
         }
         ScriptMsg::Scroll => (engine.fire_scroll(), None),
+        ScriptMsg::SelectionChange => (engine.fire_selection_change(), None),
         ScriptMsg::InputKeystroke { node_id } => {
             let region = region_for(&engine.arena(), *node_id);
             (engine.fire(&region, EventType::Input, 0, 0), None)

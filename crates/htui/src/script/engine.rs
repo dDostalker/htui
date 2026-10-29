@@ -447,6 +447,11 @@ impl ScriptEngine {
         self.fire_window_and_body("scroll", EventType::Scroll)
     }
 
+    /// Fire `selectionchange` after a page or field selection changed.
+    pub fn fire_selection_change(&mut self) -> Vec<RenderCmd> {
+        self.fire_window_and_body("selectionchange", EventType::SelectionChange)
+    }
+
     /// Shared dispatch of the document-level events (`resize` / `scroll`)
     /// that have no node target: `window.addEventListener(type, fn)` handlers
     /// run first (no node target), then the `<body>` → root ancestor chain —

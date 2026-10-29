@@ -198,11 +198,17 @@ pub fn handle_mouse_up(
     let press_origin = state.press_screen.take();
     state.drag_origin = None;
     state.drag_selecting = false;
+    let field_drag_started = state.field_drag_started;
     state.field_drag_started = false;
+    let page_selection_drag = state.text_sel_anchor.is_some() || state.text_sel_end.is_some();
     let (x, y) = canvas_pos(state, release_screen.0, release_screen.1);
     // Re-validate the hover at the release position (see the doc comment).
     msgs.push(ScriptMsg::Move { x, y });
     if button != MouseButton::Left {
+        // Right-drag block selection ends here; field drags are left-only.
+        if page_selection_drag {
+            msgs.push(ScriptMsg::SelectionChange);
+        }
         return;
     }
     if scroll_drag.is_some() {
@@ -252,6 +258,11 @@ pub fn handle_mouse_up(
     if within_click_threshold && press_target.is_some() {
         handle_click(state, hit_map, arena, x, y, msgs, cmds);
     }
+    // Browser coalesces selection notifications; notifying once at gesture end
+    // is the terminal loop's equivalent task boundary.
+    if field_drag_started || page_selection_drag {
+        msgs.push(ScriptMsg::SelectionChange);
+    }
     // A real drag ended elsewhere: the selection (field-internal or page
     // text) is kept as-is.
 }
@@ -285,7 +296,6 @@ fn find_body(arena: &NodeArena) -> Option<NodeId> {
         })
 }
 
-/// The control a `<label>` activates: the element named by `for` (when it is
 /// labelable), else the first labelable descendant (input / select /
 /// textarea / button) in document order.
 fn label_control(arena: &NodeArena, label_id: NodeId) -> Option<NodeId> {
@@ -483,7 +493,9 @@ pub fn handle_mouse_down(
                 if state.focused_input.is_some() {
                     blur_input(state, msgs, cmds);
                 }
-                clear_text_selection(state, cmds);
+                if clear_text_selection(state, cmds) {
+                    msgs.push(ScriptMsg::SelectionChange);
+                }
                 // Outside a laid-out box, the browser's implicit target is the
                 // document body. Anchoring there still allows an upward drag
                 // to select content, while normal box hits use their own
@@ -506,7 +518,9 @@ pub fn handle_mouse_down(
         // records the shape. When the block copy feature is disabled no
         // selection can start.
         MouseButton::Right => {
-            clear_text_selection(state, cmds);
+            if clear_text_selection(state, cmds) {
+                msgs.push(ScriptMsg::SelectionChange);
+            }
             if state.copy_block {
                 state.text_sel_mode = SelectionMode::Block;
                 state.text_sel_armed = true;
