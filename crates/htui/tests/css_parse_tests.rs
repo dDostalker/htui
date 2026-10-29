@@ -4032,3 +4032,149 @@ fn attribute_selector_unclosed_bracket_is_error() {
     assert!("[type".parse::<CssSelector>().is_err());
     assert!("[]".parse::<CssSelector>().is_err());
 }
+
+
+fn parse_and_cascade(html: &str) -> (NodeId, NodeArena) {
+    let mut html_parser = html_parse::Parser::new(html);
+    let (root_id, mut arena, embedded) = html_parser.parse();
+    let mut css_parser = Parser::new(&embedded);
+    let rules = css_parser.parse();
+    css_into_node(&mut arena, root_id, &rules);
+    (root_id, arena)
+}
+
+fn find_first_by_tag(arena: &NodeArena, root: NodeId, tag: NodeType) -> NodeId {
+    fn walk(arena: &NodeArena, id: NodeId, tag: NodeType) -> Option<NodeId> {
+        if arena[id].node_type == tag { return Some(id); }
+        for &c in &arena[id].children {
+            if let Some(found) = walk(arena, c, tag) { return Some(found); }
+        }
+        None
+    }
+    walk(arena, root, tag).expect("node with tag not found")
+}
+
+
+
+#[test]
+fn css_var_basic_substitution() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            :root { --primary: #ff0000; }
+            p { color: var(--primary); }
+        </style><p>hi</p>"#,
+    );
+    let p = find_first_by_tag(&arena, root, NodeType::P);
+    let color = arena[p].css_attr.get_color();
+    assert_eq!(color, Some(Color::Rgb { r: 255, g: 0, b: 0 }), "var(--primary) resolves to red");
+}
+
+#[test]
+fn css_var_fallback_value() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            p { color: var(--undefined, blue); }
+        </style><p>hi</p>"#,
+    );
+    let p = find_first_by_tag(&arena, root, NodeType::P);
+    assert_eq!(
+        arena[p].css_attr.get_color(),
+        Some(Color::Rgb { r: 0, g: 0, b: 255 }),
+        "fallback is used when the variable is undefined"
+    );
+}
+
+#[test]
+fn css_var_inheritance_children() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            div { --c: green; }
+            span { color: var(--c); }
+        </style><div><span>s</span></div>"#,
+    );
+    let div = find_first_by_tag(&arena, root, NodeType::Div);
+    let span = arena[div].children[0];
+    assert_eq!(
+        arena[span].css_attr.get_color(),
+        Some(Color::Rgb { r: 0, g: 128, b: 0 }),
+        "--c inherits from div to span"
+    );
+}
+
+#[test]
+fn css_var_override_in_child() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            div { --c: red; }
+            span { --c: blue; color: var(--c); }
+        </style><div><span>s</span></div>"#,
+    );
+    let div = find_first_by_tag(&arena, root, NodeType::Div);
+    let span = arena[div].children[0];
+    assert_eq!(
+        arena[span].css_attr.get_color(),
+        Some(Color::Rgb { r: 0, g: 0, b: 255 }),
+        "child's --c override wins over parent"
+    );
+}
+
+#[test]
+fn css_var_in_calc() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            :root { --w: 20ch; }
+            div { width: calc(var(--w) + 5ch); }
+        </style><div>d</div>"#,
+    );
+    let div = find_first_by_tag(&arena, root, NodeType::Div);
+    let w = arena[div].css_attr.get_width(80, font_ctx(1, 1), viewport());
+    assert_eq!(w, Some(25), "calc(var(--w) + 5ch) = 20 + 5 = 25");
+}
+
+#[test]
+fn css_var_chain_reference() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            :root { --a: red; --b: var(--a); }
+            p { color: var(--b); }
+        </style><p>x</p>"#,
+    );
+    let p = find_first_by_tag(&arena, root, NodeType::P);
+    assert_eq!(
+        arena[p].css_attr.get_color(),
+        Some(Color::Rgb { r: 255, g: 0, b: 0 }),
+        "--b references --a which is red"
+    );
+}
+
+#[test]
+fn css_var_undefined_no_fallback_substitutes_empty() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            p { color: var(--nothing); }
+        </style><p>x</p>"#,
+    );
+    let p = find_first_by_tag(&arena, root, NodeType::P);
+    // Value becomes empty string → parser returns None.
+    assert_eq!(arena[p].css_attr.get_color(), None);
+}
+
+#[test]
+fn css_var_multiple_in_one_value() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            :root { --bw: 2ch; --bc: red; }
+            div { border: var(--bw) solid var(--bc); }
+        </style><div>d</div>"#,
+    );
+    let div = find_first_by_tag(&arena, root, NodeType::Div);
+    // After substitution no `var(` should remain in any stored value.
+    let has_unresolved = arena[div].css_attr.0.values().any(|v| v.contains("var("));
+    assert!(!has_unresolved, "all var() references are substituted");
+    let border = arena[div].css_attr.0.get("border");
+    assert_eq!(
+        border.map(|s| s.as_ref()),
+        Some("2ch solid red"),
+        "border shorthand has both vars substituted"
+    );
+}
