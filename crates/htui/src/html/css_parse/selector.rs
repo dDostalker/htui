@@ -295,6 +295,9 @@ impl FromStr for CssSelector {
                 return Err(SelectorError::UnsupportedPseudoClass(match element {
                     PseudoElement::Before => "::before".to_string(),
                     PseudoElement::After => "::after".to_string(),
+                    PseudoElement::SliderThumb => "::slider-thumb".to_string(),
+                    PseudoElement::SliderTrack => "::slider-track".to_string(),
+                    PseudoElement::SliderProgress => "::slider-progress".to_string(),
                 }));
             }
             *last = trimmed.trim().to_string();
@@ -319,19 +322,35 @@ impl FromStr for CssSelector {
     }
 }
 
-/// The pseudo-elements the engine generates content for (CSS
-/// `::before` / `::after`).
+/// The pseudo-elements the engine recognises (CSS `::before` / `::after`
+/// and the browser-standard slider sub-parts).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PseudoElement {
     Before,
     After,
+    /// `::-webkit-slider-thumb` / `::-moz-range-thumb`.
+    SliderThumb,
+    /// `::-webkit-slider-runnable-track` / `::-moz-range-track`.
+    SliderTrack,
+    /// `::-moz-range-progress` (Firefox filled-track overlay).
+    SliderProgress,
 }
 
 /// If `seg` ends with a `::before` / `::after` pseudo-element suffix, return
 /// the segment with the suffix stripped plus the element kind.
 fn strip_pseudo_element(seg: &str) -> Option<(String, PseudoElement)> {
     let lower = seg.to_ascii_lowercase();
+    // Longest suffix first so `::-webkit-slider-runnable-track` wins over
+    // shorter partial matches.
     for (suffix, element) in [
+        (
+            "::-webkit-slider-runnable-track",
+            PseudoElement::SliderTrack,
+        ),
+        ("::-moz-range-progress", PseudoElement::SliderProgress),
+        ("::-moz-range-track", PseudoElement::SliderTrack),
+        ("::-webkit-slider-thumb", PseudoElement::SliderThumb),
+        ("::-moz-range-thumb", PseudoElement::SliderThumb),
         ("::before", PseudoElement::Before),
         (":before", PseudoElement::Before),
         ("::after", PseudoElement::After),

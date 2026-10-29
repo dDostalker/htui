@@ -3,11 +3,14 @@
 //! declaration opts into a CSS frame; otherwise the field reads as a plain
 //! rectangle, like a browser's default `<input>`.
 
+use std::sync::Arc;
+
 use compact_str::CompactString;
 use crossterm::style::Color;
 
 use crate::{
     graphics::{FontStyle, char_width},
+    html::css_parse::parse_color_str,
     layout::{LayoutBox, Rect},
     tdom::node::{Node, NodeArena},
 };
@@ -253,6 +256,27 @@ pub(crate) fn paint_input(
         } else {
             Some(fg.unwrap_or(Color::White))
         };
+        // Browser-standard pseudo-element colours: `::-webkit-slider-thumb` /
+        // `::-moz-range-thumb` for the thumb, `::-moz-range-progress` for the
+        // filled track, `::-webkit-slider-runnable-track` / `::-moz-range-track`
+        // for the unfilled track. Properties are read from the cascade's
+        // key-prefixed slots (`background-color::slider-thumb`, etc.).
+        let pseudo_color = |part: &str| -> Option<Color> {
+            if disabled {
+                return None;
+            }
+            let node_css = &node.css_attr;
+            let bg_key: Arc<str> = Arc::from(format!("background-color::slider-{part}").as_str());
+            let fg_key: Arc<str> = Arc::from(format!("color::slider-{part}").as_str());
+            node_css
+                .0
+                .get(&bg_key)
+                .or_else(|| node_css.0.get(&fg_key))
+                .and_then(|v| parse_color_str(v))
+        };
+        let thumb_fg = pseudo_color("thumb").or(track_fg);
+        let fill_fg = pseudo_color("progress").or(track_fg);
+        let empty_fg = pseudo_color("track").or(Some(Color::DarkGrey));
 
         if range_is_vertical(node) {
             if content.height == 0 {
@@ -265,9 +289,11 @@ pub(crate) fn paint_input(
             for row in 0..content.height.max(1) {
                 let abs_row = content.y.saturating_add(row);
                 let (glyph, color) = if abs_row == thumb_y {
-                    ('\u{25CF}', track_fg)
+                    ('\u{25CF}', thumb_fg)
+                } else if abs_row < thumb_y {
+                    ('\u{2502}', fill_fg)
                 } else {
-                    ('\u{2502}', Some(Color::DarkGrey))
+                    ('\u{2502}', empty_fg)
                 };
                 put(
                     canvas,
@@ -288,11 +314,11 @@ pub(crate) fn paint_input(
         for col in 0..content.width {
             let abs_col = content.x.saturating_add(col);
             let (glyph, color) = if abs_col == thumb_x {
-                ('\u{25CF}', track_fg)
+                ('\u{25CF}', thumb_fg)
             } else if abs_col < thumb_x {
-                ('\u{2501}', track_fg)
+                ('\u{2501}', fill_fg)
             } else {
-                ('\u{2500}', Some(Color::DarkGrey))
+                ('\u{2500}', empty_fg)
             };
             put(
                 canvas,

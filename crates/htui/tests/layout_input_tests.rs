@@ -1142,6 +1142,138 @@ fn range_input_renders_track_and_thumb() {
 }
 
 #[test]
+fn range_pseudo_element_webkit_thumb_color() {
+    init();
+    let html = r#"<style>
+        input::-webkit-slider-thumb { background-color: #ff0000; }
+    </style>
+    <input type="range" min="0" max="4" step="1" value="2" width="9">"#;
+    let (_, tl) = render_rows(html);
+    let cell = |x: usize| &tl.layout[x]; // row 0 where the slider paints
+    // Thumb is at column 4 (value 2 of 4 across 9 cells); it should be red.
+    assert_eq!(
+        cell(4).fcolor,
+        Some(crossterm::style::Color::Rgb {
+            r: 0xff,
+            g: 0x00,
+            b: 0x00
+        }),
+        "::-webkit-slider-thumb background-color colours the thumb"
+    );
+}
+
+#[test]
+fn range_pseudo_element_moz_thumb_color() {
+    init();
+    let html = r#"<style>
+        input::-moz-range-thumb { background-color: #00ff00; }
+    </style>
+    <input type="range" min="0" max="4" step="1" value="2" width="9">"#;
+    let (_, tl) = render_rows(html);
+    let cell = |x: usize| &tl.layout[x];
+    assert_eq!(
+        cell(4).fcolor,
+        Some(crossterm::style::Color::Rgb {
+            r: 0x00,
+            g: 0xff,
+            b: 0x00
+        }),
+        "::-moz-range-thumb background-color colours the thumb"
+    );
+}
+
+#[test]
+fn range_pseudo_element_moz_progress_color() {
+    init();
+    let html = r#"<style>
+        input::-moz-range-progress { background-color: #0000ff; }
+    </style>
+    <input type="range" min="0" max="4" step="1" value="2" width="9">"#;
+    let (_, tl) = render_rows(html);
+    let cell = |x: usize| &tl.layout[x];
+    // Filled cells (columns 0-3, left of thumb) should be blue.
+    assert_eq!(
+        cell(0).fcolor,
+        Some(crossterm::style::Color::Rgb {
+            r: 0x00,
+            g: 0x00,
+            b: 0xff
+        }),
+        "::-moz-range-progress background-color colours the filled track"
+    );
+    // Empty cells (columns 5-8, right of thumb) remain DarkGrey.
+    assert_eq!(
+        cell(6).fcolor,
+        Some(crossterm::style::Color::DarkGrey),
+        "unfilled track without ::-moz-range-track stays DarkGrey"
+    );
+}
+
+#[test]
+fn range_pseudo_element_track_color() {
+    init();
+    let html = r#"<style>
+        input::-webkit-slider-runnable-track { background-color: #ffff00; }
+    </style>
+    <input type="range" min="0" max="4" step="1" value="2" width="9">"#;
+    let (_, tl) = render_rows(html);
+    let cell = |x: usize| &tl.layout[x];
+    // Empty cells (right of thumb) should be yellow instead of DarkGrey.
+    assert_eq!(
+        cell(6).fcolor,
+        Some(crossterm::style::Color::Rgb {
+            r: 0xff,
+            g: 0xff,
+            b: 0x00
+        }),
+        "::-webkit-slider-runnable-track background-color colours the unfilled track"
+    );
+}
+
+#[test]
+fn range_pseudo_element_moz_track_color() {
+    init();
+    let html = r#"<style>
+        input::-moz-range-track { color: #00ffff; }
+    </style>
+    <input type="range" min="0" max="4" step="1" value="2" width="9">"#;
+    let (_, tl) = render_rows(html);
+    let cell = |x: usize| &tl.layout[x];
+    assert_eq!(
+        cell(6).fcolor,
+        Some(crossterm::style::Color::Rgb {
+            r: 0x00,
+            g: 0xff,
+            b: 0xff
+        }),
+        "::-moz-range-track color colours the unfilled track"
+    );
+}
+
+#[test]
+fn range_pseudo_element_disabled_overrides_colors() {
+    init();
+    let html = r#"<style>
+        input::-webkit-slider-thumb { background-color: #ff0000; }
+        input::-moz-range-progress { background-color: #0000ff; }
+    </style>
+    <input type="range" min="0" max="4" step="1" value="2" width="9" disabled>"#;
+    let (_, tl) = render_rows(html);
+    let cell = |x: usize| &tl.layout[x];
+    // Disabled controls keep the grey override regardless of pseudo-element colours.
+    assert_eq!(
+        cell(4).fcolor,
+        Some(crossterm::style::Color::DarkGrey),
+        "disabled slider ignores pseudo-element thumb colour"
+    );
+    assert_eq!(
+        cell(0).fcolor,
+        Some(crossterm::style::Color::DarkGrey),
+        "disabled slider ignores pseudo-element progress colour"
+    );
+}
+
+#[test]
 fn clipped_range_control_does_not_paint_over_parent_border() {
     init();
     let html = r#"<style>

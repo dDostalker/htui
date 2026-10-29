@@ -134,6 +134,9 @@ fn add_prefixed(
     let suffix = match pe {
         crate::html::css_parse::PseudoElement::Before => "::before",
         crate::html::css_parse::PseudoElement::After => "::after",
+        crate::html::css_parse::PseudoElement::SliderThumb => "::slider-thumb",
+        crate::html::css_parse::PseudoElement::SliderTrack => "::slider-track",
+        crate::html::css_parse::PseudoElement::SliderProgress => "::slider-progress",
     };
     for (k, v) in &css.0 {
         let key: Arc<str> = Arc::from(format!("{k}{suffix}"));
