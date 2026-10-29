@@ -401,9 +401,9 @@ fn pressing_elsewhere_replaces_the_page_selection() {
     let map = HitMap::build(&geo);
 
     let mut state = InputState::new();
-    mouse_down(&mut state, &mut engine, &map, 5, 5, MouseButton::Left);
+    mouse_down(&mut state, &mut engine, &map, 0, 0, MouseButton::Left);
     state.pressed = Some((0, 0));
-    mouse_move(&mut state, &mut engine, &map, 8, 5);
+    mouse_move(&mut state, &mut engine, &map, 3, 0);
     assert!(state.text_sel_anchor.is_some(), "a selection now exists");
 
     let cmds = mouse_down(&mut state, &mut engine, &map, 2, 2, MouseButton::Left);
@@ -501,6 +501,76 @@ fn jittery_click_on_a_button_leaves_no_selection() {
     mouse_up(&mut state, &mut engine, &map, (bx + 1) as u16, by as u16);
     assert_eq!(state.text_sel_anchor, None, "no residue after release");
     assert_eq!(state.text_sel_end, None);
+}
+
+#[test]
+fn drag_from_a_button_never_selects_page_text_or_clicks() {
+    // A button owns its gesture. Even when the pointer travels far enough to
+    // be a drag, it must not arm the page flow selection; and because the
+    // gesture crossed the drag threshold, release must not activate it either.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+             globalThis.clicks = 0;
+             document.getElementById('btn')
+               .addEventListener('click', () => globalThis.clicks += 1);
+           </script>
+           <button id="btn">Save</button><div id="next">other</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let btn = map.resolve_by_id("btn").expect("button region");
+    let (bx, by) = center(btn.rect);
+
+    let mut state = InputState::new();
+    mouse_down(&mut state, &mut engine, &map, bx, by, MouseButton::Left);
+    state.pressed = Some((bx as u16, by as u16));
+
+    let cmds = mouse_move(&mut state, &mut engine, &map, bx + 3, by);
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, RenderCmd::TextSelection { .. })),
+        "a drag originating on a button must not queue a page TextSelection"
+    );
+    assert_eq!(state.text_sel_anchor, None);
+    assert_eq!(state.text_sel_end, None);
+
+    mouse_up(&mut state, &mut engine, &map, (bx + 3) as u16, by as u16);
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.clicks)"),
+        "0",
+        "a real drag must not turn into a button click"
+    );
+}
+
+#[test]
+fn small_jitter_on_a_button_still_clicks() {
+    // Movement below the shared threshold is a sloppy click, not a drag. The
+    // release must remain on the same logical button for activation.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+             globalThis.clicks = 0;
+             document.getElementById('btn')
+               .addEventListener('click', () => globalThis.clicks += 1);
+           </script>
+           <button id="btn">Save</button>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let btn = map.resolve_by_id("btn").expect("button region");
+    let (bx, by) = center(btn.rect);
+
+    let mut state = InputState::new();
+    mouse_down(&mut state, &mut engine, &map, bx, by, MouseButton::Left);
+    state.pressed = Some((bx as u16, by as u16));
+    let _ = mouse_move(&mut state, &mut engine, &map, bx + 1, by);
+    mouse_up(&mut state, &mut engine, &map, (bx + 1) as u16, by as u16);
+
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.clicks)"),
+        "1",
+        "a sub-threshold jitter on the same button is a click"
+    );
 }
 
 #[test]
@@ -1189,6 +1259,24 @@ fn selection_text_lines_clip_to_actual_text() {
         lines,
         vec![(0, 0, 5)],
         "highlight must stop at the last glyph"
+    );
+}
+
+#[test]
+fn flow_extraction_omits_replaced_control_text() {
+    // A left-drag flow selection copies document text. Control values and
+    // button labels belong to their own interaction/copy paths, so crossing a
+    // `<button>` must not inject its label into the page-selection clipboard.
+    let (_, geo) = build_geometry(
+        "<div>before</div><button>Save</button><div>after</div>",
+        EventBindings::default(),
+    );
+    let lines: Vec<_> = (0..6).map(|row| (row, 0, 200)).collect();
+    let copied = htui::layout::extract_flow_text(&geo.arena, &geo.boxes, &lines);
+    assert_eq!(copied, "before\nafter");
+    assert!(
+        !copied.contains("Save"),
+        "button labels must not leak into flow selection text"
     );
 }
 
@@ -2740,6 +2828,7 @@ fn range_slider_drag_commits_value_and_dispatches_events() {
     let mut state = InputState::new();
     state.pressed = Some((left as u16, y as u16));
     let _ = mouse_down(&mut state, &mut engine, &map, left, y, MouseButton::Left);
+    assert!(state.drag_selecting, "range press enters drag mode");
     assert_eq!(
         eval_str(&mut engine, "range.value").as_str(),
         "0",

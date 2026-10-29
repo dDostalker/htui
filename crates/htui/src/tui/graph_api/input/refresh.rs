@@ -529,6 +529,10 @@ pub fn trigger_refresh(
                     } else {
                         state.pressed = None;
                         state.drag_selecting = false;
+                        state.press_screen = None;
+                        state.drag_origin = None;
+                        state.field_drag_started = false;
+                        state.pressed_target = None;
                     }
                 }
                 MouseEventKind::Up(btn @ (MouseButton::Right | MouseButton::Middle)) => {
@@ -549,6 +553,10 @@ pub fn trigger_refresh(
                     } else {
                         state.pressed = None;
                         state.drag_selecting = false;
+                        state.press_screen = None;
+                        state.drag_origin = None;
+                        state.field_drag_started = false;
+                        state.pressed_target = None;
                     }
                 }
                 // crossterm reports button-held motion as `Drag` (SGR code

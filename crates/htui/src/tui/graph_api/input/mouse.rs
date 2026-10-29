@@ -8,8 +8,9 @@ use super::InputState;
 use super::TEXT_SEL_DRAG_THRESHOLD;
 use super::cmd::{RenderCmd, SelectionMode};
 use super::field::{
-    char_index_at_x, clear_text_selection, is_button_input, is_disabled_control, is_range_input,
-    is_text_field, is_textarea_node, is_toggle_input, set_range_at_pointer, textarea_index_at,
+    blocks_page_selection, char_index_at_x, clear_text_selection, is_button_input,
+    is_disabled_control, is_range_input, is_text_field, is_textarea_node, is_toggle_input,
+    set_range_at_pointer, textarea_index_at,
 };
 use super::focus::{blur_input, focus_input, push_input_render};
 use super::scroll_anim::{ScrollTarget, active_scroll_target, step_target};
@@ -177,9 +178,10 @@ pub(super) fn reveal_scrollbar_at(
 /// release position: hover freezes while a button is held (button-free moves
 /// are the only thing that update it), so a press-and-drag-away release must
 /// not leave the pressed element `:hover`-highlighted — the highlight residue
-/// after a button press. A left release on the same cell it started on also
-/// dispatches the click (and the dropdown pick, when the release lands on an
-/// open `<select>` overlay row).
+/// after a button press. A left release within the shared drag threshold on
+/// the same resolved element dispatches the click (and the dropdown pick, when
+/// the release lands on an open `<select>` overlay row). A larger move is a
+/// drag: it may leave a selection, but it never turns into a click.
 pub fn handle_mouse_up(
     state: &mut InputState,
     hit_map: &HitMap,
@@ -189,10 +191,14 @@ pub fn handle_mouse_up(
     msgs: &mut Vec<ScriptMsg>,
     cmds: &mut Vec<RenderCmd>,
 ) {
-    let range_drag = state.drag_selecting && state.focused_is_range;
+    let range_drag = state.drag_selecting && state.field_drag_started && state.focused_is_range;
     let scroll_drag = state.scroll_drag.take();
     let pressed = state.pressed.take();
+    let press_target = state.pressed_target.take();
+    let press_origin = state.press_screen.take();
+    state.drag_origin = None;
     state.drag_selecting = false;
+    state.field_drag_started = false;
     let (x, y) = canvas_pos(state, release_screen.0, release_screen.1);
     // Re-validate the hover at the release position (see the doc comment).
     msgs.push(ScriptMsg::Move { x, y });
@@ -202,9 +208,9 @@ pub fn handle_mouse_up(
     if scroll_drag.is_some() {
         return;
     }
-    let Some((px, py)) = pressed else {
+    if pressed.is_none() {
         return;
-    };
+    }
     // A range drag commits at the release coordinate as well as during moves;
     // this covers consoles that coalesce or drop the final drag event.
     if range_drag
@@ -229,11 +235,24 @@ pub fn handle_mouse_up(
         close_select(state, arena, Some(option_idx), msgs, cmds);
         return;
     }
-    if px == release_screen.0 && py == release_screen.1 {
+    // A click is a small jitter on the same logical element, not necessarily
+    // the exact same terminal cell. Once the shared threshold has been
+    // crossed, the gesture is a drag: a selection may survive, but the release
+    // must not also activate a button / field.
+    let within_click_threshold = press_origin.is_some_and(|(px, py)| {
+        u32::from(
+            release_screen
+                .0
+                .abs_diff(px)
+                .max(release_screen.1.abs_diff(py)),
+        ) < TEXT_SEL_DRAG_THRESHOLD
+    });
+    let release_target = resolve_click_node(arena, hit_map.hit_test(x, y).map(|r| r.node_id));
+    if within_click_threshold && press_target.is_some() && press_target == release_target {
         handle_click(state, hit_map, arena, x, y, msgs, cmds);
     }
-    // A drag ended on a different cell: the selection (field-internal or
-    // page text) is kept as-is.
+    // A real drag ended elsewhere: the selection (field-internal or page
+    // text) is kept as-is.
 }
 
 /// Resolve the element a click should act on: a `<label>` hit resolves to
@@ -312,6 +331,16 @@ pub fn handle_mouse_down(
     cmds: &mut Vec<RenderCmd>,
 ) {
     let clicked = hit_map.hit_test(x, y);
+    // Record the stable press origin once: drag thresholds and click-vs-drag
+    // decisions must use the original pointer cell, not an intermediate drag
+    // position. The target starts clear so swallowed presses cannot click.
+    state.press_screen = Some((
+        x.min(u16::MAX as u32) as u16,
+        y.saturating_sub(state.scroll_y).min(u16::MAX as u32) as u16,
+    ));
+    state.drag_origin = Some((x, y));
+    state.pressed_target = None;
+    state.field_drag_started = false;
     // A native scrollbar owns its press before text selection / controls.
     let scrollbar_hit = (button == MouseButton::Left)
         .then(|| {
@@ -375,6 +404,7 @@ pub fn handle_mouse_down(
     // drag-selection logic below only applies when the pointer is directly
     // over the field itself.
     let click_node = resolve_click_node(arena, clicked.map(|r| r.node_id));
+    state.pressed_target = click_node;
     let direct_field_hit = clicked.is_some_and(|r| click_node == Some(r.node_id));
     let clicked_input = click_node.is_some_and(|id| is_text_field(arena, id));
     match button {
@@ -439,9 +469,12 @@ pub fn handle_mouse_down(
                     blur_input(state, msgs, cmds);
                 }
                 clear_text_selection(state, cmds);
-                if state.copy_flow {
+                let selected =
+                    click_node.is_some_and(|node_id| !blocks_page_selection(arena, node_id));
+                if state.copy_flow && selected {
                     state.text_sel_mode = SelectionMode::Flow;
                     state.text_sel_armed = true;
+                    state.drag_origin = Some((x, y));
                 }
             }
         }
@@ -456,6 +489,7 @@ pub fn handle_mouse_down(
             if state.copy_block {
                 state.text_sel_mode = SelectionMode::Block;
                 state.text_sel_armed = true;
+                state.drag_origin = Some((x, y));
             }
         }
         _ => {}
@@ -541,6 +575,18 @@ pub fn handle_mouse_move(
         // Dragging: the pointer is inside the field it started in, so the
         // selection stays within that field's rectangle.
         if state.drag_selecting {
+            // Field selections use the same motion threshold as page selections:
+            // a one-cell jiggle remains a click (the caret was already placed
+            // by mousedown), not a character/range selection.
+            if !state.field_drag_started {
+                let Some((ax, ay)) = state.drag_origin else {
+                    return;
+                };
+                if x.abs_diff(ax).max(y.abs_diff(ay)) < TEXT_SEL_DRAG_THRESHOLD {
+                    return;
+                }
+                state.field_drag_started = true;
+            }
             if let Some(focused) = state.focused_input
                 && let Some(region) = hit_map.iter().find(|r| r.node_id == focused)
             {
@@ -583,10 +629,9 @@ pub fn handle_mouse_move(
             let anchor = match state.text_sel_anchor {
                 Some(a) => a,
                 None => {
-                    let Some((px, py)) = state.pressed else {
+                    let Some(&(ax, ay)) = state.drag_origin.as_ref() else {
                         return;
                     };
-                    let (ax, ay) = canvas_pos(state, px, py);
                     if x.abs_diff(ax).max(y.abs_diff(ay)) < TEXT_SEL_DRAG_THRESHOLD {
                         return;
                     }

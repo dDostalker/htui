@@ -101,6 +101,20 @@ pub struct InputState {
     /// Whether the pointer is mid-drag inside a focused `<input>` (mouse
     /// selection as opposed to a plain click).
     pub drag_selecting: bool,
+    /// Screen cell where the active press began. Unlike `pressed`, this is
+    /// not advanced by drag motion; click thresholding uses this origin.
+    press_screen: Option<(u16, u16)>,
+    /// Canvas cell where the active drag began (or will begin once motion
+    /// crosses the threshold). Field and page selection share this stable
+    /// anchor so intermediate moves never shift the origin.
+    drag_origin: Option<(u32, u32)>,
+    /// Whether the in-field drag has passed the shared click/drag threshold.
+    /// Before this, pointer motion remains a jittery click; at/after it the
+    /// field selection follows the pointer.
+    field_drag_started: bool,
+    /// Resolved click target of the active press. A click must end on the
+    /// same logical element, not on the exact same terminal cell.
+    pressed_target: Option<NodeId>,
     /// Native scrollbar thumb currently dragged: owning node + grab offset.
     pub scroll_drag: Option<(NodeId, u32)>,
     /// Screen coordinates of the last pointer event (any button state). Lets
@@ -173,6 +187,10 @@ impl InputState {
             input_sel_anchor: None,
             input_clipboard: String::new(),
             drag_selecting: false,
+            press_screen: None,
+            drag_origin: None,
+            field_drag_started: false,
+            pressed_target: None,
             scroll_drag: None,
             last_mouse: None,
             resize_pending: false,
@@ -244,6 +262,10 @@ impl InputState {
     pub fn invalidate_viewport(&mut self, cmds: &mut Vec<RenderCmd>) {
         self.pressed = None;
         self.drag_selecting = false;
+        self.press_screen = None;
+        self.drag_origin = None;
+        self.field_drag_started = false;
+        self.pressed_target = None;
         self.scroll_drag = None;
         // A resize re-lays out every container, so a container-targeted glide
         // would keep scrolling by stale geometry; it is cancelled. A page
@@ -282,6 +304,10 @@ impl InputState {
         self.input_cursor = 0;
         self.input_sel_anchor = None;
         self.drag_selecting = false;
+        self.press_screen = None;
+        self.drag_origin = None;
+        self.field_drag_started = false;
+        self.pressed_target = None;
         clear_text_selection(self, cmds);
         if let Some(open) = self.open_select.take() {
             cmds.push(RenderCmd::SelectClose {
@@ -299,6 +325,10 @@ impl InputState {
     pub fn drop_stale_press(&mut self) -> bool {
         if self.pressed.take().is_some() {
             self.drag_selecting = false;
+            self.press_screen = None;
+            self.drag_origin = None;
+            self.field_drag_started = false;
+            self.pressed_target = None;
             self.scroll_drag = None;
             true
         } else {

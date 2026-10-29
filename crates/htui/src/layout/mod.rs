@@ -22,7 +22,7 @@ use crate::{
     graphics::grapheme_width,
     html::css_parse::TextAlign,
     layout::layout::TermMap,
-    tdom::node::{NodeArena, NodeId},
+    tdom::node::{NodeArena, NodeId, NodeType},
 };
 use std::collections::HashMap;
 use unicode_segmentation::UnicodeSegmentation;
@@ -188,6 +188,23 @@ fn collect_flow_lines<'a>(
 }
 
 fn collect_box_lines<'a>(arena: &'a NodeArena, lb: &'a LayoutBox, out: &mut Vec<FlowTextLine<'a>>) {
+    // Replaced controls own their terminal chrome and interactive values.
+    // They are edited / copied through their control-specific paths, never as
+    // ordinary text in a page flow selection.
+    if matches!(lb.kind, crate::layout::BoxKind::Replaced(_))
+        || matches!(
+            arena[lb.node_id].node_type,
+            NodeType::Input
+                | NodeType::Textarea
+                | NodeType::Select
+                | NodeType::Button
+                | NodeType::Img
+                | NodeType::Progress
+                | NodeType::Meter
+        )
+    {
+        return;
+    }
     let Some(runs) = &lb.paint_style.runs else {
         return;
     };

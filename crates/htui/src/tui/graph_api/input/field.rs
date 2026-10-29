@@ -304,6 +304,37 @@ pub(super) fn is_text_field(arena: &NodeArena, node_id: NodeId) -> bool {
         .is_some_and(|n| matches!(n.node_type, NodeType::Input | NodeType::Textarea))
 }
 
+/// `true` when the hit target (or one of its ancestors) owns non-flow control
+/// chrome rather than normal page text.
+///
+/// A drag that starts on one of these elements belongs to the control (or is
+/// pure chrome); it must not arm the engine's page flow-selection. This is
+/// deliberately broader than focusability: button inputs and replaced bars are
+/// not text-selection origins even though a plain `<output>` remains normal
+/// selectable content.
+pub(super) fn blocks_page_selection(arena: &NodeArena, node_id: NodeId) -> bool {
+    let mut current = Some(node_id);
+    while let Some(id) = current {
+        let Some(node) = arena.get(id) else {
+            return false;
+        };
+        if matches!(
+            node.node_type,
+            NodeType::Input
+                | NodeType::Textarea
+                | NodeType::Select
+                | NodeType::Button
+                | NodeType::Img
+                | NodeType::Progress
+                | NodeType::Meter
+        ) {
+            return true;
+        }
+        current = node.parent;
+    }
+    false
+}
+
 /// All `<input>` / `<textarea>` node ids in document order (depth-first), for
 /// `Tab` / `Shift`+`Tab` focus cycling. Reads the input loop's DOM snapshot; a
 /// removed or not-yet-rendered field is simply not included. `hidden` inputs
