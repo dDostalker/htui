@@ -1171,8 +1171,10 @@ fn test_full_parse_pipeline_handles_important_and_comments() {
     // by the rest of the codebase (Parser::parse + apply_css_rule).
     init();
     let mut parser = Parser::new(
-        "/* heading style */\n\
-         h1 { color: red !important; font-weight: bold; }\n\
+        "/* heading style */
+\
+         h1 { color: red !important; font-weight: bold; }
+\
          h2 { /* nothing */ font-style: italic; }",
     );
     let _rules = parser.parse();
@@ -1227,7 +1229,8 @@ fn length_parse_cells_px() {
     assert_eq!(Length::parse("20Px"), Some(Length::Px(20.0)));
     assert_eq!(Length::parse("30PX"), Some(Length::Px(30.0)));
     // Trailing whitespace tolerated.
-    assert_eq!(Length::parse("20px\n"), Some(Length::Px(20.0)));
+    assert_eq!(Length::parse("20px
+"), Some(Length::Px(20.0)));
 }
 
 #[test]
@@ -3915,4 +3918,117 @@ fn test_media_at_rule_does_not_disturb_following_rules() {
         rules.0[1].normal.0.get("color").map(|s| s.as_ref()),
         Some("red")
     );
+}
+
+
+#[test]
+fn attribute_selector_exists() {
+    let sel: CssSelector = "[disabled]".parse().expect("bare attr parses");
+    assert_eq!(sel.compounds.len(), 1);
+    assert_eq!(sel.compounds[0].len(), 1);
+    let htui::html::css_parse::AttributeSelector { name, op, value, .. } = match &sel.compounds[0][0] {
+        htui::html::css_parse::Selector::Attribute(a) => a.clone(),
+        _ => panic!("expected Attribute"),
+    };
+    assert_eq!(name, "disabled");
+    assert_eq!(op, htui::html::css_parse::AttributeOp::Exists);
+    assert_eq!(value, "");
+}
+
+#[test]
+fn attribute_selector_equals_quoted_and_unquoted() {
+    for css in ["[type=\"range\"]", "[type=range]"] {
+        let sel: CssSelector = css.parse().expect("equals attr parses");
+        match &sel.compounds[0][0] {
+            htui::html::css_parse::Selector::Attribute(a) => {
+                assert_eq!(a.name, "type");
+                assert_eq!(a.op, htui::html::css_parse::AttributeOp::Equals);
+                assert_eq!(a.value, "range");
+            }
+            _ => panic!("expected Attribute"),
+        }
+    }
+}
+
+#[test]
+fn attribute_selector_compound_with_tag() {
+    let sel: CssSelector = "input[type=\"range\"]".parse().expect("compound attr parses");
+    assert_eq!(sel.compounds[0].len(), 2, "tag + attribute");
+    match &sel.compounds[0][0] {
+        htui::html::css_parse::Selector::Tag(nt) => {
+            assert_eq!(*nt, htui::tdom::node::NodeType::Input);
+        }
+        _ => panic!("expected Tag"),
+    }
+}
+
+#[test]
+fn attribute_selector_prefix_suffix_substring() {
+    let sel: CssSelector = "[href^=\"https\"]".parse().unwrap();
+    match &sel.compounds[0][0] {
+        htui::html::css_parse::Selector::Attribute(a) => {
+            assert_eq!(a.op, htui::html::css_parse::AttributeOp::PrefixMatch);
+            assert_eq!(a.value, "https");
+        }
+        _ => panic!()
+    }
+    let sel: CssSelector = "[href$=\".pdf\"]".parse().unwrap();
+    match &sel.compounds[0][0] {
+        htui::html::css_parse::Selector::Attribute(a) => {
+            assert_eq!(a.op, htui::html::css_parse::AttributeOp::SuffixMatch);
+        }
+        _ => panic!()
+    }
+    let sel: CssSelector = "[href*=\"example\"]".parse().unwrap();
+    match &sel.compounds[0][0] {
+        htui::html::css_parse::Selector::Attribute(a) => {
+            assert_eq!(a.op, htui::html::css_parse::AttributeOp::SubstringMatch);
+        }
+        _ => panic!()
+    }
+}
+
+#[test]
+fn attribute_selector_dash_and_includes() {
+    let sel: CssSelector = "[lang|=\"en\"]".parse().unwrap();
+    match &sel.compounds[0][0] {
+        htui::html::css_parse::Selector::Attribute(a) => {
+            assert_eq!(a.op, htui::html::css_parse::AttributeOp::DashMatch);
+        }
+        _ => panic!()
+    }
+    let sel: CssSelector = "[class~=\"btn\"]".parse().unwrap();
+    match &sel.compounds[0][0] {
+        htui::html::css_parse::Selector::Attribute(a) => {
+            assert_eq!(a.op, htui::html::css_parse::AttributeOp::Includes);
+        }
+        _ => panic!()
+    }
+}
+
+#[test]
+fn attribute_selector_case_insensitive_flag() {
+    let sel: CssSelector = "[type=\"RANGE\" i]".parse().unwrap();
+    match &sel.compounds[0][0] {
+        htui::html::css_parse::Selector::Attribute(a) => {
+            assert!(a.case_insensitive);
+            assert_eq!(a.value, "RANGE");
+        }
+        _ => panic!()
+    }
+}
+
+#[test]
+fn attribute_selector_specificity_is_class_level() {
+    let bare: CssSelector = "input".parse().unwrap();
+    let attr: CssSelector = "input[type]".parse().unwrap();
+    let (_, b_bare, _) = bare.specificity();
+    let (_, b_attr, _) = attr.specificity();
+    assert_eq!(b_attr, b_bare + 1, "attribute adds one b-level specificity");
+}
+
+#[test]
+fn attribute_selector_unclosed_bracket_is_error() {
+    assert!("[type".parse::<CssSelector>().is_err());
+    assert!("[]".parse::<CssSelector>().is_err());
 }

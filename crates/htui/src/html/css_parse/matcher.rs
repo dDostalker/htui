@@ -96,6 +96,14 @@ fn matches_css(arena: &NodeArena, node_id: NodeId, sel: &Selector, state: &Dynam
         Selector::Disabled => disabled_matches(arena, node_id),
         Selector::Lang(tag) => lang_matches(arena, node_id, tag),
         Selector::PseudoClass(p) => p.matches(arena, node_id, state),
+        Selector::Attribute(attr) => {
+            let node2 = arena.get(node_id);
+            let node2 = match node2 {
+                Some(n) => n,
+                None => return false,
+            };
+            attr.matches_lookup(&|name| node2.attributes.get(name).cloned())
+        }
     }
 }
 
