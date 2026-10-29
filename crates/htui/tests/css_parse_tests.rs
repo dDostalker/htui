@@ -6,9 +6,9 @@ use htui::html::css_parse::{
     CssSelector, DynamicState, EdgeAuto, EdgeSizes, FontContext, FontStyleKind, FontWeight,
     GradientKind, INHERITED_PROPS, Length, LengthContext, LineHeight, MarginSizes, NthExpr,
     PX_PER_CELL, Parser, SUPPORTED_PROPERTIES, Selector, TextAlign, TextDecoration, TextTransform,
-    Viewport, WhiteSpace, css_into_node, css_into_node_with_state, parse_background_str,
-    parse_color_str, parse_declaration_text, reset_css_attr, resolve_line_height_cells,
-    selector_chain_matches, selector_chain_matches_with_state,
+    UserSelect, Viewport, WhiteSpace, css_into_node, css_into_node_with_state,
+    parse_background_str, parse_color_str, parse_declaration_text, reset_css_attr,
+    resolve_line_height_cells, selector_chain_matches, selector_chain_matches_with_state,
 };
 use htui::html::html_parse;
 use htui::tdom::node::{Node, NodeArena, NodeId, NodeType, effective_font_size_cells};
@@ -735,6 +735,42 @@ fn test_css_attr_full_color() {
 // ============================================================
 // #1 refactor: property registry & parse robustness
 // ============================================================
+
+#[test]
+fn user_select_is_recognised_and_resolved_against_ancestors() {
+    assert!(SUPPORTED_PROPERTIES.contains(&"user-select"));
+    let mut attr = CssAttr::new();
+    attr.0.insert("user-select".into(), "none".into());
+    assert_eq!(attr.get_user_select(), UserSelect::None);
+
+    let mut arena = NodeArena::default();
+    let root = arena.insert(Node::from(NodeType::Div));
+    let child = arena.insert(Node::from(NodeType::Div));
+    arena[root].children.push(child);
+    arena[child].parent = Some(root);
+    assert!(
+        !htui::layout::user_select_is_none(&arena, child),
+        "auto without an explicit ancestor defaults to selectable"
+    );
+
+    arena[root]
+        .css_attr
+        .0
+        .insert("user-select".into(), "none".into());
+    assert!(
+        htui::layout::user_select_is_none(&arena, child),
+        "auto resolves through the nearest explicit ancestor"
+    );
+
+    arena[child]
+        .css_attr
+        .0
+        .insert("user-select".into(), "text".into());
+    assert!(
+        !htui::layout::user_select_is_none(&arena, child),
+        "an explicit text descendant opts back into selection"
+    );
+}
 
 #[test]
 fn test_supported_properties_lists_known_names() {

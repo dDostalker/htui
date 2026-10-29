@@ -469,8 +469,9 @@ pub fn handle_mouse_down(
                     blur_input(state, msgs, cmds);
                 }
                 clear_text_selection(state, cmds);
-                let selected =
-                    click_node.is_some_and(|node_id| !blocks_page_selection(arena, node_id));
+                let selected = click_node.is_some_and(|node_id| {
+                    !blocks_page_selection(arena, node_id) && !hit_map.is_user_select_none(node_id)
+                });
                 if state.copy_flow && selected {
                     state.text_sel_mode = SelectionMode::Flow;
                     state.text_sel_armed = true;

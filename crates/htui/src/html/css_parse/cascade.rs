@@ -396,6 +396,7 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "word-spacing",
     "text-indent",
     "text-overflow",
+    "user-select",
     // Positioning (CSS Positioned Layout)
     "position",
     "z-index",

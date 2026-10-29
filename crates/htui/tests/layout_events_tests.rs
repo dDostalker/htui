@@ -1263,6 +1263,53 @@ fn selection_text_lines_clip_to_actual_text() {
 }
 
 #[test]
+fn user_select_none_excludes_flow_highlight_and_copy() {
+    // CSS `user-select: none` is a document author's selection boundary: the
+    // text still renders, but neither highlight bands nor copied flow text may
+    // include it.
+    let geo = build_styled_geometry(
+        "<style>.secret { user-select: none; }</style>\
+         <div>one</div><div id=\"secret\" class=\"secret\">secret</div><div>two</div>",
+    );
+    let lines: Vec<_> = (0..4).map(|row| (row, 0, 200)).collect();
+    assert_eq!(
+        htui::layout::selection_text_lines(&geo.arena, &geo.boxes, &lines),
+        vec![(0, 0, 3), (2, 0, 3)],
+        "user-select:none must produce no highlight bands"
+    );
+    assert_eq!(
+        htui::layout::extract_flow_text(&geo.arena, &geo.boxes, &lines),
+        "one\ntwo",
+        "user-select:none must not leak into copied text"
+    );
+}
+
+#[test]
+fn user_select_none_blocks_a_left_drag_selection_start() {
+    let html = "<style>.secret { user-select: none; }</style>\
+                <div id=\"secret\" class=\"secret\">secret</div><div id=\"next\">other</div>";
+    let geo = build_styled_geometry(html);
+    let map = HitMap::build(&geo);
+    let secret = map.resolve_by_id("secret").cloned().expect("secret region");
+    let (sx, sy) = center(secret.rect);
+    let mut engine = ScriptEngine::new(html, "", EventBindings::default()).expect("engine");
+
+    let mut state = InputState::new();
+    mouse_down(&mut state, &mut engine, &map, sx, sy, MouseButton::Left);
+    state.pressed = Some((sx as u16, sy as u16));
+    let cmds = mouse_move(&mut state, &mut engine, &map, sx + 3, sy);
+
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, RenderCmd::TextSelection { .. })),
+        "a drag starting on user-select:none must not queue TextSelection"
+    );
+    assert_eq!(state.text_sel_anchor, None);
+    assert_eq!(state.text_sel_end, None);
+}
+
+#[test]
 fn flow_extraction_omits_replaced_control_text() {
     // A left-drag flow selection copies document text. Control values and
     // button labels belong to their own interaction/copy paths, so crossing a

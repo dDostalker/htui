@@ -332,7 +332,7 @@ pub(super) fn blocks_page_selection(arena: &NodeArena, node_id: NodeId) -> bool 
         }
         current = node.parent;
     }
-    false
+    crate::layout::user_select_is_none(arena, node_id)
 }
 
 /// All `<input>` / `<textarea>` node ids in document order (depth-first), for

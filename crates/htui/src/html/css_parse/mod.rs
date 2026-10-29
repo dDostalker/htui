@@ -31,8 +31,9 @@ pub use values::{
     FontContext, FontStyleKind, FontWeight, GapSizes, Gradient, GradientKind, GradientStop,
     InsetSides, JustifyContent, Length, LengthContext, LineHeight, ListStyleType, Overflow,
     OverflowWrap, PX_PER_CELL, Position, Positioning, TableLayout, TextAlign, TextDecoration,
-    TextOverflow, TextTransform, Viewport, Visibility, WhiteSpace, WordBreak, parse_align_content,
-    parse_align_items, parse_background_str, parse_color_str, parse_flex_direction,
-    parse_flex_flow, parse_flex_shorthand, parse_flex_wrap, parse_overflow, parse_position,
-    parse_text_overflow, parse_visibility, resolve_line_height_cells,
+    TextOverflow, TextTransform, UserSelect, Viewport, Visibility, WhiteSpace, WordBreak,
+    parse_align_content, parse_align_items, parse_background_str, parse_color_str,
+    parse_flex_direction, parse_flex_flow, parse_flex_shorthand, parse_flex_wrap, parse_overflow,
+    parse_position, parse_text_overflow, parse_user_select, parse_visibility,
+    resolve_line_height_cells,
 };

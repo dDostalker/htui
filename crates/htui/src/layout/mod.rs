@@ -20,7 +20,7 @@
 
 use crate::{
     graphics::grapheme_width,
-    html::css_parse::TextAlign,
+    html::css_parse::{TextAlign, UserSelect},
     layout::layout::TermMap,
     tdom::node::{NodeArena, NodeId, NodeType},
 };
@@ -126,6 +126,26 @@ pub fn extract_flow_text(
     out
 }
 
+/// Resolve CSS `user-select` for a node, including the `auto` ancestor walk.
+///
+/// `user-select` is not inherited, but `auto` resolves its *used* value from
+/// the nearest explicit non-`auto` declaration. This lets a `text` descendant
+/// opt back in beneath `none`, while an `auto` descendant remains unselectable.
+pub fn user_select_is_none(arena: &NodeArena, start: NodeId) -> bool {
+    let mut current = Some(start);
+    while let Some(node_id) = current {
+        let Some(node) = arena.get(node_id) else {
+            return false;
+        };
+        match node.css_attr.get_user_select() {
+            UserSelect::None => return true,
+            UserSelect::Text | UserSelect::All | UserSelect::Contain => return false,
+            UserSelect::Auto => current = node.parent,
+        }
+    }
+    false
+}
+
 /// Clip a flow selection's row bands down to the columns each row actually
 /// covers with text.
 ///
@@ -192,6 +212,7 @@ fn collect_box_lines<'a>(arena: &'a NodeArena, lb: &'a LayoutBox, out: &mut Vec<
     // They are edited / copied through their control-specific paths, never as
     // ordinary text in a page flow selection.
     if matches!(lb.kind, crate::layout::BoxKind::Replaced(_))
+        || user_select_is_none(arena, lb.node_id)
         || matches!(
             arena[lb.node_id].node_type,
             NodeType::Input

@@ -255,6 +255,42 @@ pub fn parse_overflow_wrap(s: &str) -> Option<OverflowWrap> {
     }
 }
 
+/// Text selection behaviour (CSS Basic User Interface Module `user-select`).
+///
+/// The engine currently enforces the two values that affect ordinary page
+/// dragging: `none` removes the subtree from flow selection/copy, while
+/// `text` re-enables selection inside a `none` ancestor. `all` and `contain`
+/// parse for forward compatibility but do not yet add their special boundary
+/// behaviour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UserSelect {
+    /// `auto`: resolve from the nearest explicit non-`auto` ancestor.
+    #[default]
+    Auto,
+    /// `none`: exclude this subtree from flow selection and copy.
+    None,
+    /// `text`: explicitly allow text selection (even inside `none`).
+    Text,
+    /// `all`: parsed; atomic all-or-nothing selection is not implemented yet.
+    All,
+    /// `contain`: parsed; selection-boundary containment is not implemented.
+    Contain,
+}
+
+#[doc(hidden)]
+/// Parse a `user-select` keyword.
+pub fn parse_user_select(s: &str) -> Option<UserSelect> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "auto" => Some(UserSelect::Auto),
+        "none" => Some(UserSelect::None),
+        "text" => Some(UserSelect::Text),
+        "all" => Some(UserSelect::All),
+        "contain" => Some(UserSelect::Contain),
+        "element" => Some(UserSelect::Contain),
+        _ => None,
+    }
+}
+
 /// Text-overflow behaviour for a clipped (`overflow: hidden`-family) box
 /// whose content still exceeds the content width (CSS `text-overflow`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
