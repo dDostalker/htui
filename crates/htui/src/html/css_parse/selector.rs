@@ -241,18 +241,14 @@ impl AttributeSelector {
             _ => {
                 let val = self.value.as_str();
                 let (raw, val) = if self.case_insensitive {
-                    (
-                        raw.to_ascii_lowercase(),
-                        val.to_ascii_lowercase(),
-                    )
+                    (raw.to_ascii_lowercase(), val.to_ascii_lowercase())
                 } else {
                     (raw.to_string(), val.to_string())
                 };
                 match self.op {
                     AttributeOp::Equals => raw == val,
                     AttributeOp::Includes => {
-                        !val.is_empty()
-                            && raw.split_whitespace().any(|w| w == val)
+                        !val.is_empty() && raw.split_whitespace().any(|w| w == val)
                     }
                     AttributeOp::DashMatch => raw == val || raw.starts_with(&format!("{val}-")),
                     AttributeOp::PrefixMatch => !val.is_empty() && raw.starts_with(&val),
@@ -578,7 +574,12 @@ fn parse_compound_inner(
             '.' => {
                 i += 1;
                 let start = i;
-                while i < chars.len() && chars[i] != '.' && chars[i] != '#' && chars[i] != ':' && chars[i] != '[' {
+                while i < chars.len()
+                    && chars[i] != '.'
+                    && chars[i] != '#'
+                    && chars[i] != ':'
+                    && chars[i] != '['
+                {
                     i += 1;
                 }
                 let name: String = chars[start..i].iter().collect();
@@ -590,7 +591,12 @@ fn parse_compound_inner(
             '#' => {
                 i += 1;
                 let start = i;
-                while i < chars.len() && chars[i] != '.' && chars[i] != '#' && chars[i] != ':' && chars[i] != '[' {
+                while i < chars.len()
+                    && chars[i] != '.'
+                    && chars[i] != '#'
+                    && chars[i] != ':'
+                    && chars[i] != '['
+                {
                     i += 1;
                 }
                 let name: String = chars[start..i].iter().collect();
@@ -742,7 +748,12 @@ fn parse_compound_inner(
             }
             _ => {
                 let start = i;
-                while i < chars.len() && chars[i] != '.' && chars[i] != '#' && chars[i] != ':' && chars[i] != '[' {
+                while i < chars.len()
+                    && chars[i] != '.'
+                    && chars[i] != '#'
+                    && chars[i] != ':'
+                    && chars[i] != '['
+                {
                     i += 1;
                 }
                 let tag: String = chars[start..i].iter().collect();
@@ -963,7 +974,6 @@ fn split_top_level(s: &str, is_sep: impl Fn(char) -> bool) -> Vec<&str> {
     parts
 }
 
-
 /// Capture the balanced `[...]` content starting at `chars[*i] == '['`,
 /// advancing `*i` past the closing `]`. Returns `None` when the bracket is
 /// never closed.
@@ -991,9 +1001,7 @@ fn capture_balanced_bracket(chars: &[char], i: &mut usize) -> Option<String> {
 
 /// Parse the inner content of an attribute selector (`type="range"`,
 /// `disabled`, `href^="https"` with optional trailing ` i` / `I` flag).
-fn parse_attribute_selector(
-    inner: &str,
-) -> std::result::Result<AttributeSelector, SelectorError> {
+fn parse_attribute_selector(inner: &str) -> std::result::Result<AttributeSelector, SelectorError> {
     let inner = inner.trim();
     if inner.is_empty() {
         return Err(SelectorError::InvalidAttributeSelector(inner.to_string()));
@@ -1036,12 +1044,36 @@ fn parse_attribute_selector(
             continue;
         }
         match bytes[idx - 1] {
-            b'~' => { op = AttributeOp::Includes; name_end = Some(idx - 1); op_start = Some(idx + 1); }
-            b'|' => { op = AttributeOp::DashMatch; name_end = Some(idx - 1); op_start = Some(idx + 1); }
-            b'^' => { op = AttributeOp::PrefixMatch; name_end = Some(idx - 1); op_start = Some(idx + 1); }
-            b'$' => { op = AttributeOp::SuffixMatch; name_end = Some(idx - 1); op_start = Some(idx + 1); }
-            b'*' => { op = AttributeOp::SubstringMatch; name_end = Some(idx - 1); op_start = Some(idx + 1); }
-            _ => { op = AttributeOp::Equals; name_end = Some(idx); op_start = Some(idx + 1); }
+            b'~' => {
+                op = AttributeOp::Includes;
+                name_end = Some(idx - 1);
+                op_start = Some(idx + 1);
+            }
+            b'|' => {
+                op = AttributeOp::DashMatch;
+                name_end = Some(idx - 1);
+                op_start = Some(idx + 1);
+            }
+            b'^' => {
+                op = AttributeOp::PrefixMatch;
+                name_end = Some(idx - 1);
+                op_start = Some(idx + 1);
+            }
+            b'$' => {
+                op = AttributeOp::SuffixMatch;
+                name_end = Some(idx - 1);
+                op_start = Some(idx + 1);
+            }
+            b'*' => {
+                op = AttributeOp::SubstringMatch;
+                name_end = Some(idx - 1);
+                op_start = Some(idx + 1);
+            }
+            _ => {
+                op = AttributeOp::Equals;
+                name_end = Some(idx);
+                op_start = Some(idx + 1);
+            }
         }
         break;
     }

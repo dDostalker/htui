@@ -1121,7 +1121,7 @@ fn build_geometry(html: &str, bindings: EventBindings) -> (ScriptEngine, Geometr
         term_map.rows as usize,
     );
     let geo = Geometry {
-        arena,
+        arena: Arc::new(arena),
         boxes,
         root_id,
     };
@@ -1172,7 +1172,7 @@ fn publish_hit_map(hit_map: &SharedHitMap, arena: &NodeArena, root_id: NodeId) {
         term_map.rows as usize,
     );
     let geo = Geometry {
-        arena: arena.clone(),
+        arena: Arc::new(arena.clone()),
         boxes,
         root_id,
     };

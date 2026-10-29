@@ -133,9 +133,7 @@ impl CssAttr {
     /// this to theme native widgets (checkbox, radio, range, progress, meter);
     /// htui falls back to it when no pseudo-element colour is declared.
     pub fn get_accent_color(&self) -> Option<Color> {
-        self.0
-            .get("accent-color")
-            .and_then(|v| parse_color_str(v))
+        self.0.get("accent-color").and_then(|v| parse_color_str(v))
     }
 
     /// Background color (CSS `background-color`, falls back to `background`).

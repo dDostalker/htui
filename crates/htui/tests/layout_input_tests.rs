@@ -1259,9 +1259,17 @@ fn range_accent_color_fallback_for_thumb_and_fill() {
     <input type="range" min="0" max="4" step="1" value="2" width="9">"#;
     let (_, tl) = render_rows(html);
     let cell = |x: usize| &tl.layout[x];
-    let orange = Some(crossterm::style::Color::Rgb { r: 0xff, g: 0x88, b: 0x00 });
+    let orange = Some(crossterm::style::Color::Rgb {
+        r: 0xff,
+        g: 0x88,
+        b: 0x00,
+    });
     assert_eq!(cell(4).fcolor, orange, "accent-color colours the thumb");
-    assert_eq!(cell(0).fcolor, orange, "accent-color colours the filled track");
+    assert_eq!(
+        cell(0).fcolor,
+        orange,
+        "accent-color colours the filled track"
+    );
 }
 
 #[test]
@@ -1277,12 +1285,20 @@ fn range_pseudo_element_overrides_accent_color() {
     // Thumb uses the pseudo-element green; fill falls back to accent orange.
     assert_eq!(
         cell(4).fcolor,
-        Some(crossterm::style::Color::Rgb { r: 0x00, g: 0xff, b: 0x00 }),
+        Some(crossterm::style::Color::Rgb {
+            r: 0x00,
+            g: 0xff,
+            b: 0x00
+        }),
         "pseudo-element thumb overrides accent-color"
     );
     assert_eq!(
         cell(0).fcolor,
-        Some(crossterm::style::Color::Rgb { r: 0xff, g: 0x88, b: 0x00 }),
+        Some(crossterm::style::Color::Rgb {
+            r: 0xff,
+            g: 0x88,
+            b: 0x00
+        }),
         "filled track without a pseudo-element uses accent-color"
     );
 }
@@ -1296,7 +1312,11 @@ fn checkbox_accent_color() {
     let cell = &tl.layout[0];
     assert_eq!(
         cell.fcolor,
-        Some(crossterm::style::Color::Rgb { r: 0xff, g: 0x00, b: 0x00 }),
+        Some(crossterm::style::Color::Rgb {
+            r: 0xff,
+            g: 0x00,
+            b: 0x00
+        }),
         "accent-color themes the checked checkbox glyph"
     );
 }

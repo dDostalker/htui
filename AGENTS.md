@@ -422,17 +422,20 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
    没有 `:hover` 规则时直接跳过（与浏览器一致，移动指针不产生绘制）。
    `RenderArena` 携带的 hover 变化仍回退全量（内容与高亮同帧变动时最安全）。
     实测（监控器页面）：hover 全量重绘 ~1.6ms → 区域重绘 ~0.6ms。
-5. **RenderArena 每批 2 次全树拷贝是架构下限（已论证，勿再尝试 `Arc::try_unwrap`）**：
-   拷贝 ① 脚本线程快照（`script/msg.rs` `Arc::new(engine.arena())`）——引擎的 live
-   arena 必须保留给后续 JS 执行，无法移交；拷贝 ② 渲染线程级联副本（`tui/run/pipeline.rs`
-   `render_arena` 的 `arena.clone()`）——输入循环 `live_dom` 读快照（`run/thread.rs`
-   `fold_script_event`）始终同时持有一份 `Arc` 引用（refcount ≥ 2），`try_unwrap` 必然
-   失败，且同迭代内 `handle_input` 依赖该快照的新鲜度，不能不持有。已评估的替代方案：
-   (a) live_dom 改读渲染线程发布的 `Arc<Geometry>`（`geo.arena`）——可行，稳态可降至
-   1 次拷贝，代价是 DOM 读滞后 ≤ 1 帧（~16ms），当前判定不值得牺牲读新鲜度；
+5. **RenderArena 每批 1 次全树拷贝是架构下限（方案 (a) 已落地）**：
+   剩余的那次拷贝是脚本线程快照（`script/msg.rs` `Arc::new(engine.arena())`）——
+   引擎的 live arena 必须保留给后续 JS 执行，无法移交。渲染线程对快照执行
+   `Arc::try_unwrap` **原地级联**（`tui/run/pipeline.rs` `render_arena` /
+   `render_document`）：输入循环的 DOM 读快照（`live_dom`）不再持有脚本快照的
+   `Arc`，而是改读渲染线程每帧发布到 `LiveGeoSlot` 的 `Geometry.arena`
+   （`layout_and_paint` 发布、`run/mod.rs` 循环顶部刷新）——热路径 refcount = 1，
+   级联零拷贝，稳态每批只付脚本线程那 1 次。代价：输入循环 DOM 读滞后 ≤ 1 帧
+   （~16ms，与旧 read-behind 窗口同量级）；`Geometry.arena` 为 `Arc` 共享
+   （`pin_fixed_and_repaint` 的滚动 repin 也因此免除了全树克隆）。快照 refcount
+   > 1 的帧（启动帧、zoom/resize 的 `Redraw` 转换帧）自动回退克隆，行为不变。
    (b) 渲染线程持有常驻工作树 + 仅同步 dirty 节点——**不可行**：slotmap 的 NodeId
    跨 arena 无法对齐（appendChild 新节点在两个 slotmap 中得到不同 key，会破坏
-   hover/焦点/监听器等按 NodeId 索引的会话状态）。若未来放宽读新鲜度容忍度，可重开 (a)。
+   hover/焦点/监听器等按 NodeId 索引的会话状态）。
 
 ## 必要事项
 `html → tdom → layout → tui` 四层不可破坏。不要引入新的抽象层，除非有充分理由。在修改之前进行询问。

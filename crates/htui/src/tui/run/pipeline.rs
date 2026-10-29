@@ -142,23 +142,34 @@ impl RenderState {
     ) {
         let (root_id, arena) =
             cascade_document(&self.document, &self.css_rules, viewport_of(term_map));
-        self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom, None);
+        self.layout_and_paint(
+            out,
+            geo_tx,
+            term_map,
+            Arc::new(arena),
+            root_id,
+            scroll_y,
+            zoom,
+            None,
+        );
     }
 
     /// Re-layout / re-paint a supplied DOM arena, publishing geometry.
     ///
     /// Shared tail of [`redraw`](Self::redraw) and
     /// [`render_arena`](Self::render_arena). `arena` must already carry its
-    /// cascaded CSS (`css_attr`); the caller handles parsing or re-cascading.
-    /// `dirty` carries the nodes JS mutated since the previous frame: when
-    /// the re-layout leaves every box rect unchanged, only those nodes'
-    /// region is repainted instead of the whole canvas.
+    /// cascaded CSS (`css_attr`); the caller handles parsing or re-cascading,
+    /// and shares its `Arc` with the document state / the input loop's read
+    /// snapshot instead of the pipeline cloning the tree again. `dirty` carries
+    /// the nodes JS mutated since the previous frame: when the re-layout leaves
+    /// every box rect unchanged, only those nodes' region is repainted instead
+    /// of the whole canvas.
     fn layout_and_paint<W: Write>(
         &mut self,
         out: &mut BufWriter<W>,
         geo_tx: &GeometrySender,
         term_map: &TermMap,
-        arena: NodeArena,
+        arena: SharedNodeArena,
         root_id: NodeId,
         scroll_y: u32,
         zoom: f32,
@@ -239,10 +250,14 @@ impl RenderState {
             None
         };
 
-        // Publish the layout snapshot: cache it for `:hover` re-styling and
+        // Publish the layout snapshot: cache it for `:hover` re-styling,
         // forward a copy to the hit-test thread when one is listening (the
-        // event system is active).
+        // event system is active), and hand it to the input loop as its
+        // DOM-read snapshot (one frame behind at most).
         self.geometry = Some(Arc::clone(&geo));
+        if let Ok(mut guard) = self.live_geo.lock() {
+            *guard = Some(Arc::clone(&geo));
+        }
         if let Some(tx) = geo_tx
             && let Err(e) = tx.send(Arc::clone(&geo))
         {
@@ -340,16 +355,20 @@ impl RenderState {
     /// script-engine arena snapshot and render it without re-parsing HTML.
     ///
     /// Backs `RenderCmd::RenderArena`: JS mutated the live DOM, so the arena
-    /// arrives raw (no `css_attr`) and must be cascaded first. `dirty` lists
-    /// the mutated nodes for the incremental repaint; `state_changed` is true
-    /// when the `:hover` target or the focused field moved, which invalidates
-    /// the incremental path (the highlight may live anywhere in the tree).
+    /// arrives raw (no `css_attr`) and must be cascaded first. When the input
+    /// loop holds no reference to the snapshot (its DOM reads go through the
+    /// published geometry instead), the `Arc` unwraps and the cascade mutates
+    /// the snapshot in place — the steady-state batch costs one full-tree copy
+    /// (the script engine's own snapshot), not two. `dirty` lists the mutated
+    /// nodes for the incremental repaint; `state_changed` is true when the
+    /// `:hover` target or the focused field moved, which invalidates the
+    /// incremental path (the highlight may live anywhere in the tree).
     pub(super) fn render_arena<W: Write>(
         &mut self,
         out: &mut BufWriter<W>,
         geo_tx: &GeometrySender,
         term_map: &TermMap,
-        arena: &SharedNodeArena,
+        arena: SharedNodeArena,
         root_id: NodeId,
         scroll_y: u32,
         zoom: f32,
@@ -366,18 +385,29 @@ impl RenderState {
         // The cascade re-evaluates `@media` against the current viewport (the
         // stored dynamic state may predate a resize).
         self.dynamic.viewport = viewport_of(term_map);
-        let source_arena = Arc::clone(arena);
-        let mut arena = (*source_arena).clone();
-        reset_css_attr(&mut arena, root_id);
-        css_into_node_with_state(&mut arena, root_id, &self.css_rules, &self.dynamic);
-        self.document.arena = source_arena;
+        let mut owned = match Arc::try_unwrap(arena) {
+            Ok(arena) => arena,
+            Err(shared) => (*shared).clone(),
+        };
+        reset_css_attr(&mut owned, root_id);
+        css_into_node_with_state(&mut owned, root_id, &self.css_rules, &self.dynamic);
+        self.document.arena = Arc::new(owned);
         self.document.root_id = root_id;
         let dirty = if state_changed || css_changed {
             None
         } else {
             Some(&dirty)
         };
-        self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom, dirty);
+        self.layout_and_paint(
+            out,
+            geo_tx,
+            term_map,
+            Arc::clone(&self.document.arena),
+            root_id,
+            scroll_y,
+            zoom,
+            dirty,
+        );
     }
 
     /// Update one native scroll offset and re-layout the current document.
@@ -492,7 +522,7 @@ impl RenderState {
             cols: tl.columns as usize,
             rows: tl.rows as usize,
         };
-        let mut arena = geo.arena.clone();
+        let mut arena = (*geo.arena).clone();
         reset_css_attr(&mut arena, geo.root_id);
         css_into_node_with_state(&mut arena, geo.root_id, &self.css_rules, &self.dynamic);
         // Incremental repaint: only the union of the old and new affected
@@ -565,7 +595,7 @@ impl RenderState {
         pin_sticky_boxes(&mut boxes, viewport);
         let new_rects = pinned_boxes_rects(&boxes);
         let fresh = Arc::new(Geometry {
-            arena: geo.arena.clone(),
+            arena: Arc::clone(&geo.arena),
             boxes,
             root_id: geo.root_id,
         });
@@ -633,8 +663,6 @@ impl RenderState {
         zoom: f32,
         dirty: DirtyInfo,
     ) {
-        self.document.arena = arena;
-        self.document.root_id = root_id;
         self.document.css = Arc::clone(&document_css);
         self.document_css = document_css;
         self.extra_css = String::new();
@@ -643,7 +671,34 @@ impl RenderState {
         if !dirty.injected_css.is_empty() {
             self.apply_injected_css(&dirty.injected_css);
         }
-        self.redraw(out, geo_tx, term_map, scroll_y, zoom);
+        // Same in-place cascade as `render_arena`: the fresh document's
+        // snapshot is consumed when nothing else holds it.
+        let mut owned = match Arc::try_unwrap(arena) {
+            Ok(arena) => arena,
+            Err(shared) => (*shared).clone(),
+        };
+        reset_css_attr(&mut owned, root_id);
+        css_into_node_with_state(
+            &mut owned,
+            root_id,
+            &self.css_rules,
+            &DynamicState {
+                viewport: viewport_of(term_map),
+                ..Default::default()
+            },
+        );
+        self.document.arena = Arc::new(owned);
+        self.document.root_id = root_id;
+        self.layout_and_paint(
+            out,
+            geo_tx,
+            term_map,
+            Arc::clone(&self.document.arena),
+            root_id,
+            scroll_y,
+            zoom,
+            None,
+        );
     }
 }
 
@@ -679,6 +734,7 @@ mod tests {
             open_select: None,
             scrollbars_visible: Arc::new(Mutex::new(std::collections::HashMap::new())),
             max_scroll: Arc::new(AtomicU32::new(0)),
+            live_geo: Arc::new(Mutex::new(None)),
         }
     }
 

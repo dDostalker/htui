@@ -8,7 +8,9 @@ use boa_engine::JsValue;
 use crossterm::style::Color;
 use htui::events::{
     ElementRef, EventBindings, EventType, Geometry, HitMap, HitRegion,
-    interaction::{HoverState, on_click, on_mouse_down, on_mouse_move_dispatch, on_mouse_up, on_move},
+    interaction::{
+        HoverState, on_click, on_mouse_down, on_mouse_move_dispatch, on_mouse_up, on_move,
+    },
 };
 use htui::html::css_parse::{
     DynamicState, Parser as CssParser, PseudoClass, Selector, css_into_node,
@@ -1403,6 +1405,58 @@ fn selection_text_lines_keep_partial_columns() {
 }
 
 #[test]
+fn flow_copy_stays_inside_the_dragged_column() {
+    // Side-by-side flex columns share canvas rows. The raw flow bands are
+    // full-canvas-width for every row between the anchor and the end, so a
+    // straight vertical drag inside the right column would collect the left
+    // column's text on the same rows. The bands must be clipped to the drag's
+    // common block (the right column) before highlighting and copying.
+    let geo = build_styled_geometry(
+        "<style>.wrap { display: flex; } .col { width: 20ch; }</style>\
+         <div class=\"wrap\">\
+         <div class=\"col\"><div>left-a</div><div>left-b</div></div>\
+         <div class=\"col\"><div id=\"r1\">right-a</div><div id=\"r2\">right-b</div>\
+         <div id=\"r3\">right-c</div></div></div>",
+    );
+    let map = HitMap::build(&geo);
+    let r1 = map.resolve_by_id("r1").cloned().expect("right row 1");
+    let r3 = map.resolve_by_id("r3").cloned().expect("right row 3");
+    // Anchor on the first row's first character, end past the last row's
+    // text — a straight vertical drag with the column-wide sweep.
+    let anchor = (r1.rect.x as u32, r1.rect.y as u32);
+    let end = (r3.rect.x as u32 + 6, r3.rect.y as u32);
+
+    // Raw bands exactly as `selection_lines` builds them for a downward drag:
+    // the anchor row from the anchor column, full-width middle rows, the end
+    // row up to the end column.
+    let (ay, ey) = (anchor.1, end.1);
+    assert!(ey > ay + 1, "the fixture needs a full-width middle row");
+    let mut raw = vec![(ay, anchor.0, 200u32)];
+    for y in ay + 1..ey {
+        raw.push((y, 0, 200));
+    }
+    raw.push((ey, 0, end.0 + 1));
+
+    let unscoped = htui::layout::extract_flow_text(&geo.arena, &geo.boxes, &raw);
+    assert!(
+        unscoped.contains("left-b"),
+        "fixture hazard: the full-width middle band must cover the left column"
+    );
+
+    let scoped = htui::layout::clip_flow_lines_scoped(&geo.boxes, anchor, end, &raw);
+    let copied = htui::layout::extract_flow_text(&geo.arena, &geo.boxes, &scoped);
+    assert_eq!(
+        copied, "right-a\nright-b\nright-c",
+        "a vertical drag in one column must not copy the neighbouring column"
+    );
+    let highlighted = htui::layout::selection_text_lines(&geo.arena, &geo.boxes, &scoped);
+    assert!(
+        highlighted.iter().all(|&(_, cs, _)| cs >= r1.rect.x as u32),
+        "the highlight must stay inside the dragged column: {highlighted:?}"
+    );
+}
+
+#[test]
 fn command_macro_exposes_rust_functions_to_js() {
     let mut bindings = EventBindings::default();
     bindings.command("greet", greet_command());
@@ -1518,7 +1572,7 @@ fn build_geometry(html: &str, bindings: EventBindings) -> (ScriptEngine, Geometr
         term_map.rows as usize,
     );
     let geo = Geometry {
-        arena,
+        arena: Arc::new(arena),
         boxes,
         root_id,
     };
@@ -1551,7 +1605,7 @@ fn build_styled_geometry(html: &str) -> Geometry {
         term_map.rows as usize,
     );
     Geometry {
-        arena,
+        arena: Arc::new(arena),
         boxes,
         root_id,
     }
@@ -2188,7 +2242,7 @@ fn relayout(engine: &ScriptEngine, columns: u16, rows: u16) -> Geometry {
         term_map.rows as usize,
     );
     Geometry {
-        arena,
+        arena: Arc::new(arena),
         boxes,
         root_id,
     }
@@ -3015,7 +3069,11 @@ fn mousemove_dispatches_to_listener() {
     let (x, y) = center(region.rect);
     on_mouse_move_dispatch(&map, &mut engine, x, y);
     on_mouse_move_dispatch(&map, &mut engine, x + 1, y);
-    assert_eq!(*seen.lock().unwrap(), 2, "mousemove fires on every dispatch");
+    assert_eq!(
+        *seen.lock().unwrap(),
+        2,
+        "mousemove fires on every dispatch"
+    );
 }
 
 #[test]
@@ -3056,5 +3114,9 @@ fn addEventListener_mousemove_works() {
     let (x, y) = center(region.rect);
     let mut hover = HoverState::new();
     apply_message(&mut engine, &mut hover, &map, ScriptMsg::MouseMove { x, y });
-    assert_eq!(*count.lock().unwrap(), 1, "addEventListener('mousemove') fires");
+    assert_eq!(
+        *count.lock().unwrap(),
+        1,
+        "addEventListener('mousemove') fires"
+    );
 }

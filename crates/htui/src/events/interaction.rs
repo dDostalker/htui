@@ -77,12 +77,7 @@ pub fn on_mouse_down(
 }
 
 /// Dispatch a `MouseUp` event at `(x, y)`.
-pub fn on_mouse_up(
-    hit_map: &HitMap,
-    engine: &mut ScriptEngine,
-    x: u32,
-    y: u32,
-) -> Vec<RenderCmd> {
+pub fn on_mouse_up(hit_map: &HitMap, engine: &mut ScriptEngine, x: u32, y: u32) -> Vec<RenderCmd> {
     let Some(region) = hit_map.hit_test(x, y) else {
         return Vec::new();
     };

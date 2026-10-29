@@ -55,6 +55,10 @@ type LiveDocument = (SharedNodeArena, NodeId);
 /// Channel used to publish immutable layout snapshots.
 type GeometrySender = Option<mpsc::Sender<SharedGeometry>>;
 
+/// Shared slot the render thread publishes the latest frame's geometry into;
+/// the input loop reads its arena as the DOM-read snapshot.
+pub(super) type LiveGeoSlot = Arc<Mutex<Option<SharedGeometry>>>;
+
 /// Whether the terminal is currently in raw mode / alternate screen
 static TERMINAL_ACTIVE: AtomicBool = AtomicBool::new(false);
 
@@ -247,6 +251,9 @@ fn run_inner(
     // processed command batch; the input loop's watchdog below uses it to
     // distinguish a *stuck* render thread from an idle one.
     let render_beat: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
+    // The render thread publishes each frame's geometry here; the input loop
+    // reads its arena instead of holding the script thread's snapshots.
+    let live_geo: LiveGeoSlot = Arc::new(Mutex::new(None));
     let render_handle = std::thread::spawn({
         let render_document = document;
         let css_clone = Arc::clone(&session_css);
@@ -254,6 +261,7 @@ fn run_inner(
         let selection_text_clone = Arc::clone(&selection_text);
         let scrollbars_visible_clone = Arc::clone(&scrollbars_visible);
         let render_beat_clone = Arc::clone(&render_beat);
+        let live_geo_clone = Arc::clone(&live_geo);
         let render_registry = Arc::clone(&registry);
         let geo_tx = events_active.then_some(geo_tx);
         move || {
@@ -267,6 +275,7 @@ fn run_inner(
                     selection_text_clone,
                     scrollbars_visible_clone,
                     render_beat_clone,
+                    live_geo_clone,
                     config,
                 );
             });
@@ -317,6 +326,15 @@ fn run_inner(
     let mut hovered: Option<NodeId> = None;
 
     let mut quit = false;
+    // Whether the previous loop pass engaged the script thread (a message
+    // was sent to it, or one of its replies was folded). Replies sitting on
+    // `script_out_rx` are only noticed between polls, so the poll timeout
+    // gates every JS-driven frame: a timer / rAF page animating at ~60 Hz
+    // would be throttled to the idle 100 ms cadence (~10 fps). While
+    // engaged, the loop polls at the animation cadence instead — the same
+    // mechanism a running scroll animation uses. One fast pass after the
+    // engagement ends costs an idle page a single 16 ms wake.
+    let mut script_activity = false;
     // Pointer moves sent to the script thread but not answered yet.
     // Any script response can free a slot, so the count never rises above
     // `MAX_IN_FLIGHT_MOVES`.
@@ -450,6 +468,16 @@ fn run_inner(
         // no-op, so scrolling appears dead after a resize.
         let max_scroll_val = max_scroll.load(Ordering::Relaxed);
         state.clamp_scroll_to(max_scroll_val);
+        // The input loop's DOM-read snapshot is the latest *rendered* frame's
+        // arena (published by the render thread above), not the script
+        // thread's snapshot: holding the snapshot would keep the render thread
+        // from unwrapping and cascading it in place — one full-tree copy per
+        // batch instead of two. The reads run at most one frame behind.
+        if let Ok(guard) = live_geo.lock()
+            && let Some(geo) = guard.as_ref()
+        {
+            live_dom = Some((Arc::clone(&geo.arena), geo.root_id));
+        }
         // Publish the UI state the script thread's view getters read
         // (`window.innerWidth` / `innerHeight` / `scrollY`). Cheap relaxed
         // stores every iteration; the values are advisory.
@@ -467,8 +495,12 @@ fn run_inner(
         scroll_y_prev = state.scroll_y;
         // While a scroll animation is active the loop wakes at the animation
         // frame rate instead of the idle poll cadence; eased positions are
-        // wall-clock based, so a late wake self-corrects next frame.
-        let poll_timeout = if state.scroll_anim.is_some() {
+        // wall-clock based, so a late wake self-corrects next frame. Recent
+        // script-thread engagement (see `script_activity`) takes the same
+        // fast path.
+        let script_engaged = script_activity;
+        script_activity = false;
+        let poll_timeout = if state.scroll_anim.is_some() || script_engaged {
             Duration::from_millis(ANIM_POLL_MS)
         } else {
             Duration::from_millis(100)
@@ -565,6 +597,7 @@ fn run_inner(
 
         // Send engine work to the script thread. Move messages are capped so
         // a busy script thread cannot accumulate a large pointer backlog.
+        script_activity |= !msgs.is_empty();
         for msg in msgs {
             if let ScriptMsg::Move { .. } | ScriptMsg::MouseMove { .. } = msg {
                 if moves_in_flight >= MAX_IN_FLIGHT_MOVES {
@@ -609,7 +642,6 @@ fn run_inner(
                             &mut state,
                             &mut cmds,
                             &mut hovered,
-                            &mut live_dom,
                             Viewport {
                                 cols: columns as usize,
                                 rows: rows as usize,
@@ -617,6 +649,7 @@ fn run_inner(
                             ev,
                         );
                         moves_in_flight = moves_in_flight.saturating_sub(1);
+                        script_activity = true;
                         if let Some((_, prevented)) = verdict {
                             if !prevented {
                                 log::debug!(
@@ -764,7 +797,6 @@ fn run_inner(
                         &mut state,
                         &mut cmds,
                         &mut hovered,
-                        &mut live_dom,
                         Viewport {
                             cols: columns as usize,
                             rows: rows as usize,
@@ -772,6 +804,7 @@ fn run_inner(
                         ev,
                     );
                     moves_in_flight = moves_in_flight.saturating_sub(1);
+                    script_activity = true;
                 }
                 ScriptResponse::Ready { .. } | ScriptResponse::Failed(_) => {
                     log::error!("Unexpected one-shot script response in the input loop");

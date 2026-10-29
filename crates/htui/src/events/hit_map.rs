@@ -1,7 +1,7 @@
 //! Hit regions and spatial lookup over the laid-out box forest.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
@@ -45,7 +45,9 @@ pub struct HitMap {
     regions: Vec<HitRegion>,
     /// Nodes whose cascaded CSS resolves `user-select: none`. Hit-map build
     /// sees the same styled arena used by layout, so the input loop can apply
-    /// author selection policy without needing a cascaded DOM snapshot.
+    /// author selection policy without needing a cascaded DOM snapshot (the
+    /// engine's live arena carries no `css_attr`).
+    unselectable: HashSet<NodeId>,
     /// Native scrollbar controls keyed by their owning scroll container.
     pub scrollbars: HashMap<NodeId, ScrollbarRegion>,
     /// Hit-test index: region indices bucketed by canvas row (`rows[y]`
@@ -99,6 +101,16 @@ impl HitMap {
     pub fn build(geometry: &Geometry) -> HitMap {
         let mut regions = Vec::new();
         let mut scrollbars = HashMap::new();
+        // Author selection policy: resolve `user-select` for every node while
+        // the styled arena is at hand (the resolution walks the ancestor
+        // chain, so a hit on any descendant of a `none` element is covered
+        // and an explicit `text` child overrides its `none` ancestor).
+        let mut unselectable = HashSet::new();
+        for (node_id, _) in geometry.arena.iter() {
+            if crate::layout::user_select_is_none(&geometry.arena, node_id) {
+                unselectable.insert(node_id);
+            }
+        }
         // One ancestor-chain resolution per distinct node, shared by every
         // box the node produced.
         let mut paths: HashMap<NodeId, Arc<[ElementRef]>> = HashMap::new();
@@ -138,9 +150,19 @@ impl HitMap {
         }
         HitMap {
             regions,
+            unselectable,
             scrollbars,
             rows,
         }
+    }
+
+    /// Whether `node_id`'s cascaded CSS resolves `user-select: none`.
+    ///
+    /// The set covers every node of the styled arena the map was built from
+    /// (descendants of a `none` element included); an unknown id is
+    /// selectable, matching a node that no longer exists.
+    pub fn is_unselectable(&self, node_id: NodeId) -> bool {
+        self.unselectable.contains(&node_id)
     }
 
     /// The topmost region containing the canvas point.
@@ -170,7 +192,6 @@ impl HitMap {
     pub fn resolve_by_id(&self, id: &str) -> Option<&HitRegion> {
         self.regions.iter().find(|r| r.id() == Some(id))
     }
-
 
     /// Find the nearest scrollable ancestor (including `start`) whose native
     /// scrollbar is active.

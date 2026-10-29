@@ -857,6 +857,8 @@
 
     var libraryOpen = true;
     var sideTimer = null;
+    /* Last applied flex-basis (%). 30 matches the stylesheet's at-rest value. */
+    var sideBasis = 30;
 
     /* Ease-out cubic: fast start, decelerating stop (same curve as scroll). */
     function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
@@ -869,29 +871,56 @@
       toggle.textContent = libraryOpen ? "\u00ab LIB" : "LIB \u00bb";
 
       var FRAME_MS = 16;
-      var DURATION = 240;
-      var MAX_BASIS = 30;
-      var start = Date.now();
+      var OPEN_BASIS = 30;
+      /* Travel-proportional duration (the scroll-anim rule): a full swing
+         takes the max, a quick re-toggle mid-flight lands proportionally
+         faster. Clamped so a nudge still reads as motion. */
+      var MIN_MS = 80;
+      var MAX_MS = 280;
+
+      /* Retarget from wherever the sidebar currently is: reversing
+         mid-animation extends the glide instead of jumping to an endpoint. */
+      var from = sideBasis;
+      var to = libraryOpen ? OPEN_BASIS : 0;
+      var duration = Math.max(MIN_MS, Math.min(MAX_MS, Math.abs(to - from) / OPEN_BASIS * MAX_MS));
 
       if (libraryOpen) side.style.display = "flex";
       side.style.minWidth = "0";
+      /* Pin the inline basis in the same JS turn as the display flip — a
+         from-rest open must not paint one frame at the stylesheet width. */
+      side.style.flexBasis = from + "%";
+      sideBasis = from;
+
+      if (from === to) {
+        if (!libraryOpen) side.style.display = "none";
+        return;
+      }
+
+      var start = Date.now();
 
       function step() {
-        var t = Math.min(1, (Date.now() - start) / DURATION);
-        var eased = easeOutCubic(t);
-        var basis;
-        if (libraryOpen) {
-          basis = Math.round(eased * MAX_BASIS);
-        } else {
-          basis = Math.round((1 - eased) * MAX_BASIS);
+        var t = Math.min(1, (Date.now() - start) / duration);
+        /* Two-decimal percent: every frame lands on its own terminal column.
+           Integer percent quantizes the swing to ~OPEN_BASIS distinct widths,
+           which reads as early jumps followed by a frozen tail. */
+        var basis = Math.round((from + (to - from) * easeOutCubic(t)) * 100) / 100;
+        /* Skip no-op writes: a repeated value still costs a full re-cascade +
+           re-layout + repaint, congesting the pipeline and starving the
+           frames that do move. */
+        if (basis !== sideBasis) {
+          sideBasis = basis;
+          side.style.flexBasis = basis + "%";
         }
-        side.style.flexBasis = basis + "%";
         if (t < 1) {
-          sideTimer = setTimeout(step, FRAME_MS);
+          /* Aim the next frame at the animation timeline, not at now+FRAME_MS:
+             a late wake catches up instead of stretching the swing. */
+          var nextFrame = Math.floor((Date.now() - start) / FRAME_MS) + 1;
+          sideTimer = setTimeout(step, Math.max(0, start + nextFrame * FRAME_MS - Date.now()));
         } else {
           if (!libraryOpen) side.style.display = "none";
           side.style.flexBasis = "";
           side.style.minWidth = "";
+          sideBasis = to;
           sideTimer = null;
         }
       }

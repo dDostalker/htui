@@ -172,7 +172,6 @@ impl InlineRun {
         self.text.is_empty()
     }
 
-
     /// A layout-synthesised marker run (heading `#`, bullet `•`, arrow, etc.)
     /// that paints but is excluded from text extraction.
     pub fn synthesized_marker(

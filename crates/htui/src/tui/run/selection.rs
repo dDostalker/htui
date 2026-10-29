@@ -81,7 +81,12 @@ pub(super) fn highlight_lines(
 ) -> Vec<(u32, u32, u32)> {
     let raw = selection_lines(sel, cols);
     match sel.mode {
-        SelectionMode::Flow => crate::layout::selection_text_lines(arena, boxes, &raw),
+        SelectionMode::Flow => {
+            // Keep the drag inside the block it started in: a vertical drag
+            // in one column must not highlight a side-by-side card's text.
+            let raw = crate::layout::clip_flow_lines_scoped(boxes, sel.anchor, sel.end, &raw);
+            crate::layout::selection_text_lines(arena, boxes, &raw)
+        }
         SelectionMode::Block => raw,
     }
 }

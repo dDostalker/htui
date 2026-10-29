@@ -263,9 +263,7 @@ fn resolve_custom_props(
         }
     }
     // Resolve `var()` inside custom property values (e.g. `--a: var(--b)`).
-    let entries: Vec<(String, String)> = vars.iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
+    let entries: Vec<(String, String)> = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     for (k, raw) in entries {
         if raw.contains("var(") {
             let resolved = substitute_vars(&raw, &vars, 0);
@@ -296,7 +294,6 @@ fn substitute_property_vars(
         }
     }
 }
-
 
 /// Apply all stylesheet rules, inline `style` attributes and inheritance to
 /// the arena, evaluating the dynamic pseudo-classes (`:hover` / `:focus`)

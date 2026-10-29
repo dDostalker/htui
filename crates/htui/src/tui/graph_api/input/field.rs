@@ -3,6 +3,7 @@ use std::time::Duration;
 use compact_str::CompactString;
 use crossterm::event::KeyCode;
 
+use crate::events::HitMap;
 use crate::layout::Rect;
 use crate::layout::paint::{
     range_is_vertical, range_spec, textarea_caret_position, textarea_char_at, textarea_scroll_row,
@@ -305,14 +306,19 @@ pub(super) fn is_text_field(arena: &NodeArena, node_id: NodeId) -> bool {
 }
 
 /// `true` when the hit target (or one of its ancestors) owns non-flow control
-/// chrome rather than normal page text.
+/// chrome rather than normal page text, or its cascaded CSS resolves
+/// `user-select: none`.
 ///
 /// A drag that starts on one of these elements belongs to the control (or is
 /// pure chrome); it must not arm the engine's page flow-selection. This is
 /// deliberately broader than focusability: button inputs and replaced bars are
 /// not text-selection origins even though a plain `<output>` remains normal
 /// selectable content.
-pub(super) fn blocks_page_selection(arena: &NodeArena, node_id: NodeId) -> bool {
+///
+/// The `user-select` verdict comes from the hit map because it is built from
+/// the *styled* geometry; the `arena` here is the input loop's raw engine
+/// snapshot, which carries no `css_attr`.
+pub(super) fn blocks_page_selection(hit_map: &HitMap, arena: &NodeArena, node_id: NodeId) -> bool {
     let mut current = Some(node_id);
     while let Some(id) = current {
         let Some(node) = arena.get(id) else {
@@ -332,7 +338,7 @@ pub(super) fn blocks_page_selection(arena: &NodeArena, node_id: NodeId) -> bool 
         }
         current = node.parent;
     }
-    crate::layout::user_select_is_none(arena, node_id)
+    hit_map.is_unselectable(node_id)
 }
 
 /// All `<input>` / `<textarea>` node ids in document order (depth-first), for

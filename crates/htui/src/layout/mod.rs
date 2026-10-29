@@ -173,6 +173,74 @@ pub fn user_select_is_none(arena: &NodeArena, start: NodeId) -> bool {
     false
 }
 
+/// The deepest box chain that covers the canvas point (root first, deepest
+/// last).
+fn box_chain_at(boxes: &[LayoutBox], x: u32, y: u32, out: &mut Vec<NodeId>) {
+    for lb in boxes {
+        if lb.rect.contains(x, y) {
+            out.push(lb.node_id);
+            box_chain_at(&lb.children, x, y, out);
+            return;
+        }
+    }
+}
+
+/// The first box belonging to `node_id`, in tree order.
+fn box_rect(boxes: &[LayoutBox], node_id: NodeId) -> Option<Rect> {
+    for lb in boxes {
+        if lb.node_id == node_id {
+            return Some(lb.rect);
+        }
+        if let Some(found) = box_rect(&lb.children, node_id) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Clip flow-selection row bands to the columns of the deepest block box
+/// shared by the anchor and the end point.
+///
+/// The raw flow bands are full-canvas-width for every row between the anchor
+/// and the end (`selection_lines`), so a straight vertical drag inside one
+/// column would highlight and copy the text of side-by-side cards on the same
+/// rows. Browsers select the character range between the two points, so the
+/// bands are clipped to the common ancestor box of the two points: a drag
+/// that stays inside one card cannot leak the neighbouring card's text into
+/// the highlight or the copy, while a genuine cross-column drag widens the
+/// span through the shared container. When either point lies outside every
+/// box the input bands pass through unchanged.
+pub fn clip_flow_lines_scoped(
+    boxes: &[LayoutBox],
+    anchor: (u32, u32),
+    end: (u32, u32),
+    lines: &[(u32, u32, u32)],
+) -> Vec<(u32, u32, u32)> {
+    let mut anchor_chain = Vec::new();
+    let mut end_chain = Vec::new();
+    box_chain_at(boxes, anchor.0, anchor.1, &mut anchor_chain);
+    box_chain_at(boxes, end.0, end.1, &mut end_chain);
+    let span = anchor_chain
+        .iter()
+        .zip(&end_chain)
+        .take_while(|(a, b)| a == b)
+        .map(|(a, _)| *a)
+        .last()
+        .and_then(|common| box_rect(boxes, common))
+        .map(|r| (r.x as u32, r.x as u32 + r.width as u32));
+    match span {
+        Some((lo, hi)) => lines
+            .iter()
+            .filter_map(|&(y, cs, ce)| {
+                let lo = cs.max(lo);
+                let hi = ce.min(hi);
+                (lo < hi).then_some((y, lo, hi))
+            })
+            .collect(),
+        None => lines.to_vec(),
+    }
+}
+
 /// Clip a flow selection's row bands down to the columns each row actually
 /// covers with text.
 ///
@@ -183,19 +251,6 @@ pub fn user_select_is_none(arena: &NodeArena, start: NodeId) -> bool {
 /// the matching visual line (each overlapping text fragment becomes its own
 /// band), so the highlight covers exactly the cells whose glyphs the copy
 /// would yield — and nothing beyond the block's own text.
-///
-/// Block selections (right-drag rectangles) are *not* passed through this:
-/// their highlight intentionally follows the dragged rectangle.
-/// Clip a flow selection's row bands down to the columns each row actually
-/// covers with text.
-///
-/// The selection tracking works in whole rows (`col_start..canvas_width` for
-/// full rows), but painting the highlight over an entire row would wash the
-/// block's border, padding, indentation and trailing whitespace with the
-/// selection background. This maps every input band onto the text columns of
-/// the matching visual line (each overlapping text fragment becomes its own
-/// band), so the highlight covers exactly the cells whose glyphs the copy
-/// would yield \u{2014} and nothing beyond the block's own text.
 ///
 /// Block selections (right-drag rectangles) are *not* passed through this:
 /// their highlight intentionally follows the dragged rectangle.
@@ -239,7 +294,10 @@ fn collect_box_lines<'a>(arena: &'a NodeArena, lb: &'a LayoutBox, out: &mut Vec<
     // ordinary text in a page flow selection.
     if matches!(lb.kind, crate::layout::BoxKind::Replaced(_))
         || user_select_is_none(arena, lb.node_id)
-        || matches!(arena[lb.node_id].node_type, NodeType::Progress | NodeType::Meter)
+        || matches!(
+            arena[lb.node_id].node_type,
+            NodeType::Progress | NodeType::Meter
+        )
     {
         return;
     }

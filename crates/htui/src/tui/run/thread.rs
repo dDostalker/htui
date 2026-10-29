@@ -19,7 +19,6 @@ use crate::tdom::node::NodeId;
 use crate::tui::graph_api::{DrainedBatch, InputState, RenderCmd, SharedScrollbarVisibility};
 
 use super::GeometrySender;
-use super::LiveDocument;
 use super::pipeline::{combined_css_source, flush_frame, parse_css_source};
 use super::state::RenderState;
 
@@ -32,6 +31,7 @@ pub(super) fn render_thread(
     selection_text: Arc<Mutex<String>>,
     scrollbars_visible: SharedScrollbarVisibility,
     render_beat: Arc<AtomicU64>,
+    live_geo: super::LiveGeoSlot,
     config: Config,
 ) {
     // One persistent write buffer for the whole session: every frame writes
@@ -61,6 +61,7 @@ pub(super) fn render_thread(
         open_select: None,
         scrollbars_visible,
         max_scroll,
+        live_geo,
     };
 
     let mut last_frame_at: Option<Instant> = None;
@@ -248,7 +249,7 @@ pub(super) fn render_thread(
                             &mut out,
                             &geo_tx,
                             &term_map,
-                            &arena,
+                            arena,
                             root_id,
                             scroll_y,
                             zoom,
@@ -407,15 +408,17 @@ pub(super) fn hit_test_thread(rx: mpsc::Receiver<SharedGeometry>, hit_map: Share
 
 /// Fold one `ScriptResponse::Event` into the current frame: hover updates,
 /// host-pushed render commands, and — when JS mutated the DOM — a fresh arena
-/// snapshot + dirty set forwarded as a (region-repaint) `RenderArena`.
-/// Shared by the key-gate wait and the ordinary async reply fold. `viewport`
-/// is the input loop's terminal size, carried into the arena's dynamic state
-/// for the `@media` re-cascade.
+/// snapshot + dirty set forwarded as a (region-repaint) `RenderArena`. The
+/// snapshot `Arc` moves into the command unshared: the input loop reads the
+/// DOM through the render thread's published geometry instead of holding the
+/// snapshot, which is what lets the render thread unwrap and cascade it in
+/// place. Shared by the key-gate wait and the ordinary async reply fold.
+/// `viewport` is the input loop's terminal size, carried into the arena's
+/// dynamic state for the `@media` re-cascade.
 pub(super) fn fold_script_event(
     state: &mut InputState,
     cmds: &mut Vec<RenderCmd>,
     hovered: &mut Option<NodeId>,
-    live_dom: &mut Option<LiveDocument>,
     viewport: Viewport,
     ev: crate::script::ScriptEvent,
 ) {
@@ -426,7 +429,6 @@ pub(super) fn fold_script_event(
         if document_reloaded {
             state.reset_document_state(cmds);
         }
-        *live_dom = Some((Arc::clone(&d.arena), d.root_id));
         if let Some(document_css) = d.document_css {
             cmds.push(RenderCmd::RenderDocument {
                 arena: d.arena,

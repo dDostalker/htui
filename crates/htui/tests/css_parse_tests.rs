@@ -1229,8 +1229,13 @@ fn length_parse_cells_px() {
     assert_eq!(Length::parse("20Px"), Some(Length::Px(20.0)));
     assert_eq!(Length::parse("30PX"), Some(Length::Px(30.0)));
     // Trailing whitespace tolerated.
-    assert_eq!(Length::parse("20px
-"), Some(Length::Px(20.0)));
+    assert_eq!(
+        Length::parse(
+            "20px
+"
+        ),
+        Some(Length::Px(20.0))
+    );
 }
 
 #[test]
@@ -3920,13 +3925,14 @@ fn test_media_at_rule_does_not_disturb_following_rules() {
     );
 }
 
-
 #[test]
 fn attribute_selector_exists() {
     let sel: CssSelector = "[disabled]".parse().expect("bare attr parses");
     assert_eq!(sel.compounds.len(), 1);
     assert_eq!(sel.compounds[0].len(), 1);
-    let htui::html::css_parse::AttributeSelector { name, op, value, .. } = match &sel.compounds[0][0] {
+    let htui::html::css_parse::AttributeSelector {
+        name, op, value, ..
+    } = match &sel.compounds[0][0] {
         htui::html::css_parse::Selector::Attribute(a) => a.clone(),
         _ => panic!("expected Attribute"),
     };
@@ -3952,7 +3958,9 @@ fn attribute_selector_equals_quoted_and_unquoted() {
 
 #[test]
 fn attribute_selector_compound_with_tag() {
-    let sel: CssSelector = "input[type=\"range\"]".parse().expect("compound attr parses");
+    let sel: CssSelector = "input[type=\"range\"]"
+        .parse()
+        .expect("compound attr parses");
     assert_eq!(sel.compounds[0].len(), 2, "tag + attribute");
     match &sel.compounds[0][0] {
         htui::html::css_parse::Selector::Tag(nt) => {
@@ -3970,21 +3978,21 @@ fn attribute_selector_prefix_suffix_substring() {
             assert_eq!(a.op, htui::html::css_parse::AttributeOp::PrefixMatch);
             assert_eq!(a.value, "https");
         }
-        _ => panic!()
+        _ => panic!(),
     }
     let sel: CssSelector = "[href$=\".pdf\"]".parse().unwrap();
     match &sel.compounds[0][0] {
         htui::html::css_parse::Selector::Attribute(a) => {
             assert_eq!(a.op, htui::html::css_parse::AttributeOp::SuffixMatch);
         }
-        _ => panic!()
+        _ => panic!(),
     }
     let sel: CssSelector = "[href*=\"example\"]".parse().unwrap();
     match &sel.compounds[0][0] {
         htui::html::css_parse::Selector::Attribute(a) => {
             assert_eq!(a.op, htui::html::css_parse::AttributeOp::SubstringMatch);
         }
-        _ => panic!()
+        _ => panic!(),
     }
 }
 
@@ -3995,14 +4003,14 @@ fn attribute_selector_dash_and_includes() {
         htui::html::css_parse::Selector::Attribute(a) => {
             assert_eq!(a.op, htui::html::css_parse::AttributeOp::DashMatch);
         }
-        _ => panic!()
+        _ => panic!(),
     }
     let sel: CssSelector = "[class~=\"btn\"]".parse().unwrap();
     match &sel.compounds[0][0] {
         htui::html::css_parse::Selector::Attribute(a) => {
             assert_eq!(a.op, htui::html::css_parse::AttributeOp::Includes);
         }
-        _ => panic!()
+        _ => panic!(),
     }
 }
 
@@ -4014,7 +4022,7 @@ fn attribute_selector_case_insensitive_flag() {
             assert!(a.case_insensitive);
             assert_eq!(a.value, "RANGE");
         }
-        _ => panic!()
+        _ => panic!(),
     }
 }
 
@@ -4033,7 +4041,6 @@ fn attribute_selector_unclosed_bracket_is_error() {
     assert!("[]".parse::<CssSelector>().is_err());
 }
 
-
 fn parse_and_cascade(html: &str) -> (NodeId, NodeArena) {
     let mut html_parser = html_parse::Parser::new(html);
     let (root_id, mut arena, embedded) = html_parser.parse();
@@ -4045,16 +4052,18 @@ fn parse_and_cascade(html: &str) -> (NodeId, NodeArena) {
 
 fn find_first_by_tag(arena: &NodeArena, root: NodeId, tag: NodeType) -> NodeId {
     fn walk(arena: &NodeArena, id: NodeId, tag: NodeType) -> Option<NodeId> {
-        if arena[id].node_type == tag { return Some(id); }
+        if arena[id].node_type == tag {
+            return Some(id);
+        }
         for &c in &arena[id].children {
-            if let Some(found) = walk(arena, c, tag) { return Some(found); }
+            if let Some(found) = walk(arena, c, tag) {
+                return Some(found);
+            }
         }
         None
     }
     walk(arena, root, tag).expect("node with tag not found")
 }
-
-
 
 #[test]
 fn css_var_basic_substitution() {
@@ -4066,7 +4075,11 @@ fn css_var_basic_substitution() {
     );
     let p = find_first_by_tag(&arena, root, NodeType::P);
     let color = arena[p].css_attr.get_color();
-    assert_eq!(color, Some(Color::Rgb { r: 255, g: 0, b: 0 }), "var(--primary) resolves to red");
+    assert_eq!(
+        color,
+        Some(Color::Rgb { r: 255, g: 0, b: 0 }),
+        "var(--primary) resolves to red"
+    );
 }
 
 #[test]
@@ -4127,7 +4140,9 @@ fn css_var_in_calc() {
         </style><div>d</div>"#,
     );
     let div = find_first_by_tag(&arena, root, NodeType::Div);
-    let w = arena[div].css_attr.get_width(80, font_ctx(1, 1), viewport());
+    let w = arena[div]
+        .css_attr
+        .get_width(80, font_ctx(1, 1), viewport());
     assert_eq!(w, Some(25), "calc(var(--w) + 5ch) = 20 + 5 = 25");
 }
 

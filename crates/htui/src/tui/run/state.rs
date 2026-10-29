@@ -27,12 +27,21 @@ use super::pipeline::flush_frame;
 use super::region::{find_box_rect, union_rect};
 use super::selection::{highlight_lines, lines_bounds, selection_lines};
 
+/// Input-loop side of the live DOM snapshot: the render thread publishes the
+/// latest frame's [`Geometry`](crate::events::Geometry) here; the input loop
+/// reads its arena for DOM queries.
+pub(super) type LiveGeoSlot = Arc<Mutex<Option<SharedGeometry>>>;
+
 pub(super) fn cascade_document(
     document: &ParsedDocument,
     css_rules: &CssRule,
     viewport: Viewport,
 ) -> (NodeId, NodeArena) {
     let mut arena = (*document.arena).clone();
+    // The stored document arena may already carry a cascade (the arena render
+    // path shares one cascaded arena between the geometry and the document
+    // state); clear it so stale properties from removed rules cannot leak.
+    css_parse::reset_css_attr(&mut arena, document.root_id);
     css_parse::css_into_node_with_state(
         &mut arena,
         document.root_id,
@@ -212,6 +221,10 @@ pub(super) struct RenderState {
     /// Shared with the input loop; controls which scrollbar chrome paints.
     pub(super) scrollbars_visible: SharedScrollbarVisibility,
     pub(super) max_scroll: Arc<AtomicU32>,
+    /// Published to the input loop after every layout pass: the input loop's
+    /// DOM-read snapshot is the latest rendered frame's arena (up to one frame
+    /// stale) instead of a second full-tree clone of every script snapshot.
+    pub(super) live_geo: LiveGeoSlot,
 }
 
 impl RenderState {
@@ -418,7 +431,12 @@ impl RenderState {
         // lines inside one block stay continuous (browser behaviour); block
         // selections keep the canvas extraction.
         let raw_lines = match &new_sel {
-            Some(n) => selection_lines(n, cols),
+            Some(n) => crate::layout::clip_flow_lines_scoped(
+                &geo.boxes,
+                n.anchor,
+                n.end,
+                &selection_lines(n, cols),
+            ),
             None => Vec::new(),
         };
         let text = match &new_sel {

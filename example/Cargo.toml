@@ -11,3 +11,10 @@ publish = false
 
 [dependencies]
 htui = { path = "../crates/htui" }
+
+# The engine's layout / paint / diff path is on the frame critical path; an
+# unoptimized build animates at a fraction of the terminal's frame budget.
+# Optimizing the dependency keeps `cargo run` iteration on the example crate
+# itself fast (it stays at dev opt-level).
+[profile.dev.package.htui]
+opt-level = 2
