@@ -45,7 +45,7 @@ pub fn layout_hn(
     let block_fg = node.css_attr.get_color();
     let block_bg = node.css_attr.get_bg_color();
     let block_font_style = block_style(&node.css_attr);
-    let prefix_run = InlineRun::new(prefix_text, block_font_style, block_fg, block_bg);
+    let prefix_run = InlineRun::synthesized_marker(prefix_text, block_font_style, block_fg, block_bg);
 
     Some(layout_block(
         arena,

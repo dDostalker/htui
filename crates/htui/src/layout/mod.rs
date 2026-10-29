@@ -19,7 +19,6 @@
 //!   the registry of layout functions consulted by the flow orchestrator.
 
 use crate::{
-    graphics::grapheme_width,
     html::css_parse::{TextAlign, UserSelect},
     layout::layout::TermMap,
     tdom::node::{NodeArena, NodeId, NodeType},
@@ -380,7 +379,7 @@ fn extract_line_text(runs: &[InlineRun], font: usize, lo: u32, hi: u32, line_sta
         let run_w = run.width_at(font) as u32;
         let run_lo = col.max(lo);
         let run_hi = col.saturating_add(run_w).min(hi);
-        if run_lo < run_hi {
+        if run_lo < run_hi && !run.synthesized {
             out.push_str(&run_text_between(
                 run,
                 font,
@@ -403,7 +402,7 @@ fn run_text_between(run: &InlineRun, font: usize, lo: usize, hi: usize) -> Strin
     let mut out = String::new();
     let mut col = 0usize;
     for g in run.text.graphemes(true) {
-        let slot = grapheme_width(g).max(font);
+        let slot = run.grapheme_advance(g, font);
         if col >= hi {
             break;
         }

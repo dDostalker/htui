@@ -211,7 +211,7 @@ pub fn layout_block(
         // `<hr>` paints a horizontal rule: one `─` glyph per content cell,
         // synthesised at layout time so it always spans the available width.
         let width = geom.content_constraint.width.max(1);
-        vec![InlineRun::new(
+        vec![InlineRun::synthesized_marker(
             "─".repeat(width),
             block_font_style,
             block_fg,
@@ -226,7 +226,7 @@ pub fn layout_block(
         let filled = ((width as f32) * ratio.clamp(0.0, 1.0)).round() as usize;
         let mut run_text = "█".repeat(filled.min(width));
         run_text.push_str(&"░".repeat(width.saturating_sub(filled)));
-        vec![InlineRun::new(
+        vec![InlineRun::synthesized_marker(
             run_text,
             block_font_style,
             opts.bar_color.or(block_fg),
