@@ -6,12 +6,14 @@ use super::length::Length;
 // CSS Grid values
 //
 // A deliberately small, typed subset of CSS Grid.  Track lists are
-// parsed eagerly (including `repeat()`), while line placements remain
-// raw line numbers/spans until the grid algorithm knows the final
-// track count (needed for negative line numbers).  A bare custom-ident
-// names a `grid-template-areas` area and resolves to its edge line at
-// layout time; `grid-template-areas` itself is validated into a
-// rectangular cell matrix right here.
+// parsed eagerly (integer `repeat()` counts expand here, while
+// `repeat(auto-fill | auto-fit, …)` is kept for the layout to resolve
+// against the definite container size), and line placements remain raw
+// line numbers/spans until the grid algorithm knows the final track
+// count (needed for negative line numbers).  A bare custom-ident names
+// a `grid-template-areas` area and resolves to its edge line at layout
+// time; `grid-template-areas` itself is validated into a rectangular
+// cell matrix right here.
 // ============================================================
 
 /// One track size in `grid-template-columns` / `grid-template-rows`.
@@ -30,6 +32,17 @@ pub enum GridTrack {
     MinMax {
         min: Box<GridTrack>,
         max: Box<GridTrack>,
+    },
+    /// `repeat(auto-fill | auto-fit, tracks)`: the repetition count is
+    /// resolved at layout time from the definite container size, counting
+    /// each track by its definite width (its max if definite, else its min).
+    /// Only legal in the explicit `grid-template-*` lists; nested
+    /// auto-repeats are rejected.
+    AutoRepeat {
+        /// `true` for `auto-fit` (empty trailing tracks collapse), `false`
+        /// for `auto-fill` (every repetition is kept).
+        fit: bool,
+        tracks: Vec<GridTrack>,
     },
 }
 
@@ -459,7 +472,9 @@ fn split_top_level_whitespace(value: &str) -> Option<Vec<String>> {
     (!parts.is_empty()).then_some(parts)
 }
 
-/// Expand a single `repeat(N, a b)` token.
+/// Expand a single `repeat(N, a b)` token. `auto-fill` / `auto-fit` become
+/// one [`GridTrack::AutoRepeat`] for the layout to resolve; integer counts
+/// expand eagerly. Auto-repeats cannot nest.
 fn parse_repeat(token: &str) -> Option<Vec<GridTrack>> {
     let lower = token.to_ascii_lowercase();
     if !lower.starts_with("repeat(") || !token.ends_with(')') {
@@ -472,14 +487,37 @@ fn parse_repeat(token: &str) -> Option<Vec<GridTrack>> {
     }
     let second = parts.pop()?;
     let count_raw = parts.pop()?;
-    let count = count_raw.trim().parse::<usize>().ok()?;
-    if count == 0 {
+    let count_raw = count_raw.trim();
+    let auto_fit = match () {
+        _ if count_raw.eq_ignore_ascii_case("auto-fill") => false,
+        _ if count_raw.eq_ignore_ascii_case("auto-fit") => true,
+        _ => {
+            let count = count_raw.parse::<usize>().ok()?;
+            if count == 0 {
+                return None;
+            }
+            let tracks = parse_grid_track_list(&second)?;
+            if tracks.iter().any(is_auto_repeat) {
+                return None;
+            }
+            let mut out = Vec::with_capacity(tracks.len().saturating_mul(count));
+            for _ in 0..count {
+                out.extend(tracks.iter().cloned());
+            }
+            return Some(out);
+        }
+    };
+    let tracks = parse_grid_track_list(&second)?;
+    if tracks.is_empty() || tracks.iter().any(is_auto_repeat) {
         return None;
     }
-    let tracks = parse_grid_track_list(&second)?;
-    let mut out = Vec::with_capacity(tracks.len().saturating_mul(count));
-    for _ in 0..count {
-        out.extend(tracks.iter().cloned());
-    }
-    Some(out)
+    Some(vec![GridTrack::AutoRepeat {
+        fit: auto_fit,
+        tracks,
+    }])
+}
+
+/// Whether this track is an unresolved `repeat(auto-fill | auto-fit, …)`.
+fn is_auto_repeat(track: &GridTrack) -> bool {
+    matches!(track, GridTrack::AutoRepeat { .. })
 }

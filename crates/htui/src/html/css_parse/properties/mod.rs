@@ -834,6 +834,8 @@ impl CssAttr {
 
     /// Resolve the explicit column tracks, including the `grid-template`
     /// shorthand. Longhand declarations win over the shorthand when present.
+    /// `repeat(auto-fill | auto-fit, …)` entries are returned unresolved;
+    /// only the grid layout expands them.
     pub fn get_grid_template_columns(
         &self,
         font_ctx: FontContext,
@@ -847,6 +849,8 @@ impl CssAttr {
 
     /// Resolve the explicit row tracks, including the `grid-template`
     /// shorthand. Longhand declarations win over the shorthand when present.
+    /// `repeat(auto-fill | auto-fit, …)` entries are returned unresolved;
+    /// only the grid layout expands them.
     pub fn get_grid_template_rows(
         &self,
         font_ctx: FontContext,
@@ -895,20 +899,34 @@ impl CssAttr {
     }
 
     /// Implicit track sizes beyond the explicit template, cycled across
-    /// consecutive implicit tracks. An invalid declaration is `auto`.
+    /// consecutive implicit tracks. An invalid declaration is `auto`;
+    /// `repeat(auto-fill | auto-fit, …)` is only legal in the explicit
+    /// template lists and rejects here.
     pub fn get_grid_auto_columns(&self) -> Vec<GridTrack> {
         self.0
             .get("grid-auto-columns")
             .and_then(|v| parse_grid_track_list(v))
+            .filter(|list| {
+                !list
+                    .iter()
+                    .any(|track| matches!(track, GridTrack::AutoRepeat { .. }))
+            })
             .unwrap_or_else(|| vec![GridTrack::Auto])
     }
 
     /// Implicit row track sizes beyond the explicit template, cycled across
-    /// consecutive implicit tracks. An invalid declaration is `auto`.
+    /// consecutive implicit tracks. An invalid declaration is `auto`;
+    /// `repeat(auto-fill | auto-fit, …)` is only legal in the explicit
+    /// template lists and rejects here.
     pub fn get_grid_auto_rows(&self) -> Vec<GridTrack> {
         self.0
             .get("grid-auto-rows")
             .and_then(|v| parse_grid_track_list(v))
+            .filter(|list| {
+                !list
+                    .iter()
+                    .any(|track| matches!(track, GridTrack::AutoRepeat { .. }))
+            })
             .unwrap_or_else(|| vec![GridTrack::Auto])
     }
 

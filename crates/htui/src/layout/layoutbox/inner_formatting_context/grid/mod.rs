@@ -4,7 +4,9 @@
 //!
 //! - display: grid / inline-grid
 //! - track lists with auto, lengths/percentages, fr, minmax()/fit-content(),
-//!   and repeat() (minmax tracks grow base→limit before the fr pass)
+//!   and repeat() (integer counts parse eagerly; auto-fill/auto-fit resolve
+//!   against the definite container size, auto-fit collapsing its empty
+//!   tail tracks)
 //! - explicit line-number/span placement and automatic row/column placement
 //!   (including dense)
 //! - `grid-template-areas` named areas; a bare area name in a placement
@@ -188,12 +190,28 @@ fn layout_grid_container(
         .or_else(|| css.get_height(None, child_context.font, child_context.viewport));
     let definite_content_height = container_css_height;
 
-    let template = css.get_grid_template(child_context.font, child_context.viewport);
-    let areas = css.get_grid_template_areas();
     let auto_columns = css.get_grid_auto_columns();
     let auto_rows = css.get_grid_auto_rows();
     let auto_flow = css.get_grid_auto_flow();
     let gap = css.get_gap(child_context.font, child_context.viewport);
+    let template = css.get_grid_template(child_context.font, child_context.viewport);
+    // `repeat(auto-fill | auto-fit, …)` expands against the definite sizes
+    // before placement; `fit` segments remember their span for collapsing.
+    let (mut template_columns, column_repeats) = expand_auto_repeats(
+        &template.columns,
+        Some(content_width),
+        gap.column,
+        child_context.font,
+        child_context.viewport,
+    );
+    let (mut template_rows, row_repeats) = expand_auto_repeats(
+        &template.rows,
+        definite_content_height,
+        gap.row,
+        child_context.font,
+        child_context.viewport,
+    );
+    let areas = css.get_grid_template_areas();
     let align_items = css.get_align_items();
     let justify_items = css.get_justify_items();
     let align_content = css.get_align_content();
@@ -212,11 +230,11 @@ fn layout_grid_container(
     let mut occupied: HashSet<(usize, usize)> = HashSet::new();
     // `grid-template-areas` extends the explicit grid: tracks beyond
     // `grid-template-columns`/`rows` stay implicit and use `grid-auto-*`.
-    let mut column_count = explicit_count(&template.columns)
+    let mut column_count = explicit_count(&template_columns)
         .max(areas.as_ref().map(|a| a.column_count()).unwrap_or(0))
         .max(min_tracks(&items, Axis::Column))
         .max(1);
-    let mut row_count = explicit_count(&template.rows)
+    let mut row_count = explicit_count(&template_rows)
         .max(areas.as_ref().map(|a| a.row_count()).unwrap_or(0))
         .max(min_tracks(&items, Axis::Row))
         .max(1);
@@ -235,13 +253,28 @@ fn layout_grid_container(
         placements.push(placed);
     }
 
+    // `auto-fit`: trailing tracks of a tail auto-repeat that no item spans
+    // collapse away (an interior segment would shift later tracks, so it
+    // behaves like `auto-fill`).
+    collapse_fit_tail(
+        &mut template_columns,
+        &column_repeats,
+        &placements,
+        Axis::Column,
+    );
+    collapse_fit_tail(&mut template_rows, &row_repeats, &placements, Axis::Row);
+
+    // Recompute the grid extents from the (possibly collapsed) template so
+    // collapsed tracks stop reserving space.
+    column_count = explicit_count(&template_columns)
+        .max(areas.as_ref().map(|a| a.column_count()).unwrap_or(0))
+        .max(1);
+    row_count = explicit_count(&template_rows)
+        .max(areas.as_ref().map(|a| a.row_count()).unwrap_or(0))
+        .max(1);
     for placed in &placements {
-        column_count = column_count
-            .max(placed.column.saturating_add(placed.column_span))
-            .max(explicit_count(&template.columns));
-        row_count = row_count
-            .max(placed.row.saturating_add(placed.row_span))
-            .max(explicit_count(&template.rows));
+        column_count = column_count.max(placed.column.saturating_add(placed.column_span));
+        row_count = row_count.max(placed.row.saturating_add(placed.row_span));
     }
 
     let column_hints = track_hints(
@@ -258,7 +291,7 @@ fn layout_grid_container(
     );
 
     let columns = track_sizes(
-        &template.columns,
+        &template_columns,
         &auto_columns,
         &column_hints,
         Some(content_width),
@@ -267,7 +300,7 @@ fn layout_grid_container(
         child_context.viewport,
     );
     let rows = track_sizes(
-        &template.rows,
+        &template_rows,
         &auto_rows,
         &row_hints,
         definite_content_height,
@@ -952,12 +985,18 @@ fn track_sizes(
                 let base = match &**min {
                     // Parse rejects flexible/nested mins; the content hint is
                     // the safe fallback if one still reaches layout.
-                    GridTrack::Auto | GridTrack::Fr(_) | GridTrack::MinMax { .. } => hint,
+                    GridTrack::Auto
+                    | GridTrack::Fr(_)
+                    | GridTrack::MinMax { .. }
+                    | GridTrack::AutoRepeat { .. } => hint,
                     GridTrack::Length(length) => resolve(*length, hint),
                 };
                 let limit = match &**max {
                     GridTrack::Length(length) => resolve(*length, hint).max(base),
-                    GridTrack::Auto | GridTrack::Fr(_) | GridTrack::MinMax { .. } => base,
+                    GridTrack::Auto
+                    | GridTrack::Fr(_)
+                    | GridTrack::MinMax { .. }
+                    | GridTrack::AutoRepeat { .. } => base,
                 };
                 let fr = match &**max {
                     GridTrack::Fr(n) => (*n).max(0.0),
@@ -965,6 +1004,9 @@ fn track_sizes(
                 };
                 (base, limit, fr)
             }
+            // Auto-repeats are expanded before sizing; treat any survivor as
+            // a content-sized track.
+            GridTrack::AutoRepeat { .. } => (hint, hint, 0.0),
         };
         total_fr += fr;
         sizes.push(base);
@@ -997,15 +1039,29 @@ fn track_sizes(
             free -= distributed;
         }
         if total_fr > f32::EPSILON {
-            let free =
-                available.saturating_sub(sizes.iter().sum::<usize>().saturating_add(gap_total));
+            // CSS §12.7: flexible tracks share the space left by the
+            // non-flexible tracks; their own base sizes are not subtracted
+            // first (a base only floors the track). Cumulative rounding
+            // keeps the integer shares summing to the free space.
+            let non_flexible: usize = sizes
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| track_fr_weight(tracks[*index]).is_none())
+                .map(|(_, size)| *size)
+                .sum();
+            let free = available.saturating_sub(non_flexible.saturating_add(gap_total));
+            let mut allocated = 0.0f32;
             for (index, size) in sizes.iter_mut().enumerate() {
-                if let Some(weight) = track_fr_weight(tracks[index])
-                    && weight > 0.0
-                {
-                    let share = (free as f32 * (weight / total_fr)).round() as usize;
-                    *size = (*size).max(share);
+                let Some(weight) = track_fr_weight(tracks[index]) else {
+                    continue;
+                };
+                if weight <= 0.0 {
+                    continue;
                 }
+                let previous = allocated;
+                allocated += free as f32 * (weight / total_fr);
+                let share = (allocated.round() as usize).saturating_sub(previous.round() as usize);
+                *size = (*size).max(share);
             }
         }
     }
@@ -1024,6 +1080,122 @@ fn track_fr_weight(track: &GridTrack) -> Option<f32> {
             _ => None,
         },
         _ => None,
+    }
+}
+
+/// Expand `repeat(auto-fill | auto-fit, …)` in an explicit template into
+/// concrete tracks. The repetition count is the largest number whose tracks
+/// (counted at their definite width: the max side if definite, else the
+/// min side) and inner gaps fit the available size; a list without definite
+/// widths, or an indefinite container, repeats exactly once. Returns the
+/// expanded list plus `(start, end, is_auto_fit)` segment ranges.
+fn expand_auto_repeats(
+    tracks: &[GridTrack],
+    definite: Option<usize>,
+    gap: usize,
+    font: crate::html::css_parse::FontContext,
+    viewport: crate::html::css_parse::Viewport,
+) -> (Vec<GridTrack>, Vec<(usize, usize, bool)>) {
+    let mut out = Vec::new();
+    let mut segments = Vec::new();
+    for spec in tracks {
+        let GridTrack::AutoRepeat { fit, tracks: inner } = spec else {
+            out.push(spec.clone());
+            continue;
+        };
+        let start = out.len();
+        let count = auto_repeat_count(inner, definite, gap, font, viewport);
+        for _ in 0..count {
+            out.extend(inner.iter().cloned());
+        }
+        segments.push((start, out.len(), *fit));
+    }
+    (out, segments)
+}
+
+/// Definite counting width of one track inside an auto-repeat, if any: its
+/// max side when that is a definite length, else its min side.
+fn repeat_counting_width(
+    spec: &GridTrack,
+    available: usize,
+    font: crate::html::css_parse::FontContext,
+    viewport: crate::html::css_parse::Viewport,
+) -> Option<usize> {
+    let resolve = |length: &crate::html::css_parse::Length| {
+        length
+            .resolve(crate::html::css_parse::LengthContext {
+                containing: available,
+                font,
+                viewport,
+            })
+            .max(1)
+    };
+    match spec {
+        GridTrack::Length(length) => Some(resolve(length)),
+        GridTrack::MinMax { min, max } => match &**max {
+            GridTrack::Length(length) => Some(resolve(length)),
+            _ => match &**min {
+                GridTrack::Length(length) => Some(resolve(length)),
+                _ => None,
+            },
+        },
+        _ => None,
+    }
+}
+
+/// Repetition count for one auto-repeat segment (minimum one).
+fn auto_repeat_count(
+    inner: &[GridTrack],
+    definite: Option<usize>,
+    gap: usize,
+    font: crate::html::css_parse::FontContext,
+    viewport: crate::html::css_parse::Viewport,
+) -> usize {
+    let Some(available) = definite else {
+        return 1;
+    };
+    let Some(widths) = inner
+        .iter()
+        .map(|spec| repeat_counting_width(spec, available, font, viewport))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return 1;
+    };
+    let width_total: usize = widths.iter().sum();
+    if width_total == 0 {
+        return 1;
+    }
+    // Largest repetition count whose N * width + (N - 1) * gap fits.
+    (available.saturating_add(gap) / width_total.saturating_add(gap)).max(1)
+}
+
+/// Drop the trailing tracks of a tail `auto-fit` segment that no item
+/// spans, so the remaining tracks can grow into the freed space. Segments
+/// followed by other tracks keep every repetition (auto-fill behavior).
+fn collapse_fit_tail(
+    tracks: &mut Vec<GridTrack>,
+    segments: &[(usize, usize, bool)],
+    placements: &[Placed],
+    axis: Axis,
+) {
+    for &(start, end, fit) in segments.iter().rev() {
+        if !fit || end != tracks.len() {
+            continue;
+        }
+        let spans = |index: usize| {
+            placements.iter().any(|placed| {
+                let (origin, span) = match axis {
+                    Axis::Column => (placed.column, placed.column_span),
+                    Axis::Row => (placed.row, placed.row_span),
+                };
+                origin <= index && index < origin.saturating_add(span)
+            })
+        };
+        let mut end = end;
+        while end > start && !spans(end - 1) {
+            end -= 1;
+        }
+        tracks.truncate(end);
     }
 }
 
