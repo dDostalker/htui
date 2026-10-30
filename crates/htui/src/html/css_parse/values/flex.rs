@@ -230,10 +230,18 @@ pub(crate) fn expand_place_shorthand(
         }
         "place-items" => {
             parse_align_items(first)?;
-            if let Some(s) = second {
-                parse_align_items(s)?;
+            let justify_token = match second {
+                Some(s) => {
+                    parse_align_items(s)?;
+                    Some(s)
+                }
+                None => parse_align_items(first).map(|_| first),
+            };
+            let mut out = vec![("align-items", Arc::from(first))];
+            if let Some(token) = justify_token {
+                out.push(("justify-items", Arc::from(token)));
             }
-            Some(vec![("align-items", Arc::from(first))])
+            Some(out)
         }
         "place-self" => {
             // `align-self` additionally accepts `auto` (defer to the
@@ -241,10 +249,19 @@ pub(crate) fn expand_place_shorthand(
             if parse_align_items(first).is_none() && !first.eq_ignore_ascii_case("auto") {
                 return None;
             }
-            if let Some(s) = second {
-                parse_align_items(s)?;
+            let justify_token = match second {
+                Some(s) => {
+                    parse_align_items(s)?;
+                    Some(s)
+                }
+                None if first.eq_ignore_ascii_case("auto") => Some(first),
+                None => parse_align_items(first).map(|_| first),
+            };
+            let mut out = vec![("align-self", Arc::from(first))];
+            if let Some(token) = justify_token {
+                out.push(("justify-self", Arc::from(token)));
             }
-            Some(vec![("align-self", Arc::from(first))])
+            Some(out)
         }
         _ => None,
     }

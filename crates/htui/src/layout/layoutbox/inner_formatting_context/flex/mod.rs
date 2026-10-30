@@ -14,3 +14,4 @@
 mod tree;
 
 pub use tree::layout_flex_dispatch;
+pub(crate) use tree::natural_grid_item_size;

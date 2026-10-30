@@ -359,13 +359,11 @@ pub enum CssDisplay {
     /// `display: inline-flex` — inline-level box that establishes a
     /// flex formatting context for its children.
     InlineFlex,
-    /// `display: grid` — block-level box that would establish a grid
-    /// formatting context. The grid algorithm is reserved; generation
-    /// routes these to the geometry dispatcher which currently logs a
-    /// debug message and returns `None`.
+    /// `display: grid` 鈥?block-level box that establishes a grid
+    /// formatting context and is laid out by the grid algorithm.
     Grid,
-    /// `display: inline-grid` — inline-level box that would establish a
-    /// grid formatting context. Same caveat as [`CssDisplay::Grid`].
+    /// `display: inline-grid` 鈥?inline-level atomic box that establishes a
+    /// grid formatting context.
     InlineGrid,
     /// `display: table` — block-level box that establishes a table
     /// formatting context.
@@ -494,11 +492,8 @@ impl CssDisplay {
         matches!(self, CssDisplay::Flex | CssDisplay::InlineFlex)
     }
 
-    /// `true` for `display: grid` and `display: inline-grid`. The grid
-    /// layout algorithm is on the reject list, so both variants produce no
-    /// box — and (via the inline-runs walker) no inline runs either, so an
-    /// inline-grid element's text cannot leak into its parent while a
-    /// block-level grid sibling's content vanishes.
+    /// `true` for `display: grid` and `display: inline-grid`. Both establish
+    /// grid formatting contexts; the second is an atomic inline-level box.
     pub fn is_grid(self) -> bool {
         matches!(self, CssDisplay::Grid | CssDisplay::InlineGrid)
     }

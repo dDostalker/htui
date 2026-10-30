@@ -82,3 +82,4 @@ mod items;
 mod prepare;
 
 pub use dispatch::layout_flex_dispatch;
+pub(crate) use prepare::natural_grid_item_size;

@@ -14,7 +14,7 @@
 //!   lives in [`flex`].
 //! - [`FormattingContext::Table`] — Internal table formatting context. Geometry
 //!   is assigned by the table algorithm.
-//! - [`FormattingContext::Grid`] — CSS grid container (reserved). Lives in
+//! - [`FormattingContext::Grid`] — CSS grid container. Lives in
 //!   [`grid`].
 
 pub mod flex;
@@ -23,7 +23,7 @@ pub mod grid;
 
 /// Formatting context established by a box for its children.
 ///
-/// `Grid` is reserved for a future CSS grid implementation.
+/// `Grid` is implemented by the CSS Grid formatting context in [`grid`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FormattingContext {
     /// Block / inline formatting context — children are stacked by the
@@ -36,8 +36,7 @@ pub enum FormattingContext {
     Flex,
     /// Table formatting context used by generated `<table>` boxes.
     Table,
-    /// Grid formatting context. Reserved for future support; the generation
-    /// phase classifies `display: grid` boxes with this context but the
-    /// geometry phase drops them (no grid layout algorithm yet).
+    /// Grid formatting context. display: grid / inline-grid classify
+    /// here and the geometry phase dispatches them to [`grid`].
     Grid,
 }

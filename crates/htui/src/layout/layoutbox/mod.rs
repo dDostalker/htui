@@ -37,7 +37,7 @@
 //!    [`FormattingContext::Flow`] (default block / inline flow),
 //!    [`FormattingContext::Flex`] (CSS flexbox), [`FormattingContext::Table`]
 //!    (table formatting context), or [`FormattingContext::Grid`]
-//!    (reserved for future grid support).
+//!    (CSS Grid formatting context).
 //!
 //! The three axes are independent: a flex container is
 //! `BoxKind::Normal + OuterDisplay::BlockLevel { container: true } + FormattingContext::Flex`;

@@ -366,15 +366,14 @@ fn display_contents_children_become_flex_items() {
     );
 }
 
-// --- grid fallback consistency -------------------------------------------
+// --- grid rendering consistency ------------------------------------------
 //
-// The grid layout algorithm is a documented reject: `display: grid` /
-// `inline-grid` produce no box. The fallback must be the same for both
-// variants — the box is skipped and the element contributes no content to
-// the parent's inline runs or rendered canvas.
+// Both display variants establish a grid formatting context. The block
+// container occupies its own flow row; inline-grid is an atomic inline-level
+// box and participates in the surrounding inline row.
 
 #[test]
-fn grid_fallback_is_uniform_between_block_and_inline_variants() {
+fn grid_variants_render_their_items() {
     let canvas = layout_canvas(
         "<div>a<div style=\"display: grid\">G</div>b<span style=\"display: inline-grid\">H</span>c</div>",
         "",
@@ -384,12 +383,10 @@ fn grid_fallback_is_uniform_between_block_and_inline_variants() {
         "the surrounding text must render: {canvas:?}"
     );
     assert!(
-        !canvas.contains('G') && !canvas.contains('H'),
-        "grid content must not render in either variant — and the inline-grid \
-         text must not leak into the parent's inline runs: {canvas:?}"
+        canvas.contains('G') && canvas.contains('H'),
+        "grid and inline-grid content must both render: {canvas:?}"
     );
 }
-
 /// `Vec<NodeId>` helper for reading a node's children in tests.
 trait ChildrenExt {
     fn children_(&self, arena: &NodeArena) -> Vec<NodeId>;
