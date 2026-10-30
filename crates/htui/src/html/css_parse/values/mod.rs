@@ -26,6 +26,7 @@ pub(crate) use flex::{
     alignment_longhand_valid, expand_place_shorthand, is_alignment_longhand,
     is_place_shorthand_name,
 };
+pub(crate) use grid::expand_grid_template;
 pub use grid::{
     GridAreas, GridAutoFlow, GridLine, GridPlacements, GridTemplate, GridTrack, parse_grid_area,
     parse_grid_auto_flow, parse_grid_axis_shorthand, parse_grid_template,

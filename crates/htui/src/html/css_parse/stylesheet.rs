@@ -14,8 +14,8 @@ use super::{
     properties::CssAttr,
     selector::CssSelector,
     values::{
-        alignment_longhand_valid, expand_place_shorthand, is_alignment_longhand,
-        is_list_style_type_keyword, is_place_shorthand_name,
+        alignment_longhand_valid, expand_grid_template, expand_place_shorthand,
+        is_alignment_longhand, is_list_style_type_keyword, is_place_shorthand_name,
     },
 };
 
@@ -473,6 +473,13 @@ fn parse_declarations_into<'i, 't>(
                 Some(expand_list_style_shorthand(&cleaned))
             } else if name == "font" {
                 Some(expand_font_shorthand(&cleaned))
+            } else if name == "grid-template" {
+                // Only the areas form expands; a plain track-list shorthand
+                // (or `none`) keeps the raw-name path.
+                match expand_grid_template(&cleaned) {
+                    Some(pairs) => Some(Some(pairs)),
+                    None => None,
+                }
             } else {
                 None
             };

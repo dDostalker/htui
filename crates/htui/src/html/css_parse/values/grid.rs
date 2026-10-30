@@ -148,7 +148,9 @@ pub fn parse_grid_track_list(value: &str) -> Option<Vec<GridTrack>> {
 /// Parse a `grid-template` shorthand into column and row track lists.
 ///
 /// The supported grammar is `<track-list> [/ <track-list>]`. Named-line
-/// brackets and named-area strings are intentionally rejected.
+/// brackets and named-area strings are intentionally rejected here — the
+/// areas form expands at declaration-parse time via
+/// [`expand_grid_template`].
 pub fn parse_grid_template(value: &str) -> Option<GridTemplate> {
     let parts = split_top_level(value, '/')?;
     if parts.len() > 2 {
@@ -160,6 +162,87 @@ pub fn parse_grid_template(value: &str) -> Option<GridTemplate> {
         None => Vec::new(),
     };
     Some(GridTemplate { columns, rows })
+}
+
+/// Expand an areas-form `grid-template` shorthand into its longhand
+/// declarations: `grid-template: "a a" 1fr "b b" 2ch / 2ch 1fr` becomes
+/// `grid-template-areas`, `grid-template-rows` and `grid-template-columns`
+/// values. Row sizes default to `auto` per area row. A value without
+/// quoted strings is the plain `<track-list>` form and keeps the raw
+/// shorthand path ([`parse_grid_template`]); malformed area forms also
+/// return `None` so the raw path rejects them.
+pub(crate) fn expand_grid_template(value: &str) -> Option<Vec<(&'static str, Arc<str>)>> {
+    let value = value.trim();
+    if value.is_empty() {
+        return None;
+    }
+    let mut parts = split_top_level(value, '/')?;
+    if parts.len() > 2 {
+        return None;
+    }
+    let columns = if parts.len() == 2 {
+        let columns = parts.pop()?.trim().to_string();
+        Some(columns)
+    } else {
+        None
+    };
+    let before = parts.pop()?;
+    let (strings, runs) = scan_template_rows(&before)?;
+    if strings.is_empty() {
+        // Plain track-list form: the raw shorthand path owns it.
+        return None;
+    }
+    if !runs[0].trim().is_empty() {
+        return None;
+    }
+    let areas = strings.join(" ");
+    let rows = (1..=strings.len())
+        .map(|i| {
+            let size = runs.get(i).map(|run| run.trim()).unwrap_or("");
+            if size.is_empty() { "auto" } else { size }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut pairs = vec![
+        ("grid-template-areas", Arc::from(areas.as_str())),
+        ("grid-template-rows", Arc::from(rows.as_str())),
+    ];
+    if let Some(columns) = columns.filter(|columns| !columns.is_empty()) {
+        pairs.push(("grid-template-columns", Arc::from(columns.as_str())));
+    }
+    Some(pairs)
+}
+
+/// Split an areas+sizes prefix into its quoted strings (quotes kept, the
+/// way `grid-template-areas` expects them) and the raw text runs between
+/// them, leading run first. An unterminated string fails.
+fn scan_template_rows(value: &str) -> Option<(Vec<String>, Vec<String>)> {
+    let mut strings: Vec<String> = Vec::new();
+    let mut runs: Vec<String> = vec![String::new()];
+    let mut quote: Option<char> = None;
+    let mut current = String::new();
+    for c in value.chars() {
+        match quote {
+            Some(q) => {
+                if c == q {
+                    current.push(c);
+                    quote = None;
+                    strings.push(std::mem::take(&mut current));
+                    runs.push(String::new());
+                } else {
+                    current.push(c);
+                }
+            }
+            None if c == '"' || c == '\'' => {
+                quote = Some(c);
+                current.push(c);
+            }
+            None => {
+                runs.last_mut()?.push(c);
+            }
+        }
+    }
+    (quote.is_none() && current.is_empty()).then_some((strings, runs))
 }
 
 /// A parsed `grid-template-areas` matrix: one entry per quoted row string,
