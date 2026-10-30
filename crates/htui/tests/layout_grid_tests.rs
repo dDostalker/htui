@@ -386,3 +386,50 @@ fn grid_fit_content_caps_track_growth() {
         rows[0]
     );
 }
+
+#[test]
+fn grid_auto_fill_repeats_only_while_tracks_fit() {
+    init();
+    let rows = render_rows(
+        r#"<div class="g"><div>A</div><div>B</div><div>C</div></div>"#,
+        r#".g { display: grid; width: 11ch; column-gap: 1ch; grid-template-columns: repeat(auto-fill, 4ch); }"#,
+    );
+    assert_eq!(
+        rows[0].find('A'),
+        Some(0),
+        "the first auto-fill track starts at the container edge: {:?}",
+        rows[0]
+    );
+    assert_eq!(
+        rows[0].find('B'),
+        Some(5),
+        "only two 4ch repetitions fit 11ch with a 1ch gap: {:?}",
+        rows[0]
+    );
+    assert!(
+        rows[1].starts_with('C'),
+        "the third item wraps to a new row instead of a third repetition: {:?}",
+        rows[1]
+    );
+}
+
+#[test]
+fn grid_auto_fit_collapses_trailing_empty_tracks() {
+    init();
+    let rows = render_rows(
+        r#"<div class="g"><div>A</div><div>B</div></div>"#,
+        r#".g { display: grid; width: 9ch; grid-template-columns: repeat(auto-fit, minmax(3ch, 1fr)); }"#,
+    );
+    assert_eq!(
+        rows[0].find('A'),
+        Some(0),
+        "the first flexible track starts at the container edge: {:?}",
+        rows[0]
+    );
+    assert_eq!(
+        rows[0].find('B'),
+        Some(5),
+        "the empty third repetition collapses so the used tracks fill 9ch: {:?}",
+        rows[0]
+    );
+}

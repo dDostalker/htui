@@ -4311,3 +4311,29 @@ fn grid_track_parses_minmax_and_fit_content() {
             .all(|t| matches!(t, GridTrack::MinMax { .. }))
     );
 }
+
+#[test]
+fn grid_track_parses_auto_fill_and_auto_fit_repeats() {
+    use htui::html::css_parse::{GridTrack, parse_grid_track_list};
+    let list = parse_grid_track_list("repeat(auto-fill, minmax(10ch, 1fr))").expect("auto-fill");
+    assert_eq!(list.len(), 1, "an auto-repeat stays one unresolved track");
+    assert!(
+        matches!(&list[0], GridTrack::AutoRepeat { fit: false, tracks } if tracks.len() == 1),
+        "auto-fill is recorded with its inner track list"
+    );
+    let fit =
+        parse_grid_track_list("repeat(AUTO-FIT, 3ch 1ch)").expect("auto-fit, case-insensitive");
+    assert!(matches!(&fit[0], GridTrack::AutoRepeat { fit: true, tracks } if tracks.len() == 2));
+    assert!(
+        parse_grid_track_list("repeat(auto-fill, repeat(auto-fill, 3ch))").is_none(),
+        "auto-repeats cannot nest"
+    );
+    assert!(
+        parse_grid_track_list("repeat(2, repeat(auto-fill, 3ch))").is_none(),
+        "auto-repeats cannot nest inside an integer repeat"
+    );
+    assert!(
+        parse_grid_track_list("repeat(auto-fill,)").is_none(),
+        "an empty track list is invalid"
+    );
+}
