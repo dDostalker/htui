@@ -615,7 +615,7 @@ let x = find(b).unwrap();
 | `GridTrack`        | `html::css_parse::values` | 单个 track 尺寸（`Auto` / `Length` / `Fr` / `MinMax{min,max}` / `AutoRepeat{fit,tracks}`），`grid-template-*` 与 `grid-auto-*` 共用；`fit-content(x)` 解析为 `MinMax{auto, x}`，auto-repeat 由布局期按容器定尺寸展开 |
 | `GridTemplate`     | `html::css_parse::values` | `grid-template`/`-columns`/`-rows` 的显式 track 列表（`columns` / `rows`） |
 | `GridAreas`        | `html::css_parse::values` | `grid-template-areas` 矩阵（`cells: Vec<Vec<Option<Arc<str>>>>`，`None` 为 `.` 空单元格；`row_count()` / `column_count()`） |
-| `GridLine`         | `html::css_parse::values` | 放置 line 原始值（`Auto` / `Line(isize)` / `Span(usize)` / `Name(area)`，Name 在布局期解析） |
+| `GridLine`         | `html::css_parse::values` | 放置 line 原始值（`Auto` / `Line(isize)` / `Span(usize)` / `SpanName{span,name}` / `Name(area)`，Name/SpanName 在布局期对 `grid-template-areas` 解析） |
 | `GridPlacements`   | `html::css_parse::values` | item 四边 raw placement（`grid-area`/`grid-row`/`grid-column` 展开结果） |
 | `GridAutoFlow`     | `html::css_parse::values` | 自动放置（`row: bool` + `dense: bool`） |
 
