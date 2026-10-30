@@ -210,3 +210,134 @@ fn grid_item_text_does_not_duplicate_as_container_run() {
         "grid item content renders exactly once: {all:?}"
     );
 }
+
+#[test]
+fn grid_template_areas_place_items_by_name() {
+    init();
+    let rows = render_rows(
+        r#"<div class="g"><div class="a">A</div><div class="b">B</div></div>"#,
+        r#"
+        .g { display: grid; grid-template-columns: 2ch 2ch 2ch; grid-template-areas: "a a b"; }
+        .a { grid-area: a; }
+        .b { grid-area: b; }
+        "#,
+    );
+    assert_eq!(
+        rows[0].find('A'),
+        Some(0),
+        "area a starts in track one: {:?}",
+        rows[0]
+    );
+    assert_eq!(
+        rows[0].find('B'),
+        Some(4),
+        "area b starts in track three, after a's two 2ch tracks: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn grid_template_areas_null_cells_and_row_span() {
+    init();
+    let rows = render_rows(
+        r#"<div class="g"><div class="a">A</div><div class="b">B<br>C</div></div>"#,
+        r#"
+        .g { display: grid; grid-template-columns: 2ch 2ch; grid-template-areas: "a b" ". b"; }
+        .a { grid-area: a; }
+        .b { grid-area: b; }
+        "#,
+    );
+    assert_eq!(
+        rows[0].find('B'),
+        Some(2),
+        "area b starts in track two: {:?}",
+        rows[0]
+    );
+    assert_eq!(
+        rows[1].find('C'),
+        Some(2),
+        "area b spans both area rows, so its second line reaches row two: {:?}",
+        rows[1]
+    );
+    assert!(
+        !rows[1].contains('A'),
+        "the null cell under area a stays empty: {:?}",
+        rows[1]
+    );
+}
+
+#[test]
+fn grid_area_names_resolve_in_start_longhands() {
+    init();
+    let rows = render_rows(
+        r#"<div class="g"><div class="a">A</div><div class="b">B</div></div>"#,
+        r#"
+        .g { display: grid; grid-template-areas: "x y"; grid-template-columns: 2ch 2ch; }
+        .a { grid-column-start: y; }
+        .b { grid-row-start: x; }
+        "#,
+    );
+    assert_eq!(
+        rows[0].find('A'),
+        Some(2),
+        "grid-column-start: y resolves to area y's column line: {:?}",
+        rows[0]
+    );
+    assert_eq!(
+        rows[0].find('B'),
+        Some(0),
+        "grid-row-start: x pins the row while the column auto-places: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn grid_auto_rows_track_list_cycles_per_implicit_track() {
+    init();
+    let rows = render_rows(
+        r#"<div class="g"><div>A</div><div class="t">B</div><div>C</div></div>"#,
+        r#"
+        .g { display: grid; grid-auto-rows: 1ch 3ch; }
+        .t { align-self: end; }
+        "#,
+    );
+    assert_eq!(
+        rows[0].chars().next(),
+        Some('A'),
+        "the first implicit row uses the list's first 1ch size: {:?}",
+        rows[0]
+    );
+    assert!(
+        rows[1].trim().is_empty(),
+        "the second implicit row is 3ch tall and its start line stays empty: {:?}",
+        rows[1]
+    );
+    assert_eq!(
+        rows[3].chars().next(),
+        Some('B'),
+        "align-end draws B on the bottom line of its 3ch track: {:?}",
+        rows[3]
+    );
+    assert_eq!(
+        rows[4].chars().next(),
+        Some('C'),
+        "the third implicit row cycles back to 1ch: {:?}",
+        rows[4]
+    );
+}
+
+#[test]
+fn grid_justify_items_centers_items_without_justify_self() {
+    init();
+    let rows = render_rows(
+        r#"<div class="g"><div>A</div></div>"#,
+        ".g { display: grid; grid-template-columns: 6ch; justify-items: center; }",
+    );
+    let pos = rows[0].find('A').expect("grid item renders");
+    assert_eq!(
+        pos,
+        2,
+        "a one-cell item centers in a six-cell track via the container default: {rows:?}",
+        rows = rows[0]
+    );
+}

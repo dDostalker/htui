@@ -4193,3 +4193,81 @@ fn css_var_multiple_in_one_value() {
         "border shorthand has both vars substituted"
     );
 }
+
+// ============================================================
+// CSS Grid value parsing
+// ============================================================
+
+#[test]
+fn grid_line_parses_numbers_spans_and_area_names() {
+    use htui::html::css_parse::{GridLine, parse_grid_axis_shorthand};
+    assert_eq!(GridLine::parse("3"), Some(GridLine::Line(3)));
+    assert_eq!(GridLine::parse("-2"), Some(GridLine::Line(-2)));
+    assert_eq!(GridLine::parse("0"), None);
+    assert_eq!(GridLine::parse("span 2"), Some(GridLine::Span(2)));
+    assert_eq!(GridLine::parse("span"), None);
+    assert_eq!(GridLine::parse("auto"), Some(GridLine::Auto));
+    assert_eq!(
+        GridLine::parse("head"),
+        Some(GridLine::Name(Arc::from("head")))
+    );
+    assert_eq!(GridLine::parse("2ch"), None, "lengths are not grid lines");
+    // A bare custom-ident start copies into the omitted end line.
+    assert_eq!(
+        parse_grid_axis_shorthand("sidebar"),
+        Some((
+            GridLine::Name(Arc::from("sidebar")),
+            GridLine::Name(Arc::from("sidebar"))
+        ))
+    );
+    assert_eq!(
+        parse_grid_axis_shorthand("2"),
+        Some((GridLine::Line(2), GridLine::Auto))
+    );
+}
+
+#[test]
+fn grid_area_shorthand_copies_ident_starts_into_end_lines() {
+    use htui::html::css_parse::{GridLine, parse_grid_area};
+    let name = |s: &str| Some(GridLine::Name(Arc::from(s)));
+    let whole = parse_grid_area("head").expect("single name addresses the whole area");
+    assert_eq!(whole.row_start, name("head"));
+    assert_eq!(whole.column_start, name("head"));
+    assert_eq!(whole.row_end, name("head"));
+    assert_eq!(whole.column_end, name("head"));
+    let numeric = parse_grid_area("2 / 3").expect("numeric lines");
+    assert_eq!(numeric.row_start, Some(GridLine::Line(2)));
+    assert_eq!(numeric.column_start, Some(GridLine::Line(3)));
+    assert_eq!(numeric.row_end, Some(GridLine::Auto));
+    assert_eq!(numeric.column_end, Some(GridLine::Auto));
+}
+
+#[test]
+fn grid_template_areas_parses_a_rectangular_matrix() {
+    use htui::html::css_parse::{GridAreas, parse_grid_template_areas};
+    let areas = parse_grid_template_areas(r#""a . b" "a . b""#).expect("valid matrix");
+    assert_eq!(areas.row_count(), 2);
+    assert_eq!(areas.column_count(), 3);
+    assert_eq!(areas.cells[1][0].as_deref(), Some("a"));
+    assert_eq!(areas.cells[1][1], None, "a dot cell is null");
+    assert_eq!(areas.cells[1][2].as_deref(), Some("b"));
+    assert_eq!(
+        parse_grid_template_areas("none"),
+        Some(GridAreas { cells: Vec::new() })
+    );
+}
+
+#[test]
+fn grid_template_areas_rejects_ragged_or_non_rectangular_values() {
+    use htui::html::css_parse::parse_grid_template_areas;
+    assert!(
+        parse_grid_template_areas(r#""a a" "a""#).is_none(),
+        "rows must share one width"
+    );
+    assert!(
+        parse_grid_template_areas(r#""a b" "b a""#).is_none(),
+        "an L-shaped area is invalid"
+    );
+    assert!(parse_grid_template_areas("a b").is_none(), "unquoted cells");
+    assert!(parse_grid_template_areas("").is_none());
+}
