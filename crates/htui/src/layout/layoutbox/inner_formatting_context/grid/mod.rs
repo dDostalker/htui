@@ -18,6 +18,7 @@
 //! layer rather than guessed.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use crate::html::css_parse::{
     AlignContent, AlignItems, GridAreas, GridAutoFlow, GridLine, GridPlacements, GridTrack,
@@ -27,8 +28,8 @@ use crate::layout::{
     BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext, OuterDisplay, PaintStyle, Rect,
     inner_formatting_context::flow::{apply_horizontal_auto_margins, constrained_block_width},
     layoutbox::{
-        flatten_contents_children, generation::GeneratedBoxKind, text_node_run, translate_subtree,
-        visible_children, wrap_runs,
+        flatten_contents_children, generation::GeneratedBoxKind, text_node_run, visible_children,
+        wrap_runs,
     },
 };
 use crate::tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells};
@@ -470,7 +471,12 @@ fn collect_grid_items(
     let white_space = node.css_attr.get_white_space(&node.node_type);
     let word_break = node.css_attr.get_word_break();
     let overflow_wrap = node.css_attr.get_overflow_wrap();
-    let areas = node.css_attr.get_grid_template_areas();
+    // One pass over the matrix per container; per-item name lookups then
+    // cost an O(area-count) scan instead of an O(cell-count) rescan.
+    let areas = node
+        .css_attr
+        .get_grid_template_areas()
+        .map(|areas| collect_area_bounds(&areas));
     let mut items = Vec::new();
     let mut text_runs = Vec::new();
 
@@ -537,10 +543,10 @@ fn collect_grid_items(
             row_end,
             column_end,
         } = placement;
-        let row_start = resolve_area_line(row_start, true, false, areas.as_ref());
-        let row_end = resolve_area_line(row_end, true, true, areas.as_ref());
-        let column_start = resolve_area_line(column_start, false, false, areas.as_ref());
-        let column_end = resolve_area_line(column_end, false, true, areas.as_ref());
+        let row_start = resolve_area_line(row_start, true, false, areas.as_deref());
+        let row_end = resolve_area_line(row_end, true, true, areas.as_deref());
+        let column_start = resolve_area_line(column_start, false, false, areas.as_deref());
+        let column_end = resolve_area_line(column_end, false, true, areas.as_deref());
         let natural = crate::layout::inner_formatting_context::flex::natural_grid_item_size(
             arena,
             child_id,
@@ -568,19 +574,26 @@ fn collect_grid_items(
     items
 }
 
-/// Resolve an area-name line against the container's `grid-template-areas`.
+/// Bounding rectangle `(row, row_span, column, column_span)` of one named
+/// area, hoisted out of the `grid-template-areas` matrix in a single pass.
+type AreaBounds = (usize, usize, usize, usize);
+
+/// Resolve an area-name line against the container's collected area bounds.
 /// Unknown names fall back to `auto`, like a missing implicit line.
 fn resolve_area_line(
     line: Option<GridLine>,
     row_axis: bool,
     end_edge: bool,
-    areas: Option<&GridAreas>,
+    areas: Option<&[(Arc<str>, AreaBounds)]>,
 ) -> Option<GridLine> {
     let Some(GridLine::Name(name)) = &line else {
         return line;
     };
     let areas = areas?;
-    let (row, row_span, column, column_span) = find_area(areas, name)?;
+    let (row, row_span, column, column_span) = areas
+        .iter()
+        .find(|(area, _)| area == name)
+        .map(|(_, bounds)| *bounds)?;
     let (origin, span) = if row_axis {
         (row, row_span)
     } else {
@@ -595,21 +608,28 @@ fn resolve_area_line(
     Some(GridLine::Line(number as isize))
 }
 
-/// Bounding box `(row, row_span, column, column_span)` of one named area.
-/// The parser guarantees rectangularity, so the bounds cover every cell.
-fn find_area(areas: &GridAreas, name: &str) -> Option<(usize, usize, usize, usize)> {
-    let mut bounds: Option<(usize, usize, usize, usize)> = None;
+/// Collect the bounding rectangle of every named area. The parser
+/// guarantees rectangularity, so the first sighting of a name (row-major
+/// scan) fixes the start corner and later sightings only extend the ends.
+fn collect_area_bounds(areas: &GridAreas) -> Vec<(Arc<str>, AreaBounds)> {
+    let mut bounds: Vec<(Arc<str>, AreaBounds)> = Vec::new();
     for (r, row) in areas.cells.iter().enumerate() {
         for (c, cell) in row.iter().enumerate() {
-            if cell.as_deref() == Some(name) {
-                bounds = Some(match bounds {
-                    None => (r, r, c, c),
-                    Some((r0, r1, c0, c1)) => (r0, r1.max(r), c0, c1.max(c)),
-                });
+            let Some(name) = cell else {
+                continue;
+            };
+            if let Some((_, area)) = bounds.iter_mut().find(|(area, _)| area == name) {
+                area.1 = area.1.max(r);
+                area.3 = area.3.max(c);
+            } else {
+                bounds.push((name.clone(), (r, r, c, c)));
             }
         }
     }
-    bounds.map(|(r0, r1, c0, c1)| (r0, r1 - r0 + 1, c0, c1 - c0 + 1))
+    bounds
+        .into_iter()
+        .map(|(name, (r0, r1, c0, c1))| (name, (r0, r1 - r0 + 1, c0, c1 - c0 + 1)))
+        .collect()
 }
 
 #[derive(Clone, Copy)]
@@ -863,6 +883,27 @@ where
     hints
 }
 
+/// Fallback spec for implicit tracks when no `grid-auto-*` list exists.
+const AUTO_TRACK: GridTrack = GridTrack::Auto;
+
+/// Explicit track at `index`, or the cycled `grid-auto-*` entry beyond the
+/// explicit list.
+fn track_spec<'a>(
+    explicit: &'a [GridTrack],
+    implicit: &'a [GridTrack],
+    index: usize,
+) -> &'a GridTrack {
+    if let Some(spec) = explicit.get(index) {
+        return spec;
+    }
+    let list: &[GridTrack] = if implicit.is_empty() {
+        std::slice::from_ref(&AUTO_TRACK)
+    } else {
+        implicit
+    };
+    &list[(index - explicit.len()) % list.len()]
+}
+
 fn track_sizes(
     explicit: &[GridTrack],
     implicit: &[GridTrack],
@@ -874,16 +915,6 @@ fn track_sizes(
 ) -> Vec<usize> {
     // Implicit tracks cycle through the `grid-auto-*` list; an empty list
     // behaves as a single `auto`.
-    let track = |index: usize| -> GridTrack {
-        explicit.get(index).cloned().unwrap_or_else(|| {
-            let list: &[GridTrack] = if implicit.is_empty() {
-                &[GridTrack::Auto]
-            } else {
-                implicit
-            };
-            list[(index - explicit.len()) % list.len()].clone()
-        })
-    };
     let count = hints.len().max(explicit.len()).max(1);
     let gap_total = if count > 1 {
         gap.saturating_mul(count - 1)
@@ -901,32 +932,35 @@ fn track_sizes(
     };
     // Pass 1: base sizes (the min side / content hint) and growth limits
     // (the max side). Flexible tracks wait for the distribution pass.
-    let tracks: Vec<GridTrack> = (0..count).map(track).collect();
+    // Specs are borrowed, not cloned, per track.
+    let tracks: Vec<&GridTrack> = (0..count)
+        .map(|index| track_spec(explicit, implicit, index))
+        .collect();
     let mut sizes = Vec::with_capacity(count);
     let mut limits = vec![0usize; count];
     let mut total_fr = 0.0f32;
     for (index, spec) in tracks.iter().enumerate() {
         let hint = hints.get(index).copied().unwrap_or(1).max(1);
-        let (base, limit, fr) = match spec {
+        let (base, limit, fr) = match *spec {
             GridTrack::Auto => (hint, hint, 0.0),
             GridTrack::Length(length) => {
                 let size = resolve(*length, hint);
                 (size, size, 0.0)
             }
-            GridTrack::Fr(n) => (0, 0, n.max(0.0)),
+            GridTrack::Fr(n) => (0, 0, (*n).max(0.0)),
             GridTrack::MinMax { min, max } => {
-                let base = match **min {
+                let base = match &**min {
                     // Parse rejects flexible/nested mins; the content hint is
                     // the safe fallback if one still reaches layout.
                     GridTrack::Auto | GridTrack::Fr(_) | GridTrack::MinMax { .. } => hint,
-                    GridTrack::Length(length) => resolve(length, hint),
+                    GridTrack::Length(length) => resolve(*length, hint),
                 };
-                let limit = match **max {
-                    GridTrack::Length(length) => resolve(length, hint).max(base),
+                let limit = match &**max {
+                    GridTrack::Length(length) => resolve(*length, hint).max(base),
                     GridTrack::Auto | GridTrack::Fr(_) | GridTrack::MinMax { .. } => base,
                 };
                 let fr = match &**max {
-                    GridTrack::Fr(n) => n.max(0.0),
+                    GridTrack::Fr(n) => (*n).max(0.0),
                     _ => 0.0,
                 };
                 (base, limit, fr)
@@ -966,7 +1000,7 @@ fn track_sizes(
             let free =
                 available.saturating_sub(sizes.iter().sum::<usize>().saturating_add(gap_total));
             for (index, size) in sizes.iter_mut().enumerate() {
-                if let Some(weight) = track_fr_weight(&tracks[index])
+                if let Some(weight) = track_fr_weight(tracks[index])
                     && weight > 0.0
                 {
                     let share = (free as f32 * (weight / total_fr)).round() as usize;
@@ -1212,10 +1246,4 @@ fn item_natural_text_width(runs: &[InlineRun]) -> usize {
         })
         .sum::<usize>()
         .max(1)
-}
-
-// Track-level refinements can reuse the existing subtree translation helper.
-#[allow(dead_code)]
-fn _translate_child(child: &mut LayoutBox, dx: i64, dy: i64) {
-    translate_subtree(child, dx, dy);
 }
