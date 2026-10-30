@@ -612,7 +612,7 @@ let x = find(b).unwrap();
 | `Position`         | `html::css_parse::values` | CSS `position` 枚举（`Static` / `Relative` / `Absolute` / `Fixed`） |
 | `InsetSides`       | `html::css_parse::values` | `top`/`right`/`bottom`/`left` 解析结果（`Option<usize>`） |
 | `Positioning`      | `html::css_parse::values` | 定位组合（position + inset + z-index），布局期解析后存于 `LayoutBox.positioning` |
-| `GridTrack`        | `html::css_parse::values` | 单个 track 尺寸（`Auto` / `Length` / `Fr` / `MinMax{min,max}`），`grid-template-*` 与 `grid-auto-*` 共用；`fit-content(x)` 解析为 `MinMax{auto, x}` |
+| `GridTrack`        | `html::css_parse::values` | 单个 track 尺寸（`Auto` / `Length` / `Fr` / `MinMax{min,max}` / `AutoRepeat{fit,tracks}`），`grid-template-*` 与 `grid-auto-*` 共用；`fit-content(x)` 解析为 `MinMax{auto, x}`，auto-repeat 由布局期按容器定尺寸展开 |
 | `GridTemplate`     | `html::css_parse::values` | `grid-template`/`-columns`/`-rows` 的显式 track 列表（`columns` / `rows`） |
 | `GridAreas`        | `html::css_parse::values` | `grid-template-areas` 矩阵（`cells: Vec<Vec<Option<Arc<str>>>>`，`None` 为 `.` 空单元格；`row_count()` / `column_count()`） |
 | `GridLine`         | `html::css_parse::values` | 放置 line 原始值（`Auto` / `Line(isize)` / `Span(usize)` / `Name(area)`，Name 在布局期解析） |
