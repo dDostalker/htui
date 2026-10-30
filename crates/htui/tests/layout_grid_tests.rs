@@ -433,3 +433,60 @@ fn grid_auto_fit_collapses_trailing_empty_tracks() {
         rows[0]
     );
 }
+
+#[test]
+fn grid_named_span_anchors_at_the_area_edge() {
+    init();
+    let rows = render_rows(
+        r#"<div class="g"><div class="x">X</div><div class="h">H</div><div class="y">Y</div></div>"#,
+        r#"
+        .g { display: grid; grid-template-columns: 2ch 2ch 2ch 2ch; grid-template-areas: "a h h b"; }
+        .x { grid-column-start: span 2 h; }
+        .h { grid-area: h; }
+        .y { grid-column-end: span 2 h; }
+        "#,
+    );
+    assert_eq!(
+        rows[0].find('X'),
+        Some(0),
+        "a start-edge span 2 h ends at area h's first line: {:?}",
+        rows[0]
+    );
+    assert_eq!(
+        rows[0].find('H'),
+        Some(2),
+        "the named area keeps its explicit track: {:?}",
+        rows[0]
+    );
+    assert_eq!(
+        rows[0].find('Y'),
+        Some(6),
+        "an end-edge span 2 h starts after area h's last line: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn grid_definite_end_line_anchors_the_span() {
+    init();
+    let rows = render_rows(
+        r#"<div class="g"><div class="e">E</div><div class="f">F</div></div>"#,
+        r#"
+        .g { display: grid; grid-template-columns: 2ch 2ch 2ch 2ch; }
+        .e { grid-column-end: 3; }
+        .f { grid-column: 4; }
+        "#,
+    );
+    assert_eq!(
+        rows[0].find('E'),
+        Some(2),
+        "an auto start with a definite end occupies the track before it: {:?}",
+        rows[0]
+    );
+    assert_eq!(
+        rows[0].find('F'),
+        Some(6),
+        "the definite neighbour is unaffected: {:?}",
+        rows[0]
+    );
+}

@@ -4337,3 +4337,26 @@ fn grid_track_parses_auto_fill_and_auto_fit_repeats() {
         "an empty track list is invalid"
     );
 }
+
+#[test]
+fn grid_line_parses_named_spans() {
+    use htui::html::css_parse::GridLine;
+    assert_eq!(
+        GridLine::parse("span 2 head"),
+        Some(GridLine::SpanName {
+            span: 2,
+            name: Arc::from("head")
+        })
+    );
+    assert_eq!(
+        GridLine::parse("span head"),
+        Some(GridLine::SpanName {
+            span: 1,
+            name: Arc::from("head")
+        })
+    );
+    assert_eq!(GridLine::parse("span 2"), Some(GridLine::Span(2)));
+    assert_eq!(GridLine::parse("span 0"), None);
+    assert_eq!(GridLine::parse("span 2 3"), None, "two integers");
+    assert_eq!(GridLine::parse("span head tail"), None, "two idents");
+}
