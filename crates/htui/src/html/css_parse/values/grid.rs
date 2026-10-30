@@ -92,13 +92,24 @@ impl GridTrack {
         Length::parse(s).map(GridTrack::Length)
     }
 
-    /// Whether this track participates in flex (fr) distribution.
-    pub fn is_fr(self) -> bool {
+    /// The flexible (`fr`) weight this track contributes to distribution: a
+    /// bare `Fr(n)`, or `minmax(_, Fr(n))`'s max side. Zero means the track
+    /// takes no part in the fr pass.
+    pub fn fr_weight(&self) -> f32 {
         match self {
-            GridTrack::Fr(_) => true,
-            GridTrack::MinMax { max, .. } => matches!(*max, GridTrack::Fr(_)),
-            _ => false,
+            GridTrack::Fr(n) => n.max(0.0),
+            GridTrack::MinMax { max, .. } => match &**max {
+                GridTrack::Fr(n) => n.max(0.0),
+                _ => 0.0,
+            },
+            _ => 0.0,
         }
+    }
+
+    /// Whether this track contributes to flex (fr) distribution, i.e. its
+    /// [`GridTrack::fr_weight`] is positive.
+    pub fn is_fr(&self) -> bool {
+        self.fr_weight() > 0.0
     }
 }
 

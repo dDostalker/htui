@@ -572,6 +572,9 @@ let x = find(b).unwrap();
 | `OuterDisplay`     | `layout::layoutbox::outer_display` | 盒子在父级流中的角色（`BlockLevel { container }` / `Inline { block }`） |
 | `FormattingContext`| `layout::layoutbox::inner_formatting_context` | 盒子安排子项的格式化上下文（`Flow` / `Flex` / `Grid`） |
 | `AlignSelf`        | `html::css_parse::properties::align_self` | `align-self` 解析结果（`Auto` / `Value(AlignItems)`） |
+| `AlignItems`       | `html::css_parse::values` | 对齐关键字（`Stretch` / `FlexStart` / `FlexEnd` / `Center` / `Baseline`），align-items/justify-items/self 共用 |
+| `AlignContent`     | `html::css_parse::values` | 行组分布（`Stretch` 默认 / flex-start / flex-end / center / space-between / around / evenly） |
+| `JustifyContent`   | `html::css_parse::values` | 主轴分布（同 AlignContent 去掉 `Stretch`）；grid 轨道对齐与 flex 主轴共用 |
 | `LayoutFn`         | `layout::mod`           | 布局函数签名              |
 | `TermMap`          | `layout::layout`        | 终端尺寸信息              |
 | `TermLayout`       | `graphics`（`tui::graph_api` re-export） | 终端画布 + 渲染方法        |

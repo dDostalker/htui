@@ -836,36 +836,6 @@ impl CssAttr {
         GapSizes { row, column }
     }
 
-    /// Resolve the explicit column tracks, including the `grid-template`
-    /// shorthand. Longhand declarations win over the shorthand when present.
-    /// `repeat(auto-fill | auto-fit, …)` entries are returned unresolved;
-    /// only the grid layout expands them.
-    pub fn get_grid_template_columns(
-        &self,
-        font_ctx: FontContext,
-        viewport: Viewport,
-    ) -> Vec<GridTrack> {
-        if let Some(value) = self.0.get("grid-template-columns") {
-            return parse_grid_track_list(value).unwrap_or_default();
-        }
-        self.get_grid_template(font_ctx, viewport).columns
-    }
-
-    /// Resolve the explicit row tracks, including the `grid-template`
-    /// shorthand. Longhand declarations win over the shorthand when present.
-    /// `repeat(auto-fill | auto-fit, …)` entries are returned unresolved;
-    /// only the grid layout expands them.
-    pub fn get_grid_template_rows(
-        &self,
-        font_ctx: FontContext,
-        viewport: Viewport,
-    ) -> Vec<GridTrack> {
-        if let Some(value) = self.0.get("grid-template-rows") {
-            return parse_grid_track_list(value).unwrap_or_default();
-        }
-        self.get_grid_template(font_ctx, viewport).rows
-    }
-
     /// Resolve `grid-template`; longhand tracks win over the shorthand when
     /// either longhand is present.
     pub fn get_grid_template(&self, _font_ctx: FontContext, _viewport: Viewport) -> GridTemplate {

@@ -386,7 +386,6 @@ fn layout_grid_container(
             row_area,
             align_items,
             justify_items,
-            align_content,
             definite_content_height,
             content_width,
             child_context,
@@ -1093,15 +1092,13 @@ fn track_sizes(
             let non_flexible: usize = sizes
                 .iter()
                 .enumerate()
-                .filter(|(index, _)| track_fr_weight(tracks[*index]).is_none())
+                .filter(|(index, _)| tracks[*index].fr_weight() == 0.0)
                 .map(|(_, size)| *size)
                 .sum();
             let free = available.saturating_sub(non_flexible.saturating_add(gap_total));
             let mut allocated = 0.0f32;
             for (index, size) in sizes.iter_mut().enumerate() {
-                let Some(weight) = track_fr_weight(tracks[index]) else {
-                    continue;
-                };
+                let weight = tracks[index].fr_weight();
                 if weight <= 0.0 {
                     continue;
                 }
@@ -1116,18 +1113,6 @@ fn track_sizes(
         *size = (*size).max(1);
     }
     sizes
-}
-
-/// The `fr` weight of a track: a bare `Fr(n)` or a `minmax(_, Fr(n))` max.
-fn track_fr_weight(track: &GridTrack) -> Option<f32> {
-    match track {
-        GridTrack::Fr(n) => Some(*n),
-        GridTrack::MinMax { max, .. } => match &**max {
-            GridTrack::Fr(n) => Some(*n),
-            _ => None,
-        },
-        _ => None,
-    }
 }
 
 /// Expand `repeat(auto-fill | auto-fit, …)` in an explicit template into
@@ -1305,7 +1290,6 @@ fn layout_grid_item(
     row_area: TrackArea,
     container_align: AlignItems,
     container_justify_items: AlignItems,
-    _container_align_content: AlignContent,
     container_height: Option<usize>,
     content_width: usize,
     context: LayoutContext,
