@@ -182,8 +182,7 @@ pub struct InputState {
     /// prevented).
     pub pending_wheel: Option<(u32, u32, bool)>,
     /// Time + cell of the last synthesized click (double-click detection:
-    /// a second click on the same cell inside [`DBLCLICK_MS`] emits
-    /// `DblClick`).
+    /// a second click on the same cell within 500 ms emits `DblClick`).
     pub last_click: Option<(Instant, u32, u32)>,
     /// The input loop's shared UI state (viewport / scroll / focus atomics
     /// plus the `wheel`-listener flag the wheel path gates on). `None` in
