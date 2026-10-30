@@ -1052,6 +1052,12 @@ fn test_background_clip_text_paints_gradient_glyphs() {
 fn example_spectrum_stays_inside_sidebar_scroll_area() {
     init();
     let html = include_str!("../../../example/src/player.html")
+        // The sidebar is edge-triggered in the live demo; make it visible for
+        // this pure-layout regression test.
+        .replace(
+            "<div id=\"music-side\" class=\"side\" style=\"display:none\"",
+            "<div id=\"music-side\" class=\"side\"",
+        )
         .replace(
             "<div id=\"viz-l\" class=\"viz-pre\"> </div>",
             "<div id=\"viz-l\" class=\"viz-pre\">1&#9601;2&#9602;3&#9603;4&#9604;</div>",

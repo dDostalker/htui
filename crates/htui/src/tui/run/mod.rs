@@ -527,9 +527,7 @@ fn run_inner(
             // correct MouseOut / MouseOver (+ a fresh `Hover` highlight).
             let hover_revalidation =
                 state.take_resize_revalidation() || state.take_pointer_revalidation();
-            if hover_revalidation
-                && let Some((col, row)) = state.last_mouse
-            {
+            if hover_revalidation && let Some((col, row)) = state.last_mouse {
                 let (x, y) = (col as u32, row as u32 + state.scroll_y);
                 msgs.push(ScriptMsg::Move { x, y });
             }
