@@ -277,6 +277,14 @@ pub enum GridLine {
     /// CSS line number (1-based positive, negative counted from the end).
     Line(isize),
     Span(usize),
+    /// `span <n> <area-name>`: an N-track span anchored at the named area's
+    /// edge — a start edge ends at the area's first line, an end edge starts
+    /// at the line after the area. Resolved against `grid-template-areas` at
+    /// collection time; an unknown name degrades to [`GridLine::Span`].
+    SpanName {
+        span: usize,
+        name: Arc<str>,
+    },
     /// A bare custom-ident naming a `grid-template-areas` area; the layout
     /// resolves it to the area's start/end edge line per axis.
     Name(Arc<str>),
@@ -289,9 +297,33 @@ impl GridLine {
         if s.is_empty() || s.eq_ignore_ascii_case("auto") {
             return Some(GridLine::Auto);
         }
-        if let Some(rest) = s.strip_prefix("span") {
-            let n = rest.trim().parse::<usize>().ok()?;
-            return (n > 0).then_some(GridLine::Span(n));
+        if let Some(rest) = s.strip_prefix("span").map(str::trim_start) {
+            // `span N`, `span N name`, `span name` — a bare `span` is invalid.
+            let mut parts = rest.split_whitespace();
+            let first = parts.next()?;
+            if let Ok(n) = first.parse::<usize>() {
+                if n == 0 {
+                    return None;
+                }
+                return match parts.next() {
+                    None => Some(GridLine::Span(n)),
+                    Some(name)
+                        if parts.next().is_none()
+                            && is_css_ident(name)
+                            && !name.eq_ignore_ascii_case("span") =>
+                    {
+                        Some(GridLine::SpanName {
+                            span: n,
+                            name: Arc::from(name),
+                        })
+                    }
+                    _ => None,
+                };
+            }
+            return (parts.next().is_none() && is_css_ident(first)).then_some(GridLine::SpanName {
+                span: 1,
+                name: Arc::from(first),
+            });
         }
         // A bare `span` keyword is not a valid grid-line component.
         if s.eq_ignore_ascii_case("span") {

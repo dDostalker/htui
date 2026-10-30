@@ -576,10 +576,9 @@ fn collect_grid_items(
             row_end,
             column_end,
         } = placement;
-        let row_start = resolve_area_line(row_start, true, false, areas.as_deref());
-        let row_end = resolve_area_line(row_end, true, true, areas.as_deref());
-        let column_start = resolve_area_line(column_start, false, false, areas.as_deref());
-        let column_end = resolve_area_line(column_end, false, true, areas.as_deref());
+        let (row_start, row_end) = resolve_axis(row_start, row_end, true, areas.as_deref());
+        let (column_start, column_end) =
+            resolve_axis(column_start, column_end, false, areas.as_deref());
         let natural = crate::layout::inner_formatting_context::flex::natural_grid_item_size(
             arena,
             child_id,
@@ -611,34 +610,77 @@ fn collect_grid_items(
 /// area, hoisted out of the `grid-template-areas` matrix in a single pass.
 type AreaBounds = (usize, usize, usize, usize);
 
-/// Resolve an area-name line against the container's collected area bounds.
-/// Unknown names fall back to `auto`, like a missing implicit line.
-fn resolve_area_line(
-    line: Option<GridLine>,
+/// Resolve one axis's placement pair against the container's area bounds.
+///
+/// A bare name resolves to the area's edge line (unknown names fall back to
+/// `auto`, like a missing implicit line). `span N name` anchors an N-track
+/// span at the area's edge — a start edge ends at the area's first line, an
+/// end edge starts at the line after the area — and an unknown name degrades
+/// to a plain span. An already-definite end line wins over a start-span
+/// anchor (the pair then reads as `span N` ending there).
+fn resolve_axis(
+    start: Option<GridLine>,
+    end: Option<GridLine>,
     row_axis: bool,
-    end_edge: bool,
     areas: Option<&[(Arc<str>, AreaBounds)]>,
-) -> Option<GridLine> {
-    let Some(GridLine::Name(name)) = &line else {
-        return line;
+) -> (Option<GridLine>, Option<GridLine>) {
+    // The 1-based line the area edge names on this axis: start edges name
+    // the area's first line, end edges the line after the area.
+    let anchor = |name: &Arc<str>, end_edge: bool| -> Option<usize> {
+        let (row, row_span, column, column_span) = areas?
+            .iter()
+            .find(|(area, _)| area == name)
+            .map(|(_, bounds)| *bounds)?;
+        let (origin, span) = if row_axis {
+            (row, row_span)
+        } else {
+            (column, column_span)
+        };
+        Some(if end_edge {
+            origin + span + 1
+        } else {
+            origin + 1
+        })
     };
-    let areas = areas?;
-    let (row, row_span, column, column_span) = areas
-        .iter()
-        .find(|(area, _)| area == name)
-        .map(|(_, bounds)| *bounds)?;
-    let (origin, span) = if row_axis {
-        (row, row_span)
-    } else {
-        (column, column_span)
-    };
-    // `GridLine::Line` numbers are 1-based; an end edge sits after the area.
-    let number = if end_edge {
-        origin + span + 1
-    } else {
-        origin + 1
-    };
-    Some(GridLine::Line(number as isize))
+    let as_line = |line: usize| Some(GridLine::Line(line as isize));
+    let mut start = start;
+    let mut end = end;
+    match start.take() {
+        Some(GridLine::Name(name)) => start = anchor(&name, false).and_then(as_line),
+        Some(GridLine::SpanName { span, name }) => {
+            if matches!(end, Some(GridLine::Line(_))) {
+                // A definite end reads the component as a plain span.
+                start = Some(GridLine::Span(span));
+            } else {
+                match anchor(&name, false) {
+                    Some(line) => {
+                        start = as_line(line.saturating_sub(span).max(1));
+                        end = as_line(line);
+                    }
+                    None => start = Some(GridLine::Span(span)),
+                }
+            }
+        }
+        other => start = other,
+    }
+    match end.take() {
+        Some(GridLine::Name(name)) => end = anchor(&name, true).and_then(as_line),
+        // The end-edge span anchor only pins the pair when the start edge
+        // did not already resolve to a line.
+        Some(GridLine::SpanName { span, name })
+            if matches!(start, None | Some(GridLine::Auto) | Some(GridLine::Span(_))) =>
+        {
+            match anchor(&name, true) {
+                Some(line) => {
+                    start = as_line(line);
+                    end = as_line(line + span);
+                }
+                None => end = Some(GridLine::Span(span)),
+            }
+        }
+        other => end = other,
+    }
+    (start, end)
 }
 
 /// Collect the bounding rectangle of every named area. The parser
@@ -738,6 +780,12 @@ fn place_item(
         (_, Some(start), Some(end)) => end.saturating_sub(start).max(1),
         _ => column_span,
     };
+
+    // A definite end with an auto start anchors the span at `end - span`
+    // (CSS §8.5); the derived start then behaves like an explicit one.
+    let row_start = row_start.or(row_end.map(|end| end.saturating_sub(row_span.max(1))));
+    let column_start =
+        column_start.or(column_end.map(|end| end.saturating_sub(column_span.max(1))));
 
     // Both axes definite: explicit items may intentionally overlap.
     if let (Some(row), Some(column)) = (row_start, column_start) {
