@@ -193,6 +193,15 @@ impl HitMap {
         self.regions.iter().find(|r| r.id() == Some(id))
     }
 
+    /// The first region collected for `node_id`, if any.
+    ///
+    /// Regions are indexed in paint stacking order, so for a node that laid
+    /// out several boxes this is its topmost one — the same region
+    /// [`HitMap::hit_test`] resolves a point inside it to.
+    pub fn region_for(&self, node_id: NodeId) -> Option<&HitRegion> {
+        self.regions.iter().find(|r| r.node_id == node_id)
+    }
+
     /// Find the nearest scrollable ancestor (including `start`) whose native
     /// scrollbar is active.
     pub fn scroll_container(

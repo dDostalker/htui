@@ -1,6 +1,7 @@
 //! Timer natives: `setTimeout` / `setInterval` / `clearTimeout` /
-//! `clearInterval` (callbacks GC-rooted in a JS registry, deadlines in the
-//! Rust timer table the script thread drives).
+//! `clearInterval` / `requestAnimationFrame` / `cancelAnimationFrame`
+//! (callbacks GC-rooted in a JS registry, deadlines in the Rust timer table
+//! the script thread drives).
 
 use std::time::{Duration, Instant};
 
@@ -31,7 +32,8 @@ const MIN_INTERVAL_PERIOD_MS: u64 = 4;
 /// Register `args[0]` (a callable) to fire after `args[1]` ms, returning the
 /// timer id. `repeat` selects `setInterval` (re-scheduled after each fire)
 /// vs `setTimeout` (one-shot). The callback is GC-rooted in the
-/// `__htuiTimers` JS registry; the deadline lives in the Rust timer table the
+/// `__htuiTimers` JS registry; the deadline lives in the Rust timer table
+/// the script thread drives.
 fn schedule_timer(context: &mut Context, args: &[JsValue], repeat: bool) -> JsResult<JsValue> {
     let callback = args.first().cloned().unwrap_or(JsValue::undefined());
     if !callback.is_callable() {
@@ -63,16 +65,22 @@ fn schedule_timer(context: &mut Context, args: &[JsValue], repeat: bool) -> JsRe
             deadline: Instant::now() + period,
             period,
             repeat,
+            frame_time: None,
         });
         id
     };
-    // GC-root the callback in the JS registry (state borrow already released).
+    root_timer_callback(context, id, callback)?;
+    Ok(id.into())
+}
+
+/// GC-root a timer callback in the `__htuiTimers` JS registry under `id`.
+fn root_timer_callback(context: &mut Context, id: u32, callback: JsValue) -> JsResult<()> {
     let global = context.global_object();
     let registry = global
         .get(js_string!("__htuiTimers"), context)?
         .to_object(context)?;
     registry.set(js_string!(id.to_string()), callback, false, context)?;
-    Ok(id.into())
+    Ok(())
 }
 
 pub(super) fn native_clear_timeout(
@@ -91,17 +99,23 @@ pub(super) fn native_clear_interval(
     clear_timer(context, args)
 }
 
-/// The frame period `requestAnimationFrame` schedules at (~60fps). A fixed
-/// interval is the terminal take: there is no vsync / compositor, so a frame
-/// callback is simply a repeating timer — the documented animation path of
-/// the engine (CSS animation / transition stay out of scope by design).
-const RAF_INTERVAL_MS: f64 = 16.0;
+/// The frame period `requestAnimationFrame` schedules on, in ms (~60fps),
+/// anchored to a session-global grid: there is no vsync in a terminal, so
+/// the frame clock is the next multiple of this period since the engine
+/// started. CSS animation / transition stay out of scope by design; a frame
+/// callback rewriting the DOM drives repaint through the normal render
+/// pipeline.
+const RAF_PERIOD_MS: u64 = 16;
 
-/// `requestAnimationFrame(callback)` — schedule `callback` on every frame.
-/// Implemented as a ~60fps repeating timer (the same timer table
-/// `setInterval` uses), so animations drive DOM updates → repaint through
-/// the normal render pipeline. Returns the timer id (accepted by
-/// `cancelAnimationFrame` and `clearInterval` alike).
+/// `requestAnimationFrame(callback)` — run `callback` once, on the next
+/// frame. Browser-aligned one-shot semantics: the callback fires exactly
+/// once, at the next grid point of the session's ~60fps frame clock, and
+/// receives that frame's grid timestamp in ms since session start
+/// (`DOMHighResTimeStamp` semantics) as its first argument — a late wake
+/// still reports the grid time, so animation positions stay a pure function
+/// of time. Chained requests (`requestAnimationFrame` inside the callback)
+/// land on the following grid point, so per-callback jitter is absorbed
+/// instead of accumulating. `cancelAnimationFrame` cancels a pending one.
 pub(super) fn native_request_animation_frame(
     _this: &JsValue,
     args: &[JsValue],
@@ -112,7 +126,32 @@ pub(super) fn native_request_animation_frame(
             .with_message("requestAnimationFrame expects a function")
             .into());
     };
-    schedule_timer(context, &[callback, JsValue::from(RAF_INTERVAL_MS)], true)
+    let Some(rc) = with_state() else {
+        return Ok(JsValue::undefined());
+    };
+    let id = {
+        let mut st = rc.borrow_mut();
+        let now = Instant::now();
+        // The next grid point strictly after `now`: a chained request made
+        // inside a frame callback (which runs at/after its own grid point)
+        // lands on the following frame.
+        let elapsed_ms = now.saturating_duration_since(st.frame_epoch).as_millis() as u64;
+        let frame_index = elapsed_ms / RAF_PERIOD_MS + 1;
+        let frame_time = (frame_index * RAF_PERIOD_MS) as f64;
+        let deadline = st.frame_epoch + Duration::from_millis(frame_index * RAF_PERIOD_MS);
+        let id = st.next_timer_id;
+        st.next_timer_id += 1;
+        st.timers.push(TimerEntry {
+            id,
+            deadline,
+            period: Duration::ZERO,
+            repeat: false,
+            frame_time: Some(frame_time),
+        });
+        id
+    };
+    root_timer_callback(context, id, callback)?;
+    Ok(id.into())
 }
 
 /// `cancelAnimationFrame(id)` — stop a frame callback (same table as

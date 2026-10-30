@@ -123,16 +123,16 @@ pub(super) fn scroll_at_wheel(
             }
         });
     }
-    let next = if up {
-        current.saturating_sub(super::SCROLL_LINES_PER_TICK)
-    } else {
-        current
-            .saturating_add(super::SCROLL_LINES_PER_TICK)
-            .min(scroll.max_scroll)
-    };
-    if next == current {
-        return None;
-    }
+    let next = step_target(
+        current,
+        if up {
+            -(super::SCROLL_LINES_PER_TICK as i32)
+        } else {
+            super::SCROLL_LINES_PER_TICK as i32
+        },
+        0,
+        scroll.max_scroll,
+    )?;
     state.show_scrollbar(scroll.node_id);
     state.scroll_offsets.insert(scroll.node_id, next);
     Some(RenderCmd::RenderScroll {
@@ -223,7 +223,7 @@ pub fn handle_mouse_up(
     // this covers consoles that coalesce or drop the final drag event.
     if range_drag
         && let Some(focused) = state.focused_input
-        && let Some(region) = hit_map.iter().find(|r| r.node_id == focused)
+        && let Some(region) = hit_map.region_for(focused)
         && set_range_at_pointer(state, arena, focused, region.rect, x, y)
     {
         push_input_render(state, focused, cmds);
@@ -624,7 +624,7 @@ pub fn handle_mouse_move(
                 state.field_drag_started = true;
             }
             if let Some(focused) = state.focused_input
-                && let Some(region) = hit_map.iter().find(|r| r.node_id == focused)
+                && let Some(region) = hit_map.region_for(focused)
             {
                 if state.focused_is_range {
                     if set_range_at_pointer(state, arena, focused, region.rect, x, y) {

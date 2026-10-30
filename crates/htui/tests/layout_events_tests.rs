@@ -779,7 +779,6 @@ fn reset_document_state_clears_replaced_document_interaction() {
         rect: Rect::new(0, 0, 4, 2),
         options: Vec::new(),
         rows: Vec::new(),
-        selected: 0,
         highlight: 0,
     });
 
@@ -3098,7 +3097,7 @@ fn mouse_events_work_via_apply_message() {
 }
 
 #[test]
-fn addEventListener_mousemove_works() {
+fn add_event_listener_mousemove_works() {
     let count = Arc::new(Mutex::new(0usize));
     let c2 = Arc::clone(&count);
     let (mut engine, geo) = build_geometry(

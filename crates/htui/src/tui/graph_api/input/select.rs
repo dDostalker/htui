@@ -34,23 +34,16 @@ pub struct SelectOpenState {
     pub options: Vec<crate::layout::layoutbox::geometry::SelectOption>,
     /// The dropdown rows (group headers interleaved with options).
     pub rows: Vec<crate::layout::layoutbox::geometry::SelectRow>,
-    /// Index of the currently selected option.
-    pub selected: usize,
-    /// Index highlighted in the overlay (keyboard / hover cursor).
+    /// Index highlighted in the overlay (keyboard / hover cursor), starting
+    /// at the currently selected option.
     pub highlight: usize,
 }
 
 /// The overlay option row containing the canvas point `(x, y)`, if any.
 pub(super) fn hit_select_option(open: &SelectOpenState, x: u32, y: u32) -> Option<usize> {
-    if y >= open.rect.y as u32
-        && y < open.rect.y as u32 + open.rect.height as u32
-        && x >= open.rect.x as u32
-        && x < open.rect.x as u32 + open.rect.width as u32
-    {
-        Some((y - open.rect.y as u32) as usize)
-    } else {
-        None
-    }
+    open.rect
+        .contains(x, y)
+        .then(|| (y - open.rect.y as u32) as usize)
 }
 
 /// Resolve a dropdown row click to an option index.
@@ -82,7 +75,7 @@ fn open_overlay(
     filter: Option<&str>,
     cmds: &mut Vec<RenderCmd>,
 ) {
-    let Some(region) = hit_map.iter().find(|r| r.node_id == node_id) else {
+    let Some(region) = hit_map.region_for(node_id) else {
         return;
     };
     let options = overlay_options(arena, node_id, filter);
@@ -105,7 +98,6 @@ fn open_overlay(
         rect,
         options,
         rows,
-        selected,
         highlight: selected,
     });
     cmds.push(RenderCmd::SelectOpen {

@@ -281,8 +281,8 @@ pub(crate) fn install_builtins(context: &mut Context) -> JsResult<()> {
     .build();
     context.register_global_property(js_string!("CustomEvent"), custom_ctor, Attribute::all())?;
 
-    // Animation frames: a fixed ~60fps repeating timer per callback — the
-    // engine's documented animation path (no vsync exists in a terminal).
+    // Animation frames: browser-aligned one-shot callbacks on the session's
+    // ~60fps frame grid (see `native_request_animation_frame`).
     context.register_global_builtin_callable(
         js_string!("requestAnimationFrame"),
         1,

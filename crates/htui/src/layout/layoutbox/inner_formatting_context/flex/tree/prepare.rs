@@ -168,13 +168,8 @@ pub(super) fn prepare_flex_item(
         context.font,
         context.viewport,
     );
-    let font = own_font_size_cells.max(1);
-    let line_h = line_height_cells.max(1);
-    let glyph_row = if line_h > font {
-        (line_h - font) / 2
-    } else {
-        (font - 1) / 2
-    };
+    let glyph_row =
+        crate::html::css_parse::glyph_row_within_line(own_font_size_cells, line_height_cells);
     // Flex-item margins are clamped to 0 when negative: the item-sizing /
     // line-placement algorithm keeps its non-negative space model, so a
     // negative margin on a flex item degenerates to 0 (the horizontal

@@ -37,6 +37,25 @@ fn is_edit_blocked(arena: Option<&NodeArena>, node_id: NodeId) -> bool {
     is_readonly_input(arena, node_id) || is_disabled_control(arena, node_id)
 }
 
+/// Commit a field edit after the edit buffer changed: repaint the focused
+/// field, forward the `input` keystroke to the script thread, and refresh its
+/// autocomplete dropdown (a no-op for fields without a `list` attribute,
+/// including `<textarea>`).
+fn commit_field_edit(
+    state: &mut InputState,
+    focused: NodeId,
+    hit_map: Option<&HitMap>,
+    arena: Option<&NodeArena>,
+    msgs: &mut Vec<ScriptMsg>,
+    cmds: &mut Vec<RenderCmd>,
+) {
+    push_input_render(state, focused, cmds);
+    if arena.is_some() {
+        msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
+    }
+    refresh_datalist(state, hit_map, arena, cmds);
+}
+
 /// Wait for the next input event and translate it into render commands.
 ///
 /// The input loop never executes JS: everything that needs the engine is
@@ -271,11 +290,7 @@ pub fn trigger_refresh(
                         code,
                         key.modifiers,
                     ) {
-                        push_input_render(state, focused, &mut cmds);
-                        if arena.is_some() {
-                            msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
-                        }
-                        refresh_datalist(state, hit_map, arena, &mut cmds);
+                        commit_field_edit(state, focused, hit_map, arena, msgs, &mut cmds);
                     }
                     return cmds;
                 }
@@ -292,11 +307,7 @@ pub fn trigger_refresh(
                         code = KeyCode::Null;
                     }
                     if apply_ctrl_shortcut(state, code) {
-                        push_input_render(state, focused, &mut cmds);
-                        if arena.is_some() {
-                            msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
-                        }
-                        refresh_datalist(state, hit_map, arena, &mut cmds);
+                        commit_field_edit(state, focused, hit_map, arena, msgs, &mut cmds);
                     }
                     return cmds;
                 }
@@ -321,10 +332,7 @@ pub fn trigger_refresh(
                         key.code,
                     ) {
                         state.input_sel_anchor = None;
-                        push_input_render(state, focused, &mut cmds);
-                        if arena.is_some() {
-                            msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
-                        }
+                        commit_field_edit(state, focused, hit_map, arena, msgs, &mut cmds);
                     }
                     return cmds;
                 }
@@ -368,11 +376,7 @@ pub fn trigger_refresh(
                     };
                     if changed {
                         state.input_sel_anchor = None;
-                        push_input_render(state, focused, &mut cmds);
-                        if arena.is_some() {
-                            msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
-                        }
-                        refresh_datalist(state, hit_map, arena, &mut cmds);
+                        commit_field_edit(state, focused, hit_map, arena, msgs, &mut cmds);
                     }
                     return cmds;
                 }
@@ -404,16 +408,12 @@ pub fn trigger_refresh(
             let ctrl = mouse.modifiers.contains(event::KeyModifiers::CONTROL);
             state.last_mouse = Some((mouse.column, mouse.row));
             if let Some(hit_map) = hit_map {
-                reveal_scrollbar_at(
-                    state,
-                    hit_map,
-                    mouse.column as u32,
-                    mouse.row as u32 + state.scroll_y,
-                    &mut cmds,
-                );
+                let (x, y) = canvas_pos(state, mouse.column, mouse.row);
+                reveal_scrollbar_at(state, hit_map, x, y, &mut cmds);
             }
             match mouse.kind {
-                MouseEventKind::ScrollUp => {
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                    let up = matches!(mouse.kind, MouseEventKind::ScrollUp);
                     // Scrolling dismisses an open dropdown (focus loss).
                     if state.open_select.is_some()
                         && let Some(arena) = arena
@@ -423,15 +423,9 @@ pub fn trigger_refresh(
                     if ctrl {
                         return cmds;
                     }
+                    let (x, y) = canvas_pos(state, mouse.column, mouse.row);
                     if let (Some(hit_map), Some(arena)) = (hit_map, arena)
-                        && let Some(cmd) = scroll_at_wheel(
-                            state,
-                            hit_map,
-                            arena,
-                            mouse.column as u32,
-                            mouse.row as u32 + state.scroll_y,
-                            true,
-                        )
+                        && let Some(cmd) = scroll_at_wheel(state, hit_map, arena, x, y, up)
                     {
                         cmds.push(cmd);
                         return cmds;
@@ -442,9 +436,12 @@ pub fn trigger_refresh(
                         // animation's target, not the mid-flight position).
                         let base = active_scroll_target(state, ScrollTarget::Page)
                             .unwrap_or(state.scroll_y);
-                        if let Some(to) =
-                            step_target(base, -(SCROLL_LINES_PER_TICK as i32), 0, max_scroll)
-                        {
+                        let delta = if up {
+                            -(SCROLL_LINES_PER_TICK as i32)
+                        } else {
+                            SCROLL_LINES_PER_TICK as i32
+                        };
+                        if let Some(to) = step_target(base, delta, 0, max_scroll) {
                             cmds.push(RenderCmd::ScrollAnimate {
                                 target: ScrollTarget::Page,
                                 to,
@@ -452,54 +449,19 @@ pub fn trigger_refresh(
                         }
                         return cmds;
                     }
-                    if state.scroll_y == 0 {
+                    let next = if up {
+                        state.scroll_y == 0
+                    } else {
+                        state.scroll_y >= max_scroll
+                    };
+                    if next {
                         return cmds;
                     }
-                    state.scroll_y = state.scroll_y.saturating_sub(SCROLL_LINES_PER_TICK);
-                    cmds.push(RenderCmd::Rerender {
-                        scroll_y: state.scroll_y,
-                    });
-                }
-                MouseEventKind::ScrollDown => {
-                    // Scrolling dismisses an open dropdown (focus loss).
-                    if state.open_select.is_some()
-                        && let Some(arena) = arena
-                    {
-                        close_select(state, arena, None, msgs, &mut cmds);
-                    }
-                    if ctrl {
-                        return cmds;
-                    }
-                    if let (Some(hit_map), Some(arena)) = (hit_map, arena)
-                        && let Some(cmd) = scroll_at_wheel(
-                            state,
-                            hit_map,
-                            arena,
-                            mouse.column as u32,
-                            mouse.row as u32 + state.scroll_y,
-                            false,
-                        )
-                    {
-                        cmds.push(cmd);
-                        return cmds;
-                    }
-                    if state.smooth_scroll {
-                        let base = active_scroll_target(state, ScrollTarget::Page)
-                            .unwrap_or(state.scroll_y);
-                        if let Some(to) =
-                            step_target(base, SCROLL_LINES_PER_TICK as i32, 0, max_scroll)
-                        {
-                            cmds.push(RenderCmd::ScrollAnimate {
-                                target: ScrollTarget::Page,
-                                to,
-                            });
-                        }
-                        return cmds;
-                    }
-                    if state.scroll_y >= max_scroll {
-                        return cmds;
-                    }
-                    state.scroll_y = state.scroll_y.saturating_add(SCROLL_LINES_PER_TICK);
+                    state.scroll_y = if up {
+                        state.scroll_y.saturating_sub(SCROLL_LINES_PER_TICK)
+                    } else {
+                        state.scroll_y.saturating_add(SCROLL_LINES_PER_TICK)
+                    };
                     cmds.push(RenderCmd::Rerender {
                         scroll_y: state.scroll_y,
                     });
@@ -527,12 +489,7 @@ pub fn trigger_refresh(
                             &mut cmds,
                         );
                     } else {
-                        state.pressed = None;
-                        state.drag_selecting = false;
-                        state.press_screen = None;
-                        state.drag_origin = None;
-                        state.field_drag_started = false;
-                        state.pressed_target = None;
+                        state.clear_press_tracking();
                     }
                 }
                 MouseEventKind::Up(btn @ (MouseButton::Right | MouseButton::Middle)) => {
@@ -551,12 +508,7 @@ pub fn trigger_refresh(
                             &mut cmds,
                         );
                     } else {
-                        state.pressed = None;
-                        state.drag_selecting = false;
-                        state.press_screen = None;
-                        state.drag_origin = None;
-                        state.field_drag_started = false;
-                        state.pressed_target = None;
+                        state.clear_press_tracking();
                     }
                 }
                 // crossterm reports button-held motion as `Drag` (SGR code

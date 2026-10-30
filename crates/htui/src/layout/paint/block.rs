@@ -85,16 +85,13 @@ pub(crate) fn paint_block(
     let fill_bg = !background_clipped_to_text && (lb.paint_style.fill_bg || my_bg.is_some());
     let spacing_after = lb.paint_style.spacing_after;
     let box_edges = &lb.paint_style.box_edges;
-    let font = lb.paint_style.font_size_cells.max(1);
-    let line_h = lb.paint_style.line_height_cells.max(1);
     // Row of the glyph block within its line box. With `line-height > font`
     // the extra rows are split above and below the glyphs; otherwise the
     // glyphs keep the historical centering within the font-sized line box.
-    let glyph_row_within_line = if line_h > font {
-        (line_h - font) / 2
-    } else {
-        font.saturating_sub(1) / 2
-    };
+    let glyph_row_within_line = crate::html::css_parse::glyph_row_within_line(
+        lb.paint_style.font_size_cells,
+        lb.paint_style.line_height_cells,
+    );
 
     if fill_bg {
         // Paint the background across every row of the rect that is *not* a

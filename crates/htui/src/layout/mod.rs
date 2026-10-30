@@ -311,11 +311,10 @@ fn collect_box_lines<'a>(arena: &'a NodeArena, lb: &'a LayoutBox, out: &mut Vec<
     let font = lb.paint_style.font_size_cells.max(1);
     let line_h = lb.paint_style.line_height_cells.max(1);
     let align = arena[lb.node_id].css_attr.get_text_align();
-    let glyph_row = if line_h > font {
-        (line_h - font) / 2
-    } else {
-        font.saturating_sub(1) / 2
-    };
+    let glyph_row = crate::html::css_parse::glyph_row_within_line(
+        lb.paint_style.font_size_cells,
+        lb.paint_style.line_height_cells,
+    );
     let content_x = lb
         .rect
         .x
@@ -387,11 +386,10 @@ fn collect_box_label_regions(
     let font = lb.paint_style.font_size_cells.max(1);
     let line_h = lb.paint_style.line_height_cells.max(1);
     let align = arena[lb.node_id].css_attr.get_text_align();
-    let glyph_row = if line_h > font {
-        (line_h - font) / 2
-    } else {
-        font.saturating_sub(1) / 2
-    };
+    let glyph_row = crate::html::css_parse::glyph_row_within_line(
+        lb.paint_style.font_size_cells,
+        lb.paint_style.line_height_cells,
+    );
     let content_x = lb
         .rect
         .x

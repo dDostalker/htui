@@ -290,6 +290,7 @@ fn resolve_length(
         viewport,
     })
 }
+/// Parse one CSS length property into resolved cells.
 ///
 /// `auto` / missing / unsupported unit `None` (caller decides what default
 /// to apply).

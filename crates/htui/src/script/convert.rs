@@ -296,15 +296,13 @@ impl<T: FromJs> FromJs for Vec<T> {
         let arr = value
             .as_object()
             .ok_or_else(|| type_err("expected an array"))?;
-        let mut out = Vec::new();
-        let mut i = 0u32;
-        loop {
+        // Walk `length`, not "first undefined": an array holding an explicit
+        // `undefined` element must not truncate the conversion.
+        let len = arr.get(js_string!("length"), ctx)?.to_u32(ctx)?;
+        let mut out = Vec::with_capacity(len as usize);
+        for i in 0..len {
             let item = arr.get(i, ctx)?;
-            if item.is_undefined() {
-                break;
-            }
             out.push(T::from_js(&item, ctx)?);
-            i += 1;
         }
         Ok(out)
     }

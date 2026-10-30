@@ -22,15 +22,11 @@ use crate::tui::graph_api::{
     InputRenderState, RenderCmd, SelectionMode, SharedScrollbarVisibility, TermLayout,
 };
 
+use super::LiveGeoSlot;
 use super::overlay::apply_select_overlay;
 use super::pipeline::flush_frame;
 use super::region::{find_box_rect, union_rect};
 use super::selection::{highlight_lines, lines_bounds, selection_lines};
-
-/// Input-loop side of the live DOM snapshot: the render thread publishes the
-/// latest frame's [`Geometry`](crate::events::Geometry) here; the input loop
-/// reads its arena for DOM queries.
-pub(super) type LiveGeoSlot = Arc<Mutex<Option<SharedGeometry>>>;
 
 pub(super) fn cascade_document(
     document: &ParsedDocument,
@@ -204,10 +200,9 @@ pub(super) struct RenderState {
     /// / `RenderCmd::Focus` can re-style the document for CSS `:hover` /
     /// `:focus` rules and repaint without re-parsing or re-laying out.
     pub(super) geometry: Option<SharedGeometry>,
-    /// Whether the current document contains any `position: fixed` box. When
-    /// true, scrolling re-anchors the fixed boxes to the new scroll offset
-    /// The document contains `position: fixed` / `sticky` boxes, so scrolling
-    /// re-pins them (a targeted region repaint) so they stay on screen;
+    /// Whether the current document contains any `position: fixed` /
+    /// `sticky` box. When true, scrolling re-anchors the pinned boxes to the
+    /// new scroll offset (a targeted region repaint) so they stay on screen;
     /// without pinned boxes scrolling keeps the cheap canvas re-slice.
     pub(super) has_pinned: bool,
     /// Active page text selection (canvas-space endpoints + shape); `None`

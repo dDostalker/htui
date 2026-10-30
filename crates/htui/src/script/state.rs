@@ -66,6 +66,12 @@ pub(crate) struct ScriptState {
     pub fetch_rx: Receiver<AsyncResult>,
     /// Send end handed to [`resources::load_async`] when a `fetch` starts.
     pub fetch_tx: Sender<AsyncResult>,
+    /// Monotonic instant the engine was built at. It anchors the frame grid
+    /// `requestAnimationFrame` schedules on: frame deadlines are the next
+    /// multiple of the frame period since this instant, so chained one-shot
+    /// frame callbacks fire on one evenly spaced timeline regardless of how
+    /// long each callback runs.
+    pub frame_epoch: Instant,
 }
 
 impl ScriptState {
@@ -76,16 +82,22 @@ impl ScriptState {
     }
 }
 
-/// A pending `setTimeout` / `setInterval` registration.
+/// A pending `setTimeout` / `setInterval` / `requestAnimationFrame`
+/// registration.
 pub(crate) struct TimerEntry {
     pub id: u32,
     /// When the callback is due (monotonic clock).
     pub deadline: Instant,
     /// Repeat cadence for `setInterval` (re-scheduling after each fire);
-    /// ignored for one-shot `setTimeout` entries.
+    /// ignored for one-shot entries.
     pub period: Duration,
-    /// `true` for `setInterval`, `false` for `setTimeout`.
+    /// `true` for `setInterval`, `false` for one-shot entries.
     pub repeat: bool,
+    /// Frame-grid timestamp (ms since [`ScriptState::frame_epoch`]) passed to
+    /// a `requestAnimationFrame` callback as its first argument — the grid
+    /// point the callback is scheduled on, not the actual wake time.
+    /// `None` for timers invoked without arguments.
+    pub frame_time: Option<f64>,
 }
 
 thread_local! {

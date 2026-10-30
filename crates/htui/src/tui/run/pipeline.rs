@@ -97,6 +97,17 @@ pub(super) fn viewport_of(map: &TermMap) -> Viewport {
     }
 }
 
+/// Current terminal size, or `None` (logged) when the console query fails.
+pub(super) fn term_map_or_none() -> Option<TermMap> {
+    match TermMap::get_ter_map() {
+        Ok(map) => Some(map),
+        Err(e) => {
+            log::error!("Failed to get terminal size: {}", e);
+            None
+        }
+    }
+}
+
 /// Browser overflow propagation for the terminal viewport: `hidden` / `clip`
 /// on `<html>` (or on `<body>` when `<html>` does not specify overflow)
 /// disables page scrolling. Native container scrolling is unaffected.
@@ -385,10 +396,7 @@ impl RenderState {
         // The cascade re-evaluates `@media` against the current viewport (the
         // stored dynamic state may predate a resize).
         self.dynamic.viewport = viewport_of(term_map);
-        let mut owned = match Arc::try_unwrap(arena) {
-            Ok(arena) => arena,
-            Err(shared) => (*shared).clone(),
-        };
+        let mut owned = Arc::try_unwrap(arena).unwrap_or_else(|shared| (*shared).clone());
         reset_css_attr(&mut owned, root_id);
         css_into_node_with_state(&mut owned, root_id, &self.css_rules, &self.dynamic);
         self.document.arena = Arc::new(owned);
@@ -538,6 +546,12 @@ impl RenderState {
             (None, Some(b)) => Some(b),
             (None, None) => None,
         };
+        // Highlight bands are derived once: the region below extends to
+        // them, and the same bands are overlaid after the repaint.
+        let sel_lines = self
+            .text_selection
+            .as_ref()
+            .map(|sel| highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32));
         let Some(mut r) = region else {
             return;
         };
@@ -546,18 +560,14 @@ impl RenderState {
         // colour, so cells outside `r` would keep the previous frame's
         // highlight and be blended again (a step darker per hover / focus
         // repaint — the bright / dark flicker).
-        if let Some(sel) = &self.text_selection {
-            let sel_lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
-            if let Some(sel_rect) = lines_bounds(&sel_lines) {
-                r = union_rect(r, sel_rect);
-            }
+        if let Some(sel_rect) = sel_lines.as_ref().and_then(|lines| lines_bounds(lines)) {
+            r = union_rect(r, sel_rect);
         }
         tl.repaint_region(&arena, &geo.boxes, r);
         // The repaint reset the canvas (or part of it); the active selection
         // highlight must be overlaid again.
-        if let Some(sel) = &self.text_selection {
-            let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
-            tl.apply_text_selection(&lines, SELECTION_BG);
+        if let Some(lines) = &sel_lines {
+            tl.apply_text_selection(lines, SELECTION_BG);
         }
         if let Some(open) = &self.open_select {
             apply_select_overlay(tl, open);
@@ -673,10 +683,7 @@ impl RenderState {
         }
         // Same in-place cascade as `render_arena`: the fresh document's
         // snapshot is consumed when nothing else holds it.
-        let mut owned = match Arc::try_unwrap(arena) {
-            Ok(arena) => arena,
-            Err(shared) => (*shared).clone(),
-        };
+        let mut owned = Arc::try_unwrap(arena).unwrap_or_else(|shared| (*shared).clone());
         reset_css_attr(&mut owned, root_id);
         css_into_node_with_state(
             &mut owned,

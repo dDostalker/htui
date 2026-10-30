@@ -13,11 +13,13 @@
 //! Supported CSS properties (full grammar; values are case-insensitive):
 //!
 //! - `display: flex`
-//! - `flex-direction: row | column`
-//! - `flex-wrap: nowrap | wrap`
+//! - `flex-direction: row | row-reverse | column | column-reverse`
+//! - `flex-wrap: nowrap | wrap | wrap-reverse`
 //! - `justify-content: flex-start | flex-end | center | space-between |
 //!   space-around | space-evenly`
-//! - `align-items: stretch | flex-start | flex-end | center`
+//! - `align-items: stretch | flex-start | flex-end | center | baseline`
+//!   (baseline aligns each item's first text row on the line's shared
+//!   baseline — the terminal cell-grid analogue of the CSS baseline)
 //! - `align-self: auto | <same as align-items>`
 //! - `align-content: <same as justify-content>`
 //! - `flex-grow`, `flex-shrink` (non-negative numbers)
@@ -25,15 +27,13 @@
 //! - `order` (integer)
 //! - `gap`, `row-gap`, `column-gap`
 //!
-//! Intentionally **not** supported in v1:
+//! Contiguous raw text children of a flex container are wrapped into
+//! anonymous flex items (CSS Flexbox §4).
 //!
-//! - `flex-direction: row-reverse | column-reverse`
-//! - `flex-wrap: wrap-reverse`
-//! - `align-items: baseline` (terminals have no baseline concept)
-//! - `display: inline-flex` (renderer is block-only)
-//! - Anonymous flex items from raw text nodes inside a flex container
-//!   (v1 skips them; the container's text / inline children are still
-//!   collected as its own inline runs)
+//! Not supported:
+//!
+//! - `display: inline-flex` participates as a block-level box (the value is
+//!   accepted and blockified; the renderer is block-only)
 //! - `align-items: stretch` when the container has no explicit `height`
 //!   (cross-axis size would be ambiguous — see the stretch section below)
 //!

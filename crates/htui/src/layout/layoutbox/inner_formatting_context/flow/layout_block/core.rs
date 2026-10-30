@@ -27,8 +27,8 @@ use crossterm::style::Color;
 use crate::html::css_parse::resolve_line_height_cells;
 
 use super::geometry::{
-    OuterGeometry, block_left, build_border_rect, compute_outer_geometry, constrained_block_width,
-    reserve_border_box,
+    OuterGeometry, apply_horizontal_auto_margins, block_left, build_border_rect,
+    compute_outer_geometry, constrained_block_width, reserve_border_box,
 };
 use super::options::LayoutBlockOptions;
 
@@ -127,14 +127,12 @@ pub fn layout_block(
             // fixed (non-auto) margins, so the free space is simply the
             // leftover width. Vertical auto margins stay 0 in block flow.
             let margin_auto = node.css_attr.get_margin_auto();
-            if margin_auto.left || margin_auto.right {
-                let free = available.saturating_sub(block_width);
-                match (margin_auto.left, margin_auto.right) {
-                    (true, true) => edges.margin.left = (free / 2) as isize,
-                    (true, false) => edges.margin.left = free as isize,
-                    _ => {}
-                }
-            }
+            apply_horizontal_auto_margins(
+                (margin_auto.left, margin_auto.right),
+                &mut edges,
+                available,
+                block_width,
+            );
             let x = block_left(containing) + opts.indent;
             let geom = compute_outer_geometry(
                 BoxConstraint {
@@ -482,9 +480,13 @@ pub fn layout_block(
                 1,
                 viewport_height,
             );
-            let thumb_height = ((viewport_height as f32
-                * (viewport_height as f32 / content_height.max(1) as f32))
-                .round() as usize)
+            // Thumb height proportional to the visible fraction
+            // (viewport / content), rounded half-up in integer math.
+            let content = content_height.max(1);
+            let thumb_height = (viewport_height
+                .saturating_mul(viewport_height)
+                .saturating_add(content / 2)
+                / content)
                 .clamp(1, viewport_height);
             let thumb_y = track.y
                 + if max_scroll == 0 {

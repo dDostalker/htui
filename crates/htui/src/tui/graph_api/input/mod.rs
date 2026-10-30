@@ -260,13 +260,7 @@ impl InputState {
     /// dropdown overlay would highlight or paint stale cells. Resets that
     /// state and emits the render commands that clear the render-side mirrors.
     pub fn invalidate_viewport(&mut self, cmds: &mut Vec<RenderCmd>) {
-        self.pressed = None;
-        self.drag_selecting = false;
-        self.press_screen = None;
-        self.drag_origin = None;
-        self.field_drag_started = false;
-        self.pressed_target = None;
-        self.scroll_drag = None;
+        self.clear_press_tracking();
         // A resize re-lays out every container, so a container-targeted glide
         // would keep scrolling by stale geometry; it is cancelled. A page
         // glide survives — the viewport offset stays meaningful across a
@@ -293,7 +287,7 @@ impl InputState {
     /// do survive; the latter is reused to re-validate hover against the fresh
     /// hit map.
     pub fn reset_document_state(&mut self, cmds: &mut Vec<RenderCmd>) {
-        self.pressed = None;
+        self.clear_press_tracking();
         self.scroll_offsets.clear();
         self.scroll_anim = None;
         self.hide_scrollbars();
@@ -303,11 +297,6 @@ impl InputState {
         self.input_value = CompactString::new("");
         self.input_cursor = 0;
         self.input_sel_anchor = None;
-        self.drag_selecting = false;
-        self.press_screen = None;
-        self.drag_origin = None;
-        self.field_drag_started = false;
-        self.pressed_target = None;
         clear_text_selection(self, cmds);
         if let Some(open) = self.open_select.take() {
             cmds.push(RenderCmd::SelectClose {
@@ -317,6 +306,20 @@ impl InputState {
         self.request_resize_revalidation();
     }
 
+    /// Clear every field that tracks the active press / drag: the press
+    /// marker, drag anchors, the resolved click target and the scrollbar
+    /// grab. Shared by viewport invalidation, document reload and stale-press
+    /// drops so no reset site can miss a field.
+    fn clear_press_tracking(&mut self) {
+        self.pressed = None;
+        self.drag_selecting = false;
+        self.press_screen = None;
+        self.drag_origin = None;
+        self.field_drag_started = false;
+        self.pressed_target = None;
+        self.scroll_drag = None;
+    }
+
     /// Drop a press whose release was never received: a button-free `Moved`
     /// event proves no button is held, so any recorded press is stale. Without
     /// this, a lost release (e.g. the console dropping the `Up` during a
@@ -324,12 +327,7 @@ impl InputState {
     /// events would stay silent forever. Returns whether a press was dropped.
     pub fn drop_stale_press(&mut self) -> bool {
         if self.pressed.take().is_some() {
-            self.drag_selecting = false;
-            self.press_screen = None;
-            self.drag_origin = None;
-            self.field_drag_started = false;
-            self.pressed_target = None;
-            self.scroll_drag = None;
+            self.clear_press_tracking();
             true
         } else {
             false

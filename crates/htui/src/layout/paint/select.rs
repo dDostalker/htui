@@ -11,8 +11,7 @@ use crate::{
 };
 
 use super::{
-    PaintCanvas, cell_index, clamp_rect_to_canvas, control_background, control_background_at,
-    intersect_rects, paint_control_chrome, put,
+    PaintCanvas, cell_index, control_background_at, control_clip, paint_control_chrome, put,
 };
 
 /// Frame colour for an open (focused) dropdown (Tokyo Night accent cyan).
@@ -24,28 +23,18 @@ pub(crate) fn paint_select(
     canvas: &mut PaintCanvas<'_>,
     clip: Rect,
 ) {
-    let r = lb.rect;
-    let canvas_cols = canvas.columns as usize;
-    if r.x >= canvas_cols || r.width == 0 || r.height == 0 {
-        return;
-    }
-    let Some(r) = clamp_rect_to_canvas(r, canvas_cols) else {
-        return;
-    };
-    let Some(visible) = intersect_rects(Rect::new(r.x, r.y, r.width, r.height), clip) else {
-        return;
-    };
     // Control chrome and replaced glyphs are painted directly by cell; reduce
     // the control rect to the inherited clip so a partially visible field
     // cannot overwrite a parent border or sibling cell.
-    let r = visible;
+    let Some(r) = control_clip(lb, canvas, clip) else {
+        return;
+    };
 
     let node = &arena[lb.node_id];
     let fg = node.css_attr.get_color();
     let open = canvas.open_select == Some(lb.node_id);
 
-    let content = paint_control_chrome(lb, arena, canvas, r, fg);
-    let background = control_background(node);
+    let (content, background) = paint_control_chrome(lb, arena, canvas, r, fg);
     // While the dropdown is open the label is drawn with the accent colour
     // (a border, when declared, keeps its own colour from the chrome).
     let label_fg = if open {
@@ -81,7 +70,7 @@ pub(crate) fn paint_select(
         let w = char_width(ch).max(1);
         for sub in 0..w {
             let abs_col = inner_x.saturating_add(col).saturating_add(sub);
-            if abs_col < visible.x || abs_col >= visible.x.saturating_add(visible.width) {
+            if abs_col < r.x || abs_col >= r.x.saturating_add(r.width) {
                 continue;
             }
             put(
@@ -98,7 +87,7 @@ pub(crate) fn paint_select(
     let chevron_col = inner_x
         .saturating_add(inner_width)
         .saturating_sub(chevron_w);
-    if chevron_col >= visible.x && chevron_col < visible.x.saturating_add(visible.width) {
+    if chevron_col >= r.x && chevron_col < r.x.saturating_add(r.width) {
         put(
             canvas,
             cell_index(canvas, chevron_col, content.y),

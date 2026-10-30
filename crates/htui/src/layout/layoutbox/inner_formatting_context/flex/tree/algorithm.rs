@@ -210,10 +210,7 @@ fn fixup_min_max(sizes: &mut [usize], line: &[&FlexItemPrep], available: usize, 
     if n == 0 {
         return;
     }
-    let mins: Vec<usize> = line
-        .iter()
-        .map(|p| p.min_main.max(p.css_min_main.unwrap_or(0)).max(1))
-        .collect();
+    let mins: Vec<usize> = line.iter().map(|p| p.effective_min_main()).collect();
     let maxs: Vec<Option<usize>> = line.iter().map(|p| p.css_max_main).collect();
     // Initial clamp (min wins over max, CSS).
     for i in 0..n {
@@ -325,7 +322,7 @@ fn enforce_min_main_sizes(
     column_gap: usize,
 ) {
     let n = sizes.len();
-    let mins: Vec<usize> = line.iter().map(|p| p.min_main.max(1)).collect();
+    let mins: Vec<usize> = line.iter().map(|p| p.effective_min_main()).collect();
     for i in 0..n {
         if sizes[i] < mins[i] {
             sizes[i] = mins[i];
@@ -424,31 +421,24 @@ pub(super) fn align_content_spacing(
     free_space: usize,
     n_lines: usize,
 ) -> (usize, usize) {
-    match align {
-        // `stretch` fills the free cross space by growing each line's cross
-        // size by `free / n` (no leading / trailing / inter-line gap) — the
-        // browser semantics. The line growth itself is applied in
-        // `layout_flex_items` via `stretch_extra`; the pair returned here is
-        // only the line-offset distribution, which for stretch is zero (lines
-        // are already stacked edge-to-edge by their grown sizes).
-        AlignContent::Stretch => (0, 0),
-        AlignContent::FlexStart
-        | AlignContent::FlexEnd
-        | AlignContent::Center
-        | AlignContent::SpaceBetween
-        | AlignContent::SpaceAround
-        | AlignContent::SpaceEvenly => justify_spacing(
-            match align {
-                AlignContent::FlexStart => JustifyContent::FlexStart,
-                AlignContent::FlexEnd => JustifyContent::FlexEnd,
-                AlignContent::Center => JustifyContent::Center,
-                AlignContent::SpaceBetween => JustifyContent::SpaceBetween,
-                AlignContent::SpaceAround => JustifyContent::SpaceAround,
-                _ => JustifyContent::SpaceEvenly,
-            },
-            free_space,
-            n_lines,
-        ),
+    // `stretch` fills the free cross space by growing each line's cross
+    // size by `free / n` (no leading / trailing / inter-line gap) — the
+    // browser semantics. The line growth itself is applied in
+    // `layout_flex_items` via `stretch_extra`; the pair returned here is
+    // only the line-offset distribution, which for stretch is zero (lines
+    // are already stacked edge-to-edge by their grown sizes).
+    let justify = match align {
+        AlignContent::Stretch => None,
+        AlignContent::FlexStart => Some(JustifyContent::FlexStart),
+        AlignContent::FlexEnd => Some(JustifyContent::FlexEnd),
+        AlignContent::Center => Some(JustifyContent::Center),
+        AlignContent::SpaceBetween => Some(JustifyContent::SpaceBetween),
+        AlignContent::SpaceAround => Some(JustifyContent::SpaceAround),
+        AlignContent::SpaceEvenly => Some(JustifyContent::SpaceEvenly),
+    };
+    match justify {
+        Some(justify) => justify_spacing(justify, free_space, n_lines),
+        None => (0, 0),
     }
 }
 

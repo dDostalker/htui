@@ -134,6 +134,21 @@ pub fn resolve_line_height_cells(
     }
 }
 
+/// Vertical offset (rows) of the glyph row within a line box: the leading
+/// `line-height - font` rows split evenly above and below the glyphs; when
+/// the line box is shorter than the font span the glyphs keep the
+/// historical centering within the font-sized box. Both inputs are floored
+/// at one cell.
+pub fn glyph_row_within_line(font_cells: usize, line_height_cells: usize) -> usize {
+    let font = font_cells.max(1);
+    let line_h = line_height_cells.max(1);
+    if line_h > font {
+        (line_h - font) / 2
+    } else {
+        font.saturating_sub(1) / 2
+    }
+}
+
 // ============================================================
 // Text-wrapping property values (CSS Text Level 3 subset)
 //

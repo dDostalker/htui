@@ -139,18 +139,17 @@ pub(super) fn wrapper_is_cached(context: &mut Context, node_id: NodeId) -> JsRes
 // Helpers
 // ============================================================
 
-/// Concatenate all descendant `Text` nodes of `node_id` (browser `textContent`).
+/// Concatenate all descendant `Text` nodes of `node_id` (browser
+/// `textContent`). A text node's own data is included — the browser returns
+/// it for `textContent` on the node itself — so this wraps
+/// [`Node::text_content`](crate::tdom::node::Node::text_content) (descendants
+/// only) with the self case.
 fn collect_text(arena: &NodeArena, node_id: NodeId) -> String {
-    let mut out = String::new();
-    let mut stack = vec![node_id];
-    while let Some(id) = stack.pop() {
-        let Some(node) = arena.get(id) else { continue };
-        if node.node_type == NodeType::Text
-            && let Some(s) = &node.data
-        {
-            out.push_str(s);
-        }
-        stack.extend(node.children.iter().rev().copied());
+    let Some(node) = arena.get(node_id) else {
+        return String::new();
+    };
+    if node.node_type == NodeType::Text {
+        return node.data.clone().unwrap_or_default();
     }
-    out
+    node.text_content(arena)
 }

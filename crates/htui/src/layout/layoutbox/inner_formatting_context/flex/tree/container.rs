@@ -6,7 +6,9 @@ use crate::{
     html::css_parse::{BoxSizing, OverflowWrap, WhiteSpace, WordBreak},
     layout::{
         BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext, PaintStyle, Rect,
-        inner_formatting_context::flow::{constrained_block_width, dispatch},
+        inner_formatting_context::flow::{
+            apply_horizontal_auto_margins, constrained_block_width, dispatch,
+        },
         layoutbox::{
             flatten_contents_children,
             generation::{GeneratedBoxKind, generate_node},
@@ -105,6 +107,15 @@ pub(super) struct FlexItemPrep {
     pub(super) natural_height: usize,
 }
 
+impl FlexItemPrep {
+    /// The smallest main-axis size the flex distribution may assign the
+    /// item: the automatic minimum (`min_main`) combined with the explicit
+    /// `min-*` constraint (the larger of the two), floored at one cell.
+    pub(super) fn effective_min_main(&self) -> usize {
+        self.min_main.max(self.css_min_main.unwrap_or(0)).max(1)
+    }
+}
+
 /// Build a [`LayoutBox`] for a flex container at `node_id`.
 ///
 /// Performs the full two-phase flex algorithm and returns the assembled
@@ -162,14 +173,12 @@ pub(super) fn layout_flex_container(
             // A flex container is a block-level box in its own flow, so
             // `margin: 0 auto` centers it the same way `layout_block` does.
             let margin_auto = node.css_attr.get_margin_auto();
-            if margin_auto.left || margin_auto.right {
-                let free = available.saturating_sub(block_width);
-                match (margin_auto.left, margin_auto.right) {
-                    (true, true) => edges.margin.left = (free / 2) as isize,
-                    (true, false) => edges.margin.left = free as isize,
-                    _ => {}
-                }
-            }
+            apply_horizontal_auto_margins(
+                (margin_auto.left, margin_auto.right),
+                &mut edges,
+                available,
+                block_width,
+            );
             (
                 (containing.x as i64 + edges.margin.left as i64).max(0) as usize,
                 outer_y_top,
@@ -224,6 +233,26 @@ pub(super) fn layout_flex_container(
     let mut item_preps: Vec<FlexItemPrep> = Vec::new();
     let mut text_runs: Vec<InlineRun> = Vec::new();
 
+    // Flush accumulated raw text into an anonymous flex item (CSS Flexbox
+    // §4): run between element children and after the last one.
+    let flush_text_runs = |item_preps: &mut Vec<FlexItemPrep>, text_runs: &mut Vec<InlineRun>| {
+        if text_runs.is_empty() {
+            return;
+        }
+        item_preps.push(prepare_anonymous_text_item(
+            AnonymousTextItem {
+                runs: std::mem::take(text_runs),
+                font_size_cells: own_font_size_cells,
+                line_height_cells,
+                white_space,
+                word_break,
+                overflow_wrap,
+            },
+            direction,
+            align_items,
+        ));
+    };
+
     // `display: contents` children are spliced out (recursively) before item
     // collection: a contents element produces no flex item, so its visible
     // children take its place in document order (its raw text still folds
@@ -247,20 +276,7 @@ pub(super) fn layout_flex_container(
         }
 
         // Flush the preceding raw text into an anonymous flex item.
-        if !text_runs.is_empty() {
-            item_preps.push(prepare_anonymous_text_item(
-                AnonymousTextItem {
-                    runs: std::mem::take(&mut text_runs),
-                    font_size_cells: own_font_size_cells,
-                    line_height_cells,
-                    white_space,
-                    word_break,
-                    overflow_wrap,
-                },
-                direction,
-                align_items,
-            ));
-        }
+        flush_text_runs(&mut item_preps, &mut text_runs);
 
         let Some(generated) = generate_node(arena, child_id) else {
             continue;
@@ -315,20 +331,7 @@ pub(super) fn layout_flex_container(
     }
 
     // Flush trailing raw text.
-    if !text_runs.is_empty() {
-        item_preps.push(prepare_anonymous_text_item(
-            AnonymousTextItem {
-                runs: std::mem::take(&mut text_runs),
-                font_size_cells: own_font_size_cells,
-                line_height_cells,
-                white_space,
-                word_break,
-                overflow_wrap,
-            },
-            direction,
-            align_items,
-        ));
-    }
+    flush_text_runs(&mut item_preps, &mut text_runs);
 
     // A flex item is laid out by recursively dispatching its own element
     // handler with the rectangle allocated by the flex algorithm; anonymous

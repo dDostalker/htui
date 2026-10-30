@@ -306,13 +306,16 @@ pub fn apply_message(
         }
         ScriptMsg::Click { x, y } => {
             let mut cmds = interaction::on_click(hover, hit_map, engine, *x, *y);
+            // The hit test cannot change between the default actions below
+            // (JS mutations rebuild the hit map only on the next layout), so
+            // it runs once here.
+            let clicked = hit_map.hit_test(*x, *y).map(|r| r.node_id);
             // `<summary>` default action: after the click handlers, clicking
             // a summary (or its content) toggles the owning `<details>`'s
             // `open` attribute and fires a `toggle` event on it — the
             // browser's disclosure widget.
-            if let Some(details_id) = hit_map
-                .hit_test(*x, *y)
-                .and_then(|r| summary_details(&engine.arena(), r.node_id))
+            if let Some(details_id) =
+                clicked.and_then(|node_id| summary_details(&engine.arena(), node_id))
             {
                 engine.toggle_details(details_id);
                 let region = region_for(&engine.arena(), details_id);
@@ -322,9 +325,8 @@ pub fn apply_message(
             // handlers, fire the matching event on the containing `<form>`.
             // The engine performs no default navigation / control reset —
             // pages handle it in JS.
-            if let Some((form_id, et)) = hit_map
-                .hit_test(*x, *y)
-                .and_then(|r| button_form_action(&engine.arena(), r.node_id))
+            if let Some((form_id, et)) =
+                clicked.and_then(|node_id| button_form_action(&engine.arena(), node_id))
             {
                 let region = region_for(&engine.arena(), form_id);
                 cmds.extend(engine.fire(&region, et, 0, 0));
@@ -332,9 +334,8 @@ pub fn apply_message(
             // `form[method=dialog]` default action: after the submit handlers,
             // a submit inside a dialog closes it (removes `open`) and fires a
             // `close` event on the dialog — the browser's native dialog flow.
-            if let Some(dialog_id) = hit_map
-                .hit_test(*x, *y)
-                .and_then(|r| dialog_form_action(&engine.arena(), r.node_id))
+            if let Some(dialog_id) =
+                clicked.and_then(|node_id| dialog_form_action(&engine.arena(), node_id))
                 && engine.close_dialog(dialog_id)
             {
                 let region = region_for(&engine.arena(), dialog_id);

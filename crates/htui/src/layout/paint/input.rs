@@ -17,15 +17,8 @@ use crate::{
 
 use super::button::paint_button;
 use super::{
-    PaintCanvas, cell_index, clamp_rect_to_canvas, control_background, control_background_at,
-    intersect_rects, paint_control_chrome, put,
-};
-
-/// Highlight colour for the selected character range (Tokyo Night selection).
-const SELECTION_BG: Color = Color::Rgb {
-    r: 0x3b,
-    g: 0x42,
-    b: 0x61,
+    PaintCanvas, SELECTION_BG, caret_cell, cell_index, control_background_at, control_clip,
+    paint_control_chrome, put,
 };
 
 /// Numeric parameters for an `<input type=range>` control.
@@ -210,21 +203,12 @@ pub(crate) fn paint_input(
     canvas: &mut PaintCanvas<'_>,
     clip: Rect,
 ) {
-    let r = lb.rect;
-    let canvas_cols = canvas.columns as usize;
-    if r.x >= canvas_cols || r.width == 0 || r.height == 0 {
-        return;
-    }
-    let Some(r) = clamp_rect_to_canvas(r, canvas_cols) else {
-        return;
-    };
-    let Some(visible) = intersect_rects(Rect::new(r.x, r.y, r.width, r.height), clip) else {
-        return;
-    };
     // Control chrome and replaced glyphs are painted directly by cell; reduce
     // the control rect to the inherited clip so a partially visible field
     // cannot overwrite a parent border or sibling cell.
-    let r = visible;
+    let Some(r) = control_clip(lb, canvas, clip) else {
+        return;
+    };
 
     let node = &arena[lb.node_id];
     let input_type = node
@@ -246,8 +230,7 @@ pub(crate) fn paint_input(
     // and pointer mapping share `RangeSpec`, so the thumb column, keyboard
     // steps, and click positions agree.
     if input_type == "range" {
-        let content = paint_control_chrome(lb, arena, canvas, r, fg);
-        let background = control_background(node);
+        let (content, background) = paint_control_chrome(lb, arena, canvas, r, fg);
         let state = canvas.input_states.get(&lb.node_id);
         let spec = range_spec(node, state.map(|s| s.value.as_str()));
         let disabled = node.attributes.contains_key("disabled");
@@ -370,8 +353,7 @@ pub(crate) fn paint_input(
         return;
     }
 
-    let content = paint_control_chrome(lb, arena, canvas, r, fg);
-    let background = control_background(node);
+    let (content, background) = paint_control_chrome(lb, arena, canvas, r, fg);
 
     // Live edit state wins while focused, and an unfocused entry covers only
     // the single repaint right after a blur (so the committed text doesn't
@@ -407,16 +389,6 @@ pub(crate) fn paint_input(
     let disabled = node.attributes.contains_key("disabled");
     // A disabled field is dimmed (text grey); the background keeps its fill.
     let text_fg = if disabled { Some(Color::DarkGrey) } else { fg };
-    // `caret-color` paints the caret block with the declared colour; the
-    // default is the inverted cell (field background <-> text colour swap).
-    let caret_color = node.css_attr.get_caret_color();
-    let caret_cell = |fg: Option<Color>, bg: Option<Color>| match caret_color {
-        Some(cc) => (Some(bg.unwrap_or(Color::Black)), Some(cc)),
-        None => (
-            Some(bg.unwrap_or(Color::Black)),
-            Some(fg.unwrap_or(Color::White)),
-        ),
-    };
 
     // The value fills the whole content area.
     let inner_width = content.width;
@@ -441,14 +413,14 @@ pub(crate) fn paint_input(
             if abs_col >= inner_x.saturating_add(inner_width) {
                 break;
             }
-            if abs_col < visible.x || abs_col >= visible.x.saturating_add(visible.width) {
+            if abs_col < r.x || abs_col >= r.x.saturating_add(r.width) {
                 continue;
             }
             let sampled_bg = control_background_at(&background, abs_col, inner_y, r);
             let (cell_fg, cell_bg) = if inverted {
                 // Inverted caret cell so the caret position is visible even at
                 // the end of the value (a blank inverted cell).
-                caret_cell(fg, sampled_bg)
+                caret_cell(node, fg, sampled_bg)
             } else if selection.is_some_and(|(s, e)| i >= s && i < e) {
                 // Selected characters are highlighted (Tokyo Night selection
                 // blue) over the field's own colours.
@@ -481,7 +453,7 @@ pub(crate) fn paint_input(
         let abs_col = inner_x.saturating_add(col);
         if abs_col < inner_x.saturating_add(inner_width) {
             let sampled_bg = control_background_at(&background, abs_col, inner_y, r);
-            let (cf, cb) = caret_cell(fg, sampled_bg);
+            let (cf, cb) = caret_cell(node, fg, sampled_bg);
             put(
                 canvas,
                 cell_index(canvas, abs_col, inner_y),

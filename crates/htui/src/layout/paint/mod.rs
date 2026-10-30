@@ -50,18 +50,54 @@ use self::textarea::paint_textarea;
 /// mirroring a browser's UA field colour.
 pub(super) const CONTROL_DEFAULT_BG: Color = Color::DarkGrey;
 
+/// Highlight colour for the selected character range of an editable control
+/// (`<input>` / `<textarea>`) — the same Tokyo Night selection the page
+/// selection uses.
+pub(super) const SELECTION_BG: Color = Color::Rgb {
+    r: 0x3b,
+    g: 0x42,
+    b: 0x61,
+};
+
+/// Shared prelude of the replaced-control painters: clamp the control's rect
+/// to the canvas, then intersect with the inherited clip. `None` when the
+/// control paints nothing.
+pub(super) fn control_clip(lb: &LayoutBox, canvas: &PaintCanvas<'_>, clip: Rect) -> Option<Rect> {
+    let r = clamp_rect_to_canvas(lb.rect, canvas.columns as usize)?;
+    intersect_rects(r, clip)
+}
+
+/// `(fg, bg)` pair painting the caret block: `caret-color` paints the caret
+/// with the declared colour; the default is the inverted cell (field
+/// background ↔ text colour swap).
+pub(super) fn caret_cell(
+    node: &Node,
+    fg: Option<Color>,
+    bg: Option<Color>,
+) -> (Option<Color>, Option<Color>) {
+    match node.css_attr.get_caret_color() {
+        Some(cc) => (Some(bg.unwrap_or(Color::Black)), Some(cc)),
+        None => (
+            Some(bg.unwrap_or(Color::Black)),
+            Some(fg.unwrap_or(Color::White)),
+        ),
+    }
+}
+
 /// Paint a replaced control's shared chrome: the background fill across the
 /// whole border-box (the CSS `background-color`, or [`CONTROL_DEFAULT_BG`]
 /// when unset), then the CSS `border` frame when one is declared. Returns the
 /// content rect — the border-box shrunk by the border thickness — that the
-/// caller draws its value / label into; with no border this is the full box.
+/// caller draws its value / label into (with no border this is the full box),
+/// plus the resolved background so callers can sample per-cell colours
+/// without resolving it a second time.
 pub(super) fn paint_control_chrome(
     lb: &LayoutBox,
     arena: &NodeArena,
     canvas: &mut PaintCanvas<'_>,
     rect: Rect,
     fg: Option<Color>,
-) -> Rect {
+) -> (Rect, Background) {
     let node = &arena[lb.node_id];
     let bg = control_background(node);
     let bg_fill = BackgroundFill {
@@ -91,15 +127,18 @@ pub(super) fn paint_control_chrome(
         // already painted reachable.
         paint_borders(lb, rect, canvas, fg, Some(bg_fill), rect);
     }
-    Rect::new(
-        rect.x.saturating_add(sides.left.thickness()),
-        rect.y.saturating_add(sides.top.thickness()),
-        rect.width
-            .saturating_sub(sides.left.thickness())
-            .saturating_sub(sides.right.thickness()),
-        rect.height
-            .saturating_sub(sides.top.thickness())
-            .saturating_sub(sides.bottom.thickness()),
+    (
+        Rect::new(
+            rect.x.saturating_add(sides.left.thickness()),
+            rect.y.saturating_add(sides.top.thickness()),
+            rect.width
+                .saturating_sub(sides.left.thickness())
+                .saturating_sub(sides.right.thickness()),
+            rect.height
+                .saturating_sub(sides.top.thickness())
+                .saturating_sub(sides.bottom.thickness()),
+        ),
+        bg,
     )
 }
 
@@ -325,25 +364,14 @@ fn fill_canvas_background(
     let rows = canvas.layout.len() / cols;
     let bg_rect = Rect::new(0, 0, cols, rows);
     let start_row = content_bottom.min(rows);
-    let region = canvas.region;
     for y in start_row..rows {
         let row_start = y * cols;
-        for (i, cell) in canvas.layout[row_start..row_start + cols]
-            .iter_mut()
-            .enumerate()
-        {
-            let in_region = match region {
-                None => true,
-                Some(r) => {
-                    i >= r.x
-                        && i < r.x.saturating_add(r.width)
-                        && y >= r.y
-                        && y < r.y.saturating_add(r.height)
-                }
-            };
-            if !in_region {
+        for i in 0..cols {
+            let idx = row_start + i;
+            if !canvas.in_region(idx) {
                 continue;
             }
+            let cell = &mut canvas.layout[idx];
             // Only still-default cells: never clobber content that happens to
             // sit below `content_bottom` (e.g. a positioned child).
             if cell.word == " " && cell.bcolor.is_none() && cell.style.is_empty() {
@@ -495,17 +523,10 @@ fn paint_box(
     // the content area / children clip derived below also end at the canvas
     // edge — otherwise a child's background would cover the parent's
     // (clamped) border cell and leave the frame with a hole on the right
-    // side when the terminal shrinks.
-    let rect = if lb.rect.x >= canvas_cols || lb.rect.width == 0 {
-        lb.rect
-    } else {
-        Rect::new(
-            lb.rect.x,
-            lb.rect.y,
-            lb.rect.width.min(canvas_cols.saturating_sub(lb.rect.x)),
-            lb.rect.height,
-        )
-    };
+    // side when the terminal shrinks. A rect beyond the canvas / zero-width
+    // keeps its geometry: the zero-area branch below still lets positioned
+    // children paint.
+    let rect = clamp_rect_to_canvas(lb.rect, canvas_cols).unwrap_or(lb.rect);
     // This box's own clip = inherited clip ∩ own border-box. A box never
     // paints outside its ancestors' borders.
     let own_clip = match clip {

@@ -56,7 +56,7 @@ pub(super) fn focus_input(
     };
     let mut cursor = value.chars().count();
     state.input_value = value;
-    if is_range_input(arena, node_id) {
+    if state.focused_is_range {
         normalize_range_state(state, arena, node_id);
         cursor = state.input_value.chars().count();
     }

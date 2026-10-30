@@ -781,7 +781,7 @@ pub(super) fn native_get_local_name(
                 .and_then(|n| n.node_type.tag_name().map(str::to_string))
         })
         .unwrap_or_default();
-    Ok(js_string!(name.to_ascii_lowercase()).into())
+    Ok(js_string!(name.as_str()).into())
 }
 
 /// `Node.compareDocumentPosition(other)` bitmasks (the DOM's

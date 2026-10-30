@@ -112,7 +112,6 @@
     gap: 1ch;
     overflow: hidden;
   }
-  .side.collapsed { display: none; }
   .side-scroll {
     flex: 1 1 auto;
     min-height: 0;
@@ -200,7 +199,6 @@
   .band5 { background-color: #0d5547; color: #2fe6a8; }
   .band6 { background-color: #2a2a52; color: #7c7cf0; }
   .band7 { background-color: #33224a; color: #a06ae0; }
-  .band8 { background-color: #3a1f3d; color: #c66ad8; }
   .art-cap {
     flex: 0 0 auto;
     height: 1ch;
@@ -344,7 +342,6 @@
     display: flex;
     flex-direction: column;
   }
-  .lib { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
   .lib-head { flex: 0 0 auto; display: flex; align-items: center; gap: 2ch; margin-bottom: 1ch; }
   .lib-title { font-weight: bold; color: var(--text-bright); text-transform: uppercase; }
   .tabs { display: flex; gap: 1ch; }
@@ -357,7 +354,6 @@
   }
   .tab:hover { color: var(--text-bright); background-color: var(--bg-btn-hover); }
   .tab.on { color: var(--accent); background-color: var(--bg-accent-dim); }
-  .lib-meta { display: none; }
   .plist {
     flex: 0 0 auto;
     height: 20vh;
@@ -481,7 +477,6 @@
     .viz { display: none; }
     .side-scroll { display: none; }
     .main-wrap,
-    .lib-wrap,
     .footer { margin: 0 1ch; }
   }
 
@@ -491,8 +486,7 @@
     .card-lyr { display: none; }
     .card { border: 0; padding: 0; }
     .top { height: 1ch; border: 0; padding: 0 1ch; }
-    .main-wrap,
-    .lib-wrap { height: 2ch; }
+    .main-wrap { height: 2ch; }
     .plist { min-height: 1ch; }
     .card-head { margin-bottom: 0; }
     .np-body { gap: 1ch; }
@@ -501,8 +495,7 @@
   }
 
   @media (max-height: 9ch) {
-    .np-expand,
-    .lib-wrap { display: none; }
+    .np-expand { display: none; }
   }
 </style>
 </head>
@@ -564,7 +557,6 @@
             <span id="tab-all" class="tab on" onclick="setTab('all')">All</span>
             <span id="tab-fav" class="tab" onclick="setTab('fav')">Fav</span>
           </span>
-          <span id="lib-meta" class="lib-meta"></span>
         </div>
         <div id="plist" class="plist"></div>
       </div>
@@ -654,11 +646,15 @@
 
     var WAVE_N = 48;
     var seeking = false;
-    var seekRelease = 0;
+    var lastScrubAt = 0;
     var VIZ_H = 4;
-    var CAPS = [" ", "\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587"];
-    var FULL = "\u2588";
-    var BLOCKS = ["\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587", "\u2588"];
+    var VIZ_COLS = 16;
+    /* One 9-char intensity ramp: CAPS is the fractional-cap slice, BLOCKS
+       the filled slice (CAPS[i+1] === BLOCKS[i]). */
+    var RAMP = " ▁▂▃▄▅▆▇█";
+    var CAPS = RAMP.slice(0, 8);
+    var BLOCKS = RAMP.slice(1);
+    var FULL = "█";
 
     function $(id) { return document.getElementById(id); }
 
@@ -709,8 +705,9 @@
       $("artist").textContent = t.artist;
       $("t-cur").textContent = fmt(elapsed);
       $("t-rem").textContent = "-" + fmt(t.dur - elapsed);
-      $("badge-genre").textContent = t.genre;
-      $("badge-genre").className = "badge tag-" + t.genre.replace("-", "");
+      var badge = $("badge-genre");
+      badge.textContent = t.genre;
+      badge.className = "badge tag-" + t.genre.replace("-", "");
       $("badge-q").textContent = t.q;
       $("badge-bpm").textContent = t.bpm + " BPM";
       $("np-state").textContent = playing ? "\u25b6 " + fmt(elapsed) + " / " + fmt(t.dur) : "IDLE";
@@ -749,9 +746,6 @@
           + '</div>';
       }
       $("plist").innerHTML = html;
-      var allTotal = 0;
-      for (var j = 0; j < tracks.length; j++) { allTotal += tracks[j].dur; }
-      $("lib-meta").textContent = count + " TRACKS \u00b7 " + fmt(total) + (tab === "all" ? " \u00b7 TOTAL " + fmt(allTotal) : "");
     }
 
     function renderQueue() {
@@ -767,12 +761,19 @@
       $("queue").innerHTML = html;
     }
 
+    var lyricsKey = null;
     function renderLyrics() {
       var lines = tracks[current].lyrics;
       var active = -1;
       for (var i = 0; i < lines.length; i++) {
         if (elapsed >= lines[i][0]) { active = i; }
       }
+      /* Skip no-op writes: the 1s progress tick re-runs this every second
+         but the active line changes rarely, and a repeated innerHTML still
+         costs a full re-cascade + repaint. */
+      var key = current + "/" + active;
+      if (key === lyricsKey) { return; }
+      lyricsKey = key;
       var html = "";
       for (var j = 0; j < lines.length; j++) {
         html += '<div class="' + (j === active ? "ly on" : "ly") + '">' + lines[j][1] + '</div>';
@@ -785,6 +786,7 @@
       renderPlaylist();
       renderQueue();
       renderLyrics();
+      syncViz();
     }
 
     function pick(i) {
@@ -842,11 +844,11 @@
     }
 
     function scrub(value) {
-      /* Hold off the 1-second progress timer just long enough that an active
-         drag is not overwritten by playback. */
+      /* Hold off the 1-second progress timer while a drag is active. There
+         is no separate release event (htui fires `change` with `input`), so
+         the progress tick itself clears the flag after a quiet period. */
       seeking = true;
-      clearTimeout(seekRelease);
-      seekRelease = setTimeout(function () { seeking = false; }, 250);
+      lastScrubAt = Date.now();
       seek(Number(value) - elapsed);
     }
 
@@ -857,74 +859,90 @@
 
     var libraryOpen = true;
     var sideTimer = null;
-    /* Last applied flex-basis (%). 30 matches the stylesheet's at-rest value. */
-    var sideBasis = 30;
+    /* Last applied flex-basis value + unit (null = still at the stylesheet
+       at-rest value). Kept in the stylesheet's own unit (30% wide, 24ch
+       under the 64ch media query) so the inline tween and the cleared
+       inline end state agree — no snap on completion. */
+    var sideBasis = null;
+    var sideUnit = "%";
+
+    /* The at-rest basis the stylesheet gives the sidebar at the current
+       viewport (matchMedia shares the @media grammar with the CSS). */
+    function atRestBasis() {
+      return matchMedia("(max-width: 64ch)").matches
+        ? { v: 24, u: "ch" }
+        : { v: 30, u: "%" };
+    }
 
     /* Ease-out cubic: fast start, decelerating stop (same curve as scroll). */
     function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
     function toggleLibrary() {
       libraryOpen = !libraryOpen;
-      if (sideTimer) { clearTimeout(sideTimer); sideTimer = null; }
+      if (sideTimer !== null) { cancelAnimationFrame(sideTimer); sideTimer = null; }
       var side = document.getElementById("music-side");
       var toggle = document.getElementById("lib-toggle");
       toggle.textContent = libraryOpen ? "\u00ab LIB" : "LIB \u00bb";
 
-      var FRAME_MS = 16;
-      var OPEN_BASIS = 30;
+      var rest = atRestBasis();
+      if (sideBasis === null) { sideBasis = rest.v; }
+      var unit = rest.u;
+      /* Retarget from wherever the sidebar currently is: reversing
+         mid-animation extends the glide instead of jumping to an endpoint. */
+      var from = sideBasis;
+      var to = libraryOpen ? rest.v : 0;
       /* Travel-proportional duration (the scroll-anim rule): a full swing
          takes the max, a quick re-toggle mid-flight lands proportionally
          faster. Clamped so a nudge still reads as motion. */
       var MIN_MS = 80;
       var MAX_MS = 280;
-
-      /* Retarget from wherever the sidebar currently is: reversing
-         mid-animation extends the glide instead of jumping to an endpoint. */
-      var from = sideBasis;
-      var to = libraryOpen ? OPEN_BASIS : 0;
-      var duration = Math.max(MIN_MS, Math.min(MAX_MS, Math.abs(to - from) / OPEN_BASIS * MAX_MS));
+      var duration = Math.max(MIN_MS, Math.min(MAX_MS, Math.abs(to - from) / rest.v * MAX_MS));
 
       if (libraryOpen) side.style.display = "flex";
       side.style.minWidth = "0";
       /* Pin the inline basis in the same JS turn as the display flip — a
          from-rest open must not paint one frame at the stylesheet width. */
-      side.style.flexBasis = from + "%";
+      side.style.flexBasis = from + unit;
       sideBasis = from;
+      sideUnit = unit;
 
       if (from === to) {
         if (!libraryOpen) side.style.display = "none";
         return;
       }
 
-      var start = Date.now();
+      /* ts is the frame's grid timestamp (ms since session start, browser
+         DOMHighResTimeStamp semantics — a late frame still reports its grid
+         time). The first frame anchors the tween clock, so t is a pure
+         function of the animation timeline and a dropped frame shows the
+         correct current position. */
+      var start = null;
 
-      function step() {
-        var t = Math.min(1, (Date.now() - start) / duration);
-        /* Two-decimal percent: every frame lands on its own terminal column.
-           Integer percent quantizes the swing to ~OPEN_BASIS distinct widths,
-           which reads as early jumps followed by a frozen tail. */
+      function step(ts) {
+        if (start === null) { start = ts; }
+        var t = Math.min(1, (ts - start) / duration);
+        /* Two decimals: every frame lands on its own terminal column;
+           integer quantization reads as early jumps + a frozen tail. */
         var basis = Math.round((from + (to - from) * easeOutCubic(t)) * 100) / 100;
         /* Skip no-op writes: a repeated value still costs a full re-cascade +
            re-layout + repaint, congesting the pipeline and starving the
            frames that do move. */
         if (basis !== sideBasis) {
           sideBasis = basis;
-          side.style.flexBasis = basis + "%";
+          side.style.flexBasis = basis + sideUnit;
         }
         if (t < 1) {
-          /* Aim the next frame at the animation timeline, not at now+FRAME_MS:
-             a late wake catches up instead of stretching the swing. */
-          var nextFrame = Math.floor((Date.now() - start) / FRAME_MS) + 1;
-          sideTimer = setTimeout(step, Math.max(0, start + nextFrame * FRAME_MS - Date.now()));
+          sideTimer = requestAnimationFrame(step);
         } else {
+          sideTimer = null;
           if (!libraryOpen) side.style.display = "none";
+          /* Drop the inline override; the stylesheet's at-rest basis takes
+             over (an identical value — see atRestBasis). */
           side.style.flexBasis = "";
           side.style.minWidth = "";
-          sideBasis = to;
-          sideTimer = null;
         }
       }
-      step();
+      sideTimer = requestAnimationFrame(step);
     }
 
     function toggleRepeat() { repeat = !repeat; update(); }
@@ -939,8 +957,9 @@
 
     /* ---------- spectrum ---------- */
     var vizLevels = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    var vizTick = 0;
     var vizPhase = 0;
+    var vizTimer = null;
+    var VIZ_INTERVAL_MS = 150;
 
     function renderViz() {
       var left = "";
@@ -948,7 +967,7 @@
       for (var row = 0; row < VIZ_H; row++) {
         var lineL = "";
         var lineR = "";
-        for (var col = 0; col < 16; col++) {
+        for (var col = 0; col < VIZ_COLS; col++) {
           var rem = VIZ_H - 1 - row;
           var lv = vizLevels[col] * VIZ_H;
           var filled = Math.floor(lv);
@@ -965,20 +984,34 @@
       $("viz-r").textContent = right;
     }
 
-    function tickViz() {
-      vizTick++;
-      /* rAF fires ~60fps; only touch the DOM every 9th frame (~150ms).
-         Without this the script thread drowns in repaint commands and
-         click handling feels laggy / queued clicks fire in bursts. */
-      if (vizTick % 9 !== 0) { return; }
+    /* The meter updates at ~7 Hz (every DOM write costs a full re-cascade,
+       so 60fps would starve click handling), decaying to the idle floor
+       after pause and stopping entirely until playback resumes — a permanent
+       60fps rAF would pin the input loop at animation cadence forever. */
+    function stepViz() {
       vizPhase++;
-      for (var i = 0; i < 16; i++) {
+      var settled = !playing;
+      for (var i = 0; i < VIZ_COLS; i++) {
         var base = 0.5 + 0.5 * Math.sin(vizPhase * 0.35 + i * 0.85);
         var target = playing ? base * (0.3 + 0.7 * Math.random()) : 0.05;
         vizLevels[i] = vizLevels[i] + (target - vizLevels[i]) * 0.5;
         if (vizLevels[i] < 0.02) { vizLevels[i] = 0.02; }
+        if (playing || Math.abs(vizLevels[i] - 0.05) > 0.005) { settled = false; }
       }
       renderViz();
+      return settled;
+    }
+
+    /* (Re)arm the meter loop; a no-op while it is already running. Called
+       from refresh() so every playback state change re-drives it. */
+    function syncViz() {
+      if (vizTimer !== null) { return; }
+      vizTimer = setInterval(function () {
+        if (stepViz()) {
+          clearInterval(vizTimer);
+          vizTimer = null;
+        }
+      }, VIZ_INTERVAL_MS);
     }
 
     /* ---------- timers ---------- */
@@ -988,6 +1021,7 @@
     }, 1000);
 
     setInterval(function () {
+      if (seeking && Date.now() - lastScrubAt >= 1000) { seeking = false; }
       if (!playing) { return; }
       elapsed++;
       if (elapsed >= tracks[current].dur) {
@@ -1003,7 +1037,6 @@
     }, 1000);
 
     refresh();
-    requestAnimationFrame(tickViz);
   </script>
 </body>
 </html>

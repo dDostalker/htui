@@ -704,8 +704,7 @@ fn run_inner(
             } = cmd
             {
                 let resolved = hit_map.lock().ok().and_then(|map| {
-                    map.iter()
-                        .find(|r| r.node_id == *node_id)
+                    map.region_for(*node_id)
                         .map(|region| scroll_into_view_target(region.rect, *block, u32::from(rows)))
                 });
                 match resolved {
@@ -982,13 +981,7 @@ fn install_panic_hook() {
 
             default_hook(info);
 
-            let message = if let Some(message) = info.payload().downcast_ref::<&str>() {
-                *message
-            } else if let Some(message) = info.payload().downcast_ref::<String>() {
-                message.as_str()
-            } else {
-                "non-string panic payload"
-            };
+            let message = panic_message(info.payload());
             let location = info
                 .location()
                 .map(|location| {

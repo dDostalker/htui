@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 
 use boa_engine::{Context, JsResult, JsValue, Source, js_string};
 
@@ -133,6 +134,7 @@ impl ScriptEngine {
             next_fetch_id: 0,
             fetch_rx,
             fetch_tx,
+            frame_epoch: Instant::now(),
         }));
         ENGINE_STATE.with(|s| *s.borrow_mut() = Some(Rc::clone(&state)));
 

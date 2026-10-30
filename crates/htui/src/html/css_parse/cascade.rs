@@ -477,7 +477,6 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "min-height",
     "max-height",
     "box-sizing",
-    "border-radius",
     // Text
     "text-transform",
     "line-height",
@@ -533,7 +532,6 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "order",
     "gap",
     "row-gap",
-    "column-gap",
     "place-content",
     "place-items",
     "place-self",

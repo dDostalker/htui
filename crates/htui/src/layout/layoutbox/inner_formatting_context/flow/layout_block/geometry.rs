@@ -63,6 +63,27 @@ pub fn block_left(containing: BoxConstraint) -> usize {
     containing.x
 }
 
+/// Distribute horizontal `margin: auto` for a block-level box into `edges`:
+/// two auto margins center the box, a single one absorbs the whole
+/// remainder. `available` is the containing block's width already minus the
+/// fixed (non-auto) margins; vertical auto margins stay 0 in block flow.
+pub fn apply_horizontal_auto_margins(
+    auto: (bool, bool),
+    edges: &mut BoxEdges,
+    available: usize,
+    block_width: usize,
+) {
+    if !auto.0 && !auto.1 {
+        return;
+    }
+    let free = available.saturating_sub(block_width);
+    match auto {
+        (true, true) => edges.margin.left = (free / 2) as isize,
+        (true, false) => edges.margin.left = free as isize,
+        _ => {}
+    }
+}
+
 /// Resolved outer geometry for a block-level element before children are
 /// laid out.
 ///

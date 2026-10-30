@@ -1006,34 +1006,66 @@ fn attributes_snapshot_object() {
 }
 
 #[test]
-fn request_animation_frame_schedules_repeating_timer() {
+fn request_animation_frame_fires_once_on_the_frame_grid() {
     let mut e = engine(r#"<div id="d">x</div>"#);
     eval(
         &mut e,
-        r#"globalThis.ticks = 0;
-           globalThis.rafId = requestAnimationFrame(function () { ticks++ });
+        r#"globalThis.tss = [];
+           globalThis.step = function (ts) {
+               tss.push(ts);
+               if (tss.length < 3) { requestAnimationFrame(globalThis.step); }
+           };
+           globalThis.rafId = requestAnimationFrame(globalThis.step);
            globalThis.isFunction = typeof requestAnimationFrame === 'function';"#,
     );
     assert_eq!(eval_str(&mut e, "isFunction"), "true");
-    assert_eq!(eval_str(&mut e, "ticks"), "0", "no synchronous fire");
-    // Advance past the ~16ms frame period; run_due_timers drives the
-    // repeating frame callback.
+    assert_eq!(eval_str(&mut e, "tss.length"), "0", "no synchronous fire");
+    // Advance past the ~16ms frame period; run_due_timers fires the ONE due
+    // frame (one-shot semantics — the chained request lands on the next
+    // grid point and is not yet due).
     std::thread::sleep(std::time::Duration::from_millis(40));
     e.run_due_timers();
-    let after_first = eval_str(&mut e, "ticks");
-    assert!(
-        after_first != "0",
-        "frame callback fired at least once (got {after_first})"
-    );
-    // cancelAnimationFrame stops the loop.
-    eval(&mut e, "cancelAnimationFrame(rafId)");
-    let baseline = eval_str(&mut e, "ticks").parse::<u32>().unwrap_or(0);
-    std::thread::sleep(std::time::Duration::from_millis(40));
-    e.run_due_timers();
-    let after_cancel = eval_str(&mut e, "ticks").parse::<u32>().unwrap_or(0);
     assert_eq!(
-        after_cancel, baseline,
-        "no further frames after cancellation"
+        eval_str(&mut e, "tss.length"),
+        "1",
+        "exactly one frame per run"
+    );
+    // The callback received the frame's grid timestamp: a finite number,
+    // aligned to the 16ms grid, ms since session start.
+    eval(
+        &mut e,
+        "globalThis.tsCheck = typeof tss[0] === 'number' && isFinite(tss[0]) && tss[0] >= 0 && tss[0] % 16 === 0;",
+    );
+    assert_eq!(eval_str(&mut e, "tsCheck"), "true");
+    // Subsequent runs drive the chained frames; timestamps advance on the
+    // same grid (>= 16ms apart, jitter absorbed rather than accumulated).
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    e.run_due_timers();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    e.run_due_timers();
+    eval(
+        &mut e,
+        "globalThis.gridCheck = tss.length === 3 && tss[1] > tss[0] && tss[2] > tss[1] \
+         && tss[1] - tss[0] >= 16 && tss[2] - tss[1] >= 16;",
+    );
+    assert_eq!(eval_str(&mut e, "gridCheck"), "true");
+    assert_eq!(
+        eval_str(&mut e, "tss.length"),
+        "3",
+        "the chain stops when no further frame is requested"
+    );
+    // cancelAnimationFrame prevents a pending (not yet fired) frame.
+    eval(
+        &mut e,
+        "globalThis.rafId = requestAnimationFrame(function () { tss.push(999); });
+         cancelAnimationFrame(rafId);",
+    );
+    std::thread::sleep(std::time::Duration::from_millis(40));
+    e.run_due_timers();
+    assert_eq!(
+        eval_str(&mut e, "tss.length"),
+        "3",
+        "cancelled frame never fires"
     );
 }
 

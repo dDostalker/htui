@@ -56,8 +56,9 @@ pub use generic::{
 pub use head::{layout_hn, layout_meta, layout_title};
 pub use img::{layout_img, layout_img_with_rect};
 pub use layout_block::{
-    LayoutBlockOptions, OuterGeometry, block_left, build_border_rect, compute_outer_geometry,
-    constrained_block_width, layout_block, reserve_border_box, resolve_block_width,
+    LayoutBlockOptions, OuterGeometry, apply_horizontal_auto_margins, block_left,
+    build_border_rect, compute_outer_geometry, constrained_block_width, layout_block,
+    reserve_border_box, resolve_block_width,
 };
 pub use list::{layout_li, layout_menu, layout_ol, layout_ul};
 pub use table::{layout_row_group, layout_table, layout_td, layout_th, layout_tr};
