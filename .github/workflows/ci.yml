@@ -249,6 +249,7 @@ jobs:
           --test layout_textarea_tests
           --test layout_form_tests
           --test layout_form_elements_tests
+          --test script_dom_api_tests
 
   test-script:
     name: Test script / events / macros
@@ -262,6 +263,7 @@ jobs:
       - name: Run area tests
         run: cargo test -p htui --locked
           --test script_loop_tests
+          --test script_dom_api_tests
           --test layout_events_tests
           --test layout_focus_tests
           --test macro_tests

@@ -1149,7 +1149,16 @@ fn spawn_script_with_ui(
     let (tx, rx) = mpsc::channel::<ScriptMsg>();
     let (out_tx, out_rx) = mpsc::channel::<ScriptResponse>();
     let handle = std::thread::spawn(move || {
-        run_script_thread(document, bindings, Arc::from(""), rx, out_tx, hit_map, ui)
+        run_script_thread(
+            document,
+            bindings,
+            Arc::from(""),
+            rx,
+            out_tx,
+            hit_map,
+            ui,
+            Arc::new(Mutex::new(String::new())),
+        )
     });
     (tx, out_rx, handle)
 }

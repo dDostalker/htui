@@ -31,9 +31,9 @@ use super::{
         native_query_selector_all,
     },
     view::{
-        native_add_window_event_listener, native_inner_height, native_inner_width,
-        native_match_media, native_remove_window_event_listener, native_scroll_by,
-        native_scroll_to, native_scroll_y,
+        native_add_window_event_listener, native_get_active_element, native_get_selection,
+        native_inner_height, native_inner_width, native_match_media,
+        native_remove_window_event_listener, native_scroll_by, native_scroll_to, native_scroll_y,
     },
     with_state,
 };
@@ -182,6 +182,23 @@ pub(crate) fn install_builtins(context: &mut Context) -> JsResult<()> {
         false,
         context,
     )?;
+    doc_obj.set(
+        js_string!("getSelection"),
+        js_fn(context, NativeFunction::from_fn_ptr(native_get_selection)),
+        false,
+        context,
+    )?;
+    {
+        let desc = PropertyDescriptorBuilder::new()
+            .get(js_fn(
+                context,
+                NativeFunction::from_fn_ptr(native_get_active_element),
+            ))
+            .enumerable(true)
+            .configurable(true)
+            .build();
+        doc_obj.define_property_or_throw(js_string!("activeElement"), desc, context)?;
+    }
     context.register_global_property(js_string!("document"), document, Attribute::all())?;
 
     // console
@@ -317,6 +334,11 @@ pub(crate) fn install_builtins(context: &mut Context) -> JsResult<()> {
         let global = context.global_object();
         global.define_property_or_throw(js_string!(name), desc, context)?;
     }
+    context.register_global_builtin_callable(
+        js_string!("getSelection"),
+        0,
+        NativeFunction::from_fn_ptr(native_get_selection),
+    )?;
     for (name, native) in [
         (
             "matchMedia",

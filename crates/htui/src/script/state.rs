@@ -1,14 +1,15 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use boa_engine::{Context, JsError};
 
 use crate::{
-    events::HtmlEvent,
+    events::{HitMap, HtmlEvent, SharedHitMap},
     resources::AsyncResult,
     source::SharedSourceText,
     tdom::node::{NodeArena, NodeId},
@@ -108,27 +109,55 @@ thread_local! {
     /// `window.innerWidth` / `innerHeight` / `scrollY`; unset (direct
     /// `ScriptEngine::new` in tests) reads as zeros.
     static UI_STATE: RefCell<Option<std::sync::Arc<SharedUiState>>> = const { RefCell::new(None) };
+    /// The latest hit map channel (set on the script thread by
+    /// `run_script_thread`). Geometry-read natives (`getBoundingClientRect`
+    /// & co) read it; the inner snapshot is replaced by the hit-test thread
+    /// after every layout, so it is locked on each read. Unset (direct
+    /// `ScriptEngine::new`) reads as zeros.
+    static HIT_MAP: RefCell<Option<SharedHitMap>> = const { RefCell::new(None) };
+    /// The current page selection text (set on the script thread by
+    /// `run_script_thread`, refreshed by the render thread). Read by
+    /// `window.getSelection()`; unset reads as empty.
+    static SELECTION_TEXT: RefCell<Option<std::sync::Arc<Mutex<String>>>> =
+        const { RefCell::new(None) };
 }
 
 /// Terminal UI state the input loop owns but JS needs to read: the viewport
-/// in cells and the page scroll offset. Shared as `Arc` (the input loop and
-/// the script thread hold clones) and updated with relaxed atomics — the
-/// values are advisory for scripts, never used for synchronization.
+/// in cells, the page scroll offset and the focused input's node id. Shared
+/// as `Arc` (the input loop and the script thread hold clones) and updated
+/// with relaxed atomics — the values are advisory for scripts, never used
+/// for synchronization.
 #[derive(Debug, Default)]
 pub struct SharedUiState {
     pub cols: AtomicU32,
     pub rows: AtomicU32,
     pub scroll_y: AtomicU32,
+    /// Focused field's `NodeId` opaque bits (slotmap `KeyData::as_ffi`);
+    /// `0` when nothing is focused. `document.activeElement` reads it.
+    pub focused: AtomicU64,
 }
 
 impl SharedUiState {
-    /// Snapshot the three values in one read.
+    /// Snapshot the three viewport values in one read.
     pub fn load(&self) -> (u32, u32, u32) {
         (
             self.cols.load(Ordering::Relaxed),
             self.rows.load(Ordering::Relaxed),
             self.scroll_y.load(Ordering::Relaxed),
         )
+    }
+
+    /// Publish the focused field (`None` clears it); read by
+    /// `document.activeElement`.
+    pub fn set_focused(&self, node_id: Option<NodeId>) {
+        let bits = node_id.map_or(0, |id| slotmap::Key::data(&id).as_ffi());
+        self.focused.store(bits, Ordering::Relaxed);
+    }
+
+    /// The focused field's node id, `None` when nothing is focused.
+    pub fn focused(&self) -> Option<NodeId> {
+        let bits = self.focused.load(Ordering::Relaxed);
+        (bits != 0).then(|| slotmap::KeyData::from_ffi(bits).into())
     }
 }
 
@@ -142,6 +171,51 @@ pub(crate) fn set_ui_state(ui: std::sync::Arc<SharedUiState>) {
 /// loop is attached (a bare `ScriptEngine::new` in tests).
 pub(crate) fn with_ui() -> Option<(u32, u32, u32)> {
     UI_STATE.with(|cell| cell.borrow().as_ref().map(|ui| ui.load()))
+}
+
+/// The focused-field node id bits from the shared UI state (0 = none).
+pub(crate) fn with_focused() -> u64 {
+    UI_STATE.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .map_or(0, |ui| ui.focused.load(Ordering::Relaxed))
+    })
+}
+
+/// Publish the hit map channel for the current (script) thread; geometry-read
+/// natives read it via [`with_hit_map`]. The inner snapshot keeps updating as
+/// the hit-test thread publishes new layouts.
+pub(crate) fn set_hit_map(hit_map: SharedHitMap) {
+    HIT_MAP.with(|cell| *cell.borrow_mut() = Some(hit_map));
+}
+
+/// Snapshot the latest hit map. `None` when no input loop is attached.
+pub(crate) fn with_hit_map() -> Option<std::sync::Arc<HitMap>> {
+    HIT_MAP.with(|cell| {
+        cell.borrow().as_ref().and_then(|shared| {
+            shared
+                .lock()
+                .ok()
+                .map(|guard| std::sync::Arc::clone(&guard))
+        })
+    })
+}
+
+/// Publish the selection text channel for the current (script) thread;
+/// `window.getSelection()` reads it via [`selection_text`].
+pub(crate) fn set_selection_text(text: std::sync::Arc<Mutex<String>>) {
+    SELECTION_TEXT.with(|cell| *cell.borrow_mut() = Some(text));
+}
+
+/// Snapshot the current selection text (empty when nothing is selected or no
+/// input loop is attached).
+pub(crate) fn selection_text() -> String {
+    SELECTION_TEXT.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .and_then(|text| text.lock().ok().map(|guard| guard.clone()))
+            .unwrap_or_default()
+    })
 }
 
 /// Engine pieces produced by a successful build: the Boa context and the

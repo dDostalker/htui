@@ -46,6 +46,10 @@ pub(crate) fn make_event_object(
         .property(js_string!("y"), y as f64, Attribute::all())
         .property(js_string!("bubbles"), true, Attribute::all())
         .property(js_string!("defaultPrevented"), false, Attribute::all())
+        // Engine-dispatched events are trusted; JS-constructed ones
+        // (`new Event(...)`) carry `isTrusted: false` instead (see
+        // `build_event_object`).
+        .property(js_string!("isTrusted"), true, Attribute::all())
         .property(
             js_string!("_stopped"),
             false,
@@ -888,6 +892,12 @@ fn build_event_object(
     )?;
     obj.set(
         js_string!("defaultPrevented"),
+        JsValue::from(false),
+        false,
+        context,
+    )?;
+    obj.set(
+        js_string!("isTrusted"),
         JsValue::from(false),
         false,
         context,

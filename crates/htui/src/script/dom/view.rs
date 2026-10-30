@@ -15,9 +15,11 @@ use boa_engine::{
 };
 
 use crate::html::css_parse::{Viewport, parse_media_query_list};
+use crate::layout::Rect;
+use crate::tdom::node::NodeId;
 use crate::tui::graph_api::{RenderCmd, ScrollIntoViewBlock, ScrollTarget};
 
-use super::super::with_ui;
+use super::super::{selection_text, with_focused, with_hit_map, with_ui};
 use super::{js_fn, this_node_id};
 
 /// Registry key holding the window-level listeners.
@@ -216,6 +218,278 @@ pub(crate) fn native_scroll_by(
         push_page_scroll(to, smooth);
     }
     Ok(JsValue::undefined())
+}
+
+// ============================================================
+// element geometry reads
+// ============================================================
+
+/// The published geometry of one node: the union of every box it laid out,
+/// the first box's client rect, and its scrollbar state when the node is an
+/// active scroll container. All rects are document (canvas) coordinates in
+/// terminal cells.
+struct NodeGeometry {
+    rect: Rect,
+    client: Rect,
+    scroll: Option<crate::events::ScrollbarRegion>,
+}
+
+/// Union of two rects covering both.
+fn union_rects(a: Rect, b: Rect) -> Rect {
+    let x = a.x.min(b.x);
+    let y = a.y.min(b.y);
+    Rect {
+        x,
+        y,
+        width: (a.x + a.width).max(b.x + b.width).saturating_sub(x),
+        height: (a.y + a.height).max(b.y + b.height).saturating_sub(y),
+    }
+}
+
+/// Snapshot `node_id`'s geometry from the latest hit map. `None` when no
+/// input loop is attached or the node laid out no boxes (unknown / display
+/// none / detached).
+fn node_geometry(node_id: NodeId) -> Option<NodeGeometry> {
+    let hit_map = with_hit_map()?;
+    let mut rect: Option<Rect> = None;
+    let mut client: Option<Rect> = None;
+    for region in hit_map.iter().filter(|r| r.node_id == node_id) {
+        rect = Some(match rect {
+            Some(prev) => union_rects(prev, region.rect),
+            None => region.rect,
+        });
+        if client.is_none() {
+            client = Some(region.client);
+        }
+    }
+    let rect = rect?;
+    Some(NodeGeometry {
+        rect,
+        client: client.unwrap_or(rect),
+        scroll: hit_map.scrollbars.get(&node_id).copied(),
+    })
+}
+
+/// The page scroll offset (viewport y = document y − scroll offset).
+fn scroll_y() -> u32 {
+    with_ui().map_or(0, |(_, _, sy)| sy)
+}
+
+/// `element.getBoundingClientRect()` — the union of the element's laid-out
+/// boxes as `{x, y, width, height, top, right, bottom, left}` in terminal
+/// cells. `y`/`top` are viewport coordinates (document minus page scroll);
+/// boxes scrolled above the viewport read as 0 (unsigned cell space).
+pub(crate) fn native_get_bounding_client_rect(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let mut init = ObjectInitializer::new(context);
+    if let Some(geo) = node_geometry(node_id) {
+        let top = geo.rect.y.saturating_sub(scroll_y() as usize);
+        let x = f64::from(geo.rect.x as u32);
+        let y = f64::from(top as u32);
+        let w = f64::from(geo.rect.width as u32);
+        let h = f64::from(geo.rect.height as u32);
+        init.property(js_string!("x"), x, Attribute::all());
+        init.property(js_string!("y"), y, Attribute::all());
+        init.property(js_string!("width"), w, Attribute::all());
+        init.property(js_string!("height"), h, Attribute::all());
+        init.property(js_string!("top"), y, Attribute::all());
+        init.property(js_string!("left"), x, Attribute::all());
+        init.property(js_string!("right"), x + w, Attribute::all());
+        init.property(js_string!("bottom"), y + h, Attribute::all());
+    } else {
+        for name in [
+            "x", "y", "width", "height", "top", "right", "bottom", "left",
+        ] {
+            init.property(js_string!(name), 0.0, Attribute::all());
+        }
+    }
+    Ok(init.build().into())
+}
+
+/// Shared numeric getter over the node's client box (`clientWidth` /
+/// `clientHeight`) or its border inset (`clientTop` / `clientLeft`).
+fn client_metric(node_id: NodeId, pick: fn(&NodeGeometry) -> f64) -> f64 {
+    node_geometry(node_id).map_or(0.0, |g| pick(&g))
+}
+
+pub(crate) fn native_get_client_width(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    Ok(client_metric(node_id, |g| f64::from(g.client.width as u32)).into())
+}
+
+pub(crate) fn native_get_client_height(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    Ok(client_metric(node_id, |g| f64::from(g.client.height as u32)).into())
+}
+
+pub(crate) fn native_get_client_top(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    Ok(client_metric(node_id, |g| {
+        f64::from(g.client.y.saturating_sub(g.rect.y) as u32)
+    })
+    .into())
+}
+
+pub(crate) fn native_get_client_left(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    Ok(client_metric(node_id, |g| {
+        f64::from(g.client.x.saturating_sub(g.rect.x) as u32)
+    })
+    .into())
+}
+
+pub(crate) fn native_get_scroll_top(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    Ok(f64::from(
+        node_geometry(node_id)
+            .and_then(|g| g.scroll)
+            .map_or(0, |s| s.scroll_y),
+    )
+    .into())
+}
+
+/// `element.scrollTop = n` — re-scroll an active native scroll container
+/// (clamped to its live maximum); a no-op on non-scrolling elements.
+pub(crate) fn native_set_scroll_top(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let value = args.first().cloned().unwrap_or_else(JsValue::undefined);
+    let to = clamp_cell(value.to_number(context).unwrap_or(0.0));
+    if let Some(geo) = node_geometry(node_id)
+        && let Some(scroll) = geo.scroll
+    {
+        push_scroll_cmd(RenderCmd::RenderScroll {
+            node_id,
+            scroll_y: to.min(scroll.max_scroll),
+        });
+    }
+    Ok(JsValue::undefined())
+}
+
+pub(crate) fn native_get_scroll_left(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let _ = this_node_id(this, context)?;
+    // Horizontal container scrolling is not implemented yet (the x axis is
+    // read-only zero until then, like `window.scrollX`).
+    Ok(0.0.into())
+}
+
+pub(crate) fn native_get_scroll_height(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let value = node_geometry(node_id).map_or(0.0, |g| {
+        f64::from(
+            g.scroll
+                .map_or(g.rect.height, |s| s.content_height as usize) as u32,
+        )
+    });
+    Ok(value.into())
+}
+
+pub(crate) fn native_get_scroll_width(
+    this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    Ok(node_geometry(node_id)
+        .map_or(0.0, |g| f64::from(g.rect.width as u32))
+        .into())
+}
+
+/// `document.activeElement` — the focused `<input>` / `<textarea>` wrapper,
+/// or `null`. Reads the input loop's shared focus snapshot; before the first
+/// focus it is `null`.
+pub(crate) fn native_get_active_element(
+    _this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let bits = with_focused();
+    if bits == 0 {
+        return Ok(JsValue::null());
+    }
+    super::node_wrapper(context, super::u64_to_node_id(bits))
+}
+
+// ============================================================
+// selection
+// ============================================================
+
+/// `window.getSelection()` / `document.getSelection()` — a minimal Selection
+/// snapshot over the engine's page selection: `isCollapsed`, `rangeCount`,
+/// `anchorNode` / `focusNode` (always `null` — the engine selection is
+/// canvas-space, not node-anchored) and `toString()`.
+pub(crate) fn native_get_selection(
+    _this: &JsValue,
+    _args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let text = selection_text();
+    let collapsed = text.is_empty();
+    let mut init = ObjectInitializer::new(context);
+    init.property(
+        js_string!("rangeCount"),
+        if collapsed { 0 } else { 1 },
+        Attribute::all(),
+    );
+    init.property(js_string!("isCollapsed"), collapsed, Attribute::all());
+    init.property(js_string!("anchorNode"), JsValue::null(), Attribute::all());
+    init.property(js_string!("focusNode"), JsValue::null(), Attribute::all());
+    let obj = init.build();
+    obj.set(
+        js_string!("toString"),
+        js_fn(
+            context,
+            NativeFunction::from_fn_ptr(native_selection_to_string),
+        ),
+        false,
+        context,
+    )?;
+    Ok(obj.into())
+}
+
+/// `Selection.toString()` — the selected text snapshot, read fresh on every
+/// call.
+pub(crate) fn native_selection_to_string(
+    _this: &JsValue,
+    _args: &[JsValue],
+    _context: &mut Context,
+) -> JsResult<JsValue> {
+    Ok(js_string!(selection_text()).into())
 }
 
 // ============================================================

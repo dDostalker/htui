@@ -14,6 +14,7 @@
 //! both paths are guaranteed to behave identically.
 
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::Duration;
 
@@ -26,7 +27,7 @@ use crate::events::{
 use crate::html::html_parse::ParsedDocument;
 use crate::layout::Rect;
 use crate::script::ScriptEngine;
-use crate::script::{SharedUiState, set_ui_state};
+use crate::script::{SharedUiState, set_hit_map, set_selection_text, set_ui_state};
 use crate::source::SharedSourceText;
 use crate::tdom::node::{NodeArena, NodeId, NodeType, SharedNodeArena};
 use crate::tui::graph_api::{DirtyInfo, RenderCmd};
@@ -520,8 +521,10 @@ pub fn apply_message(
 ///
 /// Build the engine, run top-level scripts, then handle `ScriptMsg` requests,
 /// timers, and fetches until `Quit` or channel disconnect. `ui` is the
-/// input loop's shared UI state (viewport / scroll offset) that the
-/// `window.innerWidth` & co getters read.
+/// input loop's shared UI state (viewport / scroll offset / focused field)
+/// that the `window.innerWidth` & co getters read; `hit_map` is the live
+/// hit-map channel the geometry-read natives consult; `selection_text` is
+/// the render thread's selection text `window.getSelection()` reads.
 pub fn run_script_thread(
     document: ParsedDocument,
     bindings: EventBindings,
@@ -530,8 +533,11 @@ pub fn run_script_thread(
     tx: Sender<ScriptResponse>,
     hit_map: SharedHitMap,
     ui: Arc<SharedUiState>,
+    selection_text: Arc<Mutex<String>>,
 ) {
     set_ui_state(ui);
+    set_hit_map(Arc::clone(&hit_map));
+    set_selection_text(selection_text);
     let mut engine = match ScriptEngine::new_from_document(document, &session_js, bindings) {
         Ok(engine) => engine,
         Err(err) => {
@@ -691,6 +697,7 @@ pub(crate) fn region_for(arena: &NodeArena, node_id: NodeId) -> HitRegion {
     HitRegion {
         node_id,
         rect: Rect::new(0, 0, 0, 0),
+        client: Rect::new(0, 0, 0, 0),
         path: path.into(),
     }
 }

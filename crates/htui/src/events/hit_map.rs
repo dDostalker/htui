@@ -25,6 +25,9 @@ pub struct HitRegion {
     /// regions apart within one layout session. Not stable across `Redraw`s.
     pub node_id: NodeId,
     pub rect: Rect,
+    /// The `clientWidth` / `clientHeight` box: this box's rect inset by its
+    /// own border widths (content + padding, the browser client-box rule).
+    pub client: Rect,
     /// `[self, parent, grandparent, …]` — the bubbling path.
     pub path: Arc<[ElementRef]>,
 }
@@ -132,6 +135,7 @@ impl HitMap {
             regions.push(HitRegion {
                 node_id,
                 rect,
+                client: rect,
                 path: path_of(node_id),
             });
         }
@@ -242,9 +246,23 @@ fn collect_regions(
     out: &mut Vec<HitRegion>,
     scrollbars: &mut HashMap<NodeId, ScrollbarRegion>,
 ) {
+    let rect = box_tree.rect;
+    // Client box = border box inset by the box's own border widths.
+    let border = &box_tree.paint_style.box_edges.border;
+    let client = Rect {
+        x: rect.x + border.left.width,
+        y: rect.y + border.top.width,
+        width: rect
+            .width
+            .saturating_sub(border.left.width + border.right.width),
+        height: rect
+            .height
+            .saturating_sub(border.top.width + border.bottom.width),
+    };
     out.push(HitRegion {
         node_id: box_tree.node_id,
-        rect: box_tree.rect,
+        rect,
+        client,
         path: path_of(box_tree.node_id),
     });
     if let Some(scroll) = box_tree.paint_style.scrollbar {
@@ -268,6 +286,10 @@ pub struct ScrollbarRegion {
     pub thumb: Rect,
     pub scroll_y: u32,
     pub max_scroll: u32,
+    /// Full scrollable content height in rows (`el.scrollHeight`).
+    pub content_height: u32,
+    /// Visible viewport height in rows (`el.clientHeight` of the scroller).
+    pub viewport_height: u32,
 }
 
 impl ScrollbarRegion {
@@ -278,6 +300,8 @@ impl ScrollbarRegion {
             thumb: scroll.thumb,
             scroll_y: scroll.scroll_y as u32,
             max_scroll: scroll.max_scroll as u32,
+            content_height: scroll.content_height as u32,
+            viewport_height: scroll.viewport_height as u32,
         }
     }
 

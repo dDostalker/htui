@@ -53,7 +53,7 @@ mod hit_map;
 pub mod interaction;
 
 pub use geometry::{Geometry, SharedGeometry};
-pub use hit_map::{HitMap, HitRegion, SharedHitMap};
+pub use hit_map::{HitMap, HitRegion, ScrollbarRegion, SharedHitMap};
 pub use interaction::{HoverState, on_click, on_move};
 
 /// DOM-like event types supported by the input layer.

@@ -230,7 +230,8 @@ htui/
 │   │   │   ├── render_diff_tests.rs # 帧差增量渲染（不变零输出 / 滚动 diff / 全帧对比）
 │   │   │   ├── macro_tests.rs       # 注册宏测试（commands/host/command(name) 自动注册，纯内存）
 │   │   │   ├── query_selector_tests.rs # querySelector/querySelectorAll 测试（document/元素作用域、组合器、无效选择器抛错，纯内存）
-│   │   │   └── script_loop_tests.rs # 脚本线程桥测试（apply_message 语义 + 阻塞宿主函数不阻塞输入，纯内存）
+│   │   │   ├── script_loop_tests.rs # 脚本线程桥测试（apply_message 语义 + 阻塞宿主函数不阻塞输入，纯内存）
+│   │   │   └── script_dom_api_tests.rs # JS 读取 API 测试（getBoundingClientRect/client*/scrollTop 写/activeElement/getSelection/isTrusted，纯内存）
 │   └── htui-macros/             # 过程宏 crate：#[htui::command]/#[htui::commands] + #[derive(IntoJs/FromJs)]
 │       ├── Cargo.toml
 │       └── src/

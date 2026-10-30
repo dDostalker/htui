@@ -72,7 +72,13 @@ pub(crate) fn node_id_to_f64(id: NodeId) -> f64 {
 
 /// Recover a `NodeId` from the `f64` stored on an element wrapper.
 pub(crate) fn f64_to_node_id(v: f64) -> NodeId {
-    slotmap::KeyData::from_ffi(v as u64).into()
+    u64_to_node_id(v as u64)
+}
+
+/// Recover a `NodeId` from its opaque slotmap bits (the shared UI state
+/// carries the focused field's id this way).
+pub(crate) fn u64_to_node_id(v: u64) -> NodeId {
+    slotmap::KeyData::from_ffi(v).into()
 }
 
 /// Read `_nodeId` off a `this` object.

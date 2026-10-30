@@ -188,11 +188,16 @@ fn run_inner(
     // script thread for the `window.innerWidth` & co getters (relaxed
     // atomics — advisory values, no synchronization).
     let ui_state = Arc::new(SharedUiState::default());
+    // Text of the current page selection, refreshed by the render thread and
+    // read by the input loop on `Ctrl+C` and `window.getSelection()` on the
+    // script thread (shared through `Arc<Mutex<_>>`).
+    let selection_text: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
     let script_thread: Option<std::thread::JoinHandle<()>> = bindings.map(|bindings| {
         let script_document = document.clone();
         let hit_map_thread = Arc::clone(&hit_map);
         let script_registry = Arc::clone(&registry);
         let ui_state_thread = Arc::clone(&ui_state);
+        let selection_text_thread = Arc::clone(&selection_text);
         std::thread::spawn(move || {
             resources::with_registry(script_registry, || {
                 run_script_thread(
@@ -203,6 +208,7 @@ fn run_inner(
                     script_out_tx,
                     hit_map_thread,
                     ui_state_thread,
+                    selection_text_thread,
                 )
             });
         })
@@ -237,9 +243,6 @@ fn run_inner(
     #[cfg(debug_assertions)]
     let mut mem_reload;
 
-    // Text of the current page selection, refreshed by the render thread and
-    // read by the input loop on `Ctrl+C` (shared through `Arc<Mutex<_>>`).
-    let selection_text: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
     // Scrollbar chrome starts hidden and is revealed by interaction. Sharing
     // the flag with the render thread makes the hide transition atomic with
     // the repaint that removes it.
@@ -484,6 +487,7 @@ fn run_inner(
         ui_state.cols.store(u32::from(columns), Ordering::Relaxed);
         ui_state.rows.store(u32::from(rows), Ordering::Relaxed);
         ui_state.scroll_y.store(state.scroll_y, Ordering::Relaxed);
+        ui_state.set_focused(state.focused_input);
         // The page scroll offset changed since the previous iteration (wheel,
         // keys, animation tick, `scrollTo`): notify the script thread so
         // `scroll` listeners run. One frame behind the paint — the detection
