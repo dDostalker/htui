@@ -159,21 +159,21 @@ pub fn layout_table(
     let caption_rows = caption_lines
         .len()
         .saturating_mul(own_font_size_cells.max(1));
-    if let (Some(cid), 0..) = (caption_id, caption_rows)
-        && caption_side == CaptionSide::Top
-    {
+    // Shared caption-box constructor for the top / bottom placements
+    // (identical chrome; only the y position and the consumed runs differ).
+    let caption_box = |cid: NodeId, y: usize, runs: Vec<Vec<InlineRun>>| {
         let cnode = &arena[cid];
         let text_align = if cnode.css_attr.is_set("text-align") {
             cnode.css_attr.get_text_align()
         } else {
             TextAlign::Center
         };
-        table_children.push(LayoutBox::new_normal(
+        LayoutBox::new_normal(
             cid,
-            Rect::new(content_x, current_y, inner_width, caption_rows),
+            Rect::new(content_x, y, inner_width, caption_rows),
             PaintStyle {
                 box_edges: crate::html::box_edges::BoxEdges::default(),
-                runs: Some(caption_lines.clone()),
+                runs: Some(runs),
                 column_layout: None,
                 font_size_cells: own_font_size_cells,
                 line_height_cells: own_font_size_cells.max(1),
@@ -182,10 +182,16 @@ pub fn layout_table(
                 spacing_after: 0,
                 text_align,
                 text_indent: 0,
+                scrollbar: None,
             },
             cnode.css_attr.outer_display(&cnode.node_type),
             Vec::new(),
-        ));
+        )
+    };
+    if caption_side == CaptionSide::Top
+        && let Some(cid) = caption_id
+    {
+        table_children.push(caption_box(cid, current_y, caption_lines.clone()));
         current_y = current_y.saturating_add(caption_rows);
     }
 
@@ -212,33 +218,10 @@ pub fn layout_table(
         current_y = current_y.saturating_add(row_height);
     }
 
-    if let (Some(cid), 0..) = (caption_id, caption_rows)
-        && caption_side == CaptionSide::Bottom
+    if caption_side == CaptionSide::Bottom
+        && let Some(cid) = caption_id
     {
-        let cnode = &arena[cid];
-        let text_align = if cnode.css_attr.is_set("text-align") {
-            cnode.css_attr.get_text_align()
-        } else {
-            TextAlign::Center
-        };
-        table_children.push(LayoutBox::new_normal(
-            cid,
-            Rect::new(content_x, current_y, inner_width, caption_rows),
-            PaintStyle {
-                box_edges: crate::html::box_edges::BoxEdges::default(),
-                runs: Some(caption_lines),
-                column_layout: None,
-                font_size_cells: own_font_size_cells,
-                line_height_cells: own_font_size_cells.max(1),
-                border_radius: crate::html::css_parse::CornerRadii::default(),
-                fill_bg: cnode.css_attr.get_bg_color().is_some(),
-                spacing_after: 0,
-                text_align,
-                text_indent: 0,
-            },
-            cnode.css_attr.outer_display(&cnode.node_type),
-            Vec::new(),
-        ));
+        table_children.push(caption_box(cid, current_y, caption_lines));
         current_y = current_y.saturating_add(caption_rows);
     }
 
@@ -276,6 +259,7 @@ pub fn layout_table(
         spacing_after: 0,
         text_align: node.css_attr.get_text_align(),
         text_indent: 0,
+        scrollbar: None,
     };
 
     let table_box = LayoutBox::new_normal(

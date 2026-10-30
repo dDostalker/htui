@@ -24,6 +24,7 @@ mod mutation;
 mod style;
 mod timers;
 mod traverse;
+mod view;
 mod wrapper;
 
 // Kept reachable for `super::dom::…` imports from engine.rs / bindings.rs /
@@ -36,6 +37,7 @@ pub(crate) use events::{
     set_attr_handler,
 };
 pub(crate) use fetch::response_object;
+pub(crate) use view::{get_window_listeners, mql_last_matches, mql_matches_now, mql_query};
 
 use boa_engine::{
     Context, JsNativeError, JsObject, JsResult, JsValue, NativeFunction, js_string,
@@ -70,7 +72,13 @@ pub(crate) fn node_id_to_f64(id: NodeId) -> f64 {
 
 /// Recover a `NodeId` from the `f64` stored on an element wrapper.
 pub(crate) fn f64_to_node_id(v: f64) -> NodeId {
-    slotmap::KeyData::from_ffi(v as u64).into()
+    u64_to_node_id(v as u64)
+}
+
+/// Recover a `NodeId` from its opaque slotmap bits (the shared UI state
+/// carries the focused field's id this way).
+pub(crate) fn u64_to_node_id(v: u64) -> NodeId {
+    slotmap::KeyData::from_ffi(v).into()
 }
 
 /// Read `_nodeId` off a `this` object.
@@ -137,18 +145,17 @@ pub(super) fn wrapper_is_cached(context: &mut Context, node_id: NodeId) -> JsRes
 // Helpers
 // ============================================================
 
-/// Concatenate all descendant `Text` nodes of `node_id` (browser `textContent`).
+/// Concatenate all descendant `Text` nodes of `node_id` (browser
+/// `textContent`). A text node's own data is included — the browser returns
+/// it for `textContent` on the node itself — so this wraps
+/// [`Node::text_content`](crate::tdom::node::Node::text_content) (descendants
+/// only) with the self case.
 fn collect_text(arena: &NodeArena, node_id: NodeId) -> String {
-    let mut out = String::new();
-    let mut stack = vec![node_id];
-    while let Some(id) = stack.pop() {
-        let Some(node) = arena.get(id) else { continue };
-        if node.node_type == NodeType::Text
-            && let Some(s) = &node.data
-        {
-            out.push_str(s);
-        }
-        stack.extend(node.children.iter().rev().copied());
+    let Some(node) = arena.get(node_id) else {
+        return String::new();
+    };
+    if node.node_type == NodeType::Text {
+        return node.data.clone().unwrap_or_default();
     }
-    out
+    node.text_content(arena)
 }

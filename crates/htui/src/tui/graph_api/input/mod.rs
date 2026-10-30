@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use compact_str::CompactString;
 
@@ -12,6 +14,7 @@ mod key_info;
 mod mouse;
 mod page;
 mod refresh;
+mod scroll_anim;
 mod select;
 
 pub use cmd::{DirtyInfo, DrainedBatch, RenderCmd, SelectionMode};
@@ -25,12 +28,20 @@ pub use field::{
 pub use focus::apply_focus_requests;
 pub use key_info::key_event_info;
 pub use mouse::{handle_click, handle_mouse_down, handle_mouse_move, handle_mouse_up};
-pub use refresh::trigger_refresh;
+pub use refresh::{default_wheel_scroll, trigger_refresh};
+pub use scroll_anim::{
+    ANIM_POLL_MS, ScrollAnim, ScrollIntoViewBlock, ScrollTarget, active_scroll_target,
+    ease_out_cubic, scroll_anim_duration, scroll_into_view_target, step_target,
+};
 pub use select::{OverlayKind, SelectOpenState};
 
 use field::clear_text_selection;
 
 const SCROLL_LINES_PER_TICK: u32 = 3;
+const SCROLLBAR_VISIBLE_FOR: Duration = Duration::from_millis(900);
+
+/// Shared visible-scrollbar set. A missing node is hidden.
+pub type SharedScrollbarVisibility = Arc<Mutex<HashMap<NodeId, bool>>>;
 const ZOOM_STEP: f32 = 0.1;
 const ZOOM_MIN: f32 = 0.2;
 const ZOOM_MAX: f32 = 5.0;
@@ -51,6 +62,19 @@ const TEXT_SEL_DRAG_THRESHOLD: u32 = 2;
 #[derive(Debug)]
 pub struct InputState {
     pub scroll_y: u32,
+    /// Current offsets for native scroll containers.
+    pub scroll_offsets: HashMap<NodeId, u32>,
+    /// Current horizontal offsets for native `overflow-x` containers.
+    pub scroll_x_offsets: HashMap<NodeId, u32>,
+    /// Active eased scroll animation (`None` = none). Wheel and page-jump
+    /// input glides toward its target through this state; any direct scroll
+    /// write (arrow keys, scrollbar drag) cancels it.
+    pub scroll_anim: Option<ScrollAnim>,
+    /// Per-container scrollbar visibility shared with the render thread. A
+    /// missing node is hidden; geometry remains hittable while chrome is off.
+    pub scrollbars_visible: SharedScrollbarVisibility,
+    /// Per-container wall-clock deadlines after which the shared flag clears.
+    pub scrollbar_hide_at: HashMap<NodeId, Instant>,
     pub zoom: f32,
     /// Screen coordinates of the last left-button press; a click is only
     /// recognised when the release lands on the same cell.
@@ -61,6 +85,8 @@ pub struct InputState {
     /// Whether the focused node is a `<textarea>` (multi-line editing:
     /// Enter inserts a newline, ↑/↓ move the caret, click maps to rows).
     pub focused_is_textarea: bool,
+    /// Whether the focused node is a discrete `<input type=range>` slider.
+    pub focused_is_range: bool,
     /// Edit buffer of the focused input; the DOM `value` attribute is the
     pub input_value: CompactString,
     /// Caret position in [`InputState::input_value`] (character index).
@@ -77,6 +103,26 @@ pub struct InputState {
     /// Whether the pointer is mid-drag inside a focused `<input>` (mouse
     /// selection as opposed to a plain click).
     pub drag_selecting: bool,
+    /// Screen cell where the active press began. Unlike `pressed`, this is
+    /// not advanced by drag motion; click thresholding uses this origin.
+    press_screen: Option<(u16, u16)>,
+    /// Canvas cell where the active drag began (or will begin once motion
+    /// crosses the threshold). Field and page selection share this stable
+    /// anchor so intermediate moves never shift the origin.
+    drag_origin: Option<(u32, u32)>,
+    /// Whether the in-field drag has passed the shared click/drag threshold.
+    /// Before this, pointer motion remains a jittery click; at/after it the
+    /// field selection follows the pointer.
+    field_drag_started: bool,
+    /// Whether the active press resolved to an actionable click target.
+    /// Disabled controls and scrollbar/dropdown-only presses leave it clear.
+    pressed_target: Option<NodeId>,
+    /// Native scrollbar thumb currently dragged: owning node + grab offset.
+    /// The axis flag selects the vertical track or the bottom horizontal one.
+    pub scroll_drag: Option<(NodeId, u32)>,
+    /// Grab offset of the active horizontal scrollbar drag (set alongside
+    /// [`Self::scroll_drag`]).
+    pub scroll_drag_x: Option<u32>,
     /// Screen coordinates of the last pointer event (any button state). Lets
     /// the run loop re-validate hover against a freshly rebuilt hit map after
     /// a viewport change by synthesising a `Move` at the known position.
@@ -85,6 +131,7 @@ pub struct InputState {
     /// run loop re-validates the pointer hover once the rebuilt hit map is in
     /// place (consumed by [`InputState::take_resize_revalidation`]).
     pub resize_pending: bool,
+    pub pointer_revalidation: bool,
     /// Canvas-space anchor of the page text selection (start point; `None`
     /// when no text selection is active).
     pub text_sel_anchor: Option<(u32, u32)>,
@@ -103,6 +150,9 @@ pub struct InputState {
     /// over page content never starts a selection (and `Ctrl+C` copies
     /// nothing).
     pub copy_flow: bool,
+    /// Whether wheel and page-jump scrolling glides (`Config`'s
+    /// `smooth_scroll`); when `false` those inputs scroll instantly.
+    pub smooth_scroll: bool,
     /// Whether the block (right-drag) rectangle selection + copy is enabled.
     /// Seeded from [`Config`](crate::config::Config); when `false` a right
     /// drag never starts a rectangle selection (and `Ctrl+C` copies nothing).
@@ -123,34 +173,115 @@ pub struct InputState {
     /// `keydown` gate verdict (`None` = no key pending). Set by
     /// [`trigger_refresh`], consumed by the run loop after the wait.
     pub key_gate: Option<KeyGate>,
+    /// A wheel tick waiting for its gated `wheel` verdict. When the verdict
+    /// clears (no `preventDefault()`), [`Self::pending_wheel`] re-runs the
+    /// built-in container / page scroll for that tick.
+    pub wheel_gate: Option<KeyGate>,
+    /// Coordinates + direction of the wheel tick held behind
+    /// [`Self::wheel_gate`] (the default scroll runs only when not
+    /// prevented).
+    pub pending_wheel: Option<(u32, u32, bool)>,
+    /// Time + cell of the last synthesized click (double-click detection:
+    /// a second click on the same cell within 500 ms emits `DblClick`).
+    pub last_click: Option<(Instant, u32, u32)>,
+    /// The input loop's shared UI state (viewport / scroll / focus atomics
+    /// plus the `wheel`-listener flag the wheel path gates on). `None` in
+    /// bare-test states without a run loop.
+    pub ui: Option<Arc<crate::script::SharedUiState>>,
 }
+
+/// Two clicks on the same cell within this window are a double click.
+const DBLCLICK_MS: u128 = 500;
 
 impl InputState {
     /// Create the default input state (top of page, 100% zoom, no focus or selection).
     pub fn new() -> Self {
         Self {
             scroll_y: 0,
+            scroll_offsets: HashMap::new(),
+            scroll_x_offsets: HashMap::new(),
+            scroll_anim: None,
+            scrollbars_visible: Arc::new(Mutex::new(HashMap::new())),
+            scrollbar_hide_at: HashMap::new(),
             zoom: 1.0,
             pressed: None,
             focused_input: None,
             focused_is_textarea: false,
+            focused_is_range: false,
             input_value: CompactString::new(""),
             input_cursor: 0,
             input_sel_anchor: None,
             input_clipboard: String::new(),
             drag_selecting: false,
+            press_screen: None,
+            drag_origin: None,
+            field_drag_started: false,
+            pressed_target: None,
+            scroll_drag: None,
+            scroll_drag_x: None,
             last_mouse: None,
             resize_pending: false,
+            pointer_revalidation: false,
             text_sel_anchor: None,
             text_sel_end: None,
             text_sel_mode: SelectionMode::Flow,
             text_sel_armed: false,
             copy_flow: true,
+            smooth_scroll: true,
             copy_block: true,
             selection_text: Arc::new(Mutex::new(String::new())),
             open_select: None,
             next_key_id: 0,
             key_gate: None,
+            wheel_gate: None,
+            pending_wheel: None,
+            last_click: None,
+            ui: None,
+        }
+    }
+
+    /// Make one scrollbar visible and restart only its auto-hide deadline.
+    ///
+    /// Visibility is shared with the render thread so the reveal is atomic with
+    /// the frame that draws the changed chrome.
+    pub fn show_scrollbar(&mut self, node_id: NodeId) {
+        if let Ok(mut visible) = self.scrollbars_visible.lock() {
+            visible.insert(node_id, true);
+        }
+        self.scrollbar_hide_at
+            .insert(node_id, Instant::now() + SCROLLBAR_VISIBLE_FOR);
+    }
+
+    /// Clear expired deadlines and return the ids whose visibility changed.
+    /// The caller must emit a repaint covering those scroll containers.
+    pub fn take_expired_scrollbar_visibility(&mut self) -> Vec<NodeId> {
+        let now = Instant::now();
+        let expired: Vec<NodeId> = self
+            .scrollbar_hide_at
+            .iter()
+            .filter(|(_, deadline)| **deadline <= now)
+            .map(|(node_id, _)| *node_id)
+            .collect();
+        if expired.is_empty() {
+            return expired;
+        }
+        for node_id in &expired {
+            self.scrollbar_hide_at.remove(node_id);
+        }
+        if let Ok(mut visible) = self.scrollbars_visible.lock() {
+            for node_id in &expired {
+                visible.insert(*node_id, false);
+            }
+        }
+        expired
+    }
+
+    /// Clear the auto-hide state immediately. Used when replaced document node
+    /// ids make previous reveal state stale.
+    pub fn hide_scrollbars(&mut self) {
+        self.scrollbar_hide_at.clear();
+        if let Ok(mut visible) = self.scrollbars_visible.lock() {
+            visible.clear();
         }
     }
 
@@ -161,8 +292,16 @@ impl InputState {
     /// dropdown overlay would highlight or paint stale cells. Resets that
     /// state and emits the render commands that clear the render-side mirrors.
     pub fn invalidate_viewport(&mut self, cmds: &mut Vec<RenderCmd>) {
-        self.pressed = None;
-        self.drag_selecting = false;
+        self.clear_press_tracking();
+        // A resize re-lays out every container, so a container-targeted glide
+        // would keep scrolling by stale geometry; it is cancelled. A page
+        // glide survives — the viewport offset stays meaningful across a
+        // re-layout.
+        if let Some(anim) = &self.scroll_anim
+            && matches!(anim.target(), ScrollTarget::Container(_))
+        {
+            self.scroll_anim = None;
+        }
         clear_text_selection(self, cmds);
         if let Some(open) = self.open_select.take() {
             cmds.push(RenderCmd::SelectClose {
@@ -175,17 +314,21 @@ impl InputState {
     ///
     /// A whole-document reload (hot reload or `ScriptMsg::ReloadHtml`)
     /// replaces the arena, so focused-field edit buffers, an open dropdown,
-    /// drag state and page-selection coordinates must not survive. Scroll,
-    /// zoom, clipboard and the last pointer position do survive; the latter is
-    /// reused to re-validate hover against the fresh hit map.
+    /// drag state, an active scroll animation and page-selection coordinates
+    /// must not survive. Scroll, zoom, clipboard and the last pointer position
+    /// do survive; the latter is reused to re-validate hover against the fresh
+    /// hit map.
     pub fn reset_document_state(&mut self, cmds: &mut Vec<RenderCmd>) {
-        self.pressed = None;
+        self.clear_press_tracking();
+        self.scroll_offsets.clear();
+        self.scroll_anim = None;
+        self.hide_scrollbars();
         self.focused_input = None;
         self.focused_is_textarea = false;
+        self.focused_is_range = false;
         self.input_value = CompactString::new("");
         self.input_cursor = 0;
         self.input_sel_anchor = None;
-        self.drag_selecting = false;
         clear_text_selection(self, cmds);
         if let Some(open) = self.open_select.take() {
             cmds.push(RenderCmd::SelectClose {
@@ -195,6 +338,20 @@ impl InputState {
         self.request_resize_revalidation();
     }
 
+    /// Clear every field that tracks the active press / drag: the press
+    /// marker, drag anchors, the resolved click target and the scrollbar
+    /// grab. Shared by viewport invalidation, document reload and stale-press
+    /// drops so no reset site can miss a field.
+    fn clear_press_tracking(&mut self) {
+        self.pressed = None;
+        self.drag_selecting = false;
+        self.press_screen = None;
+        self.drag_origin = None;
+        self.field_drag_started = false;
+        self.pressed_target = None;
+        self.scroll_drag = None;
+    }
+
     /// Drop a press whose release was never received: a button-free `Moved`
     /// event proves no button is held, so any recorded press is stale. Without
     /// this, a lost release (e.g. the console dropping the `Up` during a
@@ -202,7 +359,7 @@ impl InputState {
     /// events would stay silent forever. Returns whether a press was dropped.
     pub fn drop_stale_press(&mut self) -> bool {
         if self.pressed.take().is_some() {
-            self.drag_selecting = false;
+            self.clear_press_tracking();
             true
         } else {
             false
@@ -221,6 +378,20 @@ impl InputState {
     /// fresh hit map.
     pub fn take_resize_revalidation(&mut self) -> bool {
         std::mem::take(&mut self.resize_pending)
+    }
+
+    /// Remember that a pointer move was dropped; the run loop re-synthesises
+    /// a `Move` at [`InputState::last_mouse`] (see
+    /// [`InputState::take_pointer_revalidation`]).
+    pub fn request_pointer_revalidation(&mut self) {
+        self.pointer_revalidation = true;
+    }
+
+    /// Consume the pending dropped-move flag; `true` when the run loop
+    /// should synthesise a `Move` at [`InputState::last_mouse`] so the
+    /// script thread hover state converges on the pointer true position.
+    pub fn take_pointer_revalidation(&mut self) -> bool {
+        std::mem::take(&mut self.pointer_revalidation)
     }
 
     /// Mirror the render thread's scroll clamp: after a terminal grow / a
@@ -277,3 +448,33 @@ pub(crate) fn reapply_console_modes() {
 /// Non-Windows resize does not touch the terminal modes; nothing to re-apply.
 #[cfg(not(windows))]
 pub(crate) fn reapply_console_modes() {}
+
+#[cfg(test)]
+mod scrollbar_visibility_tests {
+    use slotmap::Key;
+    use std::time::Duration;
+
+    use super::*;
+
+    #[test]
+    fn expired_scrollbar_visibility_transitions_once() {
+        let mut state = InputState::new();
+        let node_id = NodeId::null();
+
+        state.show_scrollbar(node_id);
+        assert_eq!(
+            state.scrollbars_visible.lock().unwrap().get(&node_id),
+            Some(&true)
+        );
+
+        state
+            .scrollbar_hide_at
+            .insert(node_id, Instant::now() - Duration::from_millis(1));
+        assert_eq!(state.take_expired_scrollbar_visibility(), vec![node_id]);
+        assert_eq!(
+            state.scrollbars_visible.lock().unwrap().get(&node_id),
+            Some(&false)
+        );
+        assert!(state.take_expired_scrollbar_visibility().is_empty());
+    }
+}

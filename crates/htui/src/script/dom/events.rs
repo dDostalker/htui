@@ -46,6 +46,10 @@ pub(crate) fn make_event_object(
         .property(js_string!("y"), y as f64, Attribute::all())
         .property(js_string!("bubbles"), true, Attribute::all())
         .property(js_string!("defaultPrevented"), false, Attribute::all())
+        // Engine-dispatched events are trusted; JS-constructed ones
+        // (`new Event(...)`) carry `isTrusted: false` instead (see
+        // `build_event_object`).
+        .property(js_string!("isTrusted"), true, Attribute::all())
         .property(
             js_string!("_stopped"),
             false,
@@ -240,7 +244,12 @@ pub(super) fn native_add_event_listener(
     // `dispatchEvent` on a CustomEvent type reaches its listeners, like a
     // browser's open event-type namespace.
     match parse_event_type(args.first(), context) {
-        Ok(event_type) => add_listener(context, node_id, event_type, fn_val)?,
+        Ok(event_type) => {
+            if event_type == EventType::Wheel {
+                crate::script::note_wheel_listener();
+            }
+            add_listener(context, node_id, event_type, fn_val)?
+        }
         Err(_) => add_listener_by_name(context, node_id, &type_name, fn_val)?,
     }
     Ok(JsValue::undefined())
@@ -322,6 +331,9 @@ fn event_type_str(et: EventType) -> &'static str {
         EventType::Click => "click",
         EventType::MouseOver => "mouseover",
         EventType::MouseOut => "mouseout",
+        EventType::MouseDown => "mousedown",
+        EventType::MouseUp => "mouseup",
+        EventType::MouseMove => "mousemove",
         EventType::Focus => "focus",
         EventType::Blur => "blur",
         EventType::Input => "input",
@@ -332,8 +344,49 @@ fn event_type_str(et: EventType) -> &'static str {
         EventType::Reset => "reset",
         EventType::Toggle => "toggle",
         EventType::Close => "close",
+        EventType::Resize => "resize",
+        EventType::Scroll => "scroll",
+        EventType::SelectionChange => "selectionchange",
+        EventType::DblClick => "dblclick",
+        EventType::Wheel => "wheel",
+        EventType::ContextMenu => "contextmenu",
+        EventType::MouseEnter => "mouseenter",
+        EventType::MouseLeave => "mouseleave",
+        EventType::DomContentLoaded => "DOMContentLoaded",
+        EventType::Load => "load",
     }
 }
+
+/// Every [`EventType`] variant — the enumeration [`parse_event_type`] walks.
+/// A new variant must be added here alongside its [`event_type_str`] arm.
+const ALL_EVENT_TYPES: &[EventType] = &[
+    EventType::Click,
+    EventType::MouseOver,
+    EventType::MouseOut,
+    EventType::MouseDown,
+    EventType::MouseUp,
+    EventType::MouseMove,
+    EventType::Focus,
+    EventType::Blur,
+    EventType::Input,
+    EventType::Change,
+    EventType::KeyDown,
+    EventType::KeyUp,
+    EventType::Submit,
+    EventType::Reset,
+    EventType::Toggle,
+    EventType::Close,
+    EventType::Resize,
+    EventType::Scroll,
+    EventType::SelectionChange,
+    EventType::DblClick,
+    EventType::Wheel,
+    EventType::ContextMenu,
+    EventType::MouseEnter,
+    EventType::MouseLeave,
+    EventType::DomContentLoaded,
+    EventType::Load,
+];
 
 pub(crate) fn parse_event_type(
     arg: Option<&JsValue>,
@@ -345,22 +398,19 @@ pub(crate) fn parse_event_type(
             .into());
     };
     let s = arg.to_string(context)?.to_std_string_lossy();
-    match s.as_str() {
-        "click" => Ok(EventType::Click),
-        "mouseover" => Ok(EventType::MouseOver),
-        "mouseout" => Ok(EventType::MouseOut),
-        "focus" => Ok(EventType::Focus),
-        "blur" => Ok(EventType::Blur),
-        "input" => Ok(EventType::Input),
-        "change" => Ok(EventType::Change),
-        "submit" => Ok(EventType::Submit),
-        "reset" => Ok(EventType::Reset),
-        "toggle" => Ok(EventType::Toggle),
-        "close" => Ok(EventType::Close),
-        other => Err(JsNativeError::typ()
-            .with_message(format!("unsupported event type `{other}`"))
-            .into()),
-    }
+    // Inverse lookup of [`event_type_str`]: the name table above is the
+    // single source, so a variant cannot gain a string without becoming
+    // parseable (the hand-written parse table used to lag behind it —
+    // `keydown` / `keyup` were unparseable).
+    ALL_EVENT_TYPES
+        .iter()
+        .copied()
+        .find(|et| event_type_str(*et) == s)
+        .ok_or_else(|| {
+            JsNativeError::typ()
+                .with_message(format!("unsupported event type `{s}`"))
+                .into()
+        })
 }
 
 /// Register a JS listener for `(node, event_type)` in the JS-side registry.
@@ -861,6 +911,12 @@ fn build_event_object(
     )?;
     obj.set(
         js_string!("defaultPrevented"),
+        JsValue::from(false),
+        false,
+        context,
+    )?;
+    obj.set(
+        js_string!("isTrusted"),
         JsValue::from(false),
         false,
         context,

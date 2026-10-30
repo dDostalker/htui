@@ -88,9 +88,11 @@ pub(super) fn native_set_class(
     Ok(JsValue::undefined())
 }
 
-/// attribute (the `classList` property). The factory's `getAttr` / `setAttr`
+/// A live `DOMTokenList` view of the node's `class` attribute (the
+/// `classList` property). The factory's `getAttr` / `setAttr`
 /// closures read / write the attribute through the engine arena, so the
 /// returned object reflects later DOM mutations (browser `classList` is
+/// live too).
 pub(super) fn native_get_class_list(
     this: &JsValue,
     _args: &[JsValue],

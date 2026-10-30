@@ -116,6 +116,45 @@ pub enum RenderCmd {
         focused: bool,
         selection: Option<(usize, usize)>,
     },
+    /// Update one native scroll container and re-layout. Stateful because the
+    /// offsets are interaction history, not a DOM mutation.
+    RenderScroll {
+        node_id: NodeId,
+        scroll_y: u32,
+    },
+    /// Horizontal counterpart of [`RenderCmd::RenderScroll`](Self::RenderScroll):
+    /// update one `overflow-x` container and re-layout.
+    RenderScrollX {
+        node_id: NodeId,
+        scroll_x: u32,
+    },
+    /// Glide the page viewport or one native scroll container to `to` with an
+    /// ease-out animation. Intercepted by the run loop (never forwarded to the
+    /// render thread): the animation lives on the input side and emits one
+    /// viewport command (`Rerender` / `RenderScroll`) per frame while it
+    /// runs. `target` picks the page viewport or the scroll container.
+    ScrollAnimate {
+        target: super::scroll_anim::ScrollTarget,
+        to: u32,
+    },
+    /// Jump the page viewport to `to` instantly (the `behavior: "auto"`
+    /// variant of JS `window.scrollTo`). Intercepted by the run loop like
+    /// [`RenderCmd::ScrollAnimate`](Self::ScrollAnimate): the input side
+    /// writes its own `scroll_y` (capped at the live scroll ceiling) and
+    /// emits the `Rerender`.
+    ScrollSet {
+        to: u32,
+    },
+    /// Scroll the page so the element `node_id` lands at `block` alignment
+    /// (JS `element.scrollIntoView`). The input loop resolves the element's
+    /// document rect from the hit map and converts it into a
+    /// [`RenderCmd::ScrollSet`](Self::ScrollSet) /
+    /// [`RenderCmd::ScrollAnimate`](Self::ScrollAnimate) (per `smooth`).
+    ScrollIntoView {
+        node_id: NodeId,
+        block: super::scroll_anim::ScrollIntoViewBlock,
+        smooth: bool,
+    },
     /// JS `el.focus()` — focus the text field `node_id`. Intercepted by the
     /// input loop (never forwarded to the render thread): it seeds the edit
     /// session and routes the `blur` / `focus` events back through the
@@ -226,6 +265,7 @@ fn merge_dirty(target: &mut DirtyInfo, source: DirtyInfo) {
 #[derive(Debug, Default)]
 pub struct DrainedBatch {
     inputs: Vec<RenderCmd>,
+    scrolls: Vec<RenderCmd>,
     css_reloads: Vec<RenderCmd>,
     selects: Vec<RenderCmd>,
     text_selection: Option<RenderCmd>,
@@ -246,6 +286,15 @@ impl DrainedBatch {
     pub fn absorb(&mut self, cmd: RenderCmd) {
         match cmd {
             RenderCmd::RenderInput { .. } => self.inputs.push(cmd),
+            RenderCmd::RenderScroll { .. } | RenderCmd::RenderScrollX { .. } => {
+                self.scrolls.push(cmd)
+            }
+            // Never forwarded (the run loop intercepts markers before the
+            // channel) — dropped here so a leaked one cannot displace a real
+            // snapshot.
+            RenderCmd::ScrollAnimate { .. }
+            | RenderCmd::ScrollSet { .. }
+            | RenderCmd::ScrollIntoView { .. } => {}
             sel @ (RenderCmd::SelectOpen { .. }
             | RenderCmd::SelectClose { .. }
             | RenderCmd::SelectMove { .. }) => self.selects.push(sel),
@@ -386,6 +435,11 @@ impl DrainedBatch {
     /// Drain the `RenderInput` commands in arrival order.
     pub fn drain_inputs(&mut self) -> impl Iterator<Item = RenderCmd> {
         std::mem::take(&mut self.inputs).into_iter()
+    }
+
+    /// Drain the native scrollbar updates in arrival order.
+    pub fn drain_scrolls(&mut self) -> impl Iterator<Item = RenderCmd> {
+        std::mem::take(&mut self.scrolls).into_iter()
     }
 
     /// Drain session-CSS reload commands in arrival order.

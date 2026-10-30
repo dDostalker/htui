@@ -2,13 +2,14 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 
 use boa_engine::{Context, JsResult, JsValue, Source, js_string};
 
 use crate::source::SharedSourceText;
 
 use crate::{
-    events::{EventBindings, EventType, HitRegion, HtmlEvent, KeyEventInfo},
+    events::{EventBindings, EventType, HitMap, HitRegion, HtmlEvent, KeyEventInfo},
     html::html_parse::{ParsedDocument, Parser},
     tdom::node::{Node, NodeArena, NodeId, NodeType},
     tui::graph_api::{DirtyInfo, RenderCmd},
@@ -19,6 +20,7 @@ use super::dom::{
     get_attr_handler, get_listeners, install_builtins, make_event_object, node_wrapper,
 };
 use super::host::HostFn;
+use super::msg::{ScriptDirty, ScriptEvent};
 use super::state::{ENGINE_STATE, ScriptState};
 use super::{EngineBuildError, EngineParts};
 
@@ -101,6 +103,24 @@ impl ScriptEngine {
         }
         self.context = context;
         self.state = state;
+        // Browser refresh semantics: a whole-document reload replays the load
+        // sequence. Handler writes land in the fresh state's dirty set and
+        // the dispatched commands re-enter its pending queue — the caller's
+        // normal `take_dirty` / `take_pending_cmds` drains pick both up.
+        let boot = self.fire_document_loaded();
+        {
+            let mut st = self.state.borrow_mut();
+            st.render_cmds.extend(boot.cmds);
+            if let Some(d) = boot.dirty {
+                st.dirty.nodes.extend(d.dirty.nodes);
+                // `fire_document_loaded` drained the reload flag the reload
+                // seeded; restore it so the caller's response still carries
+                // the new document CSS.
+                if d.document_css.is_some() {
+                    st.document_reload = true;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -133,6 +153,7 @@ impl ScriptEngine {
             next_fetch_id: 0,
             fetch_rx,
             fetch_tx,
+            frame_epoch: Instant::now(),
         }));
         ENGINE_STATE.with(|s| *s.borrow_mut() = Some(Rc::clone(&state)));
 
@@ -436,6 +457,231 @@ impl ScriptEngine {
         self.dispatch(region, event_type, x, y, None).0
     }
 
+    /// Dispatch a non-bubbling event to the region's target element only
+    /// (`mouseenter` / `mouseleave` semantics — ancestors never hear it).
+    pub fn fire_target(
+        &mut self,
+        region: &HitRegion,
+        event_type: EventType,
+        x: u32,
+        y: u32,
+    ) -> Vec<RenderCmd> {
+        let target_only = HitRegion {
+            node_id: region.node_id,
+            rect: region.rect,
+            client: region.client,
+            path: region.path[..1].into(),
+        };
+        self.dispatch(&target_only, event_type, x, y, None).0
+    }
+
+    /// Dispatch a `wheel` tick, reporting whether a listener called
+    /// `preventDefault()` (the input loop cancels the built-in scroll then).
+    /// A missing target still reports "not prevented" so the built-in runs.
+    pub fn fire_wheel_gate(
+        &mut self,
+        hit_map: &HitMap,
+        x: u32,
+        y: u32,
+        up: bool,
+    ) -> (Vec<RenderCmd>, bool) {
+        match hit_map.hit_test(x, y) {
+            Some(region) => {
+                let payload = if up {
+                    EventPayload::WheelUp
+                } else {
+                    EventPayload::WheelDown
+                };
+                self.dispatch(region, EventType::Wheel, x, y, Some(payload))
+            }
+            None => (Vec::new(), false),
+        }
+    }
+
+    /// Fire the browser load sequence: `DOMContentLoaded` then `load` on the
+    /// window listeners and the document body. Called once after the engine
+    /// built (scripts ran) and again after every whole-document reload —
+    /// browser refresh semantics.
+    pub fn fire_document_loaded(&mut self) -> ScriptEvent {
+        let mut cmds = self.fire_window_and_body("DOMContentLoaded", EventType::DomContentLoaded);
+        cmds.extend(self.fire_window_and_body("load", EventType::Load));
+        let dirty = self.take_dirty();
+        let snapshot = if dirty.is_empty() {
+            None
+        } else {
+            let document_css = self.take_document_reload().then(|| self.document_css());
+            Some(ScriptDirty {
+                arena: Arc::new(self.arena()),
+                root_id: self.root_id(),
+                dirty,
+                document_css,
+            })
+        };
+        ScriptEvent {
+            cmds,
+            dirty: snapshot,
+            hovered: None,
+            key_gate: None,
+            wheel_gate: None,
+        }
+    }
+
+    /// Fire `event.resize` on the window listeners and the document body.
+    pub fn fire_resize(&mut self) -> Vec<RenderCmd> {
+        self.fire_window_and_body("resize", EventType::Resize)
+    }
+
+    /// Fire `event.scroll` on the window listeners and the document body
+    /// (after the page scroll offset changed; handlers read `window.scrollY`).
+    pub fn fire_scroll(&mut self) -> Vec<RenderCmd> {
+        self.fire_window_and_body("scroll", EventType::Scroll)
+    }
+
+    /// Fire `selectionchange` after a page or field selection changed.
+    pub fn fire_selection_change(&mut self) -> Vec<RenderCmd> {
+        self.fire_window_and_body("selectionchange", EventType::SelectionChange)
+    }
+
+    /// Shared dispatch of the document-level events (`resize` / `scroll`)
+    /// that have no node target: `window.addEventListener(type, fn)` handlers
+    /// run first (no node target), then the `<body>` → root ancestor chain —
+    /// the dispatch shape key events use for their no-focused-field fallback.
+    /// Returns the render commands pushed by host functions during the
+    /// dispatch.
+    fn fire_window_and_body(&mut self, type_name: &str, event_type: EventType) -> Vec<RenderCmd> {
+        // Window-level listeners: same event object, no node target.
+        let window_cmd = {
+            let window_listeners =
+                super::dom::get_window_listeners(&mut self.context, type_name).unwrap_or_default();
+            let target = JsValue::undefined();
+            let Ok(event) = make_event_object(&mut self.context, event_type, &target, 0, 0) else {
+                return Vec::new();
+            };
+            let mut cmds = Vec::new();
+            for listener in window_listeners {
+                let Ok(f) = listener.to_object(&mut self.context) else {
+                    continue;
+                };
+                if let Err(e) = f.call(&target, std::slice::from_ref(&event), &mut self.context) {
+                    log::warn!("window {type_name} listener threw: {e}");
+                }
+            }
+            let mut st = self.state.borrow_mut();
+            cmds.extend(std::mem::take(&mut st.render_cmds));
+            cmds
+        };
+        // Document-level chain (target = `<body>`, like the keydown fallback).
+        let region = {
+            let arena = self.arena();
+            let body_id = arena
+                .iter()
+                .find(|(_, n)| n.node_type == NodeType::Body)
+                .map(|(id, _)| id)
+                .unwrap_or_else(|| self.root_id());
+            super::msg::region_for(&arena, body_id)
+        };
+        let mut cmds = self.fire(&region, event_type, 0, 0);
+        cmds.extend(window_cmd);
+        cmds
+    }
+
+    /// Re-evaluate every registered `matchMedia` list against the current
+    /// viewport and fire `change` on the ones that flipped. Backed by the
+    /// `__htuiMQLs` GC-rooted array; the current viewport comes from the
+    /// shared UI state (zeros match nothing, so a missing input loop never
+    /// spurious-fires).
+    pub fn evaluate_media_changes(&mut self) {
+        // `mql_matches_now` reads the shared UI state itself; the presence
+        // check only avoids spurious change events with no input loop attached.
+        if super::with_ui().is_none() {
+            return;
+        }
+        let Ok(mqls) = self
+            .context
+            .global_object()
+            .get(js_string!("__htuiMQLs"), &mut self.context)
+            .and_then(|v| v.to_object(&mut self.context))
+        else {
+            return;
+        };
+        let Ok(len) = mqls
+            .get(js_string!("length"), &mut self.context)
+            .and_then(|v| v.to_u32(&mut self.context))
+        else {
+            return;
+        };
+        for i in 0..len {
+            let Ok(obj) = mqls
+                .get(i, &mut self.context)
+                .and_then(|v| v.to_object(&mut self.context))
+            else {
+                continue;
+            };
+            let Some(query) = super::dom::mql_query(&obj, &mut self.context) else {
+                continue;
+            };
+            let matches = super::dom::mql_matches_now(&query);
+            let last = super::dom::mql_last_matches(&obj, &mut self.context);
+            if matches == last {
+                continue;
+            }
+            if let Err(e) = obj.set(
+                js_string!("_lastMatches"),
+                matches,
+                false,
+                &mut self.context,
+            ) {
+                log::warn!("Failed to store matchMedia state: {e}");
+                continue;
+            }
+            let event = {
+                let mut init = boa_engine::object::ObjectInitializer::new(&mut self.context);
+                init.property(
+                    js_string!("type"),
+                    js_string!("change"),
+                    boa_engine::property::Attribute::all(),
+                )
+                .property(
+                    js_string!("matches"),
+                    matches,
+                    boa_engine::property::Attribute::all(),
+                )
+                .build()
+            };
+            let listeners = obj
+                .get(js_string!("_listeners"), &mut self.context)
+                .and_then(|v| v.to_object(&mut self.context));
+            if let Ok(list) = listeners {
+                let len = list
+                    .get(js_string!("length"), &mut self.context)
+                    .and_then(|v| v.to_u32(&mut self.context))
+                    .unwrap_or(0);
+                for li in 0..len {
+                    let Ok(listener) = list.get(li, &mut self.context) else {
+                        continue;
+                    };
+                    let Ok(f) = listener.to_object(&mut self.context) else {
+                        continue;
+                    };
+                    if let Err(e) = f.call(
+                        &obj.clone().into(),
+                        &[event.clone().into()],
+                        &mut self.context,
+                    ) {
+                        log::warn!("matchMedia change listener threw: {e}");
+                    }
+                }
+            }
+            if let Ok(onchange) = obj.get(js_string!("onchange"), &mut self.context)
+                && onchange.is_callable()
+                && let Ok(f) = onchange.to_object(&mut self.context)
+                && let Err(e) = f.call(&obj.clone().into(), &[event.into()], &mut self.context)
+            {
+                log::warn!("matchMedia onchange handler threw: {e}");
+            }
+        }
+    }
+
     /// Dispatch a keyboard event ([`EventType::KeyDown`] / [`EventType::KeyUp`])
     /// along the hit region's ancestor path.
     ///
@@ -460,26 +706,30 @@ impl ScriptEngine {
         event_type: EventType,
         key: &KeyEventInfo,
     ) -> (Vec<RenderCmd>, bool) {
-        self.dispatch(region, event_type, 0, 0, Some(key))
+        self.dispatch(region, event_type, 0, 0, Some(EventPayload::Key(key)))
     }
 
     /// Shared dispatch core of [`fire`](Self::fire) and
-    /// [`fire_key`](Self::fire_key): build the JS event object (with keyboard
-    /// fields when `key` is set), walk `region.path` target-first firing every
-    /// registered listener, honouring `stopPropagation()`. Returns any render
-    /// commands pushed by host functions during the dispatch, plus whether a
-    /// listener called `event.preventDefault()`.
+    /// [`fire_key`](Self::fire_key): build the JS event object (with the
+    /// payload fields the event kind carries), walk `region.path` target-first
+    /// firing every registered listener, honouring `stopPropagation()`.
+    /// Returns any render commands pushed by host functions during the
+    /// dispatch, plus whether a listener called `event.preventDefault()`.
     fn dispatch(
         &mut self,
         region: &HitRegion,
         event_type: EventType,
         x: u32,
         y: u32,
-        key: Option<&KeyEventInfo>,
+        payload: Option<EventPayload<'_>>,
     ) -> (Vec<RenderCmd>, bool) {
         let target_id = region.path.first().and_then(|e| e.id.clone());
+        let key_info = match payload {
+            Some(EventPayload::Key(k)) => Some(k.clone()),
+            _ => None,
+        };
 
-        let event = match self.build_event_object(event_type, &region.path, x, y, key) {
+        let event = match self.build_event_object(event_type, &region.path, x, y, payload) {
             Ok(e) => e,
             Err(e) => {
                 log::warn!("Failed to build JS event object: {e}");
@@ -496,7 +746,7 @@ impl ScriptEngine {
                 x,
                 y,
                 bubbles: true,
-                key: key.cloned(),
+                key: key_info,
             });
         }
 
@@ -644,32 +894,64 @@ impl ScriptEngine {
 
     /// Build a JS `Event` object for a dispatch: the shared object from
     /// [`super::dom::make_event_object`] plus the keyboard payload fields
-    /// when a [`KeyEventInfo`] rides along.
+    /// when a [`KeyEventInfo`] rides along, or the mouse payload fields
+    /// (`clientX` / `clientY` / `pageX` / `pageY`, `deltaY` for wheel) for
+    /// the pointer-driven event types.
     fn build_event_object(
         &mut self,
         event_type: EventType,
         path: &[crate::events::ElementRef],
         x: u32,
         y: u32,
-        key: Option<&KeyEventInfo>,
+        payload: Option<EventPayload<'_>>,
     ) -> JsResult<JsValue> {
         let target = match path.first() {
             Some(el) => node_wrapper(&mut self.context, el.node_id)?,
             None => JsValue::null(),
         };
         let event = make_event_object(&mut self.context, event_type, &target, x, y)?;
-        if let Some(k) = key
-            && let Some(obj) = event.as_object()
-        {
-            let fields: [(&str, JsValue); 8] = [
-                ("key", js_string!(k.key.as_str()).into()),
-                ("code", js_string!(k.code.as_str()).into()),
-                ("keyCode", JsValue::from(k.key_code as f64)),
-                ("shiftKey", JsValue::from(k.shift)),
-                ("ctrlKey", JsValue::from(k.ctrl)),
-                ("altKey", JsValue::from(k.alt)),
-                ("metaKey", JsValue::from(k.meta)),
-                ("repeat", JsValue::from(k.repeat)),
+        let Some(obj) = event.as_object() else {
+            return Ok(event);
+        };
+        match payload {
+            Some(EventPayload::Key(k)) => {
+                let fields: [(&str, JsValue); 8] = [
+                    ("key", js_string!(k.key.as_str()).into()),
+                    ("code", js_string!(k.code.as_str()).into()),
+                    ("keyCode", JsValue::from(k.key_code as f64)),
+                    ("shiftKey", JsValue::from(k.shift)),
+                    ("ctrlKey", JsValue::from(k.ctrl)),
+                    ("altKey", JsValue::from(k.alt)),
+                    ("metaKey", JsValue::from(k.meta)),
+                    ("repeat", JsValue::from(k.repeat)),
+                ];
+                for (name, value) in fields {
+                    obj.set(js_string!(name), value, false, &mut self.context)?;
+                }
+            }
+            Some(up @ (EventPayload::WheelUp | EventPayload::WheelDown)) => {
+                // Line-mode wheel delta (browser `deltaMode: 1`); negative
+                // scrolls up. Mirrors the input layer's per-tick line count.
+                const WHEEL_DELTA_LINES: f64 = 3.0;
+                let delta = if matches!(up, EventPayload::WheelUp) {
+                    -WHEEL_DELTA_LINES
+                } else {
+                    WHEEL_DELTA_LINES
+                };
+                obj.set(js_string!("deltaY"), delta, false, &mut self.context)?;
+            }
+            None => {}
+        }
+        if is_mouse_event_type(event_type) {
+            // `pageX/pageY` are the canvas (document) coordinates; `clientX`
+            // / `clientY` subtract the page scroll offset (viewport space).
+            let (_, _, scroll_y) = super::with_ui().unwrap_or((0, 0, 0));
+            let client_y = y.saturating_sub(scroll_y);
+            let fields: [(&str, JsValue); 4] = [
+                ("clientX", JsValue::from(f64::from(x))),
+                ("clientY", JsValue::from(f64::from(client_y))),
+                ("pageX", JsValue::from(f64::from(x))),
+                ("pageY", JsValue::from(f64::from(y))),
             ];
             for (name, value) in fields {
                 obj.set(js_string!(name), value, false, &mut self.context)?;
@@ -677,6 +959,36 @@ impl ScriptEngine {
         }
         Ok(event)
     }
+}
+
+/// Extra payload a dispatch can attach to the JS event object beyond the
+/// shared surface.
+enum EventPayload<'a> {
+    /// Keyboard fields (`event.key` / `event.code` / …).
+    Key(&'a KeyEventInfo),
+    /// Wheel tick scrolling up (`deltaY` negative).
+    WheelUp,
+    /// Wheel tick scrolling down (`deltaY` positive).
+    WheelDown,
+}
+
+/// Event types whose JS objects carry the mouse coordinate fields
+/// (`clientX` / `clientY` / `pageX` / `pageY`).
+fn is_mouse_event_type(event_type: EventType) -> bool {
+    matches!(
+        event_type,
+        EventType::Click
+            | EventType::DblClick
+            | EventType::MouseDown
+            | EventType::MouseUp
+            | EventType::MouseMove
+            | EventType::MouseOver
+            | EventType::MouseOut
+            | EventType::MouseEnter
+            | EventType::MouseLeave
+            | EventType::ContextMenu
+            | EventType::Wheel
+    )
 }
 
 impl Drop for ScriptEngine {

@@ -17,6 +17,7 @@ mod thread;
 
 use self::thread::{fold_script_event, hit_test_thread, render_thread};
 
+use std::collections::HashMap;
 use std::io::stdout;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -35,15 +36,17 @@ use crossterm::{
 use crate::Session;
 use crate::{
     events::{HitMap, SharedGeometry, SharedHitMap},
-    html::{css_parse::DynamicState, html_parse::Parser},
+    html::{css_parse::DynamicState, css_parse::Viewport, html_parse::Parser},
     layout::layout::{MAX_TERM_COLS, MAX_TERM_ROWS, TermMap},
     resources,
+    script::SharedUiState,
     script::{ScriptMsg, ScriptResponse, run_script_thread},
     source::SharedSourceText,
     tdom::node::{NodeId, SharedNodeArena},
     tui::graph_api::{
-        DirtyInfo, InputState, KEY_GATE_TIMEOUT, RenderCmd, apply_focus_requests,
-        reapply_console_modes, trigger_refresh,
+        ANIM_POLL_MS, DirtyInfo, InputState, KEY_GATE_TIMEOUT, RenderCmd, ScrollAnim, ScrollTarget,
+        apply_focus_requests, default_wheel_scroll, reapply_console_modes, scroll_into_view_target,
+        trigger_refresh,
     },
 };
 
@@ -52,6 +55,10 @@ type LiveDocument = (SharedNodeArena, NodeId);
 
 /// Channel used to publish immutable layout snapshots.
 type GeometrySender = Option<mpsc::Sender<SharedGeometry>>;
+
+/// Shared slot the render thread publishes the latest frame's geometry into;
+/// the input loop reads its arena as the DOM-read snapshot.
+pub(super) type LiveGeoSlot = Arc<Mutex<Option<SharedGeometry>>>;
 
 /// Whether the terminal is currently in raw mode / alternate screen
 static TERMINAL_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -178,10 +185,20 @@ fn run_inner(
     // on the second channel. Start that thread only when event bindings exist.
     let (script_tx, script_rx) = mpsc::channel::<ScriptMsg>();
     let (script_out_tx, script_out_rx) = mpsc::channel::<ScriptResponse>();
+    // The viewport / scroll offset the input loop owns, shared with the
+    // script thread for the `window.innerWidth` & co getters (relaxed
+    // atomics — advisory values, no synchronization).
+    let ui_state = Arc::new(SharedUiState::default());
+    // Text of the current page selection, refreshed by the render thread and
+    // read by the input loop on `Ctrl+C` and `window.getSelection()` on the
+    // script thread (shared through `Arc<Mutex<_>>`).
+    let selection_text: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
     let script_thread: Option<std::thread::JoinHandle<()>> = bindings.map(|bindings| {
         let script_document = document.clone();
         let hit_map_thread = Arc::clone(&hit_map);
         let script_registry = Arc::clone(&registry);
+        let ui_state_thread = Arc::clone(&ui_state);
+        let selection_text_thread = Arc::clone(&selection_text);
         std::thread::spawn(move || {
             resources::with_registry(script_registry, || {
                 run_script_thread(
@@ -191,6 +208,8 @@ fn run_inner(
                     script_rx,
                     script_out_tx,
                     hit_map_thread,
+                    ui_state_thread,
+                    selection_text_thread,
                 )
             });
         })
@@ -225,21 +244,28 @@ fn run_inner(
     #[cfg(debug_assertions)]
     let mut mem_reload;
 
-    // Text of the current page selection, refreshed by the render thread and
-    // read by the input loop on `Ctrl+C` (shared through `Arc<Mutex<_>>`).
-    let selection_text: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    // Scrollbar chrome starts hidden and is revealed by interaction. Sharing
+    // the flag with the render thread makes the hide transition atomic with
+    // the repaint that removes it.
+    let scrollbars_visible: crate::tui::graph_api::SharedScrollbarVisibility =
+        Arc::new(Mutex::new(HashMap::new()));
 
     let (tx, rx) = mpsc::channel::<RenderCmd>();
     // Frame-completion heartbeat: the render thread bumps it after every
     // processed command batch; the input loop's watchdog below uses it to
     // distinguish a *stuck* render thread from an idle one.
     let render_beat: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
+    // The render thread publishes each frame's geometry here; the input loop
+    // reads its arena instead of holding the script thread's snapshots.
+    let live_geo: LiveGeoSlot = Arc::new(Mutex::new(None));
     let render_handle = std::thread::spawn({
         let render_document = document;
         let css_clone = Arc::clone(&session_css);
         let max_scroll_clone = Arc::clone(&max_scroll);
         let selection_text_clone = Arc::clone(&selection_text);
+        let scrollbars_visible_clone = Arc::clone(&scrollbars_visible);
         let render_beat_clone = Arc::clone(&render_beat);
+        let live_geo_clone = Arc::clone(&live_geo);
         let render_registry = Arc::clone(&registry);
         let geo_tx = events_active.then_some(geo_tx);
         move || {
@@ -251,7 +277,9 @@ fn run_inner(
                     max_scroll_clone,
                     geo_tx,
                     selection_text_clone,
+                    scrollbars_visible_clone,
                     render_beat_clone,
+                    live_geo_clone,
                     config,
                 );
             });
@@ -259,10 +287,13 @@ fn run_inner(
     });
 
     let mut state = InputState::new();
+    state.ui = Some(Arc::clone(&ui_state));
     state.zoom = config.zoom;
     state.copy_flow = config.copy_flow;
     state.copy_block = config.copy_block;
+    state.smooth_scroll = config.smooth_scroll;
     state.selection_text = Arc::clone(&selection_text);
+    state.scrollbars_visible = Arc::clone(&scrollbars_visible);
     let (mut columns, mut rows): (u16, u16) = match TermMap::get_ter_map() {
         Ok(m) => (m.columns, m.rows),
         Err(e) => {
@@ -300,10 +331,22 @@ fn run_inner(
     let mut hovered: Option<NodeId> = None;
 
     let mut quit = false;
+    // Whether the previous loop pass engaged the script thread (a message
+    // was sent to it, or one of its replies was folded). Replies sitting on
+    // `script_out_rx` are only noticed between polls, so the poll timeout
+    // gates every JS-driven frame: a timer / rAF page animating at ~60 Hz
+    // would be throttled to the idle 100 ms cadence (~10 fps). While
+    // engaged, the loop polls at the animation cadence instead — the same
+    // mechanism a running scroll animation uses. One fast pass after the
+    // engagement ends costs an idle page a single 16 ms wake.
+    let mut script_activity = false;
     // Pointer moves sent to the script thread but not answered yet.
     // Any script response can free a slot, so the count never rises above
     // `MAX_IN_FLIGHT_MOVES`.
     let mut moves_in_flight: usize = 0;
+    // Scroll offset at the previous loop pass: the input loop notifies the
+    // script thread (`ScriptMsg::Scroll`) when it differs.
+    let mut scroll_y_prev: u32 = 0;
     // Render-stall watchdog state: `(heartbeat at last command send, when it
     // was sent)`. The render thread bumps its heartbeat after each processed
     // batch, so a send followed by no heartbeat for a while means the render
@@ -430,6 +473,44 @@ fn run_inner(
         // no-op, so scrolling appears dead after a resize.
         let max_scroll_val = max_scroll.load(Ordering::Relaxed);
         state.clamp_scroll_to(max_scroll_val);
+        // The input loop's DOM-read snapshot is the latest *rendered* frame's
+        // arena (published by the render thread above), not the script
+        // thread's snapshot: holding the snapshot would keep the render thread
+        // from unwrapping and cascading it in place — one full-tree copy per
+        // batch instead of two. The reads run at most one frame behind.
+        if let Ok(guard) = live_geo.lock()
+            && let Some(geo) = guard.as_ref()
+        {
+            live_dom = Some((Arc::clone(&geo.arena), geo.root_id));
+        }
+        // Publish the UI state the script thread's view getters read
+        // (`window.innerWidth` / `innerHeight` / `scrollY`). Cheap relaxed
+        // stores every iteration; the values are advisory.
+        ui_state.cols.store(u32::from(columns), Ordering::Relaxed);
+        ui_state.rows.store(u32::from(rows), Ordering::Relaxed);
+        ui_state.scroll_y.store(state.scroll_y, Ordering::Relaxed);
+        ui_state.set_focused(state.focused_input);
+        // The page scroll offset changed since the previous iteration (wheel,
+        // keys, animation tick, `scrollTo`): notify the script thread so
+        // `scroll` listeners run. One frame behind the paint — the detection
+        // runs before this iteration's animation tick — which matches how
+        // browsers coalesce scroll events.
+        if events_active && state.scroll_y != scroll_y_prev {
+            msgs.push(ScriptMsg::Scroll);
+        }
+        scroll_y_prev = state.scroll_y;
+        // While a scroll animation is active the loop wakes at the animation
+        // frame rate instead of the idle poll cadence; eased positions are
+        // wall-clock based, so a late wake self-corrects next frame. Recent
+        // script-thread engagement (see `script_activity`) takes the same
+        // fast path.
+        let script_engaged = script_activity;
+        script_activity = false;
+        let poll_timeout = if state.scroll_anim.is_some() || script_engaged {
+            Duration::from_millis(ANIM_POLL_MS)
+        } else {
+            Duration::from_millis(25)
+        };
         let mut cmds = if events_active {
             let map = match hit_map.lock() {
                 Ok(guard) => Arc::clone(&guard),
@@ -444,9 +525,9 @@ fn run_inner(
             // geometry: the element under a stationary pointer may have
             // reflowed to something else, and a synthetic `Move` fires the
             // correct MouseOut / MouseOver (+ a fresh `Hover` highlight).
-            if state.take_resize_revalidation()
-                && let Some((col, row)) = state.last_mouse
-            {
+            let hover_revalidation =
+                state.take_resize_revalidation() || state.take_pointer_revalidation();
+            if hover_revalidation && let Some((col, row)) = state.last_mouse {
                 let (x, y) = (col as u32, row as u32 + state.scroll_y);
                 msgs.push(ScriptMsg::Move { x, y });
             }
@@ -457,7 +538,7 @@ fn run_inner(
                 Some(&map),
                 live_dom.as_ref().map(|(arena, _)| arena.as_ref()),
                 &mut msgs,
-                Some(Duration::from_millis(100)),
+                Some(poll_timeout),
             )
         } else {
             trigger_refresh(
@@ -467,9 +548,19 @@ fn run_inner(
                 None,
                 None,
                 &mut msgs,
-                Some(Duration::from_millis(100)),
+                Some(poll_timeout),
             )
         };
+
+        // The input loop owns the timeout and supplies the repaint at hide
+        // time; the shared atomic is already false when this frame renders.
+        let hidden_scrollbars = state.take_expired_scrollbar_visibility();
+        if !hidden_scrollbars.is_empty() {
+            cmds.push(RenderCmd::Redraw {
+                scroll_y: state.scroll_y,
+                zoom: state.zoom,
+            });
+        }
 
         // A resize invalidates every canvas coordinate the input loop caches:
         // without this a press whose release the console dropped during the
@@ -477,6 +568,12 @@ fn run_inner(
         // click events go silent), and a stale text selection / open dropdown
         // overlay would paint wrong cells.
         if size_changed {
+            // Notify the script thread so `resize` listeners and `matchMedia`
+            // re-evaluate against the new viewport (the message itself is
+            // dataless; the getters read the shared UI state published above).
+            if events_active {
+                msgs.push(ScriptMsg::Resize);
+            }
             state.invalidate_viewport(&mut cmds);
         }
 
@@ -506,12 +603,18 @@ fn run_inner(
 
         // Send engine work to the script thread. Move messages are capped so
         // a busy script thread cannot accumulate a large pointer backlog.
+        script_activity |= !msgs.is_empty();
         for msg in msgs {
-            if let ScriptMsg::Move { .. } = msg {
+            if let ScriptMsg::Move { .. } | ScriptMsg::MouseMove { .. } = msg {
                 if moves_in_flight >= MAX_IN_FLIGHT_MOVES {
                     log::debug!(
                         "Script thread busy: dropping pointer move ({moves_in_flight} in flight)"
                     );
+                    // Dropping the newest position would strand hover on the
+                    // old element (a boundary crossing is a one-shot event).
+                    // Schedule a synthetic Move at the last known position so
+                    // hover converges once the backlog drains.
+                    state.request_pointer_revalidation();
                     continue;
                 }
                 moves_in_flight += 1;
@@ -531,7 +634,11 @@ fn run_inner(
         // script thread never stalls scrolling / quitting (decoupling). The
         // wait also folds any responses that arrive meanwhile (hover, DOM
         // mutations from key handlers).
-        if let Some(gate) = state.key_gate.take() {
+        // Keys and gated wheel ticks share the wait/verdict machinery; the
+        // wheel verdict additionally re-runs the built-in scroll when cleared.
+        let wheel_pending = state.wheel_gate.is_some();
+        let gate = state.key_gate.take().or_else(|| state.wheel_gate.take());
+        if let Some(gate) = gate {
             let mut gate_cmds = gate.cmds;
             let mut resolved = false;
             // The budget is an *absolute* deadline, not a per-`recv` timeout:
@@ -545,16 +652,44 @@ fn run_inner(
                 match script_out_rx.recv_timeout(deadline.saturating_duration_since(Instant::now()))
                 {
                     Ok(ScriptResponse::Event(ev)) => {
-                        let verdict = ev.key_gate.filter(|(id, _)| *id == gate.id);
-                        fold_script_event(&mut state, &mut cmds, &mut hovered, &mut live_dom, ev);
+                        let verdict = ev
+                            .key_gate
+                            .filter(|(id, _)| *id == gate.id)
+                            .or_else(|| ev.wheel_gate.filter(|(id, _)| *id == gate.id));
+                        fold_script_event(
+                            &mut state,
+                            &mut cmds,
+                            &mut hovered,
+                            Viewport {
+                                cols: columns as usize,
+                                rows: rows as usize,
+                            },
+                            ev,
+                        );
                         moves_in_flight = moves_in_flight.saturating_sub(1);
+                        script_activity = true;
                         if let Some((_, prevented)) = verdict {
                             if !prevented {
-                                log::debug!(
-                                    "Key gate cleared for key id {} — applying built-in",
-                                    gate.id
-                                );
+                                log::debug!("Gate cleared for id {} — applying built-in", gate.id);
                                 cmds.extend(std::mem::take(&mut gate_cmds));
+                                // Cleared wheel verdict: run the default
+                                // container / page scroll for the held tick.
+                                if wheel_pending
+                                    && let Some((x, y, up)) = state.pending_wheel.take()
+                                {
+                                    let hit_guard = hit_map.lock().ok();
+                                    let arena = live_dom.as_ref().map(|(a, _)| a);
+                                    default_wheel_scroll(
+                                        &mut state,
+                                        hit_guard.as_ref().map(|g| g.as_ref()),
+                                        arena.map(|a| &**a),
+                                        max_scroll_val,
+                                        x,
+                                        y,
+                                        up,
+                                        &mut cmds,
+                                    );
+                                }
                             }
                             resolved = true;
                         }
@@ -565,11 +700,22 @@ fn run_inner(
                     Err(RecvTimeoutError::Timeout) => {
                         // Script thread busy / blocked in a host function:
                         // fall back to the built-in so input stays responsive.
-                        log::debug!(
-                            "Key gate timed out for key id {} — running built-in",
-                            gate.id
-                        );
+                        log::debug!("Gate timed out for id {} — running built-in", gate.id);
                         cmds.extend(std::mem::take(&mut gate_cmds));
+                        if wheel_pending && let Some((x, y, up)) = state.pending_wheel.take() {
+                            let hit_guard = hit_map.lock().ok();
+                            let arena = live_dom.as_ref().map(|(a, _)| a);
+                            default_wheel_scroll(
+                                &mut state,
+                                hit_guard.as_ref().map(|g| g.as_ref()),
+                                arena.map(|a| &**a),
+                                max_scroll_val,
+                                x,
+                                y,
+                                up,
+                                &mut cmds,
+                            );
+                        }
                         resolved = true;
                     }
                     Err(RecvTimeoutError::Disconnected) => {
@@ -581,14 +727,127 @@ fn run_inner(
             }
         }
 
+        // Convert scroll-animation markers into the input loop's animation
+        // state, then emit this frame's tick — before the script-response
+        // fold, so a DOM-mutation arena appended below still supersedes the
+        // tick's viewport command (the render batch folds the newer scroll
+        // offset into a pending arena instead of dropping either). A
+        // `ScrollSet` marker (JS `scrollTo` without `behavior: "smooth"`)
+        // jumps directly: it cancels a running page glide, writes
+        // `state.scroll_y` capped at the live ceiling and emits the
+        // `Rerender` here.
+        let now = Instant::now();
+        // Resolve JS `scrollIntoView` markers against the current hit map
+        // (the element's document rect lives there, not on the script side)
+        // into concrete page-scroll markers the sweep below understands.
+        cmds.retain_mut(|cmd| {
+            if let RenderCmd::ScrollIntoView {
+                node_id,
+                block,
+                smooth,
+            } = cmd
+            {
+                let resolved = hit_map.lock().ok().and_then(|map| {
+                    map.region_for(*node_id)
+                        .map(|region| scroll_into_view_target(region.rect, *block, u32::from(rows)))
+                });
+                match resolved {
+                    Some(to) if *smooth => {
+                        *cmd = RenderCmd::ScrollAnimate {
+                            target: ScrollTarget::Page,
+                            to,
+                        };
+                    }
+                    Some(to) => *cmd = RenderCmd::ScrollSet { to },
+                    // The element produced no hit region (removed / never
+                    // laid out): nothing to scroll to.
+                    None => return false,
+                }
+            }
+            true
+        });
+        // `ScrollSet` jumps emit their `Rerender` after the sweep (the
+        // closure borrows `cmds`); the animation tick below merges into the
+        // same batch (snapshot commands supersede, latest wins).
+        let mut set_rerenders: Vec<RenderCmd> = Vec::new();
+        cmds.retain_mut(|cmd| {
+            if let RenderCmd::ScrollAnimate { target, to } = cmd {
+                match &mut state.scroll_anim {
+                    Some(anim) if anim.target() == *target => anim.retarget(*to, now),
+                    _ => {
+                        let from = match *target {
+                            ScrollTarget::Page => state.scroll_y,
+                            ScrollTarget::Container(id) => {
+                                state.scroll_offsets.get(&id).copied().unwrap_or(0)
+                            }
+                        };
+                        state.scroll_anim = Some(ScrollAnim::start(*target, from, *to, now));
+                    }
+                }
+                false
+            } else if let RenderCmd::ScrollSet { to } = cmd {
+                let to = (*to).min(max_scroll_val);
+                state.scroll_anim = None;
+                if to != state.scroll_y {
+                    state.scroll_y = to;
+                    set_rerenders.push(RenderCmd::Rerender { scroll_y: to });
+                }
+                false
+            } else {
+                true
+            }
+        });
+        cmds.splice(0..0, set_rerenders);
+        if let Some(anim) = state.scroll_anim.take() {
+            // A page glide is capped by the live scroll ceiling (the document
+            // may have shrunk since the trigger); a container glide already
+            // targets the container's own ceiling.
+            let cap = match anim.target() {
+                ScrollTarget::Page => max_scroll_val,
+                ScrollTarget::Container(_) => anim.to(),
+            };
+            let pos = anim.position(now).min(cap);
+            match anim.target() {
+                ScrollTarget::Page => {
+                    if pos != state.scroll_y {
+                        state.scroll_y = pos;
+                        cmds.push(RenderCmd::Rerender { scroll_y: pos });
+                    }
+                }
+                ScrollTarget::Container(id) => {
+                    state.show_scrollbar(id);
+                    if state.scroll_offsets.get(&id) != Some(&pos) {
+                        state.scroll_offsets.insert(id, pos);
+                        cmds.push(RenderCmd::RenderScroll {
+                            node_id: id,
+                            scroll_y: pos,
+                        });
+                    }
+                }
+            }
+            if !anim.finished(now) {
+                state.scroll_anim = Some(anim);
+            }
+        }
+
         // Fold the script thread's replies into this frame: render commands
         // pushed by host functions, hover updates, and — when JS mutated the
         // DOM — a fresh arena snapshot + dirty set for a (region) repaint.
         for resp in script_out_rx.try_iter() {
             match resp {
                 ScriptResponse::Event(ev) => {
-                    fold_script_event(&mut state, &mut cmds, &mut hovered, &mut live_dom, ev);
+                    fold_script_event(
+                        &mut state,
+                        &mut cmds,
+                        &mut hovered,
+                        Viewport {
+                            cols: columns as usize,
+                            rows: rows as usize,
+                        },
+                        ev,
+                    );
                     moves_in_flight = moves_in_flight.saturating_sub(1);
+                    script_activity = true;
                 }
                 ScriptResponse::Ready { .. } | ScriptResponse::Failed(_) => {
                     log::error!("Unexpected one-shot script response in the input loop");
@@ -653,6 +912,10 @@ fn run_inner(
                         dynamic: DynamicState {
                             hovered,
                             focused: state.focused_input,
+                            viewport: Viewport {
+                                cols: columns as usize,
+                                rows: rows as usize,
+                            },
                         },
                         dirty: DirtyInfo::default(),
                     },
@@ -762,13 +1025,7 @@ fn install_panic_hook() {
 
             default_hook(info);
 
-            let message = if let Some(message) = info.payload().downcast_ref::<&str>() {
-                *message
-            } else if let Some(message) = info.payload().downcast_ref::<String>() {
-                message.as_str()
-            } else {
-                "non-string panic payload"
-            };
+            let message = panic_message(info.payload());
             let location = info
                 .location()
                 .map(|location| {

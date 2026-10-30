@@ -14,6 +14,7 @@
 //! both paths are guaranteed to behave identically.
 
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::Duration;
 
@@ -26,6 +27,7 @@ use crate::events::{
 use crate::html::html_parse::ParsedDocument;
 use crate::layout::Rect;
 use crate::script::ScriptEngine;
+use crate::script::{SharedUiState, set_hit_map, set_selection_text, set_ui_state};
 use crate::source::SharedSourceText;
 use crate::tdom::node::{NodeArena, NodeId, NodeType, SharedNodeArena};
 use crate::tui::graph_api::{DirtyInfo, RenderCmd};
@@ -41,6 +43,27 @@ pub enum ScriptMsg {
     Move { x: u32, y: u32 },
     /// Completed click: hover sync + `Click` dispatch.
     Click { x: u32, y: u32 },
+    /// Mouse button pressed at `(x, y)` (`MouseDown` dispatch).
+    MouseDown { x: u32, y: u32 },
+    /// Held mouse button released at `(x, y)` (`MouseUp` dispatch).
+    MouseUp { x: u32, y: u32 },
+    /// Pointer moved to `(x, y)` with the button held (`MouseMove` dispatch).
+    MouseMove { x: u32, y: u32 },
+    /// Second click of a double click (`DblClick` dispatch on the click
+    /// target).
+    DblClick { x: u32, y: u32 },
+    /// Right-button release without a drag (`ContextMenu` dispatch).
+    ContextMenu { x: u32, y: u32 },
+    /// A wheel tick at `(x, y)` (`wheel` dispatch). `gate_id` correlates the
+    /// response back to the input loop's gate wait: a `preventDefault()`
+    /// verdict cancels the built-in container / page scroll for this tick.
+    /// Only sent when the page registered a `wheel` listener.
+    Wheel {
+        gate_id: u32,
+        x: u32,
+        y: u32,
+        up: bool,
+    },
     /// Focus an `<input>` field (fire `focus`).
     FocusInput { node_id: NodeId },
     /// Blur `node_id`, committing the edited `value` into the DOM and firing
@@ -51,6 +74,12 @@ pub enum ScriptMsg {
     },
     /// Editing keystroke on a focused `<input>` (fire `input`).
     InputKeystroke { node_id: NodeId },
+    /// A range slider committed a snapped value: write the DOM `value`, then
+    /// fire `input` (and `change` when the value actually changed).
+    RangeInput {
+        node_id: NodeId,
+        value: CompactString,
+    },
     /// A `<select>` option was picked: `set_value_dirty` + fire `change` when
     /// the value actually changed.
     SelectPick {
@@ -79,6 +108,18 @@ pub enum ScriptMsg {
         target: Option<NodeId>,
         key: KeyEventInfo,
     },
+    /// The terminal viewport changed size. Carries no data — the script
+    /// thread reads the live values from the shared [`SharedUiState`]; the
+    /// message's job is dispatching the `resize` event and re-evaluating
+    /// `matchMedia` lists.
+    Resize,
+    /// The page scroll offset changed (sent by the input loop after a
+    /// wheel / key / animation / `scrollTo` frame). Dispatches the `scroll`
+    /// event; handlers read `window.scrollY`.
+    Scroll,
+    /// A page or field selection changed. Dispatches the browser-shaped
+    /// document-level `selectionchange` notification (no payload).
+    SelectionChange,
     /// Replace the whole document owned by the script engine.
     ///
     /// Used by the debug hot-reload watcher. The engine re-parses the HTML,
@@ -121,6 +162,10 @@ pub struct ScriptEvent {
     /// `key_id` plus whether a JS listener called `preventDefault()` (the
     /// input loop uses the pair to decide whether the built-in shortcut runs).
     pub key_gate: Option<(u32, bool)>,
+    /// Non-`None` only when the message was a gated [`ScriptMsg::Wheel`]:
+    /// the echoed gate id plus the `preventDefault()` verdict (the input
+    /// loop runs the built-in container / page scroll when it is `false`).
+    pub wheel_gate: Option<(u32, bool)>,
 }
 
 /// One-shot or per-message reply from the script thread.
@@ -265,17 +310,52 @@ pub fn apply_message(
     hit_map: &HitMap,
     msg: ScriptMsg,
 ) -> ScriptEvent {
-    let (cmds, key_gate) = match &msg {
-        ScriptMsg::Move { x, y } => (interaction::on_move(hover, hit_map, engine, *x, *y), None),
+    let (cmds, key_gate, wheel_gate) = match &msg {
+        ScriptMsg::Move { x, y } => (
+            interaction::on_move(hover, hit_map, engine, *x, *y),
+            None,
+            None,
+        ),
+        ScriptMsg::MouseDown { x, y } => {
+            let cmds = interaction::on_mouse_down(hit_map, engine, *x, *y);
+            (cmds, None, None)
+        }
+        ScriptMsg::MouseUp { x, y } => {
+            let cmds = interaction::on_mouse_up(hit_map, engine, *x, *y);
+            (cmds, None, None)
+        }
+        ScriptMsg::MouseMove { x, y } => {
+            let cmds = interaction::on_mouse_move_dispatch(hit_map, engine, *x, *y);
+            (cmds, None, None)
+        }
+        ScriptMsg::DblClick { x, y } => match hit_map.hit_test(*x, *y) {
+            Some(region) => (engine.fire(region, EventType::DblClick, *x, *y), None, None),
+            None => (Vec::new(), None, None),
+        },
+        ScriptMsg::ContextMenu { x, y } => match hit_map.hit_test(*x, *y) {
+            Some(region) => (
+                engine.fire(region, EventType::ContextMenu, *x, *y),
+                None,
+                None,
+            ),
+            None => (Vec::new(), None, None),
+        },
+        ScriptMsg::Wheel { gate_id, x, y, up } => {
+            let (cmds, prevented) = engine.fire_wheel_gate(hit_map, *x, *y, *up);
+            (cmds, None, Some((*gate_id, prevented)))
+        }
         ScriptMsg::Click { x, y } => {
             let mut cmds = interaction::on_click(hover, hit_map, engine, *x, *y);
+            // The hit test cannot change between the default actions below
+            // (JS mutations rebuild the hit map only on the next layout), so
+            // it runs once here.
+            let clicked = hit_map.hit_test(*x, *y).map(|r| r.node_id);
             // `<summary>` default action: after the click handlers, clicking
             // a summary (or its content) toggles the owning `<details>`'s
             // `open` attribute and fires a `toggle` event on it — the
             // browser's disclosure widget.
-            if let Some(details_id) = hit_map
-                .hit_test(*x, *y)
-                .and_then(|r| summary_details(&engine.arena(), r.node_id))
+            if let Some(details_id) =
+                clicked.and_then(|node_id| summary_details(&engine.arena(), node_id))
             {
                 engine.toggle_details(details_id);
                 let region = region_for(&engine.arena(), details_id);
@@ -285,9 +365,8 @@ pub fn apply_message(
             // handlers, fire the matching event on the containing `<form>`.
             // The engine performs no default navigation / control reset —
             // pages handle it in JS.
-            if let Some((form_id, et)) = hit_map
-                .hit_test(*x, *y)
-                .and_then(|r| button_form_action(&engine.arena(), r.node_id))
+            if let Some((form_id, et)) =
+                clicked.and_then(|node_id| button_form_action(&engine.arena(), node_id))
             {
                 let region = region_for(&engine.arena(), form_id);
                 cmds.extend(engine.fire(&region, et, 0, 0));
@@ -295,23 +374,47 @@ pub fn apply_message(
             // `form[method=dialog]` default action: after the submit handlers,
             // a submit inside a dialog closes it (removes `open`) and fires a
             // `close` event on the dialog — the browser's native dialog flow.
-            if let Some(dialog_id) = hit_map
-                .hit_test(*x, *y)
-                .and_then(|r| dialog_form_action(&engine.arena(), r.node_id))
+            if let Some(dialog_id) =
+                clicked.and_then(|node_id| dialog_form_action(&engine.arena(), node_id))
                 && engine.close_dialog(dialog_id)
             {
                 let region = region_for(&engine.arena(), dialog_id);
                 cmds.extend(engine.fire(&region, EventType::Close, 0, 0));
             }
-            (cmds, None)
+            (cmds, None, None)
         }
         ScriptMsg::FocusInput { node_id } => {
             let region = region_for(&engine.arena(), *node_id);
-            (engine.fire(&region, EventType::Focus, 0, 0), None)
+            (engine.fire(&region, EventType::Focus, 0, 0), None, None)
         }
+        ScriptMsg::Resize => {
+            let mut cmds = engine.fire_resize();
+            engine.evaluate_media_changes();
+            let mut st_cmds = engine.take_pending_cmds();
+            cmds.append(&mut st_cmds);
+            (cmds, None, None)
+        }
+        ScriptMsg::Scroll => (engine.fire_scroll(), None, None),
+        ScriptMsg::SelectionChange => (engine.fire_selection_change(), None, None),
         ScriptMsg::InputKeystroke { node_id } => {
             let region = region_for(&engine.arena(), *node_id);
-            (engine.fire(&region, EventType::Input, 0, 0), None)
+            (engine.fire(&region, EventType::Input, 0, 0), None, None)
+        }
+        ScriptMsg::RangeInput { node_id, value } => {
+            let node_id = *node_id;
+            let old = engine
+                .arena()
+                .get(node_id)
+                .and_then(|n| n.attributes.get("value"))
+                .cloned()
+                .unwrap_or_default();
+            engine.set_value_dirty(node_id, value);
+            let region = region_for(&engine.arena(), node_id);
+            let mut cmds = engine.fire(&region, EventType::Input, 0, 0);
+            if old != *value {
+                cmds.extend(engine.fire(&region, EventType::Change, 0, 0));
+            }
+            (cmds, None, None)
         }
         ScriptMsg::BlurInput { node_id, value } => {
             let arena = engine.arena();
@@ -342,7 +445,7 @@ pub fn apply_message(
             if old != *value {
                 cmds.extend(engine.fire(&region, EventType::Change, 0, 0));
             }
-            (cmds, None)
+            (cmds, None, None)
         }
         ScriptMsg::SelectPick { node_id, value } => {
             let arena = engine.arena();
@@ -354,9 +457,9 @@ pub fn apply_message(
             if old != *value {
                 engine.set_value_dirty(*node_id, value);
                 let region = region_for(&engine.arena(), *node_id);
-                (engine.fire(&region, EventType::Change, 0, 0), None)
+                (engine.fire(&region, EventType::Change, 0, 0), None, None)
             } else {
-                (Vec::new(), None)
+                (Vec::new(), None, None)
             }
         }
         ScriptMsg::ToggleCheck { node_id } => {
@@ -382,9 +485,9 @@ pub fn apply_message(
                 let region = region_for(&engine.arena(), node_id);
                 let mut cmds = engine.fire(&region, EventType::Input, 0, 0);
                 cmds.extend(engine.fire(&region, EventType::Change, 0, 0));
-                (cmds, None)
+                (cmds, None, None)
             } else {
-                (Vec::new(), None)
+                (Vec::new(), None, None)
             }
         }
         ScriptMsg::FormSubmit { form_id } => {
@@ -392,7 +495,7 @@ pub fn apply_message(
             // browser's implicit submission). No default navigation — pages
             // handle the `submit` event in JS.
             let region = region_for(&engine.arena(), *form_id);
-            (engine.fire(&region, EventType::Submit, 0, 0), None)
+            (engine.fire(&region, EventType::Submit, 0, 0), None, None)
         }
         ScriptMsg::KeyDown {
             key_id,
@@ -401,11 +504,11 @@ pub fn apply_message(
         } => {
             let region = key_region(engine, *target);
             let (cmds, prevented) = engine.fire_key_gated(&region, EventType::KeyDown, key);
-            (cmds, Some((*key_id, prevented)))
+            (cmds, Some((*key_id, prevented)), None)
         }
         ScriptMsg::KeyUp { target, key } => {
             let region = key_region(engine, *target);
-            (engine.fire_key(&region, EventType::KeyUp, key), None)
+            (engine.fire_key(&region, EventType::KeyUp, key), None, None)
         }
         ScriptMsg::ReloadHtml { html } => {
             // Node ids belong to the replaced arena, so hover state cannot be
@@ -414,15 +517,15 @@ pub fn apply_message(
             if let Err(e) = engine.reload(html) {
                 log::error!("Hot reload failed; keeping the previous document: {e}");
             }
-            (Vec::new(), None)
+            (Vec::new(), None, None)
         }
         ScriptMsg::ReloadJs { js } => {
             if let Err(e) = engine.reload_js(js) {
                 log::error!("JS hot reload failed: {e}");
             }
-            (Vec::new(), None)
+            (Vec::new(), None, None)
         }
-        ScriptMsg::Quit => (Vec::new(), None),
+        ScriptMsg::Quit => (Vec::new(), None, None),
     };
 
     let document_reload = engine.take_document_reload();
@@ -450,13 +553,18 @@ pub fn apply_message(
         dirty,
         hovered,
         key_gate,
+        wheel_gate,
     }
 }
 
 /// Run the page's JS engine with required initial session-level JS.
 ///
 /// Build the engine, run top-level scripts, then handle `ScriptMsg` requests,
-/// timers, and fetches until `Quit` or channel disconnect.
+/// timers, and fetches until `Quit` or channel disconnect. `ui` is the
+/// input loop's shared UI state (viewport / scroll offset / focused field)
+/// that the `window.innerWidth` & co getters read; `hit_map` is the live
+/// hit-map channel the geometry-read natives consult; `selection_text` is
+/// the render thread's selection text `window.getSelection()` reads.
 pub fn run_script_thread(
     document: ParsedDocument,
     bindings: EventBindings,
@@ -464,7 +572,12 @@ pub fn run_script_thread(
     rx: Receiver<ScriptMsg>,
     tx: Sender<ScriptResponse>,
     hit_map: SharedHitMap,
+    ui: Arc<SharedUiState>,
+    selection_text: Arc<Mutex<String>>,
 ) {
+    set_ui_state(ui);
+    set_hit_map(Arc::clone(&hit_map));
+    set_selection_text(selection_text);
     let mut engine = match ScriptEngine::new_from_document(document, &session_js, bindings) {
         Ok(engine) => engine,
         Err(err) => {
@@ -485,6 +598,18 @@ pub fn run_script_thread(
         .is_err()
     {
         log::debug!("Script response channel closed before first frame");
+        return;
+    }
+
+    // Browser load sequence: every document-level script has run, so the DOM
+    // is ready — fire `DOMContentLoaded` then `load`. Handlers' DOM writes
+    // and render commands ride a follow-up Event batch (silent when no
+    // listener produced anything).
+    let boot = engine.fire_document_loaded();
+    if (!boot.cmds.is_empty() || boot.dirty.is_some())
+        && tx.send(ScriptResponse::Event(boot)).is_err()
+    {
+        log::debug!("Script response channel closed after load events");
         return;
     }
 
@@ -528,6 +653,7 @@ pub fn run_script_thread(
                 dirty: None,
                 hovered: hover.current().map(|r| r.node_id),
                 key_gate: None,
+                wheel_gate: None,
             },
         };
 
@@ -573,7 +699,12 @@ pub fn run_script_thread(
         // effect, or a fetch settled nothing) stays silent: the empty event
         // carries no information for the input loop, and sending it would
         // wake that loop for nothing.
-        if !has_msg && event.cmds.is_empty() && event.dirty.is_none() && event.key_gate.is_none() {
+        if !has_msg
+            && event.cmds.is_empty()
+            && event.dirty.is_none()
+            && event.key_gate.is_none()
+            && event.wheel_gate.is_none()
+        {
             continue;
         }
         if tx.send(ScriptResponse::Event(event)).is_err() {
@@ -624,6 +755,7 @@ pub(crate) fn region_for(arena: &NodeArena, node_id: NodeId) -> HitRegion {
     HitRegion {
         node_id,
         rect: Rect::new(0, 0, 0, 0),
+        client: Rect::new(0, 0, 0, 0),
         path: path.into(),
     }
 }

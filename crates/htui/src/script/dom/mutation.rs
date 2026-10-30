@@ -944,7 +944,7 @@ pub(super) fn native_set_outer_html(
         };
         // Parse into a scratch node typed like the target (keeps the
         // parser's context tag), then move the result in front of it.
-        let scratch = st
+        let Some(scratch) = st
             .arena
             .get(node_id)
             .map(|n| Node::from(n.node_type))
@@ -952,7 +952,9 @@ pub(super) fn native_set_outer_html(
                 s.parent = None;
                 st.arena.insert(s)
             })
-            .expect("node present");
+        else {
+            return Ok(JsValue::undefined());
+        };
         let mut css_sources = Vec::new();
         crate::html::html_parse::parse_fragment_into(
             &mut st.arena,

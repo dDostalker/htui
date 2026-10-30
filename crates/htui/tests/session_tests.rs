@@ -16,6 +16,7 @@ fn config_defaults_are_interactive() {
     assert_eq!(cfg.zoom, 1.0);
     assert!(cfg.events, "events default to on");
     assert_eq!(cfg.frame_gap, Duration::from_millis(16));
+    assert!(cfg.smooth_scroll, "smooth scrolling defaults to on");
 }
 
 #[test]

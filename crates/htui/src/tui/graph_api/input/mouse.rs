@@ -4,14 +4,17 @@ use crate::events::HitMap;
 use crate::script::ScriptMsg;
 use crate::tdom::node::{NodeArena, NodeId, NodeType};
 
+use super::DBLCLICK_MS;
 use super::InputState;
 use super::TEXT_SEL_DRAG_THRESHOLD;
 use super::cmd::{RenderCmd, SelectionMode};
 use super::field::{
-    char_index_at_x, clear_text_selection, is_button_input, is_disabled_control, is_text_field,
-    is_textarea_node, is_toggle_input, textarea_index_at,
+    blocks_page_selection, char_index_at_x, clear_text_selection, is_button_input,
+    is_disabled_control, is_range_input, is_text_field, is_textarea_node, is_toggle_input,
+    set_range_at_pointer, textarea_index_at,
 };
 use super::focus::{blur_input, focus_input, push_input_render};
+use super::scroll_anim::{ScrollTarget, active_scroll_target, step_target};
 use super::select::{close_select, hit_select_option, open_select, refresh_datalist, row_option};
 
 /// Handle a completed left-button click at canvas coordinates `(x, y)`.
@@ -39,7 +42,20 @@ pub fn handle_click(
     if clicked.is_some_and(|r| is_disabled_control(Some(arena), r.node_id)) {
         return;
     }
+    msgs.push(ScriptMsg::MouseDown { x, y });
     msgs.push(ScriptMsg::Click { x, y });
+    // Double click: a second click on the same cell inside the window emits
+    // `DblClick` after the `Click` pair (browser order) and resets the
+    // tracker (three rapid clicks = click + dblclick + click).
+    let now = std::time::Instant::now();
+    if state.last_click.is_some_and(|(at, px, py)| {
+        now.duration_since(at).as_millis() <= DBLCLICK_MS && (px, py) == (x, y)
+    }) {
+        state.last_click = None;
+        msgs.push(ScriptMsg::DblClick { x, y });
+    } else {
+        state.last_click = Some((now, x, y));
+    }
     // Clicking an `<input>` / `<textarea>` focuses it; a click on a `<label>`
     // delegates to its associated control (`for` or a wrapped element). Any
     // other click blurs the previously focused field.
@@ -62,6 +78,17 @@ pub fn handle_click(
                 if state.focused_input.is_some() {
                     blur_input(state, msgs, cmds);
                 }
+            } else if is_range_input(arena, node_id) {
+                focus_input(state, node_id, arena, msgs, cmds);
+                if let Some(region) = clicked
+                    && set_range_at_pointer(state, arena, node_id, region.rect, x, y)
+                {
+                    push_input_render(state, node_id, cmds);
+                    msgs.push(ScriptMsg::RangeInput {
+                        node_id,
+                        value: state.input_value.clone(),
+                    });
+                }
             } else {
                 focus_input(state, node_id, arena, msgs, cmds);
                 // Clicking an `<input list>` opens its autocomplete dropdown
@@ -74,6 +101,175 @@ pub fn handle_click(
     }
 }
 
+/// Apply a wheel tick to the nearest native scroll container under `x/y`
+/// that can still move in the requested direction.
+///
+/// With smooth scrolling enabled the tick returns a `ScrollAnimate` marker
+/// for the run loop's eased animation instead of moving the container here.
+/// Browser scroll chaining: a container already at its edge passes the tick
+/// to the next outer scroll container; when every container is at its edge
+/// (or there is no container under the pointer) the tick falls through to
+/// the page (`None`).
+pub(super) fn scroll_at_wheel(
+    state: &mut InputState,
+    hit_map: &HitMap,
+    arena: &NodeArena,
+    x: u32,
+    y: u32,
+    up: bool,
+) -> Option<RenderCmd> {
+    let hit = hit_map.hit_test(x, y)?;
+    let delta = if up {
+        -(super::SCROLL_LINES_PER_TICK as i32)
+    } else {
+        super::SCROLL_LINES_PER_TICK as i32
+    };
+    // Walk the DOM ancestor chain, trying each active scroll container; the
+    // first one that can move consumes the tick.
+    let mut current = Some(hit.node_id);
+    while let Some(node_id) = current {
+        current = arena.get(node_id).and_then(|node| node.parent);
+        let Some(scroll) = hit_map.scrollbars.get(&node_id) else {
+            continue;
+        };
+        let at_edge = if up {
+            state
+                .scroll_offsets
+                .get(&scroll.node_id)
+                .copied()
+                .unwrap_or(scroll.scroll_y)
+                == 0
+        } else {
+            state
+                .scroll_offsets
+                .get(&scroll.node_id)
+                .copied()
+                .unwrap_or(scroll.scroll_y)
+                >= scroll.max_scroll
+        };
+        if at_edge {
+            continue;
+        }
+        let base = state
+            .scroll_offsets
+            .get(&scroll.node_id)
+            .copied()
+            .unwrap_or(scroll.scroll_y);
+        if state.smooth_scroll {
+            let base = active_scroll_target(state, ScrollTarget::Container(scroll.node_id))
+                .unwrap_or(base);
+            return step_target(base, delta, 0, scroll.max_scroll).map(|to| {
+                state.show_scrollbar(scroll.node_id);
+                RenderCmd::ScrollAnimate {
+                    target: ScrollTarget::Container(scroll.node_id),
+                    to,
+                }
+            });
+        }
+        let next = step_target(base, delta, 0, scroll.max_scroll)?;
+        state.show_scrollbar(scroll.node_id);
+        state.scroll_offsets.insert(scroll.node_id, next);
+        return Some(RenderCmd::RenderScroll {
+            node_id: scroll.node_id,
+            scroll_y: next,
+        });
+    }
+    None
+}
+
+/// Horizontal counterpart of [`scroll_at_wheel`]: route a horizontal wheel
+/// tick (`ScrollLeft` / `ScrollRight`) through the `overflow-x` containers
+/// under the pointer, chaining past at-edge containers. The page never
+/// scrolls horizontally — exhaustion is a no-op.
+pub(super) fn scroll_at_wheel_x(
+    state: &mut InputState,
+    hit_map: &HitMap,
+    arena: &NodeArena,
+    x: u32,
+    y: u32,
+    left: bool,
+) -> Option<RenderCmd> {
+    let hit = hit_map.hit_test(x, y)?;
+    let delta = if left {
+        -(super::SCROLL_LINES_PER_TICK as i32)
+    } else {
+        super::SCROLL_LINES_PER_TICK as i32
+    };
+    let mut current = Some(hit.node_id);
+    while let Some(node_id) = current {
+        current = arena.get(node_id).and_then(|node| node.parent);
+        let Some(scroll) = hit_map.scrollbars.get(&node_id) else {
+            continue;
+        };
+        if scroll.max_scroll_x == 0 {
+            continue;
+        }
+        let at_edge = if left {
+            state
+                .scroll_x_offsets
+                .get(&scroll.node_id)
+                .copied()
+                .unwrap_or(scroll.scroll_x)
+                == 0
+        } else {
+            state
+                .scroll_x_offsets
+                .get(&scroll.node_id)
+                .copied()
+                .unwrap_or(scroll.scroll_x)
+                >= scroll.max_scroll_x
+        };
+        if at_edge {
+            continue;
+        }
+        let base = state
+            .scroll_x_offsets
+            .get(&scroll.node_id)
+            .copied()
+            .unwrap_or(scroll.scroll_x);
+        if let Some(next) = step_target(base, delta, 0, scroll.max_scroll_x) {
+            state.show_scrollbar(scroll.node_id);
+            state.scroll_x_offsets.insert(scroll.node_id, next);
+            return Some(RenderCmd::RenderScrollX {
+                node_id: scroll.node_id,
+                scroll_x: next,
+            });
+        }
+    }
+    None
+}
+
+/// Reveal a scrollbar when the pointer is over its track, even while idle.
+///
+/// The layout geometry remains in the hit map while chrome is hidden, so the
+/// track is the hover affordance that brings it back. A same-offset scroll
+/// update is harmless when the chrome is already visible and performs the
+/// reveal repaint when it is hidden.
+pub(super) fn reveal_scrollbar_at(
+    state: &mut InputState,
+    hit_map: &HitMap,
+    x: u32,
+    y: u32,
+    cmds: &mut Vec<RenderCmd>,
+) {
+    if let Some(scroll) = hit_map
+        .scrollbars
+        .values()
+        .find(|scroll| scroll.track.contains(x, y))
+    {
+        state.show_scrollbar(scroll.node_id);
+        let offset = state
+            .scroll_offsets
+            .get(&scroll.node_id)
+            .copied()
+            .unwrap_or(scroll.scroll_y);
+        cmds.push(RenderCmd::RenderScroll {
+            node_id: scroll.node_id,
+            scroll_y: offset,
+        });
+    }
+}
+
 /// End a button press at the release position (screen coordinates in
 /// `release_screen`).
 ///
@@ -81,9 +277,10 @@ pub fn handle_click(
 /// release position: hover freezes while a button is held (button-free moves
 /// are the only thing that update it), so a press-and-drag-away release must
 /// not leave the pressed element `:hover`-highlighted — the highlight residue
-/// after a button press. A left release on the same cell it started on also
-/// dispatches the click (and the dropdown pick, when the release lands on an
-/// open `<select>` overlay row).
+/// after a button press. A left release within the shared drag threshold on
+/// the same resolved element dispatches the click (and the dropdown pick, when
+/// the release lands on an open `<select>` overlay row). A larger move is a
+/// drag: it may leave a selection, but it never turns into a click.
 pub fn handle_mouse_up(
     state: &mut InputState,
     hit_map: &HitMap,
@@ -93,17 +290,51 @@ pub fn handle_mouse_up(
     msgs: &mut Vec<ScriptMsg>,
     cmds: &mut Vec<RenderCmd>,
 ) {
+    let range_drag = state.drag_selecting && state.field_drag_started && state.focused_is_range;
+    let scroll_drag = state.scroll_drag.take();
+    state.scroll_drag_x = None;
     let pressed = state.pressed.take();
+    let press_target = state.pressed_target.take();
+    let press_origin = state.press_screen.take();
+    state.drag_origin = None;
     state.drag_selecting = false;
+    let field_drag_started = state.field_drag_started;
+    state.field_drag_started = false;
+    let page_selection_drag = state.text_sel_anchor.is_some() || state.text_sel_end.is_some();
     let (x, y) = canvas_pos(state, release_screen.0, release_screen.1);
     // Re-validate the hover at the release position (see the doc comment).
     msgs.push(ScriptMsg::Move { x, y });
+    msgs.push(ScriptMsg::MouseUp { x, y });
     if button != MouseButton::Left {
+        // Right-drag block selection ends here; field drags are left-only.
+        if page_selection_drag {
+            msgs.push(ScriptMsg::SelectionChange);
+        } else if button == MouseButton::Right {
+            // A right release without a selection drag is a context menu
+            // request (the terminal has no native menu — page JS only).
+            msgs.push(ScriptMsg::ContextMenu { x, y });
+        }
         return;
     }
-    let Some((px, py)) = pressed else {
+    if scroll_drag.is_some() {
         return;
-    };
+    }
+    if pressed.is_none() {
+        return;
+    }
+    // A range drag commits at the release coordinate as well as during moves;
+    // this covers consoles that coalesce or drop the final drag event.
+    if range_drag
+        && let Some(focused) = state.focused_input
+        && let Some(region) = hit_map.region_for(focused)
+        && set_range_at_pointer(state, arena, focused, region.rect, x, y)
+    {
+        push_input_render(state, focused, cmds);
+        msgs.push(ScriptMsg::RangeInput {
+            node_id: focused,
+            value: state.input_value.clone(),
+        });
+    }
     // Press-drag-release over a dropdown row picks it (the browser's native
     // `<select>` interaction), even when the release lands off the press
     // cell. Rows map to option indices like the mousedown pick above:
@@ -115,11 +346,30 @@ pub fn handle_mouse_up(
         close_select(state, arena, Some(option_idx), msgs, cmds);
         return;
     }
-    if px == release_screen.0 && py == release_screen.1 {
+    // A click is a small jitter, not necessarily on the exact terminal cell.
+    // The queued `Click` dispatch resolves its bubbling target from the
+    // release hit path, so a tiny move onto an inline sibling reaches their
+    // common ancestor like a browser. Once the shared threshold has been
+    // crossed, the gesture is a drag: a selection may survive, but the release
+    // must not also activate a button / field.
+    let within_click_threshold = press_origin.is_some_and(|(px, py)| {
+        u32::from(
+            release_screen
+                .0
+                .abs_diff(px)
+                .max(release_screen.1.abs_diff(py)),
+        ) < TEXT_SEL_DRAG_THRESHOLD
+    });
+    if within_click_threshold && press_target.is_some() {
         handle_click(state, hit_map, arena, x, y, msgs, cmds);
     }
-    // A drag ended on a different cell: the selection (field-internal or
-    // page text) is kept as-is.
+    // Browser coalesces selection notifications; notifying once at gesture end
+    // is the terminal loop's equivalent task boundary.
+    if field_drag_started || page_selection_drag {
+        msgs.push(ScriptMsg::SelectionChange);
+    }
+    // A real drag ended elsewhere: the selection (field-internal or page
+    // text) is kept as-is.
 }
 
 /// Resolve the element a click should act on: a `<label>` hit resolves to
@@ -137,7 +387,20 @@ fn resolve_click_node(arena: &NodeArena, clicked: Option<NodeId>) -> Option<Node
     }
 }
 
-/// The control a `<label>` activates: the element named by `for` (when it is
+/// The document `<body>` (or root fallback), used when no box was hit.
+fn find_body(arena: &NodeArena) -> Option<NodeId> {
+    arena
+        .iter()
+        .find(|(_, node)| node.node_type == NodeType::Body)
+        .map(|(id, _)| id)
+        .or_else(|| {
+            arena
+                .iter()
+                .find(|(_, node)| node.parent.is_none())
+                .map(|(id, _)| id)
+        })
+}
+
 /// labelable), else the first labelable descendant (input / select /
 /// textarea / button) in document order.
 fn label_control(arena: &NodeArena, label_id: NodeId) -> Option<NodeId> {
@@ -198,6 +461,71 @@ pub fn handle_mouse_down(
     cmds: &mut Vec<RenderCmd>,
 ) {
     let clicked = hit_map.hit_test(x, y);
+    // Record the stable press origin once: drag thresholds and click-vs-drag
+    // decisions must use the original pointer cell, not an intermediate drag
+    // position. The target starts clear so swallowed presses cannot click.
+    state.press_screen = Some((
+        x.min(u16::MAX as u32) as u16,
+        y.saturating_sub(state.scroll_y).min(u16::MAX as u32) as u16,
+    ));
+    state.drag_origin = Some((x, y));
+    state.pressed_target = None;
+    state.field_drag_started = false;
+    // A native scrollbar owns its press before text selection / controls.
+    // The bottom horizontal track wins when the point also touches a
+    // vertical track's corner cell.
+    if button == MouseButton::Left {
+        let h_hit = hit_map
+            .scrollbars
+            .values()
+            .find(|scroll| scroll.h_track.height > 0 && scroll.h_track.contains(x, y))
+            .map(|scroll| {
+                let grab_offset = x
+                    .saturating_sub(scroll.h_thumb.x as u32)
+                    .min(scroll.h_thumb.width as u32);
+                (
+                    scroll.node_id,
+                    grab_offset,
+                    scroll.offset_at_x(x, grab_offset),
+                )
+            });
+        if let Some((node_id, grab_offset, offset)) = h_hit {
+            state.scroll_anim = None;
+            state.show_scrollbar(node_id);
+            state.scroll_drag = Some((node_id, grab_offset));
+            state.scroll_drag_x = Some(grab_offset);
+            state.scroll_x_offsets.insert(node_id, offset);
+            cmds.push(RenderCmd::RenderScrollX {
+                node_id,
+                scroll_x: offset,
+            });
+            return;
+        }
+        let scrollbar_hit = hit_map
+            .scrollbars
+            .values()
+            .find(|scroll| scroll.track.contains(x, y))
+            .map(|scroll| {
+                let grab_offset = y
+                    .saturating_sub(scroll.thumb.y as u32)
+                    .min(scroll.thumb.height as u32);
+                let offset = scroll.offset_at(y, grab_offset);
+                (scroll.node_id, grab_offset, offset)
+            });
+        if let Some((node_id, grab_offset, offset)) = scrollbar_hit {
+            // Grabbing the thumb takes over from any glide in progress. A same-
+            // offset command still reveals chrome that a previous timeout hid.
+            state.scroll_anim = None;
+            state.show_scrollbar(node_id);
+            state.scroll_drag = Some((node_id, grab_offset));
+            state.scroll_offsets.insert(node_id, offset);
+            cmds.push(RenderCmd::RenderScroll {
+                node_id,
+                scroll_y: offset,
+            });
+            return;
+        }
+    }
 
     // An open dropdown takes priority: a press on an option row picks it, a
     // press on an `<optgroup>` header does nothing (browsers keep the
@@ -232,6 +560,7 @@ pub fn handle_mouse_down(
     // drag-selection logic below only applies when the pointer is directly
     // over the field itself.
     let click_node = resolve_click_node(arena, clicked.map(|r| r.node_id));
+    state.pressed_target = click_node;
     let direct_field_hit = clicked.is_some_and(|r| click_node == Some(r.node_id));
     let clicked_input = click_node.is_some_and(|id| is_text_field(arena, id));
     match button {
@@ -244,6 +573,18 @@ pub fn handle_mouse_down(
                     } else if is_button_input(arena, node_id) {
                         // Button input: the click handler activates it — no
                         // text focus or drag selection here.
+                    } else if is_range_input(arena, node_id) {
+                        focus_input(state, node_id, arena, msgs, cmds);
+                        if let Some(region) = clicked {
+                            state.drag_selecting = true;
+                            if set_range_at_pointer(state, arena, node_id, region.rect, x, y) {
+                                push_input_render(state, node_id, cmds);
+                                msgs.push(ScriptMsg::RangeInput {
+                                    node_id,
+                                    value: state.input_value.clone(),
+                                });
+                            }
+                        }
                     } else {
                         focus_input(state, node_id, arena, msgs, cmds);
                         // Pressing an `<input list>` opens its autocomplete
@@ -283,10 +624,20 @@ pub fn handle_mouse_down(
                 if state.focused_input.is_some() {
                     blur_input(state, msgs, cmds);
                 }
-                clear_text_selection(state, cmds);
-                if state.copy_flow {
+                if clear_text_selection(state, cmds) {
+                    msgs.push(ScriptMsg::SelectionChange);
+                }
+                // Outside a laid-out box, the browser's implicit target is the
+                // document body. Anchoring there still allows an upward drag
+                // to select content, while normal box hits use their own
+                // target's selection policy.
+                let selection_node = click_node.or_else(|| find_body(arena));
+                let selected = selection_node
+                    .is_some_and(|node_id| !blocks_page_selection(hit_map, arena, node_id));
+                if state.copy_flow && selected {
                     state.text_sel_mode = SelectionMode::Flow;
                     state.text_sel_armed = true;
+                    state.drag_origin = Some((x, y));
                 }
             }
         }
@@ -297,10 +648,13 @@ pub fn handle_mouse_down(
         // records the shape. When the block copy feature is disabled no
         // selection can start.
         MouseButton::Right => {
-            clear_text_selection(state, cmds);
+            if clear_text_selection(state, cmds) {
+                msgs.push(ScriptMsg::SelectionChange);
+            }
             if state.copy_block {
                 state.text_sel_mode = SelectionMode::Block;
                 state.text_sel_armed = true;
+                state.drag_origin = Some((x, y));
             }
         }
         _ => {}
@@ -323,9 +677,9 @@ pub fn handle_mouse_down(
 
 /// Handle a pointer move at canvas coordinates `(x, y)`.
 ///
-/// While the left button is held this drives the active drag: inside a
-/// focused `<input>` the caret (and with it the character selection) follows
-/// the pointer; over page content the text selection rectangle tracks the
+/// While the left button is held this drives the active drag: a focused range
+/// follows the pointer, other focused fields move their caret / character
+/// selection, and over page content the text selection rectangle tracks the
 /// pointer. A page text selection starts only once the drag has moved past
 /// `TEXT_SEL_DRAG_THRESHOLD` cells from the press point — a press alone
 /// never creates one. Without a press it queues a [`ScriptMsg::Move`] for the
@@ -335,6 +689,7 @@ pub fn handle_mouse_down(
 pub fn handle_mouse_move(
     state: &mut InputState,
     hit_map: &HitMap,
+    arena: &NodeArena,
     x: u32,
     y: u32,
     msgs: &mut Vec<ScriptMsg>,
@@ -366,13 +721,69 @@ pub fn handle_mouse_move(
         });
     }
 
+    // Horizontal scrollbar drag: same contract as the vertical thumb, mapped
+    // through `offset_at_x` into the container's `scroll_x_offsets`.
+    if let Some((node_id, grab_offset)) = state.scroll_drag
+        && state.scroll_drag_x.is_some()
+        && let Some(scroll) = hit_map.scrollbars.get(&node_id)
+    {
+        state.show_scrollbar(node_id);
+        let offset = scroll.offset_at_x(x, grab_offset);
+        if state.scroll_x_offsets.get(&node_id) != Some(&offset) {
+            state.scroll_x_offsets.insert(node_id, offset);
+            cmds.push(RenderCmd::RenderScrollX {
+                node_id,
+                scroll_x: offset,
+            });
+        }
+        return;
+    }
+
+    if let Some((node_id, grab_offset)) = state.scroll_drag
+        && let Some(scroll) = hit_map.scrollbars.get(&node_id)
+    {
+        state.show_scrollbar(node_id);
+        let offset = scroll.offset_at(y, grab_offset);
+        if state.scroll_offsets.get(&node_id) != Some(&offset) {
+            state.scroll_offsets.insert(node_id, offset);
+            cmds.push(RenderCmd::RenderScroll {
+                node_id,
+                scroll_y: offset,
+            });
+        }
+        return;
+    }
+
     if state.pressed.is_some() {
         // Dragging: the pointer is inside the field it started in, so the
         // selection stays within that field's rectangle.
         if state.drag_selecting {
+            // Field selections use the same motion threshold as page selections:
+            // a one-cell jiggle remains a click (the caret was already placed
+            // by mousedown), not a character/range selection.
+            if !state.field_drag_started {
+                let Some((ax, ay)) = state.drag_origin else {
+                    return;
+                };
+                if x.abs_diff(ax).max(y.abs_diff(ay)) < TEXT_SEL_DRAG_THRESHOLD {
+                    return;
+                }
+                state.field_drag_started = true;
+            }
             if let Some(focused) = state.focused_input
-                && let Some(region) = hit_map.iter().find(|r| r.node_id == focused)
+                && let Some(region) = hit_map.region_for(focused)
             {
+                if state.focused_is_range {
+                    if set_range_at_pointer(state, arena, focused, region.rect, x, y) {
+                        push_input_render(state, focused, cmds);
+                        msgs.push(ScriptMsg::RangeInput {
+                            node_id: focused,
+                            value: state.input_value.clone(),
+                        });
+                    }
+                    msgs.push(ScriptMsg::MouseMove { x, y });
+                    return;
+                }
                 let idx = if state.focused_is_textarea {
                     textarea_index_at(state, region.rect, x, y)
                 } else {
@@ -402,10 +813,9 @@ pub fn handle_mouse_move(
             let anchor = match state.text_sel_anchor {
                 Some(a) => a,
                 None => {
-                    let Some((px, py)) = state.pressed else {
+                    let Some(&(ax, ay)) = state.drag_origin.as_ref() else {
                         return;
                     };
-                    let (ax, ay) = canvas_pos(state, px, py);
                     if x.abs_diff(ax).max(y.abs_diff(ay)) < TEXT_SEL_DRAG_THRESHOLD {
                         return;
                     }

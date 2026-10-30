@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use super::values::Viewport;
 use crate::tdom::node::{NodeId, NodeType};
 
 /// Errors produced while parsing a CSS selector string.
@@ -59,6 +60,10 @@ pub enum SelectorError {
     /// The tag name does not map to any known `NodeType`.
     #[error("unsupported CSS tag: {0:?}")]
     UnsupportedTag(String),
+    /// An attribute selector is malformed (unclosed bracket, missing value,
+    /// or an unsupported operator).
+    #[error("invalid attribute selector: [{0}]")]
+    InvalidAttributeSelector(String),
     /// `:nth-of-type` / `:nth-last-of-type` is missing its `(...)` list.
     #[error(":{0} requires `(...)`")]
     NthOfTypeRequiresParens(String),
@@ -108,6 +113,18 @@ impl NthExpr {
 /// `hovered`; the input loop's focus state fills `focused`). The cascade and
 /// the render thread treat it as a single value: adding a pseudo-class means
 /// adding one field here, one `PseudoClass` variant and one method arm.
+/// Session-level dynamic pseudo-class state (`:hover` / `:focus`) plus the
+/// cascade environment.
+///
+/// One slot per dynamic pseudo-class, populated by whoever owns that piece of
+/// interaction state (the script thread's pointer state machine fills
+/// `hovered`; the input loop's focus state fills `focused`). The cascade and
+/// the render thread treat it as a single value: adding a pseudo-class means
+/// adding one field here, one `PseudoClass` variant and one method arm.
+///
+/// `viewport` carries the terminal cell grid for `@media` matching. The
+/// default (`0x0`) matches no size condition — unconditional rules are
+/// unaffected — so callers that never cascade a real viewport keep working.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DynamicState {
     /// The node currently under the pointer (`:hover` matches it and its
@@ -115,6 +132,8 @@ pub struct DynamicState {
     pub hovered: Option<NodeId>,
     /// The focused text field (`:focus` matches it exactly).
     pub focused: Option<NodeId>,
+    /// Terminal viewport (columns × rows in cells) for `@media` conditions.
+    pub viewport: Viewport,
 }
 
 /// The set of dynamic pseudo-classes a stylesheet actually uses, packed as a
@@ -177,6 +196,71 @@ impl PseudoClass {
     }
 }
 
+/// CSS attribute selector comparison operator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AttributeOp {
+    /// `[attr]` — the attribute is present (value ignored).
+    Exists,
+    /// `[attr="value"]` — exact match.
+    Equals,
+    /// `[attr~="value"]` — whitespace-separated word contains `value`.
+    Includes,
+    /// `[attr|="value"]` — equals `value` or starts with `value-`.
+    DashMatch,
+    /// `[attr^="value"]` — starts with `value`.
+    PrefixMatch,
+    /// `[attr$="value"]` — ends with `value`.
+    SuffixMatch,
+    /// `[attr*="value"]` — contains `value` as a substring.
+    SubstringMatch,
+}
+
+/// A parsed CSS attribute selector (`[type="range"]`, `[disabled]`, …).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AttributeSelector {
+    /// Lowercased attribute name (HTML attribute names are case-insensitive).
+    pub name: String,
+    /// Comparison operator.
+    pub op: AttributeOp,
+    /// The right-hand value (empty for `Exists`).
+    pub value: String,
+    /// `true` when the optional `i` flag is present (`[attr=val i]`).
+    pub case_insensitive: bool,
+}
+
+impl AttributeSelector {
+    /// Evaluate this attribute selector against an attribute lookup callback
+    /// (decouples the selector from the arena's concrete map type).
+    pub fn matches_lookup(&self, lookup: &dyn Fn(&str) -> Option<String>) -> bool {
+        let Some(raw) = lookup(&self.name) else {
+            return false;
+        };
+        let raw = raw.as_str();
+        match self.op {
+            AttributeOp::Exists => true,
+            _ => {
+                let val = self.value.as_str();
+                let (raw, val) = if self.case_insensitive {
+                    (raw.to_ascii_lowercase(), val.to_ascii_lowercase())
+                } else {
+                    (raw.to_string(), val.to_string())
+                };
+                match self.op {
+                    AttributeOp::Equals => raw == val,
+                    AttributeOp::Includes => {
+                        !val.is_empty() && raw.split_whitespace().any(|w| w == val)
+                    }
+                    AttributeOp::DashMatch => raw == val || raw.starts_with(&format!("{val}-")),
+                    AttributeOp::PrefixMatch => !val.is_empty() && raw.starts_with(&val),
+                    AttributeOp::SuffixMatch => !val.is_empty() && raw.ends_with(&val),
+                    AttributeOp::SubstringMatch => !val.is_empty() && raw.contains(&val),
+                    AttributeOp::Exists => true,
+                }
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Selector {
     /// `*` — the universal selector: matches any element (never text,
@@ -223,6 +307,8 @@ pub enum Selector {
     Lang(String),
     /// A dynamic pseudo-class (currently `:hover`).
     PseudoClass(PseudoClass),
+    /// An attribute selector (`[type="range"]`, `[disabled]`, …).
+    Attribute(AttributeSelector),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -280,6 +366,9 @@ impl FromStr for CssSelector {
                 return Err(SelectorError::UnsupportedPseudoClass(match element {
                     PseudoElement::Before => "::before".to_string(),
                     PseudoElement::After => "::after".to_string(),
+                    PseudoElement::SliderThumb => "::slider-thumb".to_string(),
+                    PseudoElement::SliderTrack => "::slider-track".to_string(),
+                    PseudoElement::SliderProgress => "::slider-progress".to_string(),
                 }));
             }
             *last = trimmed.trim().to_string();
@@ -304,19 +393,35 @@ impl FromStr for CssSelector {
     }
 }
 
-/// The pseudo-elements the engine generates content for (CSS
-/// `::before` / `::after`).
+/// The pseudo-elements the engine recognises (CSS `::before` / `::after`
+/// and the browser-standard slider sub-parts).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PseudoElement {
     Before,
     After,
+    /// `::-webkit-slider-thumb` / `::-moz-range-thumb`.
+    SliderThumb,
+    /// `::-webkit-slider-runnable-track` / `::-moz-range-track`.
+    SliderTrack,
+    /// `::-moz-range-progress` (Firefox filled-track overlay).
+    SliderProgress,
 }
 
 /// If `seg` ends with a `::before` / `::after` pseudo-element suffix, return
 /// the segment with the suffix stripped plus the element kind.
 fn strip_pseudo_element(seg: &str) -> Option<(String, PseudoElement)> {
     let lower = seg.to_ascii_lowercase();
+    // Longest suffix first so `::-webkit-slider-runnable-track` wins over
+    // shorter partial matches.
     for (suffix, element) in [
+        (
+            "::-webkit-slider-runnable-track",
+            PseudoElement::SliderTrack,
+        ),
+        ("::-moz-range-progress", PseudoElement::SliderProgress),
+        ("::-moz-range-track", PseudoElement::SliderTrack),
+        ("::-webkit-slider-thumb", PseudoElement::SliderThumb),
+        ("::-moz-range-thumb", PseudoElement::SliderThumb),
         ("::before", PseudoElement::Before),
         (":before", PseudoElement::Before),
         ("::after", PseudoElement::After),
@@ -469,7 +574,12 @@ fn parse_compound_inner(
             '.' => {
                 i += 1;
                 let start = i;
-                while i < chars.len() && chars[i] != '.' && chars[i] != '#' && chars[i] != ':' {
+                while i < chars.len()
+                    && chars[i] != '.'
+                    && chars[i] != '#'
+                    && chars[i] != ':'
+                    && chars[i] != '['
+                {
                     i += 1;
                 }
                 let name: String = chars[start..i].iter().collect();
@@ -481,7 +591,12 @@ fn parse_compound_inner(
             '#' => {
                 i += 1;
                 let start = i;
-                while i < chars.len() && chars[i] != '.' && chars[i] != '#' && chars[i] != ':' {
+                while i < chars.len()
+                    && chars[i] != '.'
+                    && chars[i] != '#'
+                    && chars[i] != ':'
+                    && chars[i] != '['
+                {
                     i += 1;
                 }
                 let name: String = chars[start..i].iter().collect();
@@ -501,6 +616,7 @@ fn parse_compound_inner(
                     && chars[i] != '.'
                     && chars[i] != '#'
                     && chars[i] != ':'
+                    && chars[i] != '['
                 {
                     i += 1;
                 }
@@ -620,9 +736,24 @@ fn parse_compound_inner(
                     _ => return Err(SelectorError::UnsupportedPseudoClass(name)),
                 }
             }
+            '[' => {
+                // Attribute selector: capture the balanced `[...]` content and
+                // parse `name`, `op`, `value`, and the optional `i` flag.
+                let Some(inner) = capture_balanced_bracket(&chars, &mut i) else {
+                    return Err(SelectorError::InvalidAttributeSelector(
+                        chars.iter().collect(),
+                    ));
+                };
+                out.push(Selector::Attribute(parse_attribute_selector(&inner)?));
+            }
             _ => {
                 let start = i;
-                while i < chars.len() && chars[i] != '.' && chars[i] != '#' && chars[i] != ':' {
+                while i < chars.len()
+                    && chars[i] != '.'
+                    && chars[i] != '#'
+                    && chars[i] != ':'
+                    && chars[i] != '['
+                {
                     i += 1;
                 }
                 let tag: String = chars[start..i].iter().collect();
@@ -721,6 +852,7 @@ fn compound_specificity(compound: &[Selector]) -> (u32, u32, u32) {
             Selector::Universal => {}
             Selector::Id(_) => spec.0 += 1,
             Selector::Class(_)
+            | Selector::Attribute(_)
             | Selector::PseudoClass(_)
             | Selector::NthChild(_)
             | Selector::NthLastChild(_)
@@ -840,4 +972,130 @@ fn split_top_level(s: &str, is_sep: impl Fn(char) -> bool) -> Vec<&str> {
     }
     parts.push(&s[start..]);
     parts
+}
+
+/// Capture the balanced `[...]` content starting at `chars[*i] == '['`,
+/// advancing `*i` past the closing `]`. Returns `None` when the bracket is
+/// never closed.
+fn capture_balanced_bracket(chars: &[char], i: &mut usize) -> Option<String> {
+    debug_assert_eq!(chars[*i], '[');
+    let start = *i + 1;
+    let mut depth = 0usize;
+    while *i < chars.len() {
+        match chars[*i] {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    let inner: String = chars[start..*i].iter().collect();
+                    *i += 1;
+                    return Some(inner);
+                }
+            }
+            _ => {}
+        }
+        *i += 1;
+    }
+    None
+}
+
+/// Parse the inner content of an attribute selector (`type="range"`,
+/// `disabled`, `href^="https"` with optional trailing ` i` / `I` flag).
+fn parse_attribute_selector(inner: &str) -> std::result::Result<AttributeSelector, SelectorError> {
+    let inner = inner.trim();
+    if inner.is_empty() {
+        return Err(SelectorError::InvalidAttributeSelector(inner.to_string()));
+    }
+
+    // Detect and strip the trailing case-insensitive flag (` ... i` / ` I`).
+    let mut case_insensitive = false;
+    let mut body = inner;
+    for flag in [" i", " I"] {
+        if let Some(stripped) = body.strip_suffix(flag) {
+            case_insensitive = true;
+            body = stripped.trim_end();
+            break;
+        }
+    }
+
+    // Bare `[attr]` — existence check.
+    if !body.contains('=') {
+        let name = body.trim().to_ascii_lowercase();
+        if name.is_empty() {
+            return Err(SelectorError::InvalidAttributeSelector(inner.to_string()));
+        }
+        return Ok(AttributeSelector {
+            name,
+            op: AttributeOp::Exists,
+            value: String::new(),
+            case_insensitive,
+        });
+    }
+
+    // Split at the first `~=` / `|=` / `^=` / `$=` / `*=` / `=` operator.
+    // Scan for the operator character followed by `=`, breaking at the first
+    // match so quoted values containing `=` are never split prematurely.
+    let bytes = body.as_bytes();
+    let mut op_start = None; // index just past the operator symbol
+    let mut op = AttributeOp::Equals;
+    let mut name_end = None; // index of the last char of the name
+    for (idx, &b) in bytes.iter().enumerate() {
+        if b != b'=' || idx == 0 {
+            continue;
+        }
+        match bytes[idx - 1] {
+            b'~' => {
+                op = AttributeOp::Includes;
+                name_end = Some(idx - 1);
+                op_start = Some(idx + 1);
+            }
+            b'|' => {
+                op = AttributeOp::DashMatch;
+                name_end = Some(idx - 1);
+                op_start = Some(idx + 1);
+            }
+            b'^' => {
+                op = AttributeOp::PrefixMatch;
+                name_end = Some(idx - 1);
+                op_start = Some(idx + 1);
+            }
+            b'$' => {
+                op = AttributeOp::SuffixMatch;
+                name_end = Some(idx - 1);
+                op_start = Some(idx + 1);
+            }
+            b'*' => {
+                op = AttributeOp::SubstringMatch;
+                name_end = Some(idx - 1);
+                op_start = Some(idx + 1);
+            }
+            _ => {
+                op = AttributeOp::Equals;
+                name_end = Some(idx);
+                op_start = Some(idx + 1);
+            }
+        }
+        break;
+    }
+    let (Some(name_end), Some(op_start)) = (name_end, op_start) else {
+        return Err(SelectorError::InvalidAttributeSelector(inner.to_string()));
+    };
+    let name = body[..name_end].trim().to_ascii_lowercase();
+    if name.is_empty() {
+        return Err(SelectorError::InvalidAttributeSelector(inner.to_string()));
+    }
+    let mut value = body[op_start..].trim();
+    // Strip matching quotes (single or double).
+    if value.len() >= 2
+        && ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')))
+    {
+        value = &value[1..value.len() - 1];
+    }
+    Ok(AttributeSelector {
+        name,
+        op,
+        value: value.to_string(),
+        case_insensitive,
+    })
 }

@@ -1,3 +1,4 @@
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind};
@@ -14,13 +15,17 @@ use super::edit::{
     is_input_field_key, paste_into_field,
 };
 use super::field::{
-    KeyGate, apply_textarea_key, focused_form, is_disabled_control, is_number_input,
-    is_readonly_input, number_input_allows_char, textarea_content_width,
+    KeyGate, apply_range_key, apply_textarea_key, focused_form, is_disabled_control,
+    is_number_input, is_readonly_input, number_input_allows_char, textarea_content_width,
 };
 use super::focus::{blur_input, push_input_render};
 use super::key_info::key_event_info;
-use super::mouse::{canvas_pos, handle_mouse_down, handle_mouse_move, handle_mouse_up};
+use super::mouse::{
+    canvas_pos, handle_mouse_down, handle_mouse_move, handle_mouse_up, reveal_scrollbar_at,
+    scroll_at_wheel, scroll_at_wheel_x,
+};
 use super::page::page_level_builtins;
+use super::scroll_anim::{ScrollTarget, active_scroll_target, step_target};
 use super::select::{OverlayKind, close_select, refresh_datalist};
 use super::{SCROLL_LINES_PER_TICK, reapply_console_modes};
 
@@ -31,6 +36,25 @@ use super::{SCROLL_LINES_PER_TICK, reapply_console_modes};
 /// the same posture a readonly field takes.
 fn is_edit_blocked(arena: Option<&NodeArena>, node_id: NodeId) -> bool {
     is_readonly_input(arena, node_id) || is_disabled_control(arena, node_id)
+}
+
+/// Commit a field edit after the edit buffer changed: repaint the focused
+/// field, forward the `input` keystroke to the script thread, and refresh its
+/// autocomplete dropdown (a no-op for fields without a `list` attribute,
+/// including `<textarea>`).
+fn commit_field_edit(
+    state: &mut InputState,
+    focused: NodeId,
+    hit_map: Option<&HitMap>,
+    arena: Option<&NodeArena>,
+    msgs: &mut Vec<ScriptMsg>,
+    cmds: &mut Vec<RenderCmd>,
+) {
+    push_input_render(state, focused, cmds);
+    if arena.is_some() {
+        msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
+    }
+    refresh_datalist(state, hit_map, arena, cmds);
 }
 
 /// Wait for the next input event and translate it into render commands.
@@ -218,6 +242,25 @@ pub fn trigger_refresh(
                 }
                 let content_width = textarea_content_width(arena, focused);
 
+                // A focused range owns its discrete value changes. All other
+                // field editing keys are swallowed so typing cannot corrupt a
+                // numeric slider value; page navigation is also suppressed
+                // because the slider has keyboard focus.
+                if state.focused_is_range {
+                    let Some(arena) = arena else {
+                        return cmds;
+                    };
+                    if apply_range_key(state, arena, focused, key.code) {
+                        state.input_sel_anchor = None;
+                        push_input_render(state, focused, &mut cmds);
+                        msgs.push(ScriptMsg::RangeInput {
+                            node_id: focused,
+                            value: state.input_value.clone(),
+                        });
+                    }
+                    return cmds;
+                }
+
                 // Word-level editing: Ctrl / Alt + ←/→/Home/End/Backspace/
                 // Delete, with optional Shift extending the selection. Must
                 // run before the plain Ctrl shortcuts so Ctrl+Left is a word
@@ -248,11 +291,7 @@ pub fn trigger_refresh(
                         code,
                         key.modifiers,
                     ) {
-                        push_input_render(state, focused, &mut cmds);
-                        if arena.is_some() {
-                            msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
-                        }
-                        refresh_datalist(state, hit_map, arena, &mut cmds);
+                        commit_field_edit(state, focused, hit_map, arena, msgs, &mut cmds);
                     }
                     return cmds;
                 }
@@ -269,11 +308,7 @@ pub fn trigger_refresh(
                         code = KeyCode::Null;
                     }
                     if apply_ctrl_shortcut(state, code) {
-                        push_input_render(state, focused, &mut cmds);
-                        if arena.is_some() {
-                            msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
-                        }
-                        refresh_datalist(state, hit_map, arena, &mut cmds);
+                        commit_field_edit(state, focused, hit_map, arena, msgs, &mut cmds);
                     }
                     return cmds;
                 }
@@ -298,10 +333,7 @@ pub fn trigger_refresh(
                         key.code,
                     ) {
                         state.input_sel_anchor = None;
-                        push_input_render(state, focused, &mut cmds);
-                        if arena.is_some() {
-                            msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
-                        }
+                        commit_field_edit(state, focused, hit_map, arena, msgs, &mut cmds);
                     }
                     return cmds;
                 }
@@ -345,11 +377,7 @@ pub fn trigger_refresh(
                     };
                     if changed {
                         state.input_sel_anchor = None;
-                        push_input_render(state, focused, &mut cmds);
-                        if arena.is_some() {
-                            msgs.push(ScriptMsg::InputKeystroke { node_id: focused });
-                        }
-                        refresh_datalist(state, hit_map, arena, &mut cmds);
+                        commit_field_edit(state, focused, hit_map, arena, msgs, &mut cmds);
                     }
                     return cmds;
                 }
@@ -380,8 +408,13 @@ pub fn trigger_refresh(
         Ok(Event::Mouse(mouse)) => {
             let ctrl = mouse.modifiers.contains(event::KeyModifiers::CONTROL);
             state.last_mouse = Some((mouse.column, mouse.row));
+            if let Some(hit_map) = hit_map {
+                let (x, y) = canvas_pos(state, mouse.column, mouse.row);
+                reveal_scrollbar_at(state, hit_map, x, y, &mut cmds);
+            }
             match mouse.kind {
-                MouseEventKind::ScrollUp => {
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                    let up = matches!(mouse.kind, MouseEventKind::ScrollUp);
                     // Scrolling dismisses an open dropdown (focus loss).
                     if state.open_select.is_some()
                         && let Some(arena) = arena
@@ -391,31 +424,66 @@ pub fn trigger_refresh(
                     if ctrl {
                         return cmds;
                     }
-                    if state.scroll_y == 0 {
+                    let (x, y) = canvas_pos(state, mouse.column, mouse.row);
+                    // A page `wheel` listener gates the built-in scroll on the
+                    // script verdict (same shape as the `keydown` gate): the
+                    // tick dispatches as a `wheel` event and the default
+                    // container / page scroll only runs when no handler calls
+                    // `preventDefault()`. Without listeners the built-in runs
+                    // immediately with no script round-trip.
+                    if state
+                        .ui
+                        .as_ref()
+                        .is_some_and(|ui| ui.has_wheel_listeners.load(Ordering::Relaxed))
+                    {
+                        state.next_key_id = state.next_key_id.wrapping_add(1);
+                        let gate_id = state.next_key_id;
+                        msgs.push(ScriptMsg::Wheel { gate_id, x, y, up });
+                        state.pending_wheel = Some((x, y, up));
+                        state.wheel_gate = Some(KeyGate {
+                            id: gate_id,
+                            cmds: Vec::new(),
+                        });
                         return cmds;
                     }
-                    state.scroll_y = state.scroll_y.saturating_sub(SCROLL_LINES_PER_TICK);
-                    cmds.push(RenderCmd::Rerender {
-                        scroll_y: state.scroll_y,
-                    });
+                    default_wheel_scroll(state, hit_map, arena, max_scroll, x, y, up, &mut cmds);
+                    return cmds;
                 }
-                MouseEventKind::ScrollDown => {
-                    // Scrolling dismisses an open dropdown (focus loss).
-                    if state.open_select.is_some()
-                        && let Some(arena) = arena
-                    {
-                        close_select(state, arena, None, msgs, &mut cmds);
+                MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
+                    // Horizontal wheel ticks route through `overflow-x`
+                    // containers only — the page has no horizontal axis. With
+                    // a `wheel` listener registered the tick dispatches the
+                    // gated event instead (the listener may scroll).
+                    let (x, y) = canvas_pos(state, mouse.column, mouse.row);
+                    if let (Some(hit_map), Some(arena)) = (hit_map, arena) {
+                        let left = matches!(mouse.kind, MouseEventKind::ScrollLeft);
+                        let wheel_listeners = state
+                            .ui
+                            .as_ref()
+                            .is_some_and(|ui| ui.has_wheel_listeners.load(Ordering::Relaxed));
+                        if wheel_listeners {
+                            state.next_key_id = state.next_key_id.wrapping_add(1);
+                            let gate_id = state.next_key_id;
+                            msgs.push(ScriptMsg::Wheel {
+                                gate_id,
+                                x,
+                                y,
+                                up: false,
+                            });
+                            // No default horizontal action to defer; the gate
+                            // exists so JS can observe the tick.
+                            state.pending_wheel = None;
+                            state.wheel_gate = Some(KeyGate {
+                                id: gate_id,
+                                cmds: Vec::new(),
+                            });
+                        } else if let Some(cmd) =
+                            scroll_at_wheel_x(state, hit_map, arena, x, y, left)
+                        {
+                            cmds.push(cmd);
+                        }
                     }
-                    if ctrl {
-                        return cmds;
-                    }
-                    if state.scroll_y >= max_scroll {
-                        return cmds;
-                    }
-                    state.scroll_y = state.scroll_y.saturating_add(SCROLL_LINES_PER_TICK);
-                    cmds.push(RenderCmd::Rerender {
-                        scroll_y: state.scroll_y,
-                    });
+                    return cmds;
                 }
                 MouseEventKind::Down(button) => {
                     if let (Some(hit_map), Some(arena)) = (hit_map, arena) {
@@ -440,8 +508,7 @@ pub fn trigger_refresh(
                             &mut cmds,
                         );
                     } else {
-                        state.pressed = None;
-                        state.drag_selecting = false;
+                        state.clear_press_tracking();
                     }
                 }
                 MouseEventKind::Up(btn @ (MouseButton::Right | MouseButton::Middle)) => {
@@ -460,8 +527,7 @@ pub fn trigger_refresh(
                             &mut cmds,
                         );
                     } else {
-                        state.pressed = None;
-                        state.drag_selecting = false;
+                        state.clear_press_tracking();
                     }
                 }
                 // crossterm reports button-held motion as `Drag` (SGR code
@@ -472,15 +538,14 @@ pub fn trigger_refresh(
                 // here, otherwise every later move is misread as a drag and
                 // hover / click events stay silent forever.
                 MouseEventKind::Drag(_) | MouseEventKind::Moved => {
-                    if let (Some(hit_map), Some(_)) = (hit_map, arena) {
+                    if let (Some(hit_map), Some(arena)) = (hit_map, arena) {
                         if !matches!(mouse.kind, MouseEventKind::Drag(_)) {
                             state.drop_stale_press();
                         }
                         let (x, y) = canvas_pos(state, mouse.column, mouse.row);
-                        handle_mouse_move(state, hit_map, x, y, msgs, &mut cmds);
+                        handle_mouse_move(state, hit_map, arena, x, y, msgs, &mut cmds);
                     }
                 }
-                _ => {}
             }
             cmds
         }
@@ -529,4 +594,60 @@ pub fn trigger_refresh(
 
         _ => cmds,
     }
+}
+
+/// The built-in default for an ungated (or gate-cleared) wheel tick: scroll
+/// the nearest native scroll container under the pointer, falling back to the
+/// page. Extracted so the run loop can re-run it when a gated `wheel`
+/// dispatch comes back not-prevented.
+pub fn default_wheel_scroll(
+    state: &mut InputState,
+    hit_map: Option<&HitMap>,
+    arena: Option<&NodeArena>,
+    max_scroll: u32,
+    x: u32,
+    y: u32,
+    up: bool,
+    cmds: &mut Vec<RenderCmd>,
+) {
+    if let (Some(hit_map), Some(arena)) = (hit_map, arena)
+        && let Some(cmd) = scroll_at_wheel(state, hit_map, arena, x, y, up)
+    {
+        cmds.push(cmd);
+        return;
+    }
+    if state.smooth_scroll {
+        // Glide: the run loop converts the marker into the eased page
+        // animation (a repeat tick builds on the animation's target, not the
+        // mid-flight position).
+        let base = active_scroll_target(state, ScrollTarget::Page).unwrap_or(state.scroll_y);
+        let delta = if up {
+            -(SCROLL_LINES_PER_TICK as i32)
+        } else {
+            SCROLL_LINES_PER_TICK as i32
+        };
+        if let Some(to) = step_target(base, delta, 0, max_scroll) {
+            cmds.push(RenderCmd::ScrollAnimate {
+                target: ScrollTarget::Page,
+                to,
+            });
+        }
+        return;
+    }
+    let at_edge = if up {
+        state.scroll_y == 0
+    } else {
+        state.scroll_y >= max_scroll
+    };
+    if at_edge {
+        return;
+    }
+    state.scroll_y = if up {
+        state.scroll_y.saturating_sub(SCROLL_LINES_PER_TICK)
+    } else {
+        state.scroll_y.saturating_add(SCROLL_LINES_PER_TICK)
+    };
+    cmds.push(RenderCmd::Rerender {
+        scroll_y: state.scroll_y,
+    });
 }

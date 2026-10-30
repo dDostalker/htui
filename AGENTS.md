@@ -28,7 +28,7 @@ htui/
 │   │   ├── src/
 │   │   │   ├── lib.rs              # 入口：模块声明 + 公共 re-export（Session / Config / Parser / 宏 / boa_engine）
 │   │   │   ├── session.rs          # Session：渲染会话（mem:// 注册表 + Config + EventBindings，render(html/css/js) 主入口）
-│   │   │   ├── config.rs           # Config：渲染设置（zoom / events / frame_gap / copy_flow / copy_block）
+│   │   │   ├── config.rs           # Config：渲染设置（zoom / events / frame_gap / copy_flow / copy_block / smooth_scroll）
 │   │   │   ├── source.rs           # HtmlSource/CssSource/JsSource + include_html!/include_css!/include_js!（debug 携带源路径）
 │   │   │   ├── resources.rs        # 资源层：mem:// 内存注册表（前缀可选；debug 注册/删除通知会话重解析），供 <script>/<link>/<img>/fetch
 │   │   │   ├── graphics/           # 终端图形原语层（依赖方向：layout → graphics → tui）
@@ -75,6 +75,7 @@ htui/
 │   │   │   │       ├── cascade.rs  # INHERITED_PROPS / SUPPORTED_PROPERTIES / css_into_node()
 │   │   │   │       ├── matcher.rs  # selector_chain_matches(+with_hover)
 │   │   │   │       ├── selector.rs # CssSelector
+│   │   │   │       ├── media.rs    # @media 查询（MediaQueryList/四特征/格数语义）
 │   │   │   │       ├── stylesheet.rs # StyleSheet parsing 入口
 │   │   │   │       ├── values/     # CSS 值枚举 + 解析函数
 │   │   │   │       │   ├── mod.rs  # 入口：mod 声明 + 显式 re-exports（Length / TextAlign / ...）
@@ -174,6 +175,7 @@ htui/
 │   │   │                   ├── mouse.rs     # handle_click/mouse_down/mouse_move/mouse_up + label 解析
 │   │   │                   ├── select.rs    # OverlayKind / open·close_select / refresh_datalist
 │   │   │                   ├── refresh.rs   # trigger_refresh（按键分发状态机）
+│   │   │                   ├── scroll_anim.rs # 平滑滚动缓动（ScrollAnim/ScrollTarget/step_target，wheel/翻页键动画）
 │   │   │                   └── page.rs      # page_level_builtins（页面级滚动/缩放/复制）
 │   │   ├── tests/               # 集成测试（跟随主库）
 │   │   │   ├── fixtures/
@@ -228,7 +230,8 @@ htui/
 │   │   │   ├── render_diff_tests.rs # 帧差增量渲染（不变零输出 / 滚动 diff / 全帧对比）
 │   │   │   ├── macro_tests.rs       # 注册宏测试（commands/host/command(name) 自动注册，纯内存）
 │   │   │   ├── query_selector_tests.rs # querySelector/querySelectorAll 测试（document/元素作用域、组合器、无效选择器抛错，纯内存）
-│   │   │   └── script_loop_tests.rs # 脚本线程桥测试（apply_message 语义 + 阻塞宿主函数不阻塞输入，纯内存）
+│   │   │   ├── script_loop_tests.rs # 脚本线程桥测试（apply_message 语义 + 阻塞宿主函数不阻塞输入，纯内存）
+│   │   │   └── script_dom_api_tests.rs # JS 读取 API 测试（getBoundingClientRect/client*/scrollTop 写/activeElement/getSelection/isTrusted，纯内存）
 │   └── htui-macros/             # 过程宏 crate：#[htui::command]/#[htui::commands] + #[derive(IntoJs/FromJs)]
 │       ├── Cargo.toml
 │       └── src/
@@ -420,17 +423,20 @@ Geometry，**无需重新解析 HTML**。整文档替换（宿主函数 push `Re
    没有 `:hover` 规则时直接跳过（与浏览器一致，移动指针不产生绘制）。
    `RenderArena` 携带的 hover 变化仍回退全量（内容与高亮同帧变动时最安全）。
     实测（监控器页面）：hover 全量重绘 ~1.6ms → 区域重绘 ~0.6ms。
-5. **RenderArena 每批 2 次全树拷贝是架构下限（已论证，勿再尝试 `Arc::try_unwrap`）**：
-   拷贝 ① 脚本线程快照（`script/msg.rs` `Arc::new(engine.arena())`）——引擎的 live
-   arena 必须保留给后续 JS 执行，无法移交；拷贝 ② 渲染线程级联副本（`tui/run/pipeline.rs`
-   `render_arena` 的 `arena.clone()`）——输入循环 `live_dom` 读快照（`run/thread.rs`
-   `fold_script_event`）始终同时持有一份 `Arc` 引用（refcount ≥ 2），`try_unwrap` 必然
-   失败，且同迭代内 `handle_input` 依赖该快照的新鲜度，不能不持有。已评估的替代方案：
-   (a) live_dom 改读渲染线程发布的 `Arc<Geometry>`（`geo.arena`）——可行，稳态可降至
-   1 次拷贝，代价是 DOM 读滞后 ≤ 1 帧（~16ms），当前判定不值得牺牲读新鲜度；
+5. **RenderArena 每批 1 次全树拷贝是架构下限（方案 (a) 已落地）**：
+   剩余的那次拷贝是脚本线程快照（`script/msg.rs` `Arc::new(engine.arena())`）——
+   引擎的 live arena 必须保留给后续 JS 执行，无法移交。渲染线程对快照执行
+   `Arc::try_unwrap` **原地级联**（`tui/run/pipeline.rs` `render_arena` /
+   `render_document`）：输入循环的 DOM 读快照（`live_dom`）不再持有脚本快照的
+   `Arc`，而是改读渲染线程每帧发布到 `LiveGeoSlot` 的 `Geometry.arena`
+   （`layout_and_paint` 发布、`run/mod.rs` 循环顶部刷新）——热路径 refcount = 1，
+   级联零拷贝，稳态每批只付脚本线程那 1 次。代价：输入循环 DOM 读滞后 ≤ 1 帧
+   （~16ms，与旧 read-behind 窗口同量级）；`Geometry.arena` 为 `Arc` 共享
+   （`pin_fixed_and_repaint` 的滚动 repin 也因此免除了全树克隆）。快照 refcount
+   > 1 的帧（启动帧、zoom/resize 的 `Redraw` 转换帧）自动回退克隆，行为不变。
    (b) 渲染线程持有常驻工作树 + 仅同步 dirty 节点——**不可行**：slotmap 的 NodeId
    跨 arena 无法对齐（appendChild 新节点在两个 slotmap 中得到不同 key，会破坏
-   hover/焦点/监听器等按 NodeId 索引的会话状态）。若未来放宽读新鲜度容忍度，可重开 (a)。
+   hover/焦点/监听器等按 NodeId 索引的会话状态）。
 
 ## 必要事项
 `html → tdom → layout → tui` 四层不可破坏。不要引入新的抽象层，除非有充分理由。在修改之前进行询问。
@@ -541,7 +547,7 @@ let x = find(b).unwrap();
 | 类型               | 位置                    | 说明                      |
 | ------------------ | ----------------------- | ------------------------- |
 | `Session`          | `session`               | 渲染会话：mem:// 注册表 + `Config` + `EventBindings`，`render()` 主入口 |
-| `Config`           | `config`                | 渲染设置（zoom / events / frame_gap / copy_flow / copy_block） |
+| `Config`           | `config`                | 渲染设置（zoom / events / frame_gap / copy_flow / copy_block / smooth_scroll） |
 | `NodeId`           | `tdom::node`            | slotmap 生成的类型安全 ID |
 | `NodeArena`        | `tdom::node`            | `SlotMap<NodeId, Node>`   |
 | `Node`             | `tdom::node`            | DOM 节点（含子节点/属性） |
@@ -550,6 +556,7 @@ let x = find(b).unwrap();
 | `CssAttr`          | `html::css_parse::properties` | 解析后的 CSS 属性（`IndexMap<Arc<str>, Arc<str>>` + 30+ 个 getter；键/值共享引用，级联逐属性 O(1) 拷贝） |
 | `CssRule`          | `html::css_parse`       | 完整 CSS 规则表           |
 | `CssSelector`      | `html::css_parse`       | CSS 选择器（含组合器）    |
+| `MediaQueryList`   | `html::css_parse`       | `@media` 查询列表（逗号 OR；值按终端格计，匹配物理视口） |
 | `FontWeight`       | `html::css_parse::values` | `font-weight` 枚举（`Normal` / `Bold`） |
 | `FontStyleKind`    | `html::css_parse::values` | `font-style` 枚举（`Normal` / `Italic` / `Oblique`） |
 | `TextDecoration`   | `html::css_parse::values` | `text-decoration` 枚举（`None` / `Underline` / `LineThrough` / `UnderlineLineThrough`） |
@@ -570,7 +577,10 @@ let x = find(b).unwrap();
 | `FontStyle`        | `graphics`（`tui::graph_api` re-export） | `Block` 的聚合样式位掩码（`BOLD` / `ITALIC` / `UNDERLINED` / `CROSSED_OUT`） |
 | `RenderCmd`        | `tui::graph_api`        | 渲染线程命令枚举（Rerender / Redraw / RenderArena / RenderHtml / Hover / Quit） |
 | `DirtyInfo`        | `tui::graph_api`        | `RenderArena` 携带的脏节点集合（`nodes: Vec<NodeId>` + `injected_css: IndexMap<NodeId, String>`，后者按宿主键控、重写即替换，渲染端内容不变则跳过重解析） |
-| `InputState`       | `tui::graph_api::input` | 输入循环状态（scroll_y / zoom / pressed / 焦点输入框 / 编辑缓冲 / 选择 / open_select；hover 归脚本线程） |
+| `InputState`       | `tui::graph_api::input` | 输入循环状态（scroll_y / scroll_offsets / scroll_anim / zoom / pressed / 焦点输入框 / 编辑缓冲 / 选择 / open_select；hover 归脚本线程） |
+| `ScrollAnim`       | `tui::graph_api` | 单次缓动滚动 tween（ease-out-cubic，位置按墙钟计算；输入循环持有，输入重定向/手动滚动取消） |
+| `ScrollTarget`     | `tui::graph_api` | 滚动动画目标轴（`Page` / `Container(NodeId)`） |
+| `ScrollIntoViewBlock` | `tui::graph_api` | `scrollIntoView` 对齐（`Start` / `Center` / `End`）；`scroll_into_view_target` 纯函数换算页偏移 |
 | `InputRenderState` | `graphics::canvas`      | `<input>` 渲染状态（value / cursor / focused），`TermLayout.input_states` |
 | `EventType`        | `events`                | DOM 事件类型（Click / MouseOver / MouseOut）               |
 | `HtmlEvent`        | `events`                | 事件对象（event_type / target / current_target / x / y / bubbles）|
@@ -580,8 +590,10 @@ let x = find(b).unwrap();
 | `EventBindings`    | `events`                | 宿主函数注册表（host: 名字 → HostFn）                     |
 | `HoverState`       | `events::interaction`   | 指针悬停跟踪（enter / leave 判定，不产生视觉）；生产环境归脚本线程所有 |
 | `ScriptEngine`     | `script`                | Boa 引擎封装：live NodeArena + DOM 绑定 + fire/invoke_action/run_due_timers + eval_source（脚本线程独占） |
-| `ScriptMsg`        | `script::msg`           | 脚本线程消息协议：Move / Click / FocusInput / BlurInput / InputKeystroke / SelectPick / Quit |
+| `ScriptMsg`        | `script::msg`           | 脚本线程消息协议：Move / Click / FocusInput / BlurInput / InputKeystroke / SelectPick / Resize / Quit |
 | `ScriptResponse`   | `script::msg`           | 脚本线程回复：Ready / Failed / Event{cmds, dirty{arena,root_id}, hovered} |
+| `SharedUiState`    | `script`                | 输入循环与脚本线程共享的 UI 状态（cols/rows/scroll_y 原子）；`window.innerWidth` & co 读它 |
+| `matchMedia(q)`    | `script::dom::view`     | JS 媒体查询（复用 CSS `@media` 解析）；`change` 事件在 resize 时经 `evaluate_media_changes` 重评估派发 |
 | `HostFn`           | `script::host`          | 宿主函数类型：`Box<dyn FnMut(&mut HostCtx) -> JsResult<JsValue> + Send>`（Err → JS throw；由 host_fn/宏生成，勿手写） |
 | `HostCtx`          | `script::host`          | Boa 无关调用句柄（`host_fn` 闭包参数）：arg/arg_required/event/render/object，不暴露 Context |
 | `host_fn`          | `script::host`          | Boa 无关宿主函数构造器：`host_fn(|ctx| ...) -> HostFn`，用户侧不出现任何 Boa 类型（参数/返回值/对象/错误均纯 Rust） |

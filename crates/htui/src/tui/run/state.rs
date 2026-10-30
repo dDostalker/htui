@@ -9,6 +9,7 @@ use compact_str::CompactString;
 use crossterm::style::Color;
 
 use crate::events::SharedGeometry;
+use crate::html::css_parse::Viewport;
 use crate::html::css_parse::{self, CssRule, DynamicState, PseudoClassSet};
 use crate::html::html_parse::ParsedDocument;
 use crate::layout::Rect;
@@ -17,19 +18,35 @@ use crate::layout::layoutbox::geometry::{
 };
 use crate::source::SharedSourceText;
 use crate::tdom::node::{NodeArena, NodeId};
-use crate::tui::graph_api::{InputRenderState, RenderCmd, SelectionMode, TermLayout};
+use crate::tui::graph_api::{
+    InputRenderState, RenderCmd, SelectionMode, SharedScrollbarVisibility, TermLayout,
+};
 
+use super::LiveGeoSlot;
 use super::overlay::apply_select_overlay;
 use super::pipeline::flush_frame;
 use super::region::{find_box_rect, union_rect};
-use super::selection::{extract_selection, highlight_lines, lines_bounds, selection_lines};
+use super::selection::{highlight_lines, lines_bounds, selection_lines};
 
 pub(super) fn cascade_document(
     document: &ParsedDocument,
     css_rules: &CssRule,
+    viewport: Viewport,
 ) -> (NodeId, NodeArena) {
     let mut arena = (*document.arena).clone();
-    css_parse::css_into_node(&mut arena, document.root_id, css_rules);
+    // The stored document arena may already carry a cascade (the arena render
+    // path shares one cascaded arena between the geometry and the document
+    // state); clear it so stale properties from removed rules cannot leak.
+    css_parse::reset_css_attr(&mut arena, document.root_id);
+    css_parse::css_into_node_with_state(
+        &mut arena,
+        document.root_id,
+        css_rules,
+        &DynamicState {
+            viewport,
+            ..Default::default()
+        },
+    );
     (document.root_id, arena)
 }
 
@@ -183,10 +200,9 @@ pub(super) struct RenderState {
     /// / `RenderCmd::Focus` can re-style the document for CSS `:hover` /
     /// `:focus` rules and repaint without re-parsing or re-laying out.
     pub(super) geometry: Option<SharedGeometry>,
-    /// Whether the current document contains any `position: fixed` box. When
-    /// true, scrolling re-anchors the fixed boxes to the new scroll offset
-    /// The document contains `position: fixed` / `sticky` boxes, so scrolling
-    /// re-pins them (a targeted region repaint) so they stay on screen;
+    /// Whether the current document contains any `position: fixed` /
+    /// `sticky` box. When true, scrolling re-anchors the pinned boxes to the
+    /// new scroll offset (a targeted region repaint) so they stay on screen;
     /// without pinned boxes scrolling keeps the cheap canvas re-slice.
     pub(super) has_pinned: bool,
     /// Active page text selection (canvas-space endpoints + shape); `None`
@@ -197,7 +213,13 @@ pub(super) struct RenderState {
     pub(super) selection_text: Arc<Mutex<String>>,
     /// The `<select>` dropdown overlay currently painted (`None` = none).
     pub(super) open_select: Option<OpenSelect>,
+    /// Shared with the input loop; controls which scrollbar chrome paints.
+    pub(super) scrollbars_visible: SharedScrollbarVisibility,
     pub(super) max_scroll: Arc<AtomicU32>,
+    /// Published to the input loop after every layout pass: the input loop's
+    /// DOM-read snapshot is the latest rendered frame's arena (up to one frame
+    /// stale) instead of a second full-tree clone of every script snapshot.
+    pub(super) live_geo: LiveGeoSlot,
 }
 
 impl RenderState {
@@ -404,14 +426,16 @@ impl RenderState {
         // lines inside one block stay continuous (browser behaviour); block
         // selections keep the canvas extraction.
         let raw_lines = match &new_sel {
-            Some(n) => selection_lines(n, cols),
+            Some(n) => crate::layout::clip_flow_lines_scoped(
+                &geo.boxes,
+                n.anchor,
+                n.end,
+                &selection_lines(n, cols),
+            ),
             None => Vec::new(),
         };
         let text = match &new_sel {
-            Some(n) if n.mode == SelectionMode::Flow => {
-                crate::layout::extract_flow_text(&geo.arena, &geo.boxes, &raw_lines)
-            }
-            Some(_) => extract_selection(tl, &new_lines),
+            Some(_) => crate::layout::extract_flow_text(&geo.arena, &geo.boxes, &raw_lines),
             None => String::new(),
         };
         if let Ok(mut guard) = self.selection_text.lock() {

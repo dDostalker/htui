@@ -1,5 +1,395 @@
 use crossterm::style::Color;
 
+/// A CSS background paint source.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Background {
+    Color(Color),
+    Gradient(Gradient),
+}
+
+impl Background {
+    /// Resolve the paint color for one terminal cell.
+    pub fn color_at(&self, x: usize, y: usize, width: usize, height: usize) -> Option<Color> {
+        match self {
+            Self::Color(color) => Some(*color),
+            Self::Gradient(gradient) => gradient.color_at(x, y, width, height),
+        }
+    }
+}
+
+/// A parsed CSS gradient with normalized color-stop positions.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Gradient {
+    pub kind: GradientKind,
+    pub stops: Vec<GradientStop>,
+}
+
+impl Gradient {
+    pub fn color_at(&self, x: usize, y: usize, width: usize, height: usize) -> Option<Color> {
+        let first = self.stops.first()?;
+        if self.stops.len() == 1 {
+            return Some(first.color);
+        }
+        let px = (x as f32 + 0.5) / width.max(1) as f32;
+        let py = (y as f32 + 0.5) / height.max(1) as f32;
+        let t = match self.kind {
+            GradientKind::Linear { angle_deg } => {
+                let angle = angle_deg.to_radians();
+                let (dx, dy) = (angle.sin(), -angle.cos());
+                let corners = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)];
+                let project = |(cx, cy): (f32, f32)| cx * dx + cy * dy;
+                let min = corners
+                    .iter()
+                    .map(|&corner| project(corner))
+                    .fold(f32::INFINITY, f32::min);
+                let max = corners
+                    .iter()
+                    .map(|&corner| project(corner))
+                    .fold(f32::NEG_INFINITY, f32::max);
+                ((project((px, py)) - min) / (max - min).max(f32::EPSILON)).clamp(0.0, 1.0)
+            }
+            GradientKind::Radial { center_x, center_y } => {
+                let (dx, dy) = (px - center_x, py - center_y);
+                let radius = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)]
+                    .iter()
+                    .map(|&(cx, cy)| ((cx - center_x).powi(2) + (cy - center_y).powi(2)).sqrt())
+                    .fold(0.0_f32, f32::max)
+                    .max(f32::EPSILON);
+                ((dx * dx + dy * dy).sqrt() / radius).clamp(0.0, 1.0)
+            }
+        };
+        sample_stops(&self.stops, t)
+    }
+}
+
+/// Gradient geometry. Angles use CSS's clockwise convention where `0deg`
+/// points up and `90deg` points right.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GradientKind {
+    Linear { angle_deg: f32 },
+    Radial { center_x: f32, center_y: f32 },
+}
+
+/// One normalized color stop (`position` is `0.0..=1.0`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GradientStop {
+    pub color: Color,
+    pub position: f32,
+}
+
+fn sample_stops(stops: &[GradientStop], t: f32) -> Option<Color> {
+    if t <= stops[0].position {
+        return Some(stops[0].color);
+    }
+    for pair in stops.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        if t <= to.position {
+            let span = (to.position - from.position).max(f32::EPSILON);
+            return interpolate_color(from.color, to.color, (t - from.position) / span);
+        }
+    }
+    stops.last().map(|stop| stop.color)
+}
+
+fn interpolate_color(from: Color, to: Color, t: f32) -> Option<Color> {
+    let Color::Rgb {
+        r: from_r,
+        g: from_g,
+        b: from_b,
+    } = from
+    else {
+        return Some(to);
+    };
+    let Color::Rgb {
+        r: to_r,
+        g: to_g,
+        b: to_b,
+    } = to
+    else {
+        return Some(from);
+    };
+    let t = t.clamp(0.0, 1.0);
+    let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
+    Some(Color::Rgb {
+        r: mix(from_r, to_r),
+        g: mix(from_g, to_g),
+        b: mix(from_b, to_b),
+    })
+}
+
+/// Parse a CSS background value into a solid color or gradient.
+pub fn parse_background_str(s: &str) -> Option<Background> {
+    let value = s.trim();
+    if let Some(gradient) = parse_gradient(value) {
+        return Some(Background::Gradient(gradient));
+    }
+    parse_color_str(value).map(Background::Color)
+}
+
+fn parse_gradient(value: &str) -> Option<Gradient> {
+    let lower = value.to_ascii_lowercase();
+    let (kind, inner) = if let Some(inner) = gradient_body(&lower, "linear-gradient") {
+        (None, inner)
+    } else {
+        (Some(()), gradient_body(&lower, "radial-gradient")?)
+    };
+    let args = split_top_level(inner, ',');
+    if args.len() < 2 {
+        return None;
+    }
+
+    if kind.is_none() {
+        let mut angle = 180.0;
+        let mut stop_start = 0;
+        if let Some(parsed) = parse_linear_direction(args[0]) {
+            angle = parsed;
+            stop_start = 1;
+        }
+        let stops = parse_stops(&args[stop_start..])?;
+        return Some(Gradient {
+            kind: GradientKind::Linear { angle_deg: angle },
+            stops,
+        });
+    }
+
+    let mut center = (0.5, 0.5);
+    let mut stop_start = 0;
+    if parse_radial_prefix(args[0]).is_some() {
+        center = parse_radial_prefix(args[0])?;
+        stop_start = 1;
+    }
+    let stops = parse_stops(&args[stop_start..])?;
+    Some(Gradient {
+        kind: GradientKind::Radial {
+            center_x: center.0,
+            center_y: center.1,
+        },
+        stops,
+    })
+}
+
+fn gradient_body<'a>(lower: &'a str, name: &str) -> Option<&'a str> {
+    lower
+        .strip_prefix(name)?
+        .trim_start()
+        .strip_prefix('(')?
+        .strip_suffix(')')
+        .map(str::trim)
+}
+
+fn split_top_level(value: &str, separator: char) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+    for (index, ch) in value.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ if ch == separator && depth == 0 => {
+                parts.push(value[start..index].trim());
+                start = index + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(value[start..].trim());
+    parts
+}
+
+fn split_top_level_whitespace(value: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0usize;
+    let mut start = None;
+    for (index, ch) in value.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ if ch.is_whitespace() && depth == 0 => {
+                if let Some(start_idx) = start.take() {
+                    parts.push(&value[start_idx..index]);
+                }
+            }
+            _ => {
+                if start.is_none() {
+                    start = Some(index);
+                }
+            }
+        }
+    }
+    if let Some(start_idx) = start {
+        parts.push(&value[start_idx..]);
+    }
+    parts
+}
+
+fn parse_linear_direction(value: &str) -> Option<f32> {
+    let tokens = split_top_level_whitespace(value);
+    if tokens.first()?.eq_ignore_ascii_case("to") {
+        let mut has_x = false;
+        let mut horizontal: f32 = 0.0;
+        let mut vertical: f32 = 0.0;
+        for token in &tokens[1..] {
+            match token.to_ascii_lowercase().as_str() {
+                "left" => {
+                    has_x = true;
+                    horizontal = -1.0;
+                }
+                "right" => {
+                    has_x = true;
+                    horizontal = 1.0;
+                }
+                "top" => vertical = -1.0,
+                "bottom" => vertical = 1.0,
+                _ => return None,
+            }
+        }
+        if tokens.len() == 2 {
+            return match tokens[1].to_ascii_lowercase().as_str() {
+                "top" => Some(0.0),
+                "right" => Some(90.0),
+                "bottom" => Some(180.0),
+                "left" => Some(270.0),
+                _ => None,
+            };
+        }
+        if has_x && tokens.len() == 3 {
+            return Some(horizontal.atan2(-vertical).to_degrees().rem_euclid(360.0));
+        }
+        return None;
+    }
+    if tokens.len() != 1 {
+        return None;
+    }
+    parse_angle(tokens[0])
+}
+
+fn parse_angle(value: &str) -> Option<f32> {
+    let value = value.trim().to_ascii_lowercase();
+    if let Some(v) = value.strip_suffix("deg") {
+        return v.trim().parse::<f32>().ok();
+    }
+    if let Some(v) = value.strip_suffix("turn") {
+        return v.trim().parse::<f32>().ok().map(|v| v * 360.0);
+    }
+    if let Some(v) = value.strip_suffix("grad") {
+        return v.trim().parse::<f32>().ok().map(|v| v * 0.9);
+    }
+    if let Some(v) = value.strip_suffix("rad") {
+        return v.trim().parse::<f32>().ok().map(f32::to_degrees);
+    }
+    value.parse::<f32>().ok()
+}
+
+fn parse_radial_prefix(value: &str) -> Option<(f32, f32)> {
+    let lower = value.to_ascii_lowercase();
+    if parse_gradient_stop(value).is_some() {
+        return None;
+    }
+    let mut center = (0.5, 0.5);
+    if let Some((_, position)) = lower.split_once("at ") {
+        center = parse_gradient_position(position)?;
+    } else if ![
+        "circle", "ellipse", "closest", "farthest", "contain", "cover",
+    ]
+    .iter()
+    .any(|keyword| lower.contains(keyword))
+    {
+        return None;
+    }
+    Some(center)
+}
+
+fn parse_gradient_position(value: &str) -> Option<(f32, f32)> {
+    let tokens: Vec<&str> = value.split_whitespace().collect();
+    if tokens.len() == 1 && tokens[0].eq_ignore_ascii_case("center") {
+        return Some((0.5, 0.5));
+    }
+    let parse = |token: &str, horizontal: bool| -> Option<f32> {
+        match token.to_ascii_lowercase().as_str() {
+            "left" => Some(0.0),
+            "right" => Some(1.0),
+            "top" if horizontal => Some(0.0),
+            "bottom" if horizontal => Some(1.0),
+            "center" => Some(0.5),
+            _ => token
+                .strip_suffix('%')
+                .and_then(|v| v.trim().parse::<f32>().ok())
+                .map(|v| (v / 100.0).clamp(0.0, 1.0)),
+        }
+    };
+    match tokens.as_slice() {
+        [x] => Some((parse(x, true)?, 0.5)),
+        [x, y] => Some((parse(x, true)?, parse(y, false)?)),
+        _ => None,
+    }
+}
+
+fn parse_stops(values: &[&str]) -> Option<Vec<GradientStop>> {
+    if values.is_empty() {
+        return None;
+    }
+    let parsed: Vec<(Color, Option<f32>)> = values
+        .iter()
+        .map(|value| {
+            let (color, position) = parse_gradient_stop(value)?;
+            Some((color, position))
+        })
+        .collect::<Option<_>>()?;
+    let mut positions: Vec<Option<f32>> = parsed.iter().map(|(_, position)| *position).collect();
+    if positions[0].is_none() {
+        positions[0] = Some(0.0);
+    }
+    let last = positions.len() - 1;
+    if positions[last].is_none() {
+        positions[last] = Some(1.0);
+    }
+    let mut index = 0;
+    while index < positions.len() {
+        if positions[index].is_some() {
+            index += 1;
+            continue;
+        }
+        let start = index - 1;
+        let mut end = index;
+        while end < positions.len() && positions[end].is_none() {
+            end += 1;
+        }
+        let from = positions[start].unwrap_or(0.0);
+        let to = positions[end].unwrap_or(1.0);
+        let count = (end - start) as f32;
+        for offset in 1..(end - start) {
+            positions[start + offset] = Some(from + (to - from) * offset as f32 / count);
+        }
+        index = end + 1;
+    }
+    let mut previous: f32 = 0.0;
+    let stops: Vec<GradientStop> = parsed
+        .into_iter()
+        .zip(positions)
+        .map(|((color, _), position)| {
+            previous = previous.max(position.unwrap_or(previous).clamp(0.0, 1.0));
+            GradientStop {
+                color,
+                position: previous,
+            }
+        })
+        .collect();
+    Some(stops)
+}
+
+fn parse_gradient_stop(value: &str) -> Option<(Color, Option<f32>)> {
+    let tokens = split_top_level_whitespace(value.trim());
+    let color = parse_color_str(tokens.first()?)?;
+    match tokens.get(1) {
+        None => Some((color, None)),
+        Some(position) => {
+            let value = position.strip_suffix('%')?;
+            let position = value.trim().parse::<f32>().ok()? / 100.0;
+            Some((color, Some(position.clamp(0.0, 1.0))))
+        }
+    }
+}
+
 /// Parse a CSS color string into a [`crossterm::style::Color`].
 ///
 /// Supported formats:

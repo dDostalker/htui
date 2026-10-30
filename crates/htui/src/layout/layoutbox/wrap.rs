@@ -398,9 +398,8 @@ fn tokenize_run(
 fn apply_white_space(
     tokens: Vec<Token>,
     ws: WhiteSpace,
-    font_size_cells: usize,
+    _font_size_cells: usize,
 ) -> Vec<Vec<Token>> {
-    let space_width = font_size_cells.max(1);
     if ws.preserves_whitespace() {
         // `pre` / `pre-wrap`: every Newline is a forced break; spaces
         // are preserved as-is. `<br>` breaks are unconditional.
@@ -431,12 +430,22 @@ fn apply_white_space(
                 // `<br>` forces a line break regardless of `white-space`.
                 lines.push(Vec::new());
             }
-            Token::Space { .. } => {
+            Token::Space { width, _count } => {
                 if let Some(line) = lines.last_mut() {
                     let last_is_space = matches!(line.last(), Some(Token::Space { .. }));
                     if !last_is_space {
+                        // The collapsed representative carries ONE space's
+                        // real advance (the run's width split over its
+                        // graphemes): the tokenizer already counted word /
+                        // letter spacing per space, and the wrap budget
+                        // must match what the reconstructed space run will
+                        // actually paint — a cheap `font_size` width here
+                        // lets a line book-keep far below its painted width
+                        // and the paint pass then truncates the line's tail
+                        // (whole words silently disappear).
+                        let per_space = width.div_ceil(_count.max(1));
                         line.push(Token::Space {
-                            width: space_width,
+                            width: per_space,
                             _count: 1,
                         });
                     }

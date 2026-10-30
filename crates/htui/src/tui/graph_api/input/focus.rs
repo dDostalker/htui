@@ -6,6 +6,7 @@ use crate::tdom::node::{NodeArena, NodeId, NodeType};
 use super::InputState;
 use super::cmd::RenderCmd;
 use super::edit::selection_range;
+use super::field::{is_range_input, normalize_range_state};
 
 /// Focus `node_id` (an `<input>`), seeding the edit buffer from the DOM
 /// `value` attribute and repainting the previously focused field (if any).
@@ -24,6 +25,7 @@ pub(super) fn focus_input(
     state.focused_is_textarea = arena
         .get(node_id)
         .is_some_and(|n| n.node_type == NodeType::Textarea);
+    state.focused_is_range = is_range_input(arena, node_id);
     if let Some(prev) = state.focused_input.replace(node_id) {
         // Commit the previous field's edits back to the DOM before switching
         // focus, firing `blur` (+ `change` when the value differs).
@@ -52,8 +54,12 @@ pub(super) fn focus_input(
             .unwrap_or_default(),
         None => CompactString::new(""),
     };
-    let cursor = value.chars().count();
+    let mut cursor = value.chars().count();
     state.input_value = value;
+    if state.focused_is_range {
+        normalize_range_state(state, arena, node_id);
+        cursor = state.input_value.chars().count();
+    }
     state.input_cursor = cursor;
     state.input_sel_anchor = None;
     cmds.push(RenderCmd::RenderInput {
@@ -84,6 +90,7 @@ pub(super) fn blur_input(
         return;
     };
     state.focused_is_textarea = false;
+    state.focused_is_range = false;
     state.input_sel_anchor = None;
     msgs.push(ScriptMsg::BlurInput {
         node_id: focused,

@@ -100,8 +100,8 @@ pub fn layout_inline_blockify(
         let bg = node.css_attr.get_bg_color();
         let style = block_style(&node.css_attr);
         LayoutBlockOptions {
-            prefix: Some(InlineRun::new(open, style, fg, bg)),
-            suffix: Some(InlineRun::new(close, style, fg, bg)),
+            prefix: Some(InlineRun::synthesized_marker(open, style, fg, bg)),
+            suffix: Some(InlineRun::synthesized_marker(close, style, fg, bg)),
             ..Default::default()
         }
     } else {
@@ -165,7 +165,7 @@ pub fn layout_summary(
         let fg = node.css_attr.get_color();
         let bg = node.css_attr.get_bg_color();
         let style = block_style(&node.css_attr);
-        InlineRun::new(marker, style, fg, bg)
+        InlineRun::synthesized_marker(marker, style, fg, bg)
     });
     Some(layout_block(
         arena,
@@ -269,7 +269,9 @@ fn progress_ratio(node: &Node) -> (f32, Option<Color>) {
         } else {
             0.0
         };
-        (ratio, None)
+        // `accent-color` themes the fill; `None` means "use element fg".
+        let color = node.css_attr.get_accent_color();
+        (ratio, color)
     }
 }
 

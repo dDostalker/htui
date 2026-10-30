@@ -884,3 +884,80 @@ fn overflow_hidden_clips_nowrap_at_the_box_width() {
         "the first ten columns render: {row0:?}"
     );
 }
+
+#[test]
+fn overflow_visible_bordered_box_clips_at_the_frame_edge() {
+    init();
+    // A visibly-overflowing **bordered** box must not let its own glyphs
+    // paint past the drawn frame into the neighbouring area (the terminal
+    // "出框" artefact): a long word wider than the content width may
+    // underlap the right border column but stops at the border-box right
+    // edge. A borderless box keeps the browser-faithful spill (covered by
+    // `overflow_visible_lets_nowrap_paint_past_the_box_width` above).
+    let (term_map, tl) = draw(
+        r#"<div class="n">short supercalifragilistic word</div>"#,
+        "body { margin: 0ch; } .n { width: 12ch; border: 1ch solid red; }",
+    );
+    let cols = term_map.columns as usize;
+    let row1: String = tl.layout[cols..2 * cols]
+        .iter()
+        .map(|b| b.word.as_str())
+        .collect();
+    // Border-box width 12 = 2 border columns + 10 content columns: the long
+    // word fills the whole content row up to the right border.
+    assert!(
+        row1.contains("short supe"),
+        "the long word renders up to the frame edge: {row1:?}"
+    );
+    assert!(
+        row1.trim_end().ends_with('│'),
+        "the right border glyph survives: {row1:?}"
+    );
+    // Nothing renders right of the frame's border-box right edge (col 11).
+    let tail: String = row1.chars().skip(12).collect();
+    assert!(
+        tail.trim().is_empty(),
+        "no glyphs escape the frame: {row1:?}"
+    );
+}
+
+#[test]
+fn overflow_hidden_ancestor_clips_descendant_pre_spill() {
+    init();
+    // A borderless `white-space: pre` child wider than its clipping ancestor
+    // (`overflow: hidden` card, the music-player waveform case) must stop at
+    // the ancestor's content-box right edge: the frame glyphs survive and
+    // nothing paints into the area beyond the card. Before the fix the
+    // inherited clip only bounded rows vertically, so the glyph stream ran to
+    // the canvas edge and painted over the card's right border.
+    let wave = "▁▃▅▇".repeat(12);
+    let (term_map, tl) = draw(
+        &format!(r#"<div class="card"><div class="wave">{wave}</div></div>"#),
+        "body { margin: 0ch; } .card { width: 30ch; box-sizing: content-box; border: 1ch solid #333; padding: 1ch; overflow: hidden; } .wave { white-space: pre; }",
+    );
+    let cols = term_map.columns as usize;
+    // Border-box width 34: border cols 0/33, padding cols 1/32, content cols
+    // 2..=31. The 48-glyph wave starts at col 2 and must clip at col 32.
+    let row2: Vec<&str> = tl.layout[2 * cols..3 * cols]
+        .iter()
+        .map(|b| b.word.as_str())
+        .collect();
+    assert_eq!(row2[0], "│", "the left frame glyph: {row2:?}");
+    assert!(
+        row2[1].trim().is_empty(),
+        "the padding column stays clear: {row2:?}"
+    );
+    assert!(
+        row2[2..32].iter().all(|c| !c.trim().is_empty()),
+        "the wave fills exactly the 30 content columns: {row2:?}"
+    );
+    assert!(
+        row2[32].trim().is_empty(),
+        "the glyph stream stops at the content-box edge: {row2:?}"
+    );
+    assert_eq!(row2[33], "│", "the right frame glyph survives: {row2:?}");
+    assert!(
+        row2[34..].iter().all(|c| c.trim().is_empty()),
+        "nothing paints past the frame: {row2:?}"
+    );
+}

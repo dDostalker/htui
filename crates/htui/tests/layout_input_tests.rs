@@ -1112,3 +1112,257 @@ fn input_without_css_keeps_attribute_or_default_size() {
     assert_eq!(r.rect.width, 8);
     assert_eq!(r.rect.x, 0);
 }
+
+#[test]
+fn collect_input_ids_includes_range_sliders() {
+    init();
+    let (root, arena) = setup(
+        r#"<input value="text"><input type="range" min="0" max="4" value="2"><input type="checkbox">"#,
+    );
+    let ids = collect_input_ids(&arena);
+    assert_eq!(
+        ids.len(),
+        2,
+        "text and range are focusable; checkbox is not"
+    );
+    assert_ne!(ids[0], ids[1]);
+    let _ = root;
+}
+
+#[test]
+fn range_input_renders_track_and_thumb() {
+    init();
+    let (rows, _) =
+        render_rows(r#"<input type="range" min="0" max="4" step="1" value="2" width="9">"#);
+    let slider: String = rows[0].chars().take(9).collect();
+    assert_eq!(
+        slider, "\u{2501}\u{2501}\u{2501}\u{2501}\u{25CF}\u{2500}\u{2500}\u{2500}\u{2500}",
+        "value 2 of 4 places the thumb halfway across a 9-cell track"
+    );
+}
+
+#[test]
+fn range_pseudo_element_webkit_thumb_color() {
+    init();
+    let html = r#"<style>
+        input::-webkit-slider-thumb { background-color: #ff0000; }
+    </style>
+    <input type="range" min="0" max="4" step="1" value="2" width="9">"#;
+    let (_, tl) = render_rows(html);
+    let cell = |x: usize| &tl.layout[x]; // row 0 where the slider paints
+    // Thumb is at column 4 (value 2 of 4 across 9 cells); it should be red.
+    assert_eq!(
+        cell(4).fcolor,
+        Some(crossterm::style::Color::Rgb {
+            r: 0xff,
+            g: 0x00,
+            b: 0x00
+        }),
+        "::-webkit-slider-thumb background-color colours the thumb"
+    );
+}
+
+#[test]
+fn range_pseudo_element_moz_thumb_color() {
+    init();
+    let html = r#"<style>
+        input::-moz-range-thumb { background-color: #00ff00; }
+    </style>
+    <input type="range" min="0" max="4" step="1" value="2" width="9">"#;
+    let (_, tl) = render_rows(html);
+    let cell = |x: usize| &tl.layout[x];
+    assert_eq!(
+        cell(4).fcolor,
+        Some(crossterm::style::Color::Rgb {
+            r: 0x00,
+            g: 0xff,
+            b: 0x00
+        }),
+        "::-moz-range-thumb background-color colours the thumb"
+    );
+}
+
+#[test]
+fn range_pseudo_element_moz_progress_color() {
+    init();
+    let html = r#"<style>
+        input::-moz-range-progress { background-color: #0000ff; }
+    </style>
+    <input type="range" min="0" max="4" step="1" value="2" width="9">"#;
+    let (_, tl) = render_rows(html);
+    let cell = |x: usize| &tl.layout[x];
+    // Filled cells (columns 0-3, left of thumb) should be blue.
+    assert_eq!(
+        cell(0).fcolor,
+        Some(crossterm::style::Color::Rgb {
+            r: 0x00,
+            g: 0x00,
+            b: 0xff
+        }),
+        "::-moz-range-progress background-color colours the filled track"
+    );
+    // Empty cells (columns 5-8, right of thumb) remain DarkGrey.
+    assert_eq!(
+        cell(6).fcolor,
+        Some(crossterm::style::Color::DarkGrey),
+        "unfilled track without ::-moz-range-track stays DarkGrey"
+    );
+}
+
+#[test]
+fn range_pseudo_element_track_color() {
+    init();
+    let html = r#"<style>
+        input::-webkit-slider-runnable-track { background-color: #ffff00; }
+    </style>
+    <input type="range" min="0" max="4" step="1" value="2" width="9">"#;
+    let (_, tl) = render_rows(html);
+    let cell = |x: usize| &tl.layout[x];
+    // Empty cells (right of thumb) should be yellow instead of DarkGrey.
+    assert_eq!(
+        cell(6).fcolor,
+        Some(crossterm::style::Color::Rgb {
+            r: 0xff,
+            g: 0xff,
+            b: 0x00
+        }),
+        "::-webkit-slider-runnable-track background-color colours the unfilled track"
+    );
+}
+
+#[test]
+fn range_pseudo_element_moz_track_color() {
+    init();
+    let html = r#"<style>
+        input::-moz-range-track { color: #00ffff; }
+    </style>
+    <input type="range" min="0" max="4" step="1" value="2" width="9">"#;
+    let (_, tl) = render_rows(html);
+    let cell = |x: usize| &tl.layout[x];
+    assert_eq!(
+        cell(6).fcolor,
+        Some(crossterm::style::Color::Rgb {
+            r: 0x00,
+            g: 0xff,
+            b: 0xff
+        }),
+        "::-moz-range-track color colours the unfilled track"
+    );
+}
+
+#[test]
+fn range_accent_color_fallback_for_thumb_and_fill() {
+    init();
+    let html = r#"<style>
+        input { accent-color: #ff8800; }
+    </style>
+    <input type="range" min="0" max="4" step="1" value="2" width="9">"#;
+    let (_, tl) = render_rows(html);
+    let cell = |x: usize| &tl.layout[x];
+    let orange = Some(crossterm::style::Color::Rgb {
+        r: 0xff,
+        g: 0x88,
+        b: 0x00,
+    });
+    assert_eq!(cell(4).fcolor, orange, "accent-color colours the thumb");
+    assert_eq!(
+        cell(0).fcolor,
+        orange,
+        "accent-color colours the filled track"
+    );
+}
+
+#[test]
+fn range_pseudo_element_overrides_accent_color() {
+    init();
+    let html = r#"<style>
+        input { accent-color: #ff8800; }
+        input::-webkit-slider-thumb { background-color: #00ff00; }
+    </style>
+    <input type="range" min="0" max="4" step="1" value="2" width="9">"#;
+    let (_, tl) = render_rows(html);
+    let cell = |x: usize| &tl.layout[x];
+    // Thumb uses the pseudo-element green; fill falls back to accent orange.
+    assert_eq!(
+        cell(4).fcolor,
+        Some(crossterm::style::Color::Rgb {
+            r: 0x00,
+            g: 0xff,
+            b: 0x00
+        }),
+        "pseudo-element thumb overrides accent-color"
+    );
+    assert_eq!(
+        cell(0).fcolor,
+        Some(crossterm::style::Color::Rgb {
+            r: 0xff,
+            g: 0x88,
+            b: 0x00
+        }),
+        "filled track without a pseudo-element uses accent-color"
+    );
+}
+
+#[test]
+fn checkbox_accent_color() {
+    init();
+    let html = r#"<style>input { accent-color: red; }</style>
+    <input type="checkbox" checked>"#;
+    let (_, tl) = render_rows(html);
+    let cell = &tl.layout[0];
+    assert_eq!(
+        cell.fcolor,
+        Some(crossterm::style::Color::Rgb {
+            r: 0xff,
+            g: 0x00,
+            b: 0x00
+        }),
+        "accent-color themes the checked checkbox glyph"
+    );
+}
+
+#[test]
+fn range_pseudo_element_disabled_overrides_colors() {
+    init();
+    let html = r#"<style>
+        input::-webkit-slider-thumb { background-color: #ff0000; }
+        input::-moz-range-progress { background-color: #0000ff; }
+    </style>
+    <input type="range" min="0" max="4" step="1" value="2" width="9" disabled>"#;
+    let (_, tl) = render_rows(html);
+    let cell = |x: usize| &tl.layout[x];
+    // Disabled controls keep the grey override regardless of pseudo-element colours.
+    assert_eq!(
+        cell(4).fcolor,
+        Some(crossterm::style::Color::DarkGrey),
+        "disabled slider ignores pseudo-element thumb colour"
+    );
+    assert_eq!(
+        cell(0).fcolor,
+        Some(crossterm::style::Color::DarkGrey),
+        "disabled slider ignores pseudo-element progress colour"
+    );
+}
+
+#[test]
+fn clipped_range_control_does_not_paint_over_parent_border() {
+    init();
+    let html = r#"<style>
+        #shell { width: 10ch; height: 3ch; overflow: hidden; border: 1ch solid #888; }
+        input { width: 20ch; margin-left: 1ch; }
+    </style>
+    <div id="shell"><input type="range" min="0" max="9" step="1" value="4"></div>"#;
+    let (_, tl) = render_rows(html);
+    let cols = 80;
+    let word = |x: usize, y: usize| tl.layout[y * cols + x].word.as_str().to_string();
+
+    assert_eq!(word(0, 1), "\u{2502}", "left border stays intact");
+    assert_eq!(word(9, 1), "\u{2502}", "right border stays intact");
+    assert_eq!(word(10, 1), " ", "control must stop at its inherited clip");
+    assert_ne!(
+        word(2, 1),
+        " ",
+        "the visible track starts inside the parent"
+    );
+    assert_ne!(word(8, 1), " ", "the visible track ends inside the parent");
+}

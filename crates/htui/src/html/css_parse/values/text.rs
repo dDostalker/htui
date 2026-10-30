@@ -134,6 +134,21 @@ pub fn resolve_line_height_cells(
     }
 }
 
+/// Vertical offset (rows) of the glyph row within a line box: the leading
+/// `line-height - font` rows split evenly above and below the glyphs; when
+/// the line box is shorter than the font span the glyphs keep the
+/// historical centering within the font-sized box. Both inputs are floored
+/// at one cell.
+pub fn glyph_row_within_line(font_cells: usize, line_height_cells: usize) -> usize {
+    let font = font_cells.max(1);
+    let line_h = line_height_cells.max(1);
+    if line_h > font {
+        (line_h - font) / 2
+    } else {
+        font.saturating_sub(1) / 2
+    }
+}
+
 // ============================================================
 // Text-wrapping property values (CSS Text Level 3 subset)
 //
@@ -251,6 +266,42 @@ pub fn parse_overflow_wrap(s: &str) -> Option<OverflowWrap> {
         "normal" => Some(OverflowWrap::Normal),
         "break-word" => Some(OverflowWrap::BreakWord),
         "anywhere" => Some(OverflowWrap::Anywhere),
+        _ => None,
+    }
+}
+
+/// Text selection behaviour (CSS Basic User Interface Module `user-select`).
+///
+/// The engine currently enforces the two values that affect ordinary page
+/// dragging: `none` removes the subtree from flow selection/copy, while
+/// `text` re-enables selection inside a `none` ancestor. `all` and `contain`
+/// parse for forward compatibility but do not yet add their special boundary
+/// behaviour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UserSelect {
+    /// `auto`: resolve from the nearest explicit non-`auto` ancestor.
+    #[default]
+    Auto,
+    /// `none`: exclude this subtree from flow selection and copy.
+    None,
+    /// `text`: explicitly allow text selection (even inside `none`).
+    Text,
+    /// `all`: parsed; atomic all-or-nothing selection is not implemented yet.
+    All,
+    /// `contain`: parsed; selection-boundary containment is not implemented.
+    Contain,
+}
+
+#[doc(hidden)]
+/// Parse a `user-select` keyword.
+pub fn parse_user_select(s: &str) -> Option<UserSelect> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "auto" => Some(UserSelect::Auto),
+        "none" => Some(UserSelect::None),
+        "text" => Some(UserSelect::Text),
+        "all" => Some(UserSelect::All),
+        "contain" => Some(UserSelect::Contain),
+        "element" => Some(UserSelect::Contain),
         _ => None,
     }
 }

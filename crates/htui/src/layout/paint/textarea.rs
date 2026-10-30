@@ -17,14 +17,8 @@ use crate::{
 };
 
 use super::{
-    PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put,
-};
-
-/// Highlight colour for the selected character range (Tokyo Night selection).
-const SELECTION_BG: Color = Color::Rgb {
-    r: 0x3b,
-    g: 0x42,
-    b: 0x61,
+    PaintCanvas, SELECTION_BG, caret_cell, cell_index, control_background_at, control_clip,
+    paint_control_chrome, put,
 };
 
 /// One visual line of a `<textarea>` value: the display text wrapped to
@@ -144,15 +138,10 @@ pub(crate) fn paint_textarea(
     canvas: &mut PaintCanvas<'_>,
     clip: Rect,
 ) {
-    let r = lb.rect;
-    let canvas_cols = canvas.columns as usize;
-    if r.x >= canvas_cols || r.width == 0 || r.height == 0 {
-        return;
-    }
-    let Some(r) = clamp_rect_to_canvas(r, canvas_cols) else {
-        return;
-    };
-    let Some(visible) = intersect_rects(Rect::new(r.x, r.y, r.width, r.height), clip) else {
+    // Control chrome and replaced glyphs are painted directly by cell; reduce
+    // the control rect to the inherited clip so a partially visible field
+    // cannot overwrite a parent border or sibling cell.
+    let Some(r) = control_clip(lb, canvas, clip) else {
         return;
     };
 
@@ -165,21 +154,7 @@ pub(crate) fn paint_textarea(
     };
 
     let fg = node.css_attr.get_color();
-    let content = paint_control_chrome(lb, arena, canvas, r, fg);
-    let bg = node
-        .css_attr
-        .get_bg_color()
-        .or(Some(super::CONTROL_DEFAULT_BG));
-    // `caret-color` paints the caret block with the declared colour; the
-    // default is the inverted cell (field background <-> text colour swap).
-    let caret_color = node.css_attr.get_caret_color();
-    let caret_cell = |fg: Option<Color>, bg: Option<Color>| match caret_color {
-        Some(cc) => (Some(bg.unwrap_or(Color::Black)), Some(cc)),
-        None => (
-            Some(bg.unwrap_or(Color::Black)),
-            Some(fg.unwrap_or(Color::White)),
-        ),
-    };
+    let (content, background) = paint_control_chrome(lb, arena, canvas, r, fg);
 
     let content_width = content.width.max(1);
     let content_rows = content.height.max(1);
@@ -189,7 +164,7 @@ pub(crate) fn paint_textarea(
 
     for vis_row in 0..content_rows {
         let y = content.y.saturating_add(vis_row);
-        if y < visible.y || y >= visible.y.saturating_add(visible.height) {
+        if y < r.y || y >= r.y.saturating_add(r.height) {
             continue;
         }
         let Some(line) = lines.get(scroll.saturating_add(vis_row)) else {
@@ -201,23 +176,24 @@ pub(crate) fn paint_textarea(
             let w = char_width(c).max(1);
             let global_char = line.char_start.saturating_add(i);
             let is_caret = focused && line_row == caret_row && col == caret_col;
-            let (cell_fg, cell_bg) = if is_caret {
-                // Inverted caret cell so the position is visible even at the
-                // end of the value (a blank inverted cell).
-                caret_cell(fg, bg)
-            } else if selection.is_some_and(|(s, e)| global_char >= s && global_char < e) {
-                (Some(Color::White), Some(SELECTION_BG))
-            } else {
-                (fg, bg)
-            };
             for sub in 0..w {
                 let abs_col = content.x.saturating_add(col).saturating_add(sub);
                 if abs_col >= content.x.saturating_add(content_width) {
                     break;
                 }
-                if abs_col < visible.x || abs_col >= visible.x.saturating_add(visible.width) {
+                if abs_col < r.x || abs_col >= r.x.saturating_add(r.width) {
                     continue;
                 }
+                let sampled_bg = control_background_at(&background, abs_col, y, r);
+                let (cell_fg, cell_bg) = if is_caret {
+                    // Inverted caret cell so the position is visible even at
+                    // the end of the value (a blank inverted cell).
+                    caret_cell(node, fg, sampled_bg)
+                } else if selection.is_some_and(|(s, e)| global_char >= s && global_char < e) {
+                    (Some(Color::White), Some(SELECTION_BG))
+                } else {
+                    (fg, sampled_bg)
+                };
                 put(
                     canvas,
                     cell_index(canvas, abs_col, y),
@@ -233,7 +209,8 @@ pub(crate) fn paint_textarea(
         if focused && line_row == caret_row && caret_col >= col && caret_col < content_width {
             let abs_col = content.x.saturating_add(caret_col);
             if abs_col < content.x.saturating_add(content_width) {
-                let (cf, cb) = caret_cell(fg, bg);
+                let sampled_bg = control_background_at(&background, abs_col, y, r);
+                let (cf, cb) = caret_cell(node, fg, sampled_bg);
                 put(canvas, cell_index(canvas, abs_col, y), Some(' '), cf, cb);
             }
         }

@@ -70,6 +70,21 @@ pub(super) fn native_get_style(
         Some(set_css),
         Attribute::all(),
     );
+    init.function(
+        NativeFunction::from_fn_ptr(native_set_property),
+        js_string!("setProperty"),
+        2,
+    );
+    init.function(
+        NativeFunction::from_fn_ptr(native_get_property_value),
+        js_string!("getPropertyValue"),
+        1,
+    );
+    init.function(
+        NativeFunction::from_fn_ptr(native_remove_property),
+        js_string!("removeProperty"),
+        1,
+    );
     Ok(init.build().into())
 }
 
@@ -182,4 +197,114 @@ fn style_set_css_text(
         mark_dirty(&mut st, node_id);
     }
     Ok(JsValue::undefined())
+}
+
+/// CSSOM property-name normalization: regular properties lowercase;
+/// custom properties (`--*`) are case-sensitive and stay as written.
+fn normalize_property_name(name: &str) -> String {
+    if name.starts_with("--") {
+        name.to_string()
+    } else {
+        name.to_ascii_lowercase()
+    }
+}
+
+/// Insert/remove `name` in the element's style attribute and serialize.
+/// An empty `value` removes the declaration; returns whether the attribute
+/// changed.
+fn write_declaration(st: &mut ScriptState, node_id: NodeId, name: &str, value: &str) -> bool {
+    let mut map = style_map(st, node_id);
+    let changed = if value.is_empty() {
+        map.shift_remove(name).is_some()
+    } else {
+        map.insert(Arc::from(name), Arc::from(value))
+            .is_none_or(|old| old.as_ref() != value)
+    };
+    if changed && let Some(node) = st.arena.get_mut(node_id) {
+        let serialized: Vec<String> = map.iter().map(|(k, v)| format!("{k}: {v}")).collect();
+        node.attributes
+            .insert("style".to_string(), serialized.join("; "));
+        mark_dirty(st, node_id);
+    }
+    changed
+}
+
+/// `style.setProperty(name, value)` — writes any declaration, including
+/// `--*` custom properties (case-sensitive); regular names lowercase. An
+/// empty `value` removes the declaration. Unrecognized regular property
+/// names are still stored (the cascade drops what it cannot parse, matching
+/// the stylesheet path).
+fn native_set_property(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let name = args
+        .first()
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?
+        .unwrap_or_default();
+    let value = args
+        .get(1)
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?
+        .unwrap_or_default();
+    let name = normalize_property_name(&name);
+    if name.is_empty() {
+        return Ok(JsValue::undefined());
+    }
+    if let Some(rc) = with_state() {
+        let mut st = rc.borrow_mut();
+        write_declaration(&mut st, node_id, &name, value.trim());
+    }
+    Ok(JsValue::undefined())
+}
+
+/// `style.getPropertyValue(name)` — the current declaration value (trimmed
+/// by the parser), `""` when absent. Custom properties read case-sensitively.
+fn native_get_property_value(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let name = args
+        .first()
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?
+        .unwrap_or_default();
+    let name = normalize_property_name(&name);
+    let Some(rc) = with_state() else {
+        return Ok(js_string!().into());
+    };
+    let st = rc.borrow();
+    let value = style_map(&st, node_id)
+        .get(name.as_str())
+        .map(|v| v.as_ref().to_string())
+        .unwrap_or_default();
+    Ok(js_string!(value).into())
+}
+
+/// `style.removeProperty(name)` — drop the declaration and return its
+/// previous value (`""` when absent).
+fn native_remove_property(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let name = args
+        .first()
+        .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
+        .transpose()?
+        .unwrap_or_default();
+    let name = normalize_property_name(&name);
+    let Some(rc) = with_state() else {
+        return Ok(js_string!().into());
+    };
+    let mut st = rc.borrow_mut();
+    let old = style_map(&st, node_id).get(name.as_str()).cloned();
+    write_declaration(&mut st, node_id, &name, "");
+    Ok(js_string!(old.as_ref().map(|v| v.as_ref()).unwrap_or_default()).into())
 }

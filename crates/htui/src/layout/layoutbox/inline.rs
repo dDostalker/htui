@@ -86,6 +86,10 @@ fn pseudo_element_run(
     let (suffix, content_key) = match pe {
         PseudoElement::Before => ("::before", "content::before"),
         PseudoElement::After => ("::after", "content::after"),
+        // Slider pseudo-elements are styling-only (no generated content run).
+        PseudoElement::SliderThumb | PseudoElement::SliderTrack | PseudoElement::SliderProgress => {
+            return None;
+        }
     };
     let node = &arena[node_id];
     let raw = node.css_attr.0.get(content_key)?;

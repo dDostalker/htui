@@ -109,7 +109,7 @@ pub fn layout_li(
 
     let marker = list_marker_for_li(arena, node_id);
     let block_font_style = block_style(&node.css_attr);
-    let marker_run = InlineRun::new(
+    let marker_run = InlineRun::synthesized_marker(
         marker.clone(),
         block_font_style,
         node.css_attr.get_color(),

@@ -48,9 +48,18 @@ pub struct TermLayout {
     /// fresh layout (see `TermLayout::layout_only`) drops unfocused entries,
     /// after which the painter reads the DOM `value` attribute.
     pub input_states: HashMap<NodeId, InputRenderState>,
+    /// Native scroll offsets for `overflow-y` containers, driven by wheel /
+    /// scrollbar input and consumed by the next layout pass.
+    pub scroll_offsets: HashMap<NodeId, u32>,
+    /// Native scroll offsets for `overflow-x` containers (horizontal wheel,
+    /// bottom-scrollbar drag, `el.scrollLeft`), consumed by the next layout.
+    pub scroll_x_offsets: HashMap<NodeId, u32>,
     /// The `<select>` node whose dropdown is open (rendered as an overlay),
     /// set by the render thread while a dropdown is expanded.
     pub open_select: Option<NodeId>,
+    /// Whether each engine-owned scrollbar paints in this pass. Layout always
+    /// derives scrollbar geometry so hidden controls remain hoverable.
+    pub scrollbars_visible: HashMap<NodeId, bool>,
 }
 
 impl TermLayout {

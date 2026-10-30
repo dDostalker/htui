@@ -41,14 +41,14 @@ impl ScriptEngine {
     /// period` instead of bursting. `setTimeout` callbacks are one-shot.
     pub fn run_due_timers(&mut self) -> Vec<RenderCmd> {
         let now = Instant::now();
-        // Snapshot the due ids first: callbacks may register or clear timers,
-        // so the table mutates while we iterate.
-        let due: Vec<u32> = {
+        // Snapshot the due ids (and frame timestamps) first: callbacks may
+        // register or clear timers, so the table mutates while we iterate.
+        let due: Vec<(u32, Option<f64>)> = {
             let st = self.state.borrow();
             st.timers
                 .iter()
                 .filter(|t| t.deadline <= now)
-                .map(|t| t.id)
+                .map(|t| (t.id, t.frame_time))
                 .collect()
         };
         if due.is_empty() {
@@ -70,15 +70,28 @@ impl ScriptEngine {
                 }
             });
         }
-        for id in due {
+        for (id, frame_time) in due {
             let callback = timer_callback(&mut self.context, id);
             if !callback.is_callable() {
                 log::debug!("Timer {id} has no callable callback — skipping");
                 continue;
             }
-            if let Some(f) = callback.to_object(&mut self.context).ok()
-                && let Err(e) = f.call(&JsValue::undefined(), &[], &mut self.context)
-            {
+            let result = if let Ok(f) = callback.to_object(&mut self.context) {
+                // Frame callbacks receive their grid timestamp (ms since
+                // session start, browser `DOMHighResTimeStamp` semantics);
+                // other timers are invoked without arguments.
+                match frame_time {
+                    Some(ts) => f.call(
+                        &JsValue::undefined(),
+                        &[JsValue::from(ts)],
+                        &mut self.context,
+                    ),
+                    None => f.call(&JsValue::undefined(), &[], &mut self.context),
+                }
+            } else {
+                continue;
+            };
+            if let Err(e) = result {
                 log::warn!("Timer callback threw: {e}");
             }
         }

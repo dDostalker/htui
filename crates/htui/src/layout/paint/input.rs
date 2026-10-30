@@ -3,26 +3,166 @@
 //! declaration opts into a CSS frame; otherwise the field reads as a plain
 //! rectangle, like a browser's default `<input>`.
 
+use std::sync::Arc;
+
 use compact_str::CompactString;
 use crossterm::style::Color;
 
 use crate::{
     graphics::{FontStyle, char_width},
+    html::css_parse::parse_color_str,
     layout::{LayoutBox, Rect},
-    tdom::node::NodeArena,
+    tdom::node::{Node, NodeArena},
 };
 
 use super::button::paint_button;
 use super::{
-    PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put,
+    PaintCanvas, SELECTION_BG, caret_cell, cell_index, control_background_at, control_clip,
+    paint_control_chrome, put,
 };
 
-/// Highlight colour for the selected character range (Tokyo Night selection).
-const SELECTION_BG: Color = Color::Rgb {
-    r: 0x3b,
-    g: 0x42,
-    b: 0x61,
-};
+/// Numeric parameters for an `<input type=range>` control.
+///
+/// The terminal slider shares this model between painting and interaction so
+/// `min`, `max`, `step`, thumb geometry, and pointer mapping cannot drift.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RangeSpec {
+    min: f64,
+    max: f64,
+    step: f64,
+    value: f64,
+    precision: usize,
+}
+
+impl RangeSpec {
+    /// Snap the value to the nearest step, then clamp it to `[min, max]`.
+    fn normalized(mut self) -> Self {
+        self.max = self.max.max(self.min);
+        self.step = if self.step > 0.0 { self.step } else { 1.0 };
+        self.value = self.min + ((self.value - self.min) / self.step).round() * self.step;
+        self.value = self.value.clamp(self.min, self.max);
+        self
+    }
+
+    /// Canonical DOM representation: integral steps stay integers while
+    /// fractional steps use the input scale, avoiding binary-float artifacts.
+    pub(crate) fn value_string(&self) -> CompactString {
+        if self.step.abs() >= 1.0 && (self.value - self.value.round()).abs() < f64::EPSILON {
+            CompactString::from(format!("{}", self.value.round() as i64))
+        } else if self.precision == 0 {
+            CompactString::from(format!("{}", self.value))
+        } else {
+            let mut value = format!("{:.*}", self.precision.min(15), self.value);
+            if value.contains('.') {
+                value = value
+                    .trim_end_matches('0')
+                    .trim_end_matches('.')
+                    .to_string();
+            }
+            CompactString::from(value)
+        }
+    }
+
+    /// Thumb position along a track of `length` cells (zero-based; a one-cell
+    /// track contains only the thumb).
+    pub(crate) fn thumb_at(&self, length: usize) -> usize {
+        if length <= 1 {
+            return 0;
+        }
+        let span = self.max - self.min;
+        let fraction = if span > 0.0 {
+            ((self.value - self.min) / span).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        ((fraction * (length - 1) as f64).round() as isize).clamp(0, (length - 1) as isize) as usize
+    }
+
+    /// Value for a thumb position, using the same rounding as
+    /// [`Self::thumb_at`].
+    pub(crate) fn value_at(&self, position: usize, length: usize) -> Self {
+        let mut snapped = *self;
+        if length <= 1 {
+            snapped.value = self.min;
+            return snapped.normalized();
+        }
+        let position = position.min(length - 1);
+        let span = self.max - self.min;
+        snapped.value = self.min
+            + if span > 0.0 {
+                position as f64 / (length - 1) as f64 * span
+            } else {
+                0.0
+            };
+        snapped.normalized()
+    }
+
+    /// Move by whole steps in `direction`; the boundary flags support Home and
+    /// End. Returns `false` when the resulting value is unchanged.
+    pub(crate) fn advance(&mut self, direction: isize, to_min: bool, to_max: bool) -> bool {
+        let previous = self.value;
+        if to_min {
+            self.value = self.min;
+        } else if to_max {
+            self.value = self.max;
+        } else if direction != 0 {
+            self.value += direction as f64 * self.step;
+        } else {
+            return false;
+        }
+        let next = self.normalized();
+        let changed = next.value != previous;
+        *self = next;
+        changed
+    }
+}
+
+fn finite_number(value: &str) -> Option<f64> {
+    value.trim().parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
+/// `true` for a Firefox-style vertical slider (`<input type=range orient=vertical>`).
+pub(crate) fn range_is_vertical(node: &Node) -> bool {
+    node.attributes
+        .get("orient")
+        .is_some_and(|v| v.eq_ignore_ascii_case("vertical"))
+}
+
+fn fractional_digits(value: &str) -> usize {
+    value
+        .trim()
+        .rsplit_once('.')
+        .map(|(_, fraction)| fraction.bytes().take_while(u8::is_ascii_digit).count())
+        .unwrap_or_default()
+}
+
+/// Build slider constraints from attributes. `current` is the focused edit
+/// value; otherwise the DOM `value` is used, and an invalid or absent value
+/// falls back to the browser midpoint default.
+pub(crate) fn range_spec(node: &Node, current: Option<&str>) -> RangeSpec {
+    let attr = |name: &str| node.attributes.get(name).and_then(|v| finite_number(v));
+    let attr_digits = |name: &str| {
+        node.attributes
+            .get(name)
+            .map(|v| fractional_digits(v))
+            .unwrap_or_default()
+    };
+    let min = attr("min").unwrap_or(0.0);
+    let max_default = if min > 100.0 { min } else { 100.0 };
+    let max = attr("max").unwrap_or(max_default);
+    let value = current
+        .and_then(finite_number)
+        .or_else(|| attr("value"))
+        .unwrap_or((min + max) / 2.0);
+    RangeSpec {
+        min,
+        max,
+        step: attr("step").unwrap_or(1.0),
+        value,
+        precision: attr_digits("min").max(attr_digits("step")),
+    }
+    .normalized()
+}
 
 /// Visible window of `value` for a field with `inner_width` content columns,
 /// centred on the caret (the window always contains the caret, extending left
@@ -63,15 +203,10 @@ pub(crate) fn paint_input(
     canvas: &mut PaintCanvas<'_>,
     clip: Rect,
 ) {
-    let r = lb.rect;
-    let canvas_cols = canvas.columns as usize;
-    if r.x >= canvas_cols || r.width == 0 || r.height == 0 {
-        return;
-    }
-    let Some(r) = clamp_rect_to_canvas(r, canvas_cols) else {
-        return;
-    };
-    let Some(visible) = intersect_rects(Rect::new(r.x, r.y, r.width, r.height), clip) else {
+    // Control chrome and replaced glyphs are painted directly by cell; reduce
+    // the control rect to the inherited clip so a partially visible field
+    // cannot overwrite a parent border or sibling cell.
+    let Some(r) = control_clip(lb, canvas, clip) else {
         return;
     };
 
@@ -91,6 +226,95 @@ pub(crate) fn paint_input(
 
     let fg = node.css_attr.get_color();
 
+    // `<input type=range>` paints a one-row horizontal slider. The painter
+    // and pointer mapping share `RangeSpec`, so the thumb column, keyboard
+    // steps, and click positions agree.
+    if input_type == "range" {
+        let (content, background) = paint_control_chrome(lb, arena, canvas, r, fg);
+        let state = canvas.input_states.get(&lb.node_id);
+        let spec = range_spec(node, state.map(|s| s.value.as_str()));
+        let disabled = node.attributes.contains_key("disabled");
+        let track_fg = if disabled {
+            Some(Color::DarkGrey)
+        } else {
+            Some(fg.unwrap_or(Color::White))
+        };
+        // Browser-standard pseudo-element colours: `::-webkit-slider-thumb` /
+        // `::-moz-range-thumb` for the thumb, `::-moz-range-progress` for the
+        // filled track, `::-webkit-slider-runnable-track` / `::-moz-range-track`
+        // for the unfilled track. Properties are read from the cascade's
+        // key-prefixed slots (`background-color::slider-thumb`, etc.).
+        let pseudo_color = |part: &str| -> Option<Color> {
+            if disabled {
+                return None;
+            }
+            let node_css = &node.css_attr;
+            let bg_key: Arc<str> = Arc::from(format!("background-color::slider-{part}").as_str());
+            let fg_key: Arc<str> = Arc::from(format!("color::slider-{part}").as_str());
+            node_css
+                .0
+                .get(&bg_key)
+                .or_else(|| node_css.0.get(&fg_key))
+                .and_then(|v| parse_color_str(v))
+        };
+        let accent = node.css_attr.get_accent_color();
+        let thumb_fg = pseudo_color("thumb").or(accent).or(track_fg);
+        let fill_fg = pseudo_color("progress").or(accent).or(track_fg);
+        let empty_fg = pseudo_color("track").or(accent).or(Some(Color::DarkGrey));
+
+        if range_is_vertical(node) {
+            if content.height == 0 {
+                return;
+            }
+            let track_x = content.x;
+            let thumb_y = content
+                .y
+                .saturating_add(spec.thumb_at(content.height.max(1)));
+            for row in 0..content.height.max(1) {
+                let abs_row = content.y.saturating_add(row);
+                let (glyph, color) = if abs_row == thumb_y {
+                    ('\u{25CF}', thumb_fg)
+                } else if abs_row < thumb_y {
+                    ('\u{2502}', fill_fg)
+                } else {
+                    ('\u{2502}', empty_fg)
+                };
+                put(
+                    canvas,
+                    cell_index(canvas, track_x, abs_row),
+                    Some(glyph),
+                    color,
+                    control_background_at(&background, track_x, abs_row, r),
+                );
+            }
+            return;
+        }
+
+        if content.width == 0 {
+            return;
+        }
+        let thumb_x = content.x.saturating_add(spec.thumb_at(content.width));
+        let track_y = content.y;
+        for col in 0..content.width {
+            let abs_col = content.x.saturating_add(col);
+            let (glyph, color) = if abs_col == thumb_x {
+                ('\u{25CF}', thumb_fg)
+            } else if abs_col < thumb_x {
+                ('\u{2501}', fill_fg)
+            } else {
+                ('\u{2500}', empty_fg)
+            };
+            put(
+                canvas,
+                cell_index(canvas, abs_col, track_y),
+                Some(glyph),
+                color,
+                control_background_at(&background, abs_col, track_y, r),
+            );
+        }
+        return;
+    }
+
     // `<input type=checkbox|radio>` is a bare terminal toggle — no background
     // fill and no frame. Both controls follow the hollow → solid pattern so
     // they read as one family: checkbox `□` / `■`, radio `○` / `●`.
@@ -106,7 +330,10 @@ pub(crate) fn paint_input(
         let toggle_fg = if disabled {
             Color::DarkGrey
         } else {
-            fg.unwrap_or(Color::White)
+            node.css_attr
+                .get_accent_color()
+                .or(fg)
+                .unwrap_or(Color::White)
         };
         // The glyph carries no background of its own: the surrounding page
         // background shows through, like a browser checkbox.
@@ -126,11 +353,7 @@ pub(crate) fn paint_input(
         return;
     }
 
-    let content = paint_control_chrome(lb, arena, canvas, r, fg);
-    let bg = node
-        .css_attr
-        .get_bg_color()
-        .or(Some(super::CONTROL_DEFAULT_BG));
+    let (content, background) = paint_control_chrome(lb, arena, canvas, r, fg);
 
     // Live edit state wins while focused, and an unfocused entry covers only
     // the single repaint right after a blur (so the committed text doesn't
@@ -166,16 +389,6 @@ pub(crate) fn paint_input(
     let disabled = node.attributes.contains_key("disabled");
     // A disabled field is dimmed (text grey); the background keeps its fill.
     let text_fg = if disabled { Some(Color::DarkGrey) } else { fg };
-    // `caret-color` paints the caret block with the declared colour; the
-    // default is the inverted cell (field background <-> text colour swap).
-    let caret_color = node.css_attr.get_caret_color();
-    let caret_cell = |fg: Option<Color>, bg: Option<Color>| match caret_color {
-        Some(cc) => (Some(bg.unwrap_or(Color::Black)), Some(cc)),
-        None => (
-            Some(bg.unwrap_or(Color::Black)),
-            Some(fg.unwrap_or(Color::White)),
-        ),
-    };
 
     // The value fills the whole content area.
     let inner_width = content.width;
@@ -200,21 +413,22 @@ pub(crate) fn paint_input(
             if abs_col >= inner_x.saturating_add(inner_width) {
                 break;
             }
-            if abs_col < visible.x || abs_col >= visible.x.saturating_add(visible.width) {
+            if abs_col < r.x || abs_col >= r.x.saturating_add(r.width) {
                 continue;
             }
+            let sampled_bg = control_background_at(&background, abs_col, inner_y, r);
             let (cell_fg, cell_bg) = if inverted {
                 // Inverted caret cell so the caret position is visible even at
                 // the end of the value (a blank inverted cell).
-                caret_cell(fg, bg)
+                caret_cell(node, fg, sampled_bg)
             } else if selection.is_some_and(|(s, e)| i >= s && i < e) {
                 // Selected characters are highlighted (Tokyo Night selection
                 // blue) over the field's own colours.
                 (Some(Color::White), Some(SELECTION_BG))
             } else if showing_placeholder {
-                (Some(Color::DarkGrey), bg)
+                (Some(Color::DarkGrey), sampled_bg)
             } else {
-                (text_fg, bg)
+                (text_fg, sampled_bg)
             };
             // ASCII glyphs write one cell. The second column of a wide CJK
             // glyph is marked with an *empty* word (not a space) so the
@@ -238,7 +452,8 @@ pub(crate) fn paint_input(
     if focused && cursor == value.chars().count() && col < inner_width {
         let abs_col = inner_x.saturating_add(col);
         if abs_col < inner_x.saturating_add(inner_width) {
-            let (cf, cb) = caret_cell(fg, bg);
+            let sampled_bg = control_background_at(&background, abs_col, inner_y, r);
+            let (cf, cb) = caret_cell(node, fg, sampled_bg);
             put(
                 canvas,
                 cell_index(canvas, abs_col, inner_y),
@@ -264,4 +479,71 @@ fn put_bare(canvas: &mut PaintCanvas<'_>, idx: usize, word: Option<char>, fg: Op
     }
     cell.fcolor = fg;
     cell.style = FontStyle::empty();
+}
+
+#[cfg(test)]
+mod range_tests {
+    use super::*;
+    use crate::tdom::node::NodeType;
+
+    fn range_node(min: &str, max: &str, step: &str, value: &str) -> Node {
+        let mut node = Node::from(NodeType::Input);
+        for (name, value) in [("min", min), ("max", max), ("step", step), ("value", value)] {
+            node.attributes.insert(name.to_string(), value.to_string());
+        }
+        node
+    }
+
+    fn range_vertical_node() -> Node {
+        let mut node = range_node("0", "4", "1", "2");
+        node.attributes
+            .insert("orient".to_string(), "vertical".to_string());
+        node
+    }
+
+    #[test]
+    fn range_thumb_and_pointer_use_the_same_track_mapping() {
+        let node = range_node("0", "4", "1", "2");
+        let spec = range_spec(&node, None);
+        assert_eq!(spec.thumb_at(9), 4);
+        assert_eq!(spec.value_at(8, 9).value_string(), "4");
+        assert_eq!(spec.value_at(0, 9).value_string(), "0");
+    }
+
+    #[test]
+    fn range_vertical_mapping_uses_track_rows() {
+        assert!(range_is_vertical(&range_vertical_node()));
+        let spec = range_spec(&range_vertical_node(), None);
+        assert_eq!(spec.thumb_at(5), 2);
+        assert_eq!(spec.value_at(0, 5).value_string(), "0");
+        assert_eq!(spec.value_at(4, 5).value_string(), "4");
+    }
+
+    #[test]
+    fn range_keyboard_steps_snap_and_clamp() {
+        let mut spec = range_spec(&range_node("0", "4", "1", "0"), None);
+        assert!(
+            !spec.advance(0, true, false),
+            "Home at the minimum is a no-op"
+        );
+        assert!(spec.advance(2, false, false));
+        assert_eq!(spec.value_string(), "2");
+        assert!(spec.advance(0, false, true));
+        assert_eq!(spec.value_string(), "4");
+        assert!(
+            !spec.advance(1, false, false),
+            "Right at the maximum is a no-op"
+        );
+    }
+
+    #[test]
+    fn range_fractional_steps_use_the_snapped_decimal() {
+        let mut spec = range_spec(&range_node("0", "1", "0.25", "0.13"), None);
+        assert_eq!(spec.value_string(), "0.25");
+        assert!(spec.advance(2, false, false));
+        assert_eq!(spec.value_string(), "0.75");
+        let mut spec = range_spec(&range_node("0", "3", "0.3", "0.15"), None);
+        assert!(spec.advance(2, false, false));
+        assert_eq!(spec.value_string(), "0.9");
+    }
 }

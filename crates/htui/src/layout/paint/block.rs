@@ -1,34 +1,32 @@
-use crossterm::style::Color;
-
 use crate::{
     graphics::{FontStyle, block_style},
-    html::css_parse::TextAlign,
+    html::css_parse::{Background, TextAlign},
     layout::{LayoutBox, Rect},
     tdom::node::NodeArena,
 };
 
-use super::{PaintCanvas, border::paint_borders, intersect_rects, text::paint_runs};
+use super::{
+    BackgroundFill, PaintCanvas, background_at, border::paint_borders, intersect_rects,
+    text::paint_runs,
+};
 
 pub(crate) fn paint_block(
     lb: &LayoutBox,
     arena: &NodeArena,
     canvas: &mut PaintCanvas<'_>,
-    my_bg: Option<Color>,
-    parent_bg: Option<Color>,
+    my_bg: Option<&Background>,
+    parent_bg: Option<BackgroundFill<'_>>,
     clip: Rect,
 ) {
     let node = &arena[lb.node_id];
     let fg = node.css_attr.get_color();
+    let background_clipped_to_text = node.css_attr.background_clips_to_text();
     let style = block_style(&node.css_attr);
     // The resolved alignment comes from the paint style, not the cascade:
     // user-agent defaults the layout phase resolved (`<th>`'s `center`) are
     // not stored in the node's `css_attr`, so the paint style is the single
     // source the paint phase may consult.
     let align = lb.paint_style.text_align;
-
-    // Effective bg: own bg wins; otherwise inherit the parent's bg so child
-    // text appears on the rect's background rather than the terminal default.
-    let effective_bg = my_bg.or(parent_bg);
 
     let cols = canvas.columns as usize;
     // A box can be wider than the terminal when a parent formatting context
@@ -44,12 +42,37 @@ pub(crate) fn paint_block(
         return;
     }
     let r = Rect::new(r.x, r.y, r.width.min(cols - r.x), r.height);
+    // Border glyphs sit on this full border-box — [`paint_borders`] cuts
+    // them against `clip` per cell, so the rect itself must stay unshrunk
+    // (an intersected rect would relocate the bottom edge to the clip
+    // boundary instead of clipping it away).
+    let border_rect = r;
     // Inherited clip (ancestors' border-boxes) narrows the paint region
     // further: when a box overflows its parent, the cells beyond the clip are
     // dropped instead of painting over the sibling below.
     let r = match intersect_rects(r, clip) {
         Some(r) => r,
         None => return,
+    };
+    // Own background wins; otherwise inherit the parent's full fill descriptor
+    // so a descendant keeps sampling the ancestor gradient's coordinates.
+    let effective_bg = if background_clipped_to_text {
+        parent_bg
+    } else {
+        my_bg
+            .map(|background| BackgroundFill {
+                background,
+                rect: r,
+            })
+            .or(parent_bg)
+    };
+    let text_fill = if background_clipped_to_text {
+        my_bg.map(|background| BackgroundFill {
+            background,
+            rect: r,
+        })
+    } else {
+        None
     };
     let cell_start = canvas.cell_index(r.x, r.y);
 
@@ -59,19 +82,16 @@ pub(crate) fn paint_block(
     // without re-laying-out, so the fill must also run when the *current*
     // cascade carries one — otherwise the padding cells of e.g. a bordered
     // `.btn:hover` keep the parent background and the highlight looks hollow.
-    let fill_bg = lb.paint_style.fill_bg || my_bg.is_some();
+    let fill_bg = !background_clipped_to_text && (lb.paint_style.fill_bg || my_bg.is_some());
     let spacing_after = lb.paint_style.spacing_after;
     let box_edges = &lb.paint_style.box_edges;
-    let font = lb.paint_style.font_size_cells.max(1);
-    let line_h = lb.paint_style.line_height_cells.max(1);
     // Row of the glyph block within its line box. With `line-height > font`
     // the extra rows are split above and below the glyphs; otherwise the
     // glyphs keep the historical centering within the font-sized line box.
-    let glyph_row_within_line = if line_h > font {
-        (line_h - font) / 2
-    } else {
-        font.saturating_sub(1) / 2
-    };
+    let glyph_row_within_line = crate::html::css_parse::glyph_row_within_line(
+        lb.paint_style.font_size_cells,
+        lb.paint_style.line_height_cells,
+    );
 
     if fill_bg {
         // Paint the background across every row of the rect that is *not* a
@@ -96,7 +116,10 @@ pub(crate) fn paint_block(
             + box_edges.padding.bottom
             + box_edges.padding.left
             > 0;
-        let text_clamped = my_bg.is_some() && !has_padding && lb.paint_style.font_size_cells > 1;
+        let text_clamped = !background_clipped_to_text
+            && my_bg.is_some()
+            && !has_padding
+            && lb.paint_style.font_size_cells > 1;
         let text_row_offset: usize = if text_clamped {
             glyph_row_within_line
         } else {
@@ -137,7 +160,6 @@ pub(crate) fn paint_block(
             // Default: bg covers the padding-box (border-box minus border).
             (r.x + border_left, r.width.saturating_sub(border_horizontal))
         };
-        let bg_to_use = effective_bg;
         let rows_to_fill = r
             .height
             .saturating_sub(spacing_after)
@@ -148,6 +170,8 @@ pub(crate) fn paint_block(
             }
             let row_cell_start = cell_start + (row_offset + border_top) * cols;
             for i in 0..bg_width {
+                let x = bg_start_x + i;
+                let y = r.y + row_offset + border_top;
                 let idx = row_cell_start + (bg_start_x - r.x) + i;
                 if idx < canvas.layout.len() && canvas.in_region(idx) {
                     // Mutate in place: `clear()` keeps the 4-byte buffer from
@@ -158,7 +182,7 @@ pub(crate) fn paint_block(
                     cell.word.clear();
                     cell.word.push(' ');
                     cell.fcolor = fg;
-                    cell.bcolor = bg_to_use;
+                    cell.bcolor = background_at(effective_bg, x, y);
                     cell.style = style;
                 }
             }
@@ -176,6 +200,7 @@ pub(crate) fn paint_block(
             box_edges,
             align,
             effective_bg,
+            text_fill,
             r,
             cell_start,
             style,
@@ -194,10 +219,12 @@ pub(crate) fn paint_block(
         // background loop above, so the box reads as a tall band rather than
         // a 1-row strip.
         let vertical_offset = glyph_row_within_line * cols;
+        let scroll_offset = lb.paint_style.scrollbar.map_or(0, |scroll| scroll.scroll_y);
         let content_row = cell_start
             + (border_top.saturating_add(padding_top)) * cols
             + content_x_offset
             + vertical_offset;
+        let content_row = content_row.saturating_sub(scroll_offset * cols);
         // The runs of a clipping box (`overflow: hidden` / `auto` / `scroll`
         // / `clip`) are additionally bounded by the content-box (the rect
         // minus border + padding): wrapped text that overflows the allocated
@@ -220,6 +247,24 @@ pub(crate) fn paint_block(
         );
         let overflow_visible =
             node.css_attr.get_overflow() != crate::html::css_parse::Overflow::Clip;
+        // Horizontal bound for the box's own glyph stream, in columns from
+        // the row start (the paint pass re-bases it on every visual line).
+        // - clipping box: the content-box right edge (historic behaviour);
+        // - visibly-overflowing **bordered** box: the frame (border-box)
+        //   right edge — a long / nowrap word may underlap the right border
+        //   column but must not paint past the drawn frame into the
+        //   neighbouring area (the terminal's "出框" artefact);
+        // - visibly-overflowing borderless box: the row's canvas edge —
+        //   browser-faithful `overflow: visible` spill into the page,
+        //   still row-bounded so the flat buffer never wraps a row.
+        let has_right_frame = box_edges.border.right.thickness() > 0;
+        let h_bound_cols = if !overflow_visible {
+            (content_row % cols).saturating_add(content_width)
+        } else if has_right_frame {
+            r.x.saturating_add(r.width).min(cols)
+        } else {
+            cols
+        };
         if overflow_visible {
             paint_runs(
                 canvas,
@@ -228,10 +273,11 @@ pub(crate) fn paint_block(
                 content_width,
                 align,
                 effective_bg,
+                text_fill,
                 lb.paint_style.font_size_cells,
                 lb.paint_style.line_height_cells,
                 clip,
-                true,
+                h_bound_cols,
                 lb.paint_style.text_indent,
             );
         } else if let Some(runs_clip) = intersect_rects(content_clip, clip) {
@@ -242,10 +288,11 @@ pub(crate) fn paint_block(
                 content_width,
                 align,
                 effective_bg,
+                text_fill,
                 lb.paint_style.font_size_cells,
                 lb.paint_style.line_height_cells,
                 runs_clip,
-                false,
+                h_bound_cols,
                 lb.paint_style.text_indent,
             );
         }
@@ -257,7 +304,7 @@ pub(crate) fn paint_block(
     // clamped rect is passed down so edges never extend past the terminal
     // width. Painting last guarantees a frame cell keeps its glyph even if
     // wrapped content reached it.
-    paint_borders(lb, r, canvas, fg, effective_bg);
+    paint_borders(lb, border_rect, canvas, fg, effective_bg, clip);
 }
 
 /// Paint a multi-column box's fragmented inline content and column rules.
@@ -274,7 +321,8 @@ fn paint_column_layout(
     clip: Rect,
     box_edges: &crate::html::box_edges::BoxEdges,
     align: TextAlign,
-    effective_bg: Option<Color>,
+    effective_bg: Option<BackgroundFill<'_>>,
+    text_fill: Option<BackgroundFill<'_>>,
     r: Rect,
     cell_start: usize,
     style: FontStyle,
@@ -313,12 +361,13 @@ fn paint_column_layout(
                 col_width,
                 align,
                 effective_bg,
+                text_fill,
                 font,
                 line_h,
                 col_clip,
                 // Multicol fragmentation is intrinsic clipping: each column
                 // bounds its own lines regardless of the box's overflow.
-                false,
+                (col_cell_start % cols).saturating_add(col_width),
                 0,
             );
         }
@@ -356,7 +405,7 @@ fn paint_column_layout(
                     cell.word.clear();
                     cell.word.push('│');
                     cell.fcolor = rule_color;
-                    cell.bcolor = effective_bg;
+                    cell.bcolor = background_at(effective_bg, rule_x, y);
                     cell.style = style;
                 }
             }

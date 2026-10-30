@@ -53,7 +53,7 @@ mod hit_map;
 pub mod interaction;
 
 pub use geometry::{Geometry, SharedGeometry};
-pub use hit_map::{HitMap, HitRegion, SharedHitMap};
+pub use hit_map::{HitMap, HitRegion, ScrollbarRegion, SharedHitMap};
 pub use interaction::{HoverState, on_click, on_move};
 
 /// DOM-like event types supported by the input layer.
@@ -107,6 +107,53 @@ pub enum EventType {
     /// engine's native dialog default action when a `<form method="dialog">`
     /// submit button removes the `open` attribute.
     Close,
+    /// Fired when the terminal viewport changes size (`onresize`).
+    /// Dispatched to the window listeners (`window.addEventListener`) and
+    /// along the `<body>` ancestor chain; the event target is `<body>` (htui
+    /// has no separate window node).
+    Resize,
+    /// Fired when a mouse button is pressed on an element (`onmousedown`).
+    MouseDown,
+    /// Fired when a held mouse button is released (`onmouseup`).
+    MouseUp,
+    /// Fired when the pointer moves (`onmousemove`). Fires on every move
+    /// (subject to the input loop's in-flight cap), not just hover changes.
+    MouseMove,
+    /// Fired after the page scroll offset changed (`onscroll`). Same dispatch
+    /// shape as [`EventType::Resize`] (window listeners + `<body>` chain);
+    /// the event carries no payload — handlers read `window.scrollY`.
+    Scroll,
+    /// Fired when a page or field selection changes (`onselectionchange`).
+    /// The event has no payload; it is a change notification, matching the
+    /// browser's document-level event shape.
+    SelectionChange,
+    /// Second click of a double click (`ondblclick`): a click on the same
+    /// cell within the double-click window. Dispatched to the click target
+    /// and bubbles like [`EventType::Click`].
+    DblClick,
+    /// A wheel tick over the document (`onwheel`). Only dispatched when the
+    /// page registered a `wheel` listener (the input loop checks the shared
+    /// flag); when a listener calls `preventDefault()` the built-in
+    /// container / page scroll for that tick is cancelled (same gate the
+    /// `keydown` shortcuts use).
+    Wheel,
+    /// Right-button release without a drag (`oncontextmenu`). No native
+    /// context menu exists — the event is purely for page JS.
+    ContextMenu,
+    /// The pointer entered an element (`onmouseenter`). Unlike
+    /// [`EventType::MouseOver`] it does not bubble: only the element the
+    /// pointer moved onto receives it.
+    MouseEnter,
+    /// The pointer left an element (`onmouseleave`). Non-bubbling, dispatched
+    /// only to the element the pointer left.
+    MouseLeave,
+    /// The DOM is ready: fired once after the document parsed and every
+    /// inline / session script ran (`DOMContentLoaded`, window + `<body>`
+    /// listeners). A whole-document reload fires it again (browser refresh
+    /// semantics).
+    DomContentLoaded,
+    /// Fired right after [`EventType::DomContentLoaded`] (window `load`).
+    Load,
 }
 
 /// Terminal-agnostic keyboard payload carried by [`EventType::KeyDown`] /

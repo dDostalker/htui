@@ -6,6 +6,9 @@
   globalThis.__htuiFetchResolvers = {};
   globalThis.__htuiClassListCache = {};
   globalThis.__htuiDatasetCache = {};
+  // Every MediaQueryList `window.matchMedia` returned — re-evaluated on
+  // resize so `change` fires on flips (see `evaluate_media_changes`).
+  globalThis.__htuiMQLs = [];
 
   // Canonical array-index property key: `'0'`, `'1'`, ... map to their
   // number; everything else (symbols, '01', '1.0', '-0', 'length') is NaN.

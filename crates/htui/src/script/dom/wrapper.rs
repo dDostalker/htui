@@ -47,6 +47,12 @@ use super::{
         native_get_tag_name, native_has_child_nodes, native_is_equal_node, native_is_same_node,
         native_matches, native_query_selector, native_query_selector_all,
     },
+    view::{
+        native_get_bounding_client_rect, native_get_client_height, native_get_client_left,
+        native_get_client_top, native_get_client_width, native_get_scroll_height,
+        native_get_scroll_left, native_get_scroll_top, native_get_scroll_width,
+        native_scroll_into_view, native_set_scroll_left, native_set_scroll_top,
+    },
     with_state,
 };
 
@@ -146,6 +152,28 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
     );
     let get_prefix = js_fn(context, NativeFunction::from_fn_ptr(native_get_prefix));
     let get_local_name = js_fn(context, NativeFunction::from_fn_ptr(native_get_local_name));
+    let get_client_width = js_fn(
+        context,
+        NativeFunction::from_fn_ptr(native_get_client_width),
+    );
+    let get_client_height = js_fn(
+        context,
+        NativeFunction::from_fn_ptr(native_get_client_height),
+    );
+    let get_client_top = js_fn(context, NativeFunction::from_fn_ptr(native_get_client_top));
+    let get_client_left = js_fn(context, NativeFunction::from_fn_ptr(native_get_client_left));
+    let get_scroll_top = js_fn(context, NativeFunction::from_fn_ptr(native_get_scroll_top));
+    let set_scroll_top = js_fn(context, NativeFunction::from_fn_ptr(native_set_scroll_top));
+    let get_scroll_left = js_fn(context, NativeFunction::from_fn_ptr(native_get_scroll_left));
+    let set_scroll_left = js_fn(context, NativeFunction::from_fn_ptr(native_set_scroll_left));
+    let get_scroll_height = js_fn(
+        context,
+        NativeFunction::from_fn_ptr(native_get_scroll_height),
+    );
+    let get_scroll_width = js_fn(
+        context,
+        NativeFunction::from_fn_ptr(native_get_scroll_width),
+    );
 
     let mut init = ObjectInitializer::new(context);
     init.property(js_string!("_nodeId"), node_key, hidden);
@@ -466,6 +494,64 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
             NativeFunction::from_fn_ptr(native_click),
             js_string!("click"),
             0,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_scroll_into_view),
+            js_string!("scrollIntoView"),
+            1,
+        );
+        init.function(
+            NativeFunction::from_fn_ptr(native_get_bounding_client_rect),
+            js_string!("getBoundingClientRect"),
+            0,
+        );
+        init.accessor(
+            js_string!("clientWidth"),
+            Some(get_client_width),
+            None,
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("clientHeight"),
+            Some(get_client_height),
+            None,
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("clientTop"),
+            Some(get_client_top),
+            None,
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("clientLeft"),
+            Some(get_client_left),
+            None,
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("scrollTop"),
+            Some(get_scroll_top),
+            Some(set_scroll_top),
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("scrollLeft"),
+            Some(get_scroll_left),
+            Some(set_scroll_left),
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("scrollHeight"),
+            Some(get_scroll_height),
+            None,
+            Attribute::all(),
+        );
+        init.accessor(
+            js_string!("scrollWidth"),
+            Some(get_scroll_width),
+            None,
+            Attribute::all(),
         );
         init.function(
             NativeFunction::from_fn_ptr(native_insert_adjacent_element),

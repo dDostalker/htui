@@ -17,6 +17,7 @@ use htui::layout::{BoxConstraint, Cursor, layout_tree};
 use htui::script::{ScriptEngine, ScriptMsg, apply_message};
 use htui::tdom::node::{NodeArena, NodeId, NodeType};
 use htui::tui::graph_api::TermLayout;
+use std::sync::Arc;
 
 const COLS: u16 = 80;
 const ROWS: u16 = 24;
@@ -508,7 +509,7 @@ fn build_geometry(html: &str) -> (ScriptEngine, Geometry) {
         term_map.rows as usize,
     );
     let geo = Geometry {
-        arena,
+        arena: Arc::new(arena),
         boxes,
         root_id,
     };

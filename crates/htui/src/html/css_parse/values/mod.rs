@@ -12,7 +12,9 @@ pub use box_values::{
     Positioning, TableLayout, Visibility, parse_box_sizing, parse_caption_side, parse_empty_cells,
     parse_overflow, parse_position, parse_table_layout, parse_visibility,
 };
-pub use color::parse_color_str;
+pub use color::{
+    Background, Gradient, GradientKind, GradientStop, parse_background_str, parse_color_str,
+};
 pub use flex::{
     AlignContent, AlignItems, FlexBasis, FlexDirection, FlexShorthand, FlexWrap, GapSizes,
     JustifyContent, parse_align_content, parse_align_items, parse_flex_basis, parse_flex_direction,
@@ -40,7 +42,7 @@ pub use multicol::{
 pub use multicol::ColumnsShorthand;
 pub use text::{
     FontStyleKind, FontWeight, LineHeight, OverflowWrap, TextAlign, TextDecoration, TextOverflow,
-    TextTransform, WhiteSpace, WordBreak, parse_line_height, parse_overflow_wrap,
-    parse_text_overflow, parse_text_transform, parse_white_space, parse_word_break,
-    resolve_line_height_cells,
+    TextTransform, UserSelect, WhiteSpace, WordBreak, glyph_row_within_line, parse_line_height,
+    parse_overflow_wrap, parse_text_overflow, parse_text_transform, parse_user_select,
+    parse_white_space, parse_word_break, resolve_line_height_cells,
 };

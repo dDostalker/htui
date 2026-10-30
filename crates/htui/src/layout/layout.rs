@@ -2,9 +2,10 @@ use crossterm::terminal;
 
 use crate::{
     graphics::{Block, FontStyle, ImageCache, TermLayout},
+    html::css_parse::Overflow,
     layout::{
         BoxConstraint, Cursor, LayoutBox, Rect,
-        inner_formatting_context::flow::layout_tree,
+        inner_formatting_context::flow::layout_tree_with_scroll_offsets,
         layoutbox::{pin_fixed_boxes, pin_sticky_boxes},
         paint::{paint_layout_tree, paint_layout_tree_region},
     },
@@ -87,7 +88,10 @@ impl TermLayout {
             zoom,
             image_cache: ImageCache::new(),
             input_states: std::collections::HashMap::new(),
+            scroll_offsets: std::collections::HashMap::new(),
+            scroll_x_offsets: std::collections::HashMap::new(),
             open_select: None,
+            scrollbars_visible: std::collections::HashMap::new(),
         }
     }
 }
@@ -104,7 +108,7 @@ impl TermLayout {
     /// Two-phase pipeline:
     /// 1. Reset every cell to a blank space so stale cells from a previous
     ///    render at rows the new tree does not touch don't bleed through.
-    /// 2. [`layout_tree`] walks the DOM through `DEFAULT_LAYOUT` and builds a
+    /// 2. [`layout_tree_with_scroll_offsets`] walks the DOM through `DEFAULT_LAYOUT` and builds a
     ///    `Vec<LayoutBox>` rooted at `root_id`. Each block claims a row range
     ///    inside the containing block.
     /// 3. [`paint_layout_tree`] writes the resulting rects into `self.layout`
@@ -120,7 +124,7 @@ impl TermLayout {
     ) -> Vec<LayoutBox> {
         self.reset_canvas();
         let boxes = self.layout_only(arena, root_id, term_map);
-        self.ensure_capacity(&boxes);
+        self.ensure_capacity(arena, &boxes);
         paint_layout_tree(&boxes, arena, self);
         boxes
     }
@@ -150,13 +154,15 @@ impl TermLayout {
         assert_eq!(root.node_type, NodeType::Document);
         let containing = BoxConstraint::root(term_map);
         let mut cursor = Cursor::new();
-        let mut boxes = layout_tree(
+        let mut boxes = layout_tree_with_scroll_offsets(
             arena,
             root_id,
             containing,
             &mut cursor,
             term_map.columns as usize,
             term_map.rows as usize,
+            &self.scroll_offsets,
+            &self.scroll_x_offsets,
         );
         // Re-anchor `position: fixed` / `sticky` boxes to the *current*
         // scroll offset so they stay pinned to their screen position while the
@@ -182,7 +188,7 @@ impl TermLayout {
     /// is cleared first (stale text from a shortened value would otherwise
     /// stay on screen), then re-painted with writes gated to it.
     pub fn repaint_region(&mut self, arena: &NodeArena, boxes: &[LayoutBox], region: Rect) {
-        self.ensure_capacity(boxes);
+        self.ensure_capacity(arena, boxes);
         self.clear_region(region);
         paint_layout_tree_region(boxes, arena, self, region);
     }
@@ -195,7 +201,7 @@ impl TermLayout {
     /// arena this picks up `:hover` backgrounds without re-layout.
     pub fn repaint_from(&mut self, arena: &NodeArena, boxes: &[LayoutBox]) {
         self.reset_canvas();
-        self.ensure_capacity(boxes);
+        self.ensure_capacity(arena, boxes);
         paint_layout_tree(boxes, arena, self);
     }
 
@@ -209,15 +215,29 @@ impl TermLayout {
     /// than 4× the needed size is truncated back down (bounded below by the
     /// viewport) and released. Freshly added cells are blank, so the
     /// subsequent paint pass fills them exactly like the rest of the buffer.
-    fn ensure_capacity(&mut self, boxes: &[LayoutBox]) {
-        fn walk(boxes: &[LayoutBox], bottom: &mut usize) {
+    fn ensure_capacity(&mut self, arena: &NodeArena, boxes: &[LayoutBox]) {
+        fn walk(arena: &NodeArena, boxes: &[LayoutBox], bottom: &mut usize) {
             for b in boxes {
                 *bottom = (*bottom).max(b.rect.y.saturating_add(b.rect.height.max(1)));
-                walk(&b.children, bottom);
+                if arena[b.node_id].css_attr.get_overflow() == Overflow::Clip {
+                    // Descendants outside a clipping box cannot affect canvas
+                    // capacity. Positioned descendants escape that clip, so
+                    // they still need to reserve their own rows.
+                    for child in &b.children {
+                        if !matches!(
+                            child.positioning.position,
+                            crate::html::css_parse::Position::Static
+                        ) {
+                            walk(arena, std::slice::from_ref(child), bottom);
+                        }
+                    }
+                    continue;
+                }
+                walk(arena, &b.children, bottom);
             }
         }
         let mut bottom = self.rows as usize;
-        walk(boxes, &mut bottom);
+        walk(arena, boxes, &mut bottom);
 
         let cols = self.columns as usize;
         let viewport = cols.saturating_mul(self.rows as usize);

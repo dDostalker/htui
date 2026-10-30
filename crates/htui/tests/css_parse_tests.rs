@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use crossterm::style::Color;
 use htui::html::css_parse::{
-    BorderStyle, BoxSizing, Combinator, CornerRadii, CssAttr, CssRule, CssRuleEntry, CssSelector,
-    DynamicState, EdgeAuto, EdgeSizes, FontContext, FontStyleKind, FontWeight, INHERITED_PROPS,
-    Length, LengthContext, LineHeight, MarginSizes, NthExpr, PX_PER_CELL, Parser,
-    SUPPORTED_PROPERTIES, Selector, TextAlign, TextDecoration, TextTransform, Viewport, WhiteSpace,
-    css_into_node, css_into_node_with_state, parse_color_str, parse_declaration_text,
-    reset_css_attr, resolve_line_height_cells, selector_chain_matches,
-    selector_chain_matches_with_state,
+    Background, BorderStyle, BoxSizing, Combinator, CornerRadii, CssAttr, CssRule, CssRuleEntry,
+    CssSelector, DynamicState, EdgeAuto, EdgeSizes, FontContext, FontStyleKind, FontWeight,
+    GradientKind, INHERITED_PROPS, Length, LengthContext, LineHeight, MarginSizes, NthExpr,
+    PX_PER_CELL, Parser, SUPPORTED_PROPERTIES, Selector, TextAlign, TextDecoration, TextTransform,
+    UserSelect, Viewport, WhiteSpace, css_into_node, css_into_node_with_state,
+    parse_background_str, parse_color_str, parse_declaration_text, reset_css_attr,
+    resolve_line_height_cells, selector_chain_matches, selector_chain_matches_with_state,
 };
 use htui::html::html_parse;
 use htui::tdom::node::{Node, NodeArena, NodeId, NodeType, effective_font_size_cells};
@@ -665,6 +665,50 @@ fn test_color_transparent_and_malformed() {
 }
 
 #[test]
+fn test_linear_gradient_parsing_and_sampling() {
+    let Some(Background::Gradient(gradient)) =
+        parse_background_str("linear-gradient(to right, #ff0000 0%, rgb(0, 0, 255) 100%)")
+    else {
+        panic!("linear gradient should parse");
+    };
+    assert_eq!(gradient.kind, GradientKind::Linear { angle_deg: 90.0 });
+    assert_eq!(gradient.stops.len(), 2);
+    assert_eq!(gradient.stops[0].color, Color::Rgb { r: 255, g: 0, b: 0 });
+    assert_eq!(gradient.stops[1].color, Color::Rgb { r: 0, g: 0, b: 255 });
+    let left = gradient.color_at(0, 0, 10, 1).unwrap();
+    let right = gradient.color_at(9, 0, 10, 1).unwrap();
+    assert_ne!(left, right);
+}
+
+#[test]
+fn test_radial_gradient_parsing_with_center() {
+    let Some(Background::Gradient(gradient)) =
+        parse_background_str("radial-gradient(circle at 25% 75%, red, blue)")
+    else {
+        panic!("radial gradient should parse");
+    };
+    assert_eq!(
+        gradient.kind,
+        GradientKind::Radial {
+            center_x: 0.25,
+            center_y: 0.75
+        }
+    );
+    assert_eq!(gradient.stops.len(), 2);
+    assert!(parse_background_str("linear-gradient(red)").is_none());
+}
+
+#[test]
+fn test_background_clip_text_getter() {
+    let mut attr = CssAttr::new();
+    attr.add(&CssAttr(parse_declaration_text(
+        "background-clip: text; color: transparent;",
+    )));
+    assert!(attr.background_clips_to_text());
+    assert_eq!(attr.get_color(), None);
+}
+
+#[test]
 fn test_css_attr_full_color() {
     let mut attr = CssAttr::new();
     let css = "color: darkblue; background-color: #1e293b;";
@@ -691,6 +735,42 @@ fn test_css_attr_full_color() {
 // ============================================================
 // #1 refactor: property registry & parse robustness
 // ============================================================
+
+#[test]
+fn user_select_is_recognised_and_resolved_against_ancestors() {
+    assert!(SUPPORTED_PROPERTIES.contains(&"user-select"));
+    let mut attr = CssAttr::new();
+    attr.0.insert("user-select".into(), "none".into());
+    assert_eq!(attr.get_user_select(), UserSelect::None);
+
+    let mut arena = NodeArena::default();
+    let root = arena.insert(Node::from(NodeType::Div));
+    let child = arena.insert(Node::from(NodeType::Div));
+    arena[root].children.push(child);
+    arena[child].parent = Some(root);
+    assert!(
+        !htui::layout::user_select_is_none(&arena, child),
+        "auto without an explicit ancestor defaults to selectable"
+    );
+
+    arena[root]
+        .css_attr
+        .0
+        .insert("user-select".into(), "none".into());
+    assert!(
+        htui::layout::user_select_is_none(&arena, child),
+        "auto resolves through the nearest explicit ancestor"
+    );
+
+    arena[child]
+        .css_attr
+        .0
+        .insert("user-select".into(), "text".into());
+    assert!(
+        !htui::layout::user_select_is_none(&arena, child),
+        "an explicit text descendant opts back into selection"
+    );
+}
 
 #[test]
 fn test_supported_properties_lists_known_names() {
@@ -1091,8 +1171,10 @@ fn test_full_parse_pipeline_handles_important_and_comments() {
     // by the rest of the codebase (Parser::parse + apply_css_rule).
     init();
     let mut parser = Parser::new(
-        "/* heading style */\n\
-         h1 { color: red !important; font-weight: bold; }\n\
+        "/* heading style */
+\
+         h1 { color: red !important; font-weight: bold; }
+\
          h2 { /* nothing */ font-style: italic; }",
     );
     let _rules = parser.parse();
@@ -1147,7 +1229,13 @@ fn length_parse_cells_px() {
     assert_eq!(Length::parse("20Px"), Some(Length::Px(20.0)));
     assert_eq!(Length::parse("30PX"), Some(Length::Px(30.0)));
     // Trailing whitespace tolerated.
-    assert_eq!(Length::parse("20px\n"), Some(Length::Px(20.0)));
+    assert_eq!(
+        Length::parse(
+            "20px
+"
+        ),
+        Some(Length::Px(20.0))
+    );
 }
 
 #[test]
@@ -2506,7 +2594,7 @@ fn bucketed_cascade_matches_reference_cascade() {
     // rest of the tree must stay byte-identical to the reference.
     let hovered = DynamicState {
         hovered: Some(li2),
-        focused: None,
+        ..Default::default()
     };
     let mut arena = NodeArena::default();
     let (root, _div, _ul, _li2, _em) = build_cascade_tree(&mut arena);
@@ -2848,7 +2936,7 @@ fn stale_node_id_fails_to_match_instead_of_panicking() {
         sel,
         &DynamicState {
             hovered: Some(stale),
-            focused: None,
+            ..Default::default()
         },
     ));
 }
@@ -3568,5 +3656,540 @@ fn test_generated_content_renders_before_and_after() {
     assert!(
         canvas2.contains("mid") && !canvas2.contains('['),
         "content: none generates nothing"
+    );
+}
+
+// ============================================================
+// @media conditions
+// ============================================================
+
+use htui::html::css_parse::{MediaQuery, MediaQueryList};
+
+fn media_queries(css: &str) -> Vec<Option<MediaQueryList>> {
+    Parser::new(css)
+        .parse()
+        .0
+        .iter()
+        .map(|e| e.media.clone())
+        .collect()
+}
+
+#[test]
+fn test_media_query_matches_features_and_or() {
+    init();
+    let list = MediaQueryList(vec![MediaQuery {
+        max_width: Some(70.0),
+        ..Default::default()
+    }]);
+    assert!(
+        list.matches(&Viewport { cols: 70, rows: 24 }),
+        "boundary is inclusive"
+    );
+    assert!(list.matches(&Viewport { cols: 40, rows: 24 }));
+    assert!(!list.matches(&Viewport { cols: 71, rows: 24 }));
+
+    // Two features in one query AND together.
+    let both = MediaQueryList(vec![MediaQuery {
+        max_width: Some(70.0),
+        min_width: Some(40.0),
+        ..Default::default()
+    }]);
+    assert!(both.matches(&Viewport { cols: 60, rows: 24 }));
+    assert!(!both.matches(&Viewport { cols: 39, rows: 24 }));
+    assert!(!both.matches(&Viewport { cols: 80, rows: 24 }));
+
+    // Comma-separated queries OR together.
+    let or = MediaQueryList(vec![
+        MediaQuery {
+            max_width: Some(40.0),
+            ..Default::default()
+        },
+        MediaQuery {
+            max_height: Some(10.0),
+            ..Default::default()
+        },
+    ]);
+    assert!(or.matches(&Viewport { cols: 39, rows: 24 }), "first query");
+    assert!(or.matches(&Viewport { cols: 80, rows: 9 }), "second query");
+    assert!(
+        !or.matches(&Viewport { cols: 80, rows: 24 }),
+        "neither query"
+    );
+
+    // An empty list never matches.
+    assert!(!MediaQueryList(vec![]).matches(&Viewport { cols: 80, rows: 24 }));
+
+    // The 0x0 "no viewport known" default never matches a size condition.
+    assert!(!list.matches(&Viewport { cols: 0, rows: 0 }));
+}
+
+#[test]
+fn test_media_at_rule_parses_conditional_entries() {
+    init();
+    // Bare numbers and `ch` are both cell counts.
+    let media = media_queries("@media (max-width: 70ch) { .side { display: none; } }");
+    assert_eq!(media.len(), 1);
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(list.matches(&Viewport { cols: 60, rows: 24 }));
+    assert!(!list.matches(&Viewport { cols: 80, rows: 24 }));
+
+    // Unconditional rules carry no condition.
+    let mixed = media_queries("p { color: red; } @media (max-height: 14) { .x { color: blue; } }");
+    assert_eq!(mixed.len(), 2);
+    assert!(mixed[0].is_none());
+    let list = mixed[1].as_ref().expect("media condition");
+    assert!(list.matches(&Viewport { cols: 80, rows: 10 }));
+    assert!(!list.matches(&Viewport { cols: 80, rows: 24 }));
+
+    // `and` between features, comma OR between queries.
+    let list = media_queries(
+        "@media (max-width: 40) and (min-height: 20), (min-width: 100) { .x { color: red; } }",
+    );
+    let list = list[0].as_ref().expect("condition attached");
+    assert!(
+        list.matches(&Viewport { cols: 30, rows: 24 }),
+        "first query"
+    );
+    assert!(
+        !list.matches(&Viewport { cols: 30, rows: 10 }),
+        "height too small"
+    );
+    assert!(
+        list.matches(&Viewport {
+            cols: 120,
+            rows: 24
+        }),
+        "second query"
+    );
+}
+
+#[test]
+fn test_media_cascade_by_viewport() {
+    init();
+    // The unconditional `.side` twin verifies the non-media rule always
+    // applies to the same node (color and display are independent keys).
+    let css = "@media (max-width: 40) { .side { display: none; } } .side { color: red; }";
+    let rules = Parser::new(css).parse();
+    let mut arena = NodeArena::default();
+    let (root, div_id) = build_test(&mut arena);
+    arena[div_id]
+        .attributes
+        .insert("class".to_string(), "side".to_string());
+
+    // Wide viewport: the conditional rule never applies.
+    css_into_node_with_state(
+        &mut arena,
+        root,
+        &rules,
+        &DynamicState {
+            viewport: Viewport { cols: 80, rows: 24 },
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        arena[div_id].css_attr.0.get("display").map(|s| s.as_ref()),
+        None
+    );
+
+    // Narrow viewport: the rule applies.
+    let mut arena = NodeArena::default();
+    let (root, div_id) = build_test(&mut arena);
+    arena[div_id]
+        .attributes
+        .insert("class".to_string(), "side".to_string());
+    css_into_node_with_state(
+        &mut arena,
+        root,
+        &rules,
+        &DynamicState {
+            viewport: Viewport { cols: 40, rows: 24 },
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        arena[div_id].css_attr.0.get("display").map(|s| s.as_ref()),
+        Some("none")
+    );
+
+    // Re-cascading the same tree at the wide viewport (the resize path) drops
+    // the rule again — nothing about the old pass leaks through `reset_css_attr`.
+    reset_css_attr(&mut arena, root);
+    css_into_node_with_state(
+        &mut arena,
+        root,
+        &rules,
+        &DynamicState {
+            viewport: Viewport { cols: 80, rows: 24 },
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        arena[div_id].css_attr.0.get("display").map(|s| s.as_ref()),
+        None
+    );
+    assert_eq!(
+        arena[div_id].css_attr.0.get("color").map(|s| s.as_ref()),
+        Some("red")
+    );
+
+    // Unknown viewport (the DynamicState default): size conditions never match.
+    let mut arena = NodeArena::default();
+    let (root, div_id) = build_test(&mut arena);
+    arena[div_id]
+        .attributes
+        .insert("class".to_string(), "side".to_string());
+    css_into_node_with_state(&mut arena, root, &rules, &DynamicState::default());
+    assert_eq!(
+        arena[div_id].css_attr.0.get("display").map(|s| s.as_ref()),
+        None
+    );
+    assert_eq!(
+        arena[div_id].css_attr.0.get("color").map(|s| s.as_ref()),
+        Some("red")
+    );
+}
+
+#[test]
+fn test_media_unsupported_query_drops_the_block() {
+    init();
+    // An unsupported unit makes the query false — the rule is parsed but can
+    // never match any viewport.
+    let media = media_queries("@media (max-width: 5em) { .side { display: none; } }");
+    assert_eq!(media.len(), 1);
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(!list.matches(&Viewport { cols: 1, rows: 1 }));
+
+    // An unknown feature also drops its query; the other comma alternative
+    // still works.
+    let media =
+        media_queries("@media (hover: hover), (max-width: 40) { .side { display: none; } }");
+    assert_eq!(media.len(), 1);
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(list.matches(&Viewport { cols: 30, rows: 24 }));
+    assert!(!list.matches(&Viewport { cols: 80, rows: 24 }));
+
+    // `orientation` is supported: landscape (cols >= rows) and portrait.
+    let media = media_queries("@media (orientation: landscape) { .side { display: none; } }");
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(list.matches(&Viewport { cols: 80, rows: 24 }));
+    assert!(!list.matches(&Viewport { cols: 30, rows: 40 }), "portrait");
+    let media = media_queries("@media (orientation: portrait) { .side { display: none; } }");
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(list.matches(&Viewport { cols: 30, rows: 40 }));
+
+    // Media types: `screen` / `all` match, `print` never does.
+    let media = media_queries("@media screen and (max-width: 40) { .side { display: none; } }");
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(list.matches(&Viewport { cols: 30, rows: 24 }));
+    assert!(!list.matches(&Viewport { cols: 80, rows: 24 }));
+    let media = media_queries("@media print { .side { display: none; } }");
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(!list.matches(&Viewport { cols: 30, rows: 24 }));
+
+    // `not` inverts the whole query; `only` is an ignored legacy prefix.
+    let media = media_queries("@media not (max-width: 40) { .side { display: none; } }");
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(!list.matches(&Viewport { cols: 30, rows: 24 }));
+    assert!(list.matches(&Viewport { cols: 80, rows: 24 }));
+    let media =
+        media_queries("@media only screen and (max-width: 40) { .side { display: none; } }");
+    let list = media[0].as_ref().expect("condition attached");
+    assert!(list.matches(&Viewport { cols: 30, rows: 24 }));
+
+    // An empty prelude drops the whole block (no rules at all). A query that
+    // cannot parse (missing value) leaves the rule in place but its empty
+    // query list matches no viewport — CSS treats an unknown media query as
+    // false.
+    assert!(media_queries("@media { .side { display: none; } }").is_empty());
+    let media = media_queries("@media (max-width:) { .side { display: none; } }");
+    assert_eq!(media.len(), 1);
+    assert!(
+        !media[0]
+            .as_ref()
+            .expect("condition attached")
+            .matches(&Viewport { cols: 1, rows: 1 })
+    );
+}
+
+#[test]
+fn test_media_at_rule_does_not_disturb_following_rules() {
+    init();
+    let css = "@media (max-width: 40) { .side { display: none; } } .after { color: red; }";
+    let rules = Parser::new(css).parse();
+    assert_eq!(rules.0.len(), 2, "media child + following rule");
+    assert!(rules.0[0].media.is_some());
+    assert!(rules.0[1].media.is_none());
+    assert_eq!(
+        rules.0[1].normal.0.get("color").map(|s| s.as_ref()),
+        Some("red")
+    );
+}
+
+#[test]
+fn attribute_selector_exists() {
+    let sel: CssSelector = "[disabled]".parse().expect("bare attr parses");
+    assert_eq!(sel.compounds.len(), 1);
+    assert_eq!(sel.compounds[0].len(), 1);
+    let htui::html::css_parse::AttributeSelector {
+        name, op, value, ..
+    } = match &sel.compounds[0][0] {
+        htui::html::css_parse::Selector::Attribute(a) => a.clone(),
+        _ => panic!("expected Attribute"),
+    };
+    assert_eq!(name, "disabled");
+    assert_eq!(op, htui::html::css_parse::AttributeOp::Exists);
+    assert_eq!(value, "");
+}
+
+#[test]
+fn attribute_selector_equals_quoted_and_unquoted() {
+    for css in ["[type=\"range\"]", "[type=range]"] {
+        let sel: CssSelector = css.parse().expect("equals attr parses");
+        match &sel.compounds[0][0] {
+            htui::html::css_parse::Selector::Attribute(a) => {
+                assert_eq!(a.name, "type");
+                assert_eq!(a.op, htui::html::css_parse::AttributeOp::Equals);
+                assert_eq!(a.value, "range");
+            }
+            _ => panic!("expected Attribute"),
+        }
+    }
+}
+
+#[test]
+fn attribute_selector_compound_with_tag() {
+    let sel: CssSelector = "input[type=\"range\"]"
+        .parse()
+        .expect("compound attr parses");
+    assert_eq!(sel.compounds[0].len(), 2, "tag + attribute");
+    match &sel.compounds[0][0] {
+        htui::html::css_parse::Selector::Tag(nt) => {
+            assert_eq!(*nt, htui::tdom::node::NodeType::Input);
+        }
+        _ => panic!("expected Tag"),
+    }
+}
+
+#[test]
+fn attribute_selector_prefix_suffix_substring() {
+    let sel: CssSelector = "[href^=\"https\"]".parse().unwrap();
+    match &sel.compounds[0][0] {
+        htui::html::css_parse::Selector::Attribute(a) => {
+            assert_eq!(a.op, htui::html::css_parse::AttributeOp::PrefixMatch);
+            assert_eq!(a.value, "https");
+        }
+        _ => panic!(),
+    }
+    let sel: CssSelector = "[href$=\".pdf\"]".parse().unwrap();
+    match &sel.compounds[0][0] {
+        htui::html::css_parse::Selector::Attribute(a) => {
+            assert_eq!(a.op, htui::html::css_parse::AttributeOp::SuffixMatch);
+        }
+        _ => panic!(),
+    }
+    let sel: CssSelector = "[href*=\"example\"]".parse().unwrap();
+    match &sel.compounds[0][0] {
+        htui::html::css_parse::Selector::Attribute(a) => {
+            assert_eq!(a.op, htui::html::css_parse::AttributeOp::SubstringMatch);
+        }
+        _ => panic!(),
+    }
+}
+
+#[test]
+fn attribute_selector_dash_and_includes() {
+    let sel: CssSelector = "[lang|=\"en\"]".parse().unwrap();
+    match &sel.compounds[0][0] {
+        htui::html::css_parse::Selector::Attribute(a) => {
+            assert_eq!(a.op, htui::html::css_parse::AttributeOp::DashMatch);
+        }
+        _ => panic!(),
+    }
+    let sel: CssSelector = "[class~=\"btn\"]".parse().unwrap();
+    match &sel.compounds[0][0] {
+        htui::html::css_parse::Selector::Attribute(a) => {
+            assert_eq!(a.op, htui::html::css_parse::AttributeOp::Includes);
+        }
+        _ => panic!(),
+    }
+}
+
+#[test]
+fn attribute_selector_case_insensitive_flag() {
+    let sel: CssSelector = "[type=\"RANGE\" i]".parse().unwrap();
+    match &sel.compounds[0][0] {
+        htui::html::css_parse::Selector::Attribute(a) => {
+            assert!(a.case_insensitive);
+            assert_eq!(a.value, "RANGE");
+        }
+        _ => panic!(),
+    }
+}
+
+#[test]
+fn attribute_selector_specificity_is_class_level() {
+    let bare: CssSelector = "input".parse().unwrap();
+    let attr: CssSelector = "input[type]".parse().unwrap();
+    let (_, b_bare, _) = bare.specificity();
+    let (_, b_attr, _) = attr.specificity();
+    assert_eq!(b_attr, b_bare + 1, "attribute adds one b-level specificity");
+}
+
+#[test]
+fn attribute_selector_unclosed_bracket_is_error() {
+    assert!("[type".parse::<CssSelector>().is_err());
+    assert!("[]".parse::<CssSelector>().is_err());
+}
+
+fn parse_and_cascade(html: &str) -> (NodeId, NodeArena) {
+    let mut html_parser = html_parse::Parser::new(html);
+    let (root_id, mut arena, embedded) = html_parser.parse();
+    let mut css_parser = Parser::new(&embedded);
+    let rules = css_parser.parse();
+    css_into_node(&mut arena, root_id, &rules);
+    (root_id, arena)
+}
+
+fn find_first_by_tag(arena: &NodeArena, root: NodeId, tag: NodeType) -> NodeId {
+    fn walk(arena: &NodeArena, id: NodeId, tag: NodeType) -> Option<NodeId> {
+        if arena[id].node_type == tag {
+            return Some(id);
+        }
+        for &c in &arena[id].children {
+            if let Some(found) = walk(arena, c, tag) {
+                return Some(found);
+            }
+        }
+        None
+    }
+    walk(arena, root, tag).expect("node with tag not found")
+}
+
+#[test]
+fn css_var_basic_substitution() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            :root { --primary: #ff0000; }
+            p { color: var(--primary); }
+        </style><p>hi</p>"#,
+    );
+    let p = find_first_by_tag(&arena, root, NodeType::P);
+    let color = arena[p].css_attr.get_color();
+    assert_eq!(
+        color,
+        Some(Color::Rgb { r: 255, g: 0, b: 0 }),
+        "var(--primary) resolves to red"
+    );
+}
+
+#[test]
+fn css_var_fallback_value() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            p { color: var(--undefined, blue); }
+        </style><p>hi</p>"#,
+    );
+    let p = find_first_by_tag(&arena, root, NodeType::P);
+    assert_eq!(
+        arena[p].css_attr.get_color(),
+        Some(Color::Rgb { r: 0, g: 0, b: 255 }),
+        "fallback is used when the variable is undefined"
+    );
+}
+
+#[test]
+fn css_var_inheritance_children() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            div { --c: green; }
+            span { color: var(--c); }
+        </style><div><span>s</span></div>"#,
+    );
+    let div = find_first_by_tag(&arena, root, NodeType::Div);
+    let span = arena[div].children[0];
+    assert_eq!(
+        arena[span].css_attr.get_color(),
+        Some(Color::Rgb { r: 0, g: 128, b: 0 }),
+        "--c inherits from div to span"
+    );
+}
+
+#[test]
+fn css_var_override_in_child() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            div { --c: red; }
+            span { --c: blue; color: var(--c); }
+        </style><div><span>s</span></div>"#,
+    );
+    let div = find_first_by_tag(&arena, root, NodeType::Div);
+    let span = arena[div].children[0];
+    assert_eq!(
+        arena[span].css_attr.get_color(),
+        Some(Color::Rgb { r: 0, g: 0, b: 255 }),
+        "child's --c override wins over parent"
+    );
+}
+
+#[test]
+fn css_var_in_calc() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            :root { --w: 20ch; }
+            div { width: calc(var(--w) + 5ch); }
+        </style><div>d</div>"#,
+    );
+    let div = find_first_by_tag(&arena, root, NodeType::Div);
+    let w = arena[div]
+        .css_attr
+        .get_width(80, font_ctx(1, 1), viewport());
+    assert_eq!(w, Some(25), "calc(var(--w) + 5ch) = 20 + 5 = 25");
+}
+
+#[test]
+fn css_var_chain_reference() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            :root { --a: red; --b: var(--a); }
+            p { color: var(--b); }
+        </style><p>x</p>"#,
+    );
+    let p = find_first_by_tag(&arena, root, NodeType::P);
+    assert_eq!(
+        arena[p].css_attr.get_color(),
+        Some(Color::Rgb { r: 255, g: 0, b: 0 }),
+        "--b references --a which is red"
+    );
+}
+
+#[test]
+fn css_var_undefined_no_fallback_substitutes_empty() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            p { color: var(--nothing); }
+        </style><p>x</p>"#,
+    );
+    let p = find_first_by_tag(&arena, root, NodeType::P);
+    // Value becomes empty string → parser returns None.
+    assert_eq!(arena[p].css_attr.get_color(), None);
+}
+
+#[test]
+fn css_var_multiple_in_one_value() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            :root { --bw: 2ch; --bc: red; }
+            div { border: var(--bw) solid var(--bc); }
+        </style><div>d</div>"#,
+    );
+    let div = find_first_by_tag(&arena, root, NodeType::Div);
+    // After substitution no `var(` should remain in any stored value.
+    let has_unresolved = arena[div].css_attr.0.values().any(|v| v.contains("var("));
+    assert!(!has_unresolved, "all var() references are substituted");
+    let border = arena[div].css_attr.0.get("border");
+    assert_eq!(
+        border.map(|s| s.as_ref()),
+        Some("2ch solid red"),
+        "border shorthand has both vars substituted"
     );
 }

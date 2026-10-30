@@ -13,7 +13,10 @@ use htui::events::{EventBindings, Geometry, HitMap, HoverState, KeyEventInfo, Sh
 use htui::layout::layout::TermMap;
 use htui::layout::{BoxConstraint, Cursor, layout_tree};
 use htui::resources::{ResourceRegistry, with_registry};
-use htui::script::{ScriptEngine, ScriptMsg, ScriptResponse, apply_message, run_script_thread};
+use htui::script::{
+    ScriptEngine, ScriptEvent, ScriptMsg, ScriptResponse, SharedUiState, apply_message,
+    run_script_thread,
+};
 use htui::tdom::node::{NodeArena, NodeId};
 use htui::tui::graph_api::RenderCmd;
 
@@ -1118,7 +1121,7 @@ fn build_geometry(html: &str, bindings: EventBindings) -> (ScriptEngine, Geometr
         term_map.rows as usize,
     );
     let geo = Geometry {
-        arena,
+        arena: Arc::new(arena),
         boxes,
         root_id,
     };
@@ -1130,12 +1133,32 @@ fn spawn_script(
     bindings: EventBindings,
     hit_map: SharedHitMap,
 ) -> (Sender<ScriptMsg>, Receiver<ScriptResponse>, JoinHandle<()>) {
+    spawn_script_with_ui(html, bindings, hit_map, Arc::new(SharedUiState::default()))
+}
+
+/// Variant publishing a specific viewport / scroll offset so tests can drive
+/// the `window.innerWidth` & co getters and `matchMedia` evaluation.
+fn spawn_script_with_ui(
+    html: &str,
+    bindings: EventBindings,
+    hit_map: SharedHitMap,
+    ui: Arc<SharedUiState>,
+) -> (Sender<ScriptMsg>, Receiver<ScriptResponse>, JoinHandle<()>) {
     let mut parser = htui::html::html_parse::Parser::new(html);
     let document = parser.parse_with_scripts();
     let (tx, rx) = mpsc::channel::<ScriptMsg>();
     let (out_tx, out_rx) = mpsc::channel::<ScriptResponse>();
     let handle = std::thread::spawn(move || {
-        run_script_thread(document, bindings, Arc::from(""), rx, out_tx, hit_map)
+        run_script_thread(
+            document,
+            bindings,
+            Arc::from(""),
+            rx,
+            out_tx,
+            hit_map,
+            ui,
+            Arc::new(Mutex::new(String::new())),
+        )
     });
     (tx, out_rx, handle)
 }
@@ -1158,7 +1181,7 @@ fn publish_hit_map(hit_map: &SharedHitMap, arena: &NodeArena, root_id: NodeId) {
         term_map.rows as usize,
     );
     let geo = Geometry {
-        arena: arena.clone(),
+        arena: Arc::new(arena.clone()),
         boxes,
         root_id,
     };
@@ -1435,4 +1458,190 @@ fn insert_before_and_replace_child_reject_cycles() {
         "true",
         "`contains` terminates on the intact tree"
     );
+}
+
+// ============================================================
+// window view API: viewport getters, resize, matchMedia, scrollTo
+// ============================================================
+
+fn empty_hit_map() -> SharedHitMap {
+    Arc::new(Mutex::new(Arc::new(HitMap::new())))
+}
+
+/// Wait for the next `Event` response (skipping nothing — the script thread
+/// only answers messages / timers / fetches).
+fn recv_event(out_rx: &Receiver<ScriptResponse>) -> ScriptEvent {
+    match out_rx.recv().expect("event must arrive") {
+        ScriptResponse::Event(ev) => ev,
+        other => panic!("expected Event, got {other:?}"),
+    }
+}
+
+/// Read the text content of node `id` from a dirty arena snapshot.
+fn dirty_text(arena: &NodeArena, id: &str) -> String {
+    arena
+        .iter()
+        .find(|(_, n)| {
+            n.node_type == htui::tdom::node::NodeType::Div && n.get_id().is_some_and(|v| v == id)
+        })
+        .map(|(_, n)| {
+            n.children
+                .iter()
+                .filter_map(|&c| arena[c].data.as_deref())
+                .collect::<String>()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn viewport_getters_and_match_media_follow_the_shared_ui_state() {
+    let ui = Arc::new(SharedUiState::default());
+    ui.cols.store(80, Ordering::Relaxed);
+    ui.rows.store(24, Ordering::Relaxed);
+    ui.scroll_y.store(15, Ordering::Relaxed);
+    let html = r#"<body><div id="out">init</div><script>
+      globalThis._initial = window.innerWidth + 'x' + window.innerHeight +
+        'y' + window.scrollY;
+      window.addEventListener('resize', function () {
+        document.getElementById('out').textContent =
+          'resized:' + window.innerWidth;
+      });
+      globalThis._mql = window.matchMedia('(max-width: 70ch)');
+      globalThis._initialMatches = globalThis._mql.matches;
+      globalThis._mql.addEventListener('change', function (e) {
+        document.getElementById('out').textContent =
+          'change:' + e.matches + ':' + window.scrollY;
+      });
+    </script></body>"#;
+    let _ = env_logger::builder().is_test(true).try_init();
+    let (tx, out_rx, handle) =
+        spawn_script_with_ui(html, EventBindings::default(), empty_hit_map(), ui.clone());
+    match out_rx.recv().expect("ready must arrive") {
+        ScriptResponse::Ready { .. } => {}
+        other => panic!("expected Ready, got {other:?}"),
+    }
+
+    // Same-size resize: the event fires, no matchMedia flip.
+    tx.send(ScriptMsg::Resize).expect("send resize");
+    let ev = recv_event(&out_rx);
+    let d = ev.dirty.expect("resize listener wrote the output node");
+    assert_eq!(dirty_text(&d.arena, "out"), "resized:80");
+
+    // Shrink past the query boundary: the change event fires with
+    // `matches: true`, and `window.scrollY` still reads the shared state.
+    ui.cols.store(60, Ordering::Relaxed);
+    ui.rows.store(20, Ordering::Relaxed);
+    tx.send(ScriptMsg::Resize).expect("send shrink resize");
+    let ev = recv_event(&out_rx);
+    let d = ev.dirty.expect("change listener wrote the output node");
+    assert_eq!(dirty_text(&d.arena, "out"), "change:true:15");
+
+    tx.send(ScriptMsg::Quit).expect("send quit");
+    handle.join().expect("script thread must exit cleanly");
+}
+
+#[test]
+fn scroll_to_pushes_scroll_markers() {
+    let ui = Arc::new(SharedUiState::default());
+    ui.scroll_y.store(10, Ordering::Relaxed);
+    // Top-level scripts run during engine construction; their pushed render
+    // commands ride out with the next message reply.
+    let html = r#"<body><script>
+      window.scrollBy(0, 30);
+      window.scrollTo({ top: 100, behavior: 'smooth' });
+    </script></body>"#;
+    let (tx, out_rx, handle) =
+        spawn_script_with_ui(html, EventBindings::default(), empty_hit_map(), ui.clone());
+    match out_rx.recv().expect("ready must arrive") {
+        ScriptResponse::Ready { .. } => {}
+        other => panic!("expected Ready, got {other:?}"),
+    }
+    tx.send(ScriptMsg::Resize).expect("send resize");
+    let ev = recv_event(&out_rx);
+    let has = |cmds: &[htui::tui::graph_api::RenderCmd], want: &str| {
+        cmds.iter().any(|c| format!("{c:?}").contains(want))
+    };
+    // `scrollBy` reads the shared offset (10 + 30) and the object form with
+    // `behavior: "smooth"` routes into the animation pipeline.
+    assert!(
+        has(&ev.cmds, "ScrollSet { to: 40 }"),
+        "scrollBy(0, 30) at scrollY 10 must target 40, got {:?}",
+        ev.cmds
+    );
+    assert!(
+        has(&ev.cmds, "ScrollAnimate") && has(&ev.cmds, "to: 100"),
+        "smooth scrollTo must animate to 100, got {:?}",
+        ev.cmds
+    );
+
+    tx.send(ScriptMsg::Quit).expect("send quit");
+    handle.join().expect("script thread must exit cleanly");
+}
+
+#[test]
+fn scroll_into_view_pushes_a_marker_with_block_alignment() {
+    let html = r#"<body><div id="target">t</div><script>
+      document.getElementById('target').scrollIntoView();
+      document.getElementById('target').scrollIntoView({ block: 'center', behavior: 'smooth' });
+    </script></body>"#;
+    let (tx, out_rx, handle) = spawn_script_with_ui(
+        html,
+        EventBindings::default(),
+        empty_hit_map(),
+        Arc::new(SharedUiState::default()),
+    );
+    match out_rx.recv().expect("ready must arrive") {
+        ScriptResponse::Ready { .. } => {}
+        other => panic!("expected Ready, got {other:?}"),
+    }
+    // The markers ride out with the next message reply; the run loop (not
+    // covered here) resolves them against the hit map.
+    tx.send(ScriptMsg::Resize).expect("send resize");
+    let ev = recv_event(&out_rx);
+    let has = |want: &str| ev.cmds.iter().any(|c| format!("{c:?}").contains(want));
+    assert!(
+        has("ScrollIntoView") && has("Start"),
+        "default block is start, got {:?}",
+        ev.cmds
+    );
+    assert!(
+        has("Center") && has("smooth: true"),
+        "options object parsed, got {:?}",
+        ev.cmds
+    );
+
+    tx.send(ScriptMsg::Quit).expect("send quit");
+    handle.join().expect("script thread must exit cleanly");
+}
+
+#[test]
+fn scroll_event_fires_window_and_body_listeners() {
+    let html = r#"<body><div id="out">init</div><script>
+      window.addEventListener('scroll', function () {
+        document.getElementById('out').textContent = 'win-scroll:' + window.scrollY;
+      });
+      document.body.addEventListener('scroll', function () {
+        var el = document.getElementById('out');
+        el.textContent = 'body-scroll:' + window.scrollY;
+      });
+    </script></body>"#;
+    let (tx, out_rx, handle) = spawn_script_with_ui(
+        html,
+        EventBindings::default(),
+        empty_hit_map(),
+        Arc::new(SharedUiState::default()),
+    );
+    match out_rx.recv().expect("ready must arrive") {
+        ScriptResponse::Ready { .. } => {}
+        other => panic!("expected Ready, got {other:?}"),
+    }
+    tx.send(ScriptMsg::Scroll).expect("send scroll");
+    let ev = recv_event(&out_rx);
+    let d = ev.dirty.expect("scroll listener wrote the output node");
+    // The body listener runs after the window one (the bubbling chain), so
+    // its write is the final text; both read the shared scroll offset.
+    assert_eq!(dirty_text(&d.arena, "out"), "body-scroll:0");
+
+    tx.send(ScriptMsg::Quit).expect("send quit");
+    handle.join().expect("script thread must exit cleanly");
 }

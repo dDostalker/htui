@@ -7,11 +7,11 @@ use crossterm::style::Color;
 use crate::{
     graphics::char_width,
     layout::{LayoutBox, Rect},
-    tdom::node::{Node, NodeArena, NodeType},
+    tdom::node::{NodeArena, NodeType},
 };
 
 use super::{
-    PaintCanvas, cell_index, clamp_rect_to_canvas, intersect_rects, paint_control_chrome, put,
+    PaintCanvas, cell_index, control_background_at, control_clip, paint_control_chrome, put,
 };
 
 pub(crate) fn paint_button(
@@ -20,15 +20,10 @@ pub(crate) fn paint_button(
     canvas: &mut PaintCanvas<'_>,
     clip: Rect,
 ) {
-    let r = lb.rect;
-    let canvas_cols = canvas.columns as usize;
-    if r.x >= canvas_cols || r.width == 0 || r.height == 0 {
-        return;
-    }
-    let Some(r) = clamp_rect_to_canvas(r, canvas_cols) else {
-        return;
-    };
-    let Some(visible) = intersect_rects(Rect::new(r.x, r.y, r.width, r.height), clip) else {
+    // Control chrome and replaced glyphs are painted directly by cell; reduce
+    // the control rect to the inherited clip so a partially visible field
+    // cannot overwrite a parent border or sibling cell.
+    let Some(r) = control_clip(lb, canvas, clip) else {
         return;
     };
 
@@ -47,7 +42,7 @@ pub(crate) fn paint_button(
 
     // The label is centred inside the chrome's content area, like a browser
     // button.
-    let content = paint_control_chrome(lb, arena, canvas, r, Some(fg));
+    let (content, background) = paint_control_chrome(lb, arena, canvas, r, Some(fg));
 
     let text_w: usize = text.chars().map(|c| char_width(c).max(1)).sum();
     let leading = content.width.saturating_sub(text_w) / 2;
@@ -60,7 +55,7 @@ pub(crate) fn paint_button(
         }
         for sub in 0..w {
             let abs = base.saturating_add(sub);
-            if abs < visible.x || abs >= visible.x.saturating_add(visible.width) {
+            if abs < r.x || abs >= r.x.saturating_add(r.width) {
                 continue;
             }
             put(
@@ -68,17 +63,9 @@ pub(crate) fn paint_button(
                 cell_index(canvas, abs, content.y),
                 if sub == 0 { Some(c) } else { None },
                 Some(text_fg),
-                Some(bg_for(node)),
+                control_background_at(&background, abs, content.y, r),
             );
         }
         col += w;
     }
-}
-
-/// The background the button's text cells sit on — the CSS `background-color`
-/// or the default control grey the chrome painted.
-fn bg_for(node: &Node) -> Color {
-    node.css_attr
-        .get_bg_color()
-        .unwrap_or(super::CONTROL_DEFAULT_BG)
 }

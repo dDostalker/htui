@@ -36,6 +36,11 @@ pub struct InlineRun {
     /// Signed delta applied to every space grapheme (CSS `word-spacing`).
     /// A negative value tightens words; each space floors at zero width.
     pub word_spacing: isize,
+    /// `true` for layout-synthesised marker runs (`# ` / `• ` prefixes,
+    /// `▸ ` disclosure arrows, `<hr>` rules, bar glyphs). The paint phase
+    /// renders them but text extraction skips them (browser behaviour:
+    /// markers are not text content).
+    pub synthesized: bool,
 }
 
 impl InlineRun {
@@ -71,6 +76,7 @@ impl InlineRun {
             node_id: None,
             letter_spacing: 0,
             word_spacing: 0,
+            synthesized: false,
         }
     }
 
@@ -92,6 +98,7 @@ impl InlineRun {
             node_id,
             letter_spacing: 0,
             word_spacing: 0,
+            synthesized: false,
         }
     }
 
@@ -126,6 +133,7 @@ impl InlineRun {
             node_id: None,
             letter_spacing: 0,
             word_spacing: 0,
+            synthesized: false,
         }
     }
 
@@ -162,5 +170,19 @@ impl InlineRun {
     /// Returns true when the run has no visible text.
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
+    }
+
+    /// A layout-synthesised marker run (heading `#`, bullet `•`, arrow, etc.)
+    /// that paints but is excluded from text extraction.
+    pub fn synthesized_marker(
+        text: impl Into<String>,
+        style: FontStyle,
+        fg: Option<Color>,
+        bg: Option<Color>,
+    ) -> Self {
+        Self {
+            synthesized: true,
+            ..Self::new(text, style, fg, bg)
+        }
     }
 }

@@ -31,12 +31,13 @@ impl HoverState {
 /// Process a pointer move at canvas coordinates `(x, y)`.
 ///
 /// Detects pointer enter / leave against the previous hover target and
-/// dispatches the matching [`EventType::MouseOver`] / [`EventType::MouseOut`]
-/// events (leave before enter, matching the DOM). When the hover target
-/// changes, a `Hover` command is emitted so the render thread can re-style
-/// the document for CSS `:hover` rules — with no `:hover` CSS, the command
-/// changes nothing visually, exactly like a browser. Returns the render
-/// commands to run, in order.
+/// dispatches the matching events: bubbling [`EventType::MouseOut`] /
+/// [`EventType::MouseOver`] plus the non-bubbling [`EventType::MouseLeave`]
+/// / [`EventType::MouseEnter`] pair (leave before enter, matching the DOM).
+/// When the hover target changes, a `Hover` command is emitted so the render
+/// thread can re-style the document for CSS `:hover` rules — with no `:hover`
+/// CSS, the command changes nothing visually, exactly like a browser. Returns
+/// the render commands to run, in order.
 pub fn on_move(
     state: &mut HoverState,
     hit_map: &HitMap,
@@ -51,16 +52,53 @@ pub fn on_move(
         return cmds;
     }
     if let Some(old) = state.current.take() {
+        cmds.extend(engine.fire_target(&old, EventType::MouseLeave, x, y));
         cmds.extend(engine.fire(&old, EventType::MouseOut, x, y));
     }
     state.current = new_hover.cloned();
     if let Some(region) = new_hover {
+        cmds.extend(engine.fire_target(region, EventType::MouseEnter, x, y));
         cmds.extend(engine.fire(region, EventType::MouseOver, x, y));
     }
     cmds.push(RenderCmd::Hover {
         node_id: new_hover.map(|r| r.node_id),
     });
     cmds
+}
+
+/// Dispatch a `MouseDown` event at `(x, y)`.
+pub fn on_mouse_down(
+    hit_map: &HitMap,
+    engine: &mut ScriptEngine,
+    x: u32,
+    y: u32,
+) -> Vec<RenderCmd> {
+    let Some(region) = hit_map.hit_test(x, y) else {
+        return Vec::new();
+    };
+    engine.fire(region, EventType::MouseDown, x, y)
+}
+
+/// Dispatch a `MouseUp` event at `(x, y)`.
+pub fn on_mouse_up(hit_map: &HitMap, engine: &mut ScriptEngine, x: u32, y: u32) -> Vec<RenderCmd> {
+    let Some(region) = hit_map.hit_test(x, y) else {
+        return Vec::new();
+    };
+    engine.fire(region, EventType::MouseUp, x, y)
+}
+
+/// Dispatch a `MouseMove` event at `(x, y)`. Fires on every call (the input
+/// loop's in-flight cap provides the back-pressure), not just on hover change.
+pub fn on_mouse_move_dispatch(
+    hit_map: &HitMap,
+    engine: &mut ScriptEngine,
+    x: u32,
+    y: u32,
+) -> Vec<RenderCmd> {
+    let Some(region) = hit_map.hit_test(x, y) else {
+        return Vec::new();
+    };
+    engine.fire(region, EventType::MouseMove, x, y)
 }
 
 /// Process a click at canvas coordinates `(x, y)`.

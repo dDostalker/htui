@@ -3,10 +3,11 @@ use std::time::Duration;
 use compact_str::CompactString;
 use crossterm::event::KeyCode;
 
+use crate::events::HitMap;
 use crate::layout::Rect;
 use crate::layout::paint::{
-    textarea_caret_position, textarea_char_at, textarea_scroll_row, textarea_visual_lines,
-    value_window,
+    range_is_vertical, range_spec, textarea_caret_position, textarea_char_at, textarea_scroll_row,
+    textarea_visual_lines, value_window,
 };
 use crate::tdom::node::{NodeArena, NodeId, NodeType};
 use crate::tui::graph_api::char_width;
@@ -137,6 +138,94 @@ pub(super) fn is_number_input(arena: Option<&NodeArena>, node_id: NodeId) -> boo
     })
 }
 
+/// `true` for `<input type=range>` — a discrete slider, not a text field.
+pub(super) fn is_range_input(arena: &NodeArena, node_id: NodeId) -> bool {
+    arena.get(node_id).is_some_and(|n| {
+        n.get_type()
+            .is_some_and(|t| t.eq_ignore_ascii_case("range"))
+    })
+}
+
+/// Normalize the focused slider's edit buffer to its current constraints.
+pub(super) fn normalize_range_state(
+    state: &mut InputState,
+    arena: &NodeArena,
+    node_id: NodeId,
+) -> bool {
+    let Some(node) = arena.get(node_id) else {
+        return false;
+    };
+    let spec = range_spec(node, Some(state.input_value.as_str()));
+    let value = spec.value_string();
+    let changed = state.input_value != value;
+    state.input_value = value;
+    state.input_cursor = state.input_value.chars().count();
+    changed
+}
+
+/// Apply a keyboard adjustment to a focused range. Horizontal sliders use
+/// Left/Down then Right/Up; vertical sliders invert Up/Down so the keys follow
+/// track direction. Home/End jump to the boundaries.
+pub(super) fn apply_range_key(
+    state: &mut InputState,
+    arena: &NodeArena,
+    node_id: NodeId,
+    key: KeyCode,
+) -> bool {
+    let Some(node) = arena.get(node_id) else {
+        return false;
+    };
+    let mut spec = range_spec(node, Some(state.input_value.as_str()));
+    let vertical = range_is_vertical(node);
+    let changed = match key {
+        KeyCode::Left => spec.advance(-1, false, false),
+        KeyCode::Down if vertical => spec.advance(1, false, false),
+        KeyCode::Down => spec.advance(-1, false, false),
+        KeyCode::Right => spec.advance(1, false, false),
+        KeyCode::Up if vertical => spec.advance(-1, false, false),
+        KeyCode::Up => spec.advance(1, false, false),
+        KeyCode::Home => spec.advance(0, true, false),
+        KeyCode::End => spec.advance(0, false, true),
+        _ => false,
+    };
+    if changed {
+        state.input_value = spec.value_string();
+        state.input_cursor = state.input_value.chars().count();
+    }
+    changed
+}
+
+/// Set a range from a pointer column over its laid-out rectangle. The helper
+/// uses the same track mapping as the painter so clicks and drags land on the
+/// thumb position the user sees.
+pub(super) fn set_range_at_pointer(
+    state: &mut InputState,
+    arena: &NodeArena,
+    node_id: NodeId,
+    rect: crate::layout::Rect,
+    x: u32,
+    y: u32,
+) -> bool {
+    let Some(node) = arena.get(node_id) else {
+        return false;
+    };
+    let spec = range_spec(node, Some(state.input_value.as_str()));
+    let value = if range_is_vertical(node) {
+        let local_y =
+            ((y as usize).saturating_sub(rect.y)).min(rect.height.max(1).saturating_sub(1));
+        spec.value_at(local_y, rect.height.max(1))
+    } else {
+        let local_x =
+            ((x as usize).saturating_sub(rect.x)).min(rect.width.max(1).saturating_sub(1));
+        spec.value_at(local_x, rect.width.max(1))
+    }
+    .value_string();
+    let changed = state.input_value != value;
+    state.input_value = value;
+    state.input_cursor = state.input_value.chars().count();
+    changed
+}
+
 /// The character set an `<input type=number>` field accepts while typing:
 /// digits plus the sign / decimal / exponent markers the browser's number
 /// editor recognises (`-1.5e+3`).
@@ -216,6 +305,42 @@ pub(super) fn is_text_field(arena: &NodeArena, node_id: NodeId) -> bool {
         .is_some_and(|n| matches!(n.node_type, NodeType::Input | NodeType::Textarea))
 }
 
+/// `true` when the hit target (or one of its ancestors) owns non-flow control
+/// chrome rather than normal page text, or its cascaded CSS resolves
+/// `user-select: none`.
+///
+/// A drag that starts on one of these elements belongs to the control (or is
+/// pure chrome); it must not arm the engine's page flow-selection. This is
+/// deliberately broader than focusability: button inputs and replaced bars are
+/// not text-selection origins even though a plain `<output>` remains normal
+/// selectable content.
+///
+/// The `user-select` verdict comes from the hit map because it is built from
+/// the *styled* geometry; the `arena` here is the input loop's raw engine
+/// snapshot, which carries no `css_attr`.
+pub(super) fn blocks_page_selection(hit_map: &HitMap, arena: &NodeArena, node_id: NodeId) -> bool {
+    let mut current = Some(node_id);
+    while let Some(id) = current {
+        let Some(node) = arena.get(id) else {
+            return false;
+        };
+        if matches!(
+            node.node_type,
+            NodeType::Input
+                | NodeType::Textarea
+                | NodeType::Select
+                | NodeType::Button
+                | NodeType::Img
+                | NodeType::Progress
+                | NodeType::Meter
+        ) {
+            return true;
+        }
+        current = node.parent;
+    }
+    hit_map.is_unselectable(node_id)
+}
+
 /// All `<input>` / `<textarea>` node ids in document order (depth-first), for
 /// `Tab` / `Shift`+`Tab` focus cycling. Reads the input loop's DOM snapshot; a
 /// removed or not-yet-rendered field is simply not included. `hidden` inputs
@@ -287,9 +412,12 @@ pub(super) fn char_index_at_x(value: &str, cursor: usize, inner_width: usize, x:
 }
 
 /// Clear the page text selection, queueing a repaint only when one existed.
-pub(super) fn clear_text_selection(state: &mut InputState, cmds: &mut Vec<RenderCmd>) {
+/// Returns whether a visible selection was removed (the caller can notify the
+/// script layer with `selectionchange`).
+pub(super) fn clear_text_selection(state: &mut InputState, cmds: &mut Vec<RenderCmd>) -> bool {
     state.text_sel_armed = false;
-    if state.text_sel_anchor.is_some() || state.text_sel_end.is_some() {
+    let had_selection = state.text_sel_anchor.is_some() || state.text_sel_end.is_some();
+    if had_selection {
         state.text_sel_anchor = None;
         state.text_sel_end = None;
         cmds.push(RenderCmd::TextSelection {
@@ -297,5 +425,57 @@ pub(super) fn clear_text_selection(state: &mut InputState, cmds: &mut Vec<Render
             end: None,
             mode: state.text_sel_mode,
         });
+    }
+    had_selection
+}
+
+#[cfg(test)]
+mod range_key_tests {
+    use super::*;
+    use crate::tdom::node::NodeType;
+
+    #[test]
+    fn range_keys_step_and_clamp_without_text_editing() {
+        let mut arena = NodeArena::default();
+        let mut node = crate::tdom::node::Node::from(NodeType::Input);
+        node.attributes
+            .insert("type".to_string(), "range".to_string());
+        node.attributes.insert("min".to_string(), "0".to_string());
+        node.attributes.insert("max".to_string(), "2".to_string());
+        node.attributes.insert("step".to_string(), "1".to_string());
+        node.attributes.insert("value".to_string(), "1".to_string());
+        let id = arena.insert(node);
+
+        let mut state = InputState::new();
+        state.input_value = CompactString::from("1");
+        assert!(apply_range_key(&mut state, &arena, id, KeyCode::Left));
+        assert_eq!(state.input_value, "0");
+        assert!(!apply_range_key(&mut state, &arena, id, KeyCode::Left));
+        assert_eq!(state.input_value, "0");
+        assert!(apply_range_key(&mut state, &arena, id, KeyCode::Right));
+        assert_eq!(state.input_value, "1");
+        assert!(!apply_range_key(&mut state, &arena, id, KeyCode::Char('x')));
+        assert_eq!(state.input_value, "1");
+    }
+
+    #[test]
+    fn vertical_range_keys_follow_the_track() {
+        let mut arena = NodeArena::default();
+        let mut node = crate::tdom::node::Node::from(NodeType::Input);
+        node.attributes
+            .insert("type".to_string(), "range".to_string());
+        node.attributes
+            .insert("orient".to_string(), "vertical".to_string());
+        node.attributes.insert("min".to_string(), "0".to_string());
+        node.attributes.insert("max".to_string(), "2".to_string());
+        node.attributes.insert("value".to_string(), "1".to_string());
+        let id = arena.insert(node);
+
+        let mut state = InputState::new();
+        state.input_value = CompactString::from("1");
+        assert!(apply_range_key(&mut state, &arena, id, KeyCode::Up));
+        assert_eq!(state.input_value, "0");
+        assert!(apply_range_key(&mut state, &arena, id, KeyCode::Down));
+        assert_eq!(state.input_value, "1");
     }
 }

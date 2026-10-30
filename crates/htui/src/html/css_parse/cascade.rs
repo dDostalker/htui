@@ -9,6 +9,7 @@ use super::{
     matcher::selector_chain_matches_with_state,
     selector::{DynamicState, PseudoClassSet, Selector},
     stylesheet::{CssRule, parse_declaration_splits},
+    values::Viewport,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -133,6 +134,9 @@ fn add_prefixed(
     let suffix = match pe {
         crate::html::css_parse::PseudoElement::Before => "::before",
         crate::html::css_parse::PseudoElement::After => "::after",
+        crate::html::css_parse::PseudoElement::SliderThumb => "::slider-thumb",
+        crate::html::css_parse::PseudoElement::SliderTrack => "::slider-track",
+        crate::html::css_parse::PseudoElement::SliderProgress => "::slider-progress",
     };
     for (k, v) in &css.0 {
         let key: Arc<str> = Arc::from(format!("{k}{suffix}"));
@@ -152,6 +156,142 @@ fn apply_inline_style_at(arena: &mut NodeArena, node_id: NodeId, important: bool
     let subset = if important { imp } else { normal };
     if !subset.0.is_empty() {
         arena[node_id].css_attr.add(&subset);
+    }
+}
+
+// CSS custom property (variable) substitution:
+/// Substitute `var(--name)` / `var(--name, fallback)` references in a CSS
+/// property value using the current custom-property scope.
+///
+/// Called after the cascade resolves all declarations for a node, so the
+/// substitution sees the final cascaded value (matching the browser's
+/// computed-value timing). Recursion handles variables that reference other
+/// variables; a depth cap prevents runaway cycles.
+fn substitute_vars(input: &str, vars: &HashMap<String, String>, depth: usize) -> String {
+    const MAX_DEPTH: usize = 16;
+    if depth > MAX_DEPTH || !input.contains("var(") {
+        return input.to_string();
+    }
+    let mut result = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(pos) = rest.find("var(") {
+        result.push_str(&rest[..pos]);
+        let after = &rest[pos + 4..]; // past `var(`
+        let Some(close) = find_matching_paren(after) else {
+            // Malformed — keep the text as-is and continue scanning.
+            result.push_str("var(");
+            rest = after;
+            continue;
+        };
+        let inner = &after[..close];
+        rest = &after[close + 1..];
+
+        let (name, fallback) = split_var_args(inner);
+        let name = name.trim();
+        if let Some(value) = vars.get(name) {
+            let resolved = substitute_vars(value, vars, depth + 1);
+            result.push_str(&resolved);
+        } else if let Some(fb) = fallback {
+            let resolved = substitute_vars(fb, vars, depth + 1);
+            let trimmed = fb_style(&resolved);
+            result.push_str(&trimmed);
+        } else {
+            // Unresolved variable with no fallback: the property becomes
+            // "invalid at computed-value time" in browsers (treated as
+            // `unset`). We substitute with an empty string so the
+            // downstream parser silently ignores it.
+        }
+    }
+    result.push_str(rest);
+    result
+}
+
+/// Fallback values keep their surrounding whitespace trimmed.
+fn fb_style(s: &str) -> String {
+    s.trim().to_string()
+}
+
+/// Find the index of the `)` that closes the paren opened at position 0 of
+/// `s` (which starts right after `var(`). Handles nesting.
+fn find_matching_paren(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut depth = 1usize;
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Split `var(...)` inner content into `(name, Option<fallback>)` at the
+/// first top-level comma (commas inside nested parens are kept).
+fn split_var_args(inner: &str) -> (&str, Option<&str>) {
+    let bytes = inner.as_bytes();
+    let mut depth = 0usize;
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'(' => depth += 1,
+            b')' => depth -= 1,
+            b',' if depth == 0 => {
+                return (&inner[..i], Some(inner[i + 1..].trim()));
+            }
+            _ => {}
+        }
+    }
+    (inner, None)
+}
+
+/// Extract all custom properties (`--x: value`) from a node's cascaded
+/// attributes and merge them into `parent_vars`. Returns the merged scope
+/// with each value recursively resolved against the merged map.
+fn resolve_custom_props(
+    css_attr: &crate::html::css_parse::properties::CssAttr,
+    parent_vars: HashMap<String, String>,
+) -> HashMap<String, String> {
+    let mut vars = parent_vars;
+    for (k, v) in &css_attr.0 {
+        if k.starts_with("--") {
+            vars.insert(k.to_string(), v.to_string());
+        }
+    }
+    // Resolve `var()` inside custom property values (e.g. `--a: var(--b)`).
+    let entries: Vec<(String, String)> = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    for (k, raw) in entries {
+        if raw.contains("var(") {
+            let resolved = substitute_vars(&raw, &vars, 0);
+            vars.insert(k, resolved);
+        }
+    }
+    vars
+}
+
+/// Replace `var(--name)` references in every non-custom (`--`-prefixed)
+/// property value of the node's cascaded attributes.
+fn substitute_property_vars(
+    css_attr: &mut crate::html::css_parse::properties::CssAttr,
+    vars: &HashMap<String, String>,
+) {
+    let keys: Vec<Arc<str>> = css_attr
+        .0
+        .keys()
+        .filter(|k| !k.starts_with("--"))
+        .cloned()
+        .collect();
+    for key in keys {
+        if let Some(v) = css_attr.0.get_mut(&key)
+            && v.contains("var(")
+        {
+            let resolved = substitute_vars(v, vars, 0);
+            *v = Arc::from(resolved.as_str());
+        }
     }
 }
 
@@ -177,12 +317,22 @@ pub fn css_into_node_with_state(
     state: &DynamicState,
 ) {
     let index = css.cascade_index();
+    // `@media` visibility is fixed for the whole pass (the viewport is part
+    // of the state), so it is decided once per rule instead of per node.
+    let media_active: Vec<bool> = css
+        .0
+        .iter()
+        .map(|e| e.media.as_ref().is_none_or(|m| m.matches(&state.viewport)))
+        .collect();
     // Per-node evaluation scratch, reused across the whole pass so neither
     // the traversal nor the candidate gathering allocates per node / rule.
     let mut seen = vec![0u32; css.0.len()];
     let mut candidates: Vec<u32> = Vec::new();
     let mut stack = vec![root_id];
     let mut stamp: u32 = 0;
+    // Per-node custom-property scope, keyed by child NodeId and populated
+    // just before pushing children onto the stack.
+    let mut var_scopes: HashMap<NodeId, HashMap<String, String>> = HashMap::new();
     while let Some(node_id) = stack.pop() {
         stamp = stamp.wrapping_add(1);
         if stamp == 0 {
@@ -192,6 +342,9 @@ pub fn css_into_node_with_state(
             stamp = 1;
         }
         index.candidates_for(&arena[node_id], &mut candidates, &mut seen, stamp);
+        // Drop rules whose `@media` condition does not match the viewport
+        // (order-preserving, so the cascade rank survives the filter).
+        candidates.retain(|&rule| media_active[rule as usize]);
         // 1. Author stylesheet, normal declarations (lowest priority).
         for &rule in &candidates {
             let entry = &css.0[rule as usize];
@@ -229,7 +382,18 @@ pub fn css_into_node_with_state(
         // 4. Inline `style` attributes, `!important` declarations (highest).
         apply_inline_style_at(arena, node_id, true);
 
-        stack.extend(arena[node_id].children.iter().copied());
+        // 5. CSS custom properties (variables): merge the node's own
+        // `--name: value` declarations with the parent scope, then
+        // substitute `var(--name)` references in every non-custom property
+        // value (matching the browser's computed-value timing).
+        let parent_vars = var_scopes.remove(&node_id).unwrap_or_default();
+        let node_vars = resolve_custom_props(&arena[node_id].css_attr, parent_vars);
+        substitute_property_vars(&mut arena[node_id].css_attr, &node_vars);
+
+        for &child in &arena[node_id].children {
+            var_scopes.insert(child, node_vars.clone());
+            stack.push(child);
+        }
     }
     // Propagate inheritable CSS properties (color, text-align, font-weight,
     // font-style, text-decoration, font-size, text-transform, line-height).
@@ -251,6 +415,7 @@ pub fn css_into_node_with_hover(
         &DynamicState {
             hovered,
             focused: None,
+            viewport: Viewport { cols: 0, rows: 0 },
         },
     );
 }
@@ -296,7 +461,9 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "color",
     "background-color",
     "background",
+    "background-clip",
     "caret-color",
+    "accent-color",
     "text-align",
     "font-weight",
     "font-style",
@@ -310,7 +477,6 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "min-height",
     "max-height",
     "box-sizing",
-    "border-radius",
     // Text
     "text-transform",
     "line-height",
@@ -366,7 +532,6 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "order",
     "gap",
     "row-gap",
-    "column-gap",
     "place-content",
     "place-items",
     "place-self",
@@ -380,6 +545,7 @@ pub const SUPPORTED_PROPERTIES: &[&str] = &[
     "word-spacing",
     "text-indent",
     "text-overflow",
+    "user-select",
     // Positioning (CSS Positioned Layout)
     "position",
     "z-index",
@@ -445,6 +611,7 @@ pub const INHERITED_PROPS: &[&str] = &[
     "letter-spacing",
     "word-spacing",
     "text-indent",
+    "accent-color",
 ];
 
 fn inherit_css(arena: &mut NodeArena, root_id: NodeId) {

@@ -19,11 +19,11 @@
 //!   the registry of layout functions consulted by the flow orchestrator.
 
 use crate::{
-    graphics::grapheme_width,
-    html::css_parse::TextAlign,
+    html::css_parse::{TextAlign, UserSelect},
     layout::layout::TermMap,
-    tdom::node::{NodeArena, NodeId},
+    tdom::node::{NodeArena, NodeId, NodeType},
 };
+use std::collections::HashMap;
 use unicode_segmentation::UnicodeSegmentation;
 
 pub mod layout;
@@ -33,27 +33,39 @@ pub mod paint;
 pub use crate::html::box_edges::{Border, BorderSides, BorderStyle, BoxEdges, EdgeSizes};
 pub use crate::html::css_parse::{FontContext, Viewport};
 pub use layoutbox::inner_formatting_context;
-pub use layoutbox::inner_formatting_context::{flex::layout_flex_dispatch, flow::layout_tree};
+pub use layoutbox::inner_formatting_context::{
+    flex::layout_flex_dispatch, flow::layout_tree, flow::layout_tree_with_scroll_offsets,
+};
 pub use layoutbox::{
     BoxKind, ColumnLayout, Cursor, FormattingContext, GeneratedBox, GeneratedBoxKind,
     GeneratedPayload, InlineRun, LayoutBox, OuterDisplay, PaintStyle, Rect, ReplacedContent,
-    flatten_contents_children, generate_box_tree, generate_node, layout_generated_box,
-    layout_generated_tree,
+    ScrollbarLayout, flatten_contents_children, generate_box_tree, generate_node,
+    layout_generated_box, layout_generated_tree,
 };
 
 /// Context propagated by the layout phase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LayoutContext {
+pub struct LayoutContext<'a> {
     pub font: FontContext,
     pub viewport: Viewport,
+    /// Session scroll offsets for native `overflow-y` containers.
+    pub scroll_offsets: &'a HashMap<NodeId, u32>,
+    /// Session scroll offsets for native `overflow-x` containers.
+    pub scroll_x_offsets: &'a HashMap<NodeId, u32>,
 }
 
-impl LayoutContext {
+/// Empty offset table for callers that do not create scroll containers.
+pub static NO_SCROLL_OFFSETS: std::sync::LazyLock<std::collections::HashMap<NodeId, u32>> =
+    std::sync::LazyLock::new(std::collections::HashMap::new);
+
+impl<'a> LayoutContext<'a> {
     /// Derive a child context with the given font size, keeping the viewport.
     pub fn child(self, child_font_size_cells: usize) -> Self {
         Self {
             font: self.font.child(child_font_size_cells),
             viewport: self.viewport,
+            scroll_offsets: self.scroll_offsets,
+            scroll_x_offsets: self.scroll_x_offsets,
         }
     }
 }
@@ -73,16 +85,30 @@ impl LayoutContext {
 /// carrying the parent block's node id during generation and never produce a
 /// `LayoutBox` of their own, so the `node_id` of every box carrying inline
 /// runs is exactly its owning DOM block.
-pub fn extract_flow_text(
-    arena: &NodeArena,
-    boxes: &[LayoutBox],
+/// One clipped selection fragment: a text run slice that overlaps the
+/// selection band on a given row.
+struct ClippedFragment<'a> {
+    row: u32,
+    lo: u32,
+    hi: u32,
+    node_id: NodeId,
+    runs: &'a [InlineRun],
+    font: usize,
+    col_start: u32,
+}
+
+/// Collect the selection's overlapping text fragments (the shared inner loop
+/// of [`extract_flow_text`] and [`selection_text_lines`]): for every selection
+/// band that intersects a laid-out text line, compute the clipped `lo..hi`
+/// column range and yield the fragment.
+fn clipped_fragments<'a>(
+    arena: &'a NodeArena,
+    boxes: &'a [LayoutBox],
     lines: &[(u32, u32, u32)],
-) -> String {
+) -> Vec<ClippedFragment<'a>> {
     let mut text_lines: Vec<FlowTextLine> = Vec::new();
     collect_flow_lines(arena, boxes, &mut text_lines);
-
-    // Fragments: (row, first selected column, owning block, text).
-    let mut frags: Vec<(u32, u32, NodeId, String)> = Vec::new();
+    let mut out = Vec::new();
     for &(sel_row, sel_cs, sel_ce) in lines {
         for tl in &text_lines {
             if tl.row != sel_row {
@@ -92,17 +118,36 @@ pub fn extract_flow_text(
             let line_end = tl.col_start.saturating_add(line_width);
             let lo = sel_cs.max(tl.col_start);
             let hi = sel_ce.min(line_end);
-            if lo >= hi {
-                continue;
-            }
-            let text = extract_line_text(tl.runs, tl.font, lo, hi, tl.col_start);
-            if !text.is_empty() {
-                frags.push((tl.row, lo, tl.node_id, text));
+            if lo < hi {
+                out.push(ClippedFragment {
+                    row: tl.row,
+                    lo,
+                    hi,
+                    node_id: tl.node_id,
+                    runs: tl.runs,
+                    font: tl.font,
+                    col_start: tl.col_start,
+                });
             }
         }
     }
+    out
+}
 
-    // Assemble in visual order: same block → concatenate, new block → newline.
+pub fn extract_flow_text(
+    arena: &NodeArena,
+    boxes: &[LayoutBox],
+    lines: &[(u32, u32, u32)],
+) -> String {
+    let mut frags: Vec<(u32, u32, NodeId, String)> = Vec::new();
+    for f in clipped_fragments(arena, boxes, lines) {
+        let text = extract_line_text(f.runs, f.font, f.lo, f.hi, f.col_start);
+        if !text.is_empty() {
+            frags.push((f.row, f.lo, f.node_id, text));
+        }
+    }
+
+    // Assemble in visual order: same block \u{2192} concatenate, new block \u{2192} newline.
     frags.sort_by_key(|&(row, col, _, _)| (row, col));
     let mut out = String::new();
     let mut prev_block: Option<NodeId> = None;
@@ -114,6 +159,89 @@ pub fn extract_flow_text(
         prev_block = Some(node_id);
     }
     out
+}
+
+pub fn user_select_is_none(arena: &NodeArena, start: NodeId) -> bool {
+    let mut current = Some(start);
+    while let Some(node_id) = current {
+        let Some(node) = arena.get(node_id) else {
+            return false;
+        };
+        match node.css_attr.get_user_select() {
+            UserSelect::None => return true,
+            UserSelect::Text | UserSelect::All | UserSelect::Contain => return false,
+            UserSelect::Auto => current = node.parent,
+        }
+    }
+    false
+}
+
+/// The deepest box chain that covers the canvas point (root first, deepest
+/// last).
+fn box_chain_at(boxes: &[LayoutBox], x: u32, y: u32, out: &mut Vec<NodeId>) {
+    for lb in boxes {
+        if lb.rect.contains(x, y) {
+            out.push(lb.node_id);
+            box_chain_at(&lb.children, x, y, out);
+            return;
+        }
+    }
+}
+
+/// The first box belonging to `node_id`, in tree order.
+fn box_rect(boxes: &[LayoutBox], node_id: NodeId) -> Option<Rect> {
+    for lb in boxes {
+        if lb.node_id == node_id {
+            return Some(lb.rect);
+        }
+        if let Some(found) = box_rect(&lb.children, node_id) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Clip flow-selection row bands to the columns of the deepest block box
+/// shared by the anchor and the end point.
+///
+/// The raw flow bands are full-canvas-width for every row between the anchor
+/// and the end (`selection_lines`), so a straight vertical drag inside one
+/// column would highlight and copy the text of side-by-side cards on the same
+/// rows. Browsers select the character range between the two points, so the
+/// bands are clipped to the common ancestor box of the two points: a drag
+/// that stays inside one card cannot leak the neighbouring card's text into
+/// the highlight or the copy, while a genuine cross-column drag widens the
+/// span through the shared container. When either point lies outside every
+/// box the input bands pass through unchanged.
+pub fn clip_flow_lines_scoped(
+    boxes: &[LayoutBox],
+    anchor: (u32, u32),
+    end: (u32, u32),
+    lines: &[(u32, u32, u32)],
+) -> Vec<(u32, u32, u32)> {
+    let mut anchor_chain = Vec::new();
+    let mut end_chain = Vec::new();
+    box_chain_at(boxes, anchor.0, anchor.1, &mut anchor_chain);
+    box_chain_at(boxes, end.0, end.1, &mut end_chain);
+    let span = anchor_chain
+        .iter()
+        .zip(&end_chain)
+        .take_while(|(a, b)| a == b)
+        .map(|(a, _)| *a)
+        .last()
+        .and_then(|common| box_rect(boxes, common))
+        .map(|r| (r.x as u32, r.x as u32 + r.width as u32));
+    match span {
+        Some((lo, hi)) => lines
+            .iter()
+            .filter_map(|&(y, cs, ce)| {
+                let lo = cs.max(lo);
+                let hi = ce.min(hi);
+                (lo < hi).then_some((y, lo, hi))
+            })
+            .collect(),
+        None => lines.to_vec(),
+    }
 }
 
 /// Clip a flow selection's row bands down to the columns each row actually
@@ -134,24 +262,10 @@ pub fn selection_text_lines(
     boxes: &[LayoutBox],
     lines: &[(u32, u32, u32)],
 ) -> Vec<(u32, u32, u32)> {
-    let mut text_lines: Vec<FlowTextLine> = Vec::new();
-    collect_flow_lines(arena, boxes, &mut text_lines);
-    let mut out: Vec<(u32, u32, u32)> = Vec::new();
-    for &(sel_row, sel_cs, sel_ce) in lines {
-        for tl in &text_lines {
-            if tl.row != sel_row {
-                continue;
-            }
-            let line_width: u32 = tl.runs.iter().map(|r| r.width_at(tl.font) as u32).sum();
-            let text_end = tl.col_start.saturating_add(line_width);
-            let lo = sel_cs.max(tl.col_start);
-            let hi = sel_ce.min(text_end);
-            if lo < hi {
-                out.push((sel_row, lo, hi));
-            }
-        }
-    }
-    out
+    clipped_fragments(arena, boxes, lines)
+        .into_iter()
+        .map(|f| (f.row, f.lo, f.hi))
+        .collect()
 }
 
 /// One laid-out visual line of text, positioned exactly as the paint phase
@@ -178,6 +292,18 @@ fn collect_flow_lines<'a>(
 }
 
 fn collect_box_lines<'a>(arena: &'a NodeArena, lb: &'a LayoutBox, out: &mut Vec<FlowTextLine<'a>>) {
+    // Replaced controls own their terminal chrome and interactive values.
+    // They are edited / copied through their control-specific paths, never as
+    // ordinary text in a page flow selection.
+    if matches!(lb.kind, crate::layout::BoxKind::Replaced(_))
+        || user_select_is_none(arena, lb.node_id)
+        || matches!(
+            arena[lb.node_id].node_type,
+            NodeType::Progress | NodeType::Meter
+        )
+    {
+        return;
+    }
     let Some(runs) = &lb.paint_style.runs else {
         return;
     };
@@ -188,11 +314,10 @@ fn collect_box_lines<'a>(arena: &'a NodeArena, lb: &'a LayoutBox, out: &mut Vec<
     let font = lb.paint_style.font_size_cells.max(1);
     let line_h = lb.paint_style.line_height_cells.max(1);
     let align = arena[lb.node_id].css_attr.get_text_align();
-    let glyph_row = if line_h > font {
-        (line_h - font) / 2
-    } else {
-        font.saturating_sub(1) / 2
-    };
+    let glyph_row = crate::html::css_parse::glyph_row_within_line(
+        lb.paint_style.font_size_cells,
+        lb.paint_style.line_height_cells,
+    );
     let content_x = lb
         .rect
         .x
@@ -264,11 +389,10 @@ fn collect_box_label_regions(
     let font = lb.paint_style.font_size_cells.max(1);
     let line_h = lb.paint_style.line_height_cells.max(1);
     let align = arena[lb.node_id].css_attr.get_text_align();
-    let glyph_row = if line_h > font {
-        (line_h - font) / 2
-    } else {
-        font.saturating_sub(1) / 2
-    };
+    let glyph_row = crate::html::css_parse::glyph_row_within_line(
+        lb.paint_style.font_size_cells,
+        lb.paint_style.line_height_cells,
+    );
     let content_x = lb
         .rect
         .x
@@ -314,7 +438,7 @@ fn extract_line_text(runs: &[InlineRun], font: usize, lo: u32, hi: u32, line_sta
         let run_w = run.width_at(font) as u32;
         let run_lo = col.max(lo);
         let run_hi = col.saturating_add(run_w).min(hi);
-        if run_lo < run_hi {
+        if run_lo < run_hi && !run.synthesized {
             out.push_str(&run_text_between(
                 run,
                 font,
@@ -337,7 +461,7 @@ fn run_text_between(run: &InlineRun, font: usize, lo: usize, hi: usize) -> Strin
     let mut out = String::new();
     let mut col = 0usize;
     for g in run.text.graphemes(true) {
-        let slot = grapheme_width(g).max(font);
+        let slot = run.grapheme_advance(g, font);
         if col >= hi {
             break;
         }

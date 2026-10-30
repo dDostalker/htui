@@ -20,7 +20,7 @@ mod options;
 
 pub use core::layout_block;
 pub use geometry::{
-    OuterGeometry, block_left, build_border_rect, compute_outer_geometry, constrained_block_width,
-    reserve_border_box, resolve_block_width,
+    OuterGeometry, apply_horizontal_auto_margins, block_left, build_border_rect,
+    compute_outer_geometry, constrained_block_width, reserve_border_box, resolve_block_width,
 };
 pub use options::LayoutBlockOptions;

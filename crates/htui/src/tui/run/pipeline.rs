@@ -9,6 +9,7 @@ use crossterm::execute;
 use indexmap::IndexMap;
 
 use crate::events::Geometry;
+use crate::html::css_parse::Viewport;
 use crate::html::css_parse::{
     self, CssRule, DynamicState, PseudoClass, css_into_node_with_state, css_pseudo_rule_set,
     reset_css_attr,
@@ -86,6 +87,56 @@ fn extract_title(arena: &NodeArena, root_id: NodeId) -> Option<String> {
     None
 }
 
+/// The terminal viewport in cells for `@media` matching: the physical grid
+/// (zoom deliberately not folded in — a resize is the real media-triggering
+/// event, and the cell grid is what "window size" means on a terminal).
+pub(super) fn viewport_of(map: &TermMap) -> Viewport {
+    Viewport {
+        cols: map.columns as usize,
+        rows: map.rows as usize,
+    }
+}
+
+/// Current terminal size, or `None` (logged) when the console query fails.
+pub(super) fn term_map_or_none() -> Option<TermMap> {
+    match TermMap::get_ter_map() {
+        Ok(map) => Some(map),
+        Err(e) => {
+            log::error!("Failed to get terminal size: {}", e);
+            None
+        }
+    }
+}
+
+/// Browser overflow propagation for the terminal viewport: `hidden` / `clip`
+/// on `<html>` (or on `<body>` when `<html>` does not specify overflow)
+/// disables page scrolling. Native container scrolling is unaffected.
+fn document_scroll_locked(arena: &NodeArena, root_id: NodeId) -> bool {
+    let root = &arena[root_id];
+    let html_id = root
+        .children
+        .iter()
+        .copied()
+        .find(|&child| arena[child].node_type == NodeType::Html);
+
+    let Some(html_id) = html_id else {
+        return root.children.iter().any(|&child| {
+            arena[child].node_type == NodeType::Body
+                && arena[child].css_attr.locks_vertical_scroll()
+        });
+    };
+    let html = &arena[html_id];
+    if html.css_attr.locks_vertical_scroll() {
+        return true;
+    }
+    if !html.css_attr.vertical_scroll_visible() {
+        return false;
+    }
+    html.children.iter().any(|&child| {
+        arena[child].node_type == NodeType::Body && arena[child].css_attr.locks_vertical_scroll()
+    })
+}
+
 impl RenderState {
     /// Re-layout, re-paint, publish the geometry and flush a frame.
     ///
@@ -100,24 +151,36 @@ impl RenderState {
         scroll_y: u32,
         zoom: f32,
     ) {
-        let (root_id, arena) = cascade_document(&self.document, &self.css_rules);
-        self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom, None);
+        let (root_id, arena) =
+            cascade_document(&self.document, &self.css_rules, viewport_of(term_map));
+        self.layout_and_paint(
+            out,
+            geo_tx,
+            term_map,
+            Arc::new(arena),
+            root_id,
+            scroll_y,
+            zoom,
+            None,
+        );
     }
 
     /// Re-layout / re-paint a supplied DOM arena, publishing geometry.
     ///
     /// Shared tail of [`redraw`](Self::redraw) and
     /// [`render_arena`](Self::render_arena). `arena` must already carry its
-    /// cascaded CSS (`css_attr`); the caller handles parsing or re-cascading.
-    /// `dirty` carries the nodes JS mutated since the previous frame: when
-    /// the re-layout leaves every box rect unchanged, only those nodes'
-    /// region is repainted instead of the whole canvas.
+    /// cascaded CSS (`css_attr`); the caller handles parsing or re-cascading,
+    /// and shares its `Arc` with the document state / the input loop's read
+    /// snapshot instead of the pipeline cloning the tree again. `dirty` carries
+    /// the nodes JS mutated since the previous frame: when the re-layout leaves
+    /// every box rect unchanged, only those nodes' region is repainted instead
+    /// of the whole canvas.
     fn layout_and_paint<W: Write>(
         &mut self,
         out: &mut BufWriter<W>,
         geo_tx: &GeometrySender,
         term_map: &TermMap,
-        arena: NodeArena,
+        arena: SharedNodeArena,
         root_id: NodeId,
         scroll_y: u32,
         zoom: f32,
@@ -148,6 +211,16 @@ impl RenderState {
             return;
         };
 
+        tl.scrollbars_visible = self
+            .scrollbars_visible
+            .lock()
+            .map(|visible| {
+                visible
+                    .iter()
+                    .filter_map(|(&node_id, &is_visible)| is_visible.then_some((node_id, true)))
+                    .collect()
+            })
+            .unwrap_or_default();
         let boxes = tl.layout_only(&arena, root_id, term_map);
         // Whether the document contains any `position: fixed` box: scrolling
         // re-pins fixed / sticky boxes to the new scroll offset (a targeted
@@ -188,10 +261,14 @@ impl RenderState {
             None
         };
 
-        // Publish the layout snapshot: cache it for `:hover` re-styling and
+        // Publish the layout snapshot: cache it for `:hover` re-styling,
         // forward a copy to the hit-test thread when one is listening (the
-        // event system is active).
+        // event system is active), and hand it to the input loop as its
+        // DOM-read snapshot (one frame behind at most).
         self.geometry = Some(Arc::clone(&geo));
+        if let Ok(mut guard) = self.live_geo.lock() {
+            *guard = Some(Arc::clone(&geo));
+        }
         if let Some(tx) = geo_tx
             && let Err(e) = tx.send(Arc::clone(&geo))
         {
@@ -234,9 +311,15 @@ impl RenderState {
         // until some later re-layout republished it. u32::MAX is the startup
         // placeholder (no upper bound known yet), overwritten by the first
         // successful layout with the real value.
-        tl.scroll_y = scroll_y;
+        let page_scroll_locked = document_scroll_locked(&geo.arena, geo.root_id);
+        tl.scroll_y = if page_scroll_locked { 0 } else { scroll_y };
         tl.clamp_scroll();
-        self.max_scroll.store(tl.max_scroll(), Ordering::Relaxed);
+        let page_max_scroll = if page_scroll_locked {
+            0
+        } else {
+            tl.max_scroll()
+        };
+        self.max_scroll.store(page_max_scroll, Ordering::Relaxed);
 
         // Re-apply the active page selection: the paint pass has no knowledge
         // of it, so any freshly painted canvas needs the highlight overlaid.
@@ -283,16 +366,20 @@ impl RenderState {
     /// script-engine arena snapshot and render it without re-parsing HTML.
     ///
     /// Backs `RenderCmd::RenderArena`: JS mutated the live DOM, so the arena
-    /// arrives raw (no `css_attr`) and must be cascaded first. `dirty` lists
-    /// the mutated nodes for the incremental repaint; `state_changed` is true
-    /// when the `:hover` target or the focused field moved, which invalidates
-    /// the incremental path (the highlight may live anywhere in the tree).
+    /// arrives raw (no `css_attr`) and must be cascaded first. When the input
+    /// loop holds no reference to the snapshot (its DOM reads go through the
+    /// published geometry instead), the `Arc` unwraps and the cascade mutates
+    /// the snapshot in place — the steady-state batch costs one full-tree copy
+    /// (the script engine's own snapshot), not two. `dirty` lists the mutated
+    /// nodes for the incremental repaint; `state_changed` is true when the
+    /// `:hover` target or the focused field moved, which invalidates the
+    /// incremental path (the highlight may live anywhere in the tree).
     pub(super) fn render_arena<W: Write>(
         &mut self,
         out: &mut BufWriter<W>,
         geo_tx: &GeometrySender,
         term_map: &TermMap,
-        arena: &SharedNodeArena,
+        arena: SharedNodeArena,
         root_id: NodeId,
         scroll_y: u32,
         zoom: f32,
@@ -306,18 +393,86 @@ impl RenderState {
         if css_changed {
             self.apply_injected_css(&dirty.injected_css);
         }
-        let source_arena = Arc::clone(arena);
-        let mut arena = (*source_arena).clone();
-        reset_css_attr(&mut arena, root_id);
-        css_into_node_with_state(&mut arena, root_id, &self.css_rules, &self.dynamic);
-        self.document.arena = source_arena;
+        // The cascade re-evaluates `@media` against the current viewport (the
+        // stored dynamic state may predate a resize).
+        self.dynamic.viewport = viewport_of(term_map);
+        let mut owned = Arc::try_unwrap(arena).unwrap_or_else(|shared| (*shared).clone());
+        reset_css_attr(&mut owned, root_id);
+        css_into_node_with_state(&mut owned, root_id, &self.css_rules, &self.dynamic);
+        self.document.arena = Arc::new(owned);
         self.document.root_id = root_id;
         let dirty = if state_changed || css_changed {
             None
         } else {
             Some(&dirty)
         };
-        self.layout_and_paint(out, geo_tx, term_map, arena, root_id, scroll_y, zoom, dirty);
+        self.layout_and_paint(
+            out,
+            geo_tx,
+            term_map,
+            Arc::clone(&self.document.arena),
+            root_id,
+            scroll_y,
+            zoom,
+            dirty,
+        );
+    }
+
+    /// Update one native scroll offset and re-layout the current document.
+    pub(super) fn render_scroll<W: Write>(
+        &mut self,
+        out: &mut BufWriter<W>,
+        geo_tx: &GeometrySender,
+        term_map: &TermMap,
+        node_id: NodeId,
+        scroll_y: u32,
+    ) {
+        let Some(tl) = self.term_layout.as_mut() else {
+            return;
+        };
+        let shared_visible = self
+            .scrollbars_visible
+            .lock()
+            .map(|visible| visible.get(&node_id).copied().unwrap_or(false))
+            .unwrap_or(false);
+        let reveals_hidden_chrome =
+            shared_visible && tl.scrollbars_visible.get(&node_id) != Some(&true);
+        if tl.scroll_offsets.get(&node_id) == Some(&scroll_y) && !reveals_hidden_chrome {
+            return;
+        }
+        tl.scrollbars_visible.insert(node_id, shared_visible);
+        tl.scroll_offsets.insert(node_id, scroll_y);
+        let (page_scroll_y, zoom) = (tl.scroll_y, tl.zoom);
+        self.redraw(out, geo_tx, term_map, page_scroll_y, zoom);
+    }
+
+    /// Horizontal counterpart of [`RenderState::render_scroll`]: update one
+    /// `overflow-x` container's offset and re-layout.
+    pub(super) fn render_scroll_x<W: Write>(
+        &mut self,
+        out: &mut BufWriter<W>,
+        geo_tx: &GeometrySender,
+        term_map: &TermMap,
+        node_id: NodeId,
+        scroll_x: u32,
+    ) {
+        let Some(tl) = self.term_layout.as_mut() else {
+            return;
+        };
+        let shared_visible = self
+            .scrollbars_visible
+            .lock()
+            .map(|visible| visible.get(&node_id).copied().unwrap_or(false))
+            .unwrap_or(false);
+        let reveals_hidden_chrome =
+            shared_visible && tl.scrollbars_visible.get(&node_id) != Some(&true);
+        if tl.scroll_x_offsets.get(&node_id) == Some(&scroll_x) && !reveals_hidden_chrome {
+            return;
+        }
+        tl.scrollbars_visible.insert(node_id, shared_visible);
+        tl.scroll_x_offsets.insert(node_id, scroll_x);
+        let (page_scroll_y, zoom) = (tl.scroll_y, tl.zoom);
+        self.redraw(out, geo_tx, term_map, page_scroll_y, zoom);
     }
 
     /// Replace the session's injected-CSS set with `injected` (host ? css)
@@ -398,7 +553,13 @@ impl RenderState {
         let in_geo = |id: Option<NodeId>| id.filter(|id| geo.arena.contains_key(*id));
         let prev = in_geo(prev);
         let new = in_geo(new);
-        let mut arena = geo.arena.clone();
+        // Keep the `@media` viewport in sync with the canvas (identical unless
+        // a resize landed between layouts).
+        self.dynamic.viewport = Viewport {
+            cols: tl.columns as usize,
+            rows: tl.rows as usize,
+        };
+        let mut arena = (*geo.arena).clone();
         reset_css_attr(&mut arena, geo.root_id);
         css_into_node_with_state(&mut arena, geo.root_id, &self.css_rules, &self.dynamic);
         // Incremental repaint: only the union of the old and new affected
@@ -414,6 +575,12 @@ impl RenderState {
             (None, Some(b)) => Some(b),
             (None, None) => None,
         };
+        // Highlight bands are derived once: the region below extends to
+        // them, and the same bands are overlaid after the repaint.
+        let sel_lines = self
+            .text_selection
+            .as_ref()
+            .map(|sel| highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32));
         let Some(mut r) = region else {
             return;
         };
@@ -422,18 +589,14 @@ impl RenderState {
         // colour, so cells outside `r` would keep the previous frame's
         // highlight and be blended again (a step darker per hover / focus
         // repaint — the bright / dark flicker).
-        if let Some(sel) = &self.text_selection {
-            let sel_lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
-            if let Some(sel_rect) = lines_bounds(&sel_lines) {
-                r = union_rect(r, sel_rect);
-            }
+        if let Some(sel_rect) = sel_lines.as_ref().and_then(|lines| lines_bounds(lines)) {
+            r = union_rect(r, sel_rect);
         }
         tl.repaint_region(&arena, &geo.boxes, r);
         // The repaint reset the canvas (or part of it); the active selection
         // highlight must be overlaid again.
-        if let Some(sel) = &self.text_selection {
-            let lines = highlight_lines(&geo.arena, &geo.boxes, sel, tl.columns as u32);
-            tl.apply_text_selection(&lines, SELECTION_BG);
+        if let Some(lines) = &sel_lines {
+            tl.apply_text_selection(lines, SELECTION_BG);
         }
         if let Some(open) = &self.open_select {
             apply_select_overlay(tl, open);
@@ -471,7 +634,7 @@ impl RenderState {
         pin_sticky_boxes(&mut boxes, viewport);
         let new_rects = pinned_boxes_rects(&boxes);
         let fresh = Arc::new(Geometry {
-            arena: geo.arena.clone(),
+            arena: Arc::clone(&geo.arena),
             boxes,
             root_id: geo.root_id,
         });
@@ -539,8 +702,6 @@ impl RenderState {
         zoom: f32,
         dirty: DirtyInfo,
     ) {
-        self.document.arena = arena;
-        self.document.root_id = root_id;
         self.document.css = Arc::clone(&document_css);
         self.document_css = document_css;
         self.extra_css = String::new();
@@ -549,7 +710,31 @@ impl RenderState {
         if !dirty.injected_css.is_empty() {
             self.apply_injected_css(&dirty.injected_css);
         }
-        self.redraw(out, geo_tx, term_map, scroll_y, zoom);
+        // Same in-place cascade as `render_arena`: the fresh document's
+        // snapshot is consumed when nothing else holds it.
+        let mut owned = Arc::try_unwrap(arena).unwrap_or_else(|shared| (*shared).clone());
+        reset_css_attr(&mut owned, root_id);
+        css_into_node_with_state(
+            &mut owned,
+            root_id,
+            &self.css_rules,
+            &DynamicState {
+                viewport: viewport_of(term_map),
+                ..Default::default()
+            },
+        );
+        self.document.arena = Arc::new(owned);
+        self.document.root_id = root_id;
+        self.layout_and_paint(
+            out,
+            geo_tx,
+            term_map,
+            Arc::clone(&self.document.arena),
+            root_id,
+            scroll_y,
+            zoom,
+            None,
+        );
     }
 }
 
@@ -583,8 +768,25 @@ mod tests {
             text_selection: None,
             selection_text: Arc::new(Mutex::new(String::new())),
             open_select: None,
+            scrollbars_visible: Arc::new(Mutex::new(std::collections::HashMap::new())),
             max_scroll: Arc::new(AtomicU32::new(0)),
+            live_geo: Arc::new(Mutex::new(None)),
         }
+    }
+
+    #[test]
+    fn body_overflow_hidden_locks_document_scrolling() {
+        let mut parser = Parser::new(
+            "<html><head><style>body { overflow: hidden; }</style></head>\
+             <body><p>one</p><p>two</p><p>three</p>\
+             <p>four</p><p>five</p><p>six</p></body></html>",
+        );
+        let document = parser.parse_with_scripts();
+        let mut arena = (*document.arena).clone();
+        let mut css_parser = css_parse::Parser::new(&document.css);
+        let rules = css_parser.parse();
+        css_parse::css_into_node(&mut arena, document.root_id, &rules);
+        assert!(document_scroll_locked(&arena, document.root_id));
     }
 
     #[test]

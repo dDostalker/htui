@@ -132,14 +132,16 @@ pub(super) fn distribute_main_axis(
                 distributed += share;
             }
             // Distribute any floor-truncation remainder one cell at a
-            // time across the first items, so the line exactly fills
-            // the available main-axis size.
+            // time across the growing items, so the line exactly fills
+            // the available main-axis size. `flex-grow: 0` items never
+            // receive grow cells.
             let mut leftover = (free as isize) - distributed;
-            let mut k = 0;
-            while leftover > 0 && k < n {
+            while leftover > 0 {
+                let Some(k) = (0..n).filter(|&i| line[i].grow > 0.0).min() else {
+                    break;
+                };
                 sizes[k] += 1;
                 leftover -= 1;
-                k += 1;
             }
         }
     } else if used_after_basis > available {
@@ -155,17 +157,20 @@ pub(super) fn distribute_main_axis(
                 distributed += (sizes[i] as isize) - (new_size as isize);
                 sizes[i] = new_size;
             }
-            // If the floor-truncation sum is short of the overflow,
-            // trim additional cells from the largest items to make
-            // up the difference.
+            // If the floor-truncation sum is short of the overflow, trim
+            // the shortfall from the shrinkable items only (`flex-shrink:
+            // 0` never yields), largest current size first — the ordering
+            // the proportional pass would have continued with.
             let mut leftover = overflow as isize - distributed;
-            let mut k = 0;
-            while leftover > 0 && k < n {
-                if sizes[k] > 1 {
-                    sizes[k] -= 1;
-                    leftover -= 1;
-                }
-                k += 1;
+            while leftover > 0 {
+                let Some(k) = (0..n)
+                    .filter(|&i| line[i].shrink > 0.0 && sizes[i] > 1)
+                    .max_by_key(|&i| sizes[i])
+                else {
+                    break;
+                };
+                sizes[k] -= 1;
+                leftover -= 1;
             }
             // CSS `min-width` / `min-height: auto`: no item may shrink
             // below its min-content floor. Clamp the violated items and
@@ -205,10 +210,7 @@ fn fixup_min_max(sizes: &mut [usize], line: &[&FlexItemPrep], available: usize, 
     if n == 0 {
         return;
     }
-    let mins: Vec<usize> = line
-        .iter()
-        .map(|p| p.min_main.max(p.css_min_main.unwrap_or(0)).max(1))
-        .collect();
+    let mins: Vec<usize> = line.iter().map(|p| p.effective_min_main()).collect();
     let maxs: Vec<Option<usize>> = line.iter().map(|p| p.css_max_main).collect();
     // Initial clamp (min wins over max, CSS).
     for i in 0..n {
@@ -320,7 +322,7 @@ fn enforce_min_main_sizes(
     column_gap: usize,
 ) {
     let n = sizes.len();
-    let mins: Vec<usize> = line.iter().map(|p| p.min_main.max(1)).collect();
+    let mins: Vec<usize> = line.iter().map(|p| p.effective_min_main()).collect();
     for i in 0..n {
         if sizes[i] < mins[i] {
             sizes[i] = mins[i];
@@ -340,8 +342,12 @@ fn enforce_min_main_sizes(
             break;
         }
         let overflow = total - available;
-        // Items still above their floor can absorb more shrink.
-        let candidates: Vec<usize> = (0..n).filter(|&i| sizes[i] > mins[i]).collect();
+        // Items still above their floor can absorb more shrink — but only
+        // the shrinkable ones: `flex-shrink: 0` never yields (CSS), even
+        // when the line keeps overflowing.
+        let candidates: Vec<usize> = (0..n)
+            .filter(|&i| line[i].shrink > 0.0 && sizes[i] > mins[i])
+            .collect();
         if candidates.is_empty() {
             break; // everything at its floor; the line overflows.
         }
@@ -415,31 +421,24 @@ pub(super) fn align_content_spacing(
     free_space: usize,
     n_lines: usize,
 ) -> (usize, usize) {
-    match align {
-        // `stretch` fills the free cross space by growing each line's cross
-        // size by `free / n` (no leading / trailing / inter-line gap) — the
-        // browser semantics. The line growth itself is applied in
-        // `layout_flex_items` via `stretch_extra`; the pair returned here is
-        // only the line-offset distribution, which for stretch is zero (lines
-        // are already stacked edge-to-edge by their grown sizes).
-        AlignContent::Stretch => (0, 0),
-        AlignContent::FlexStart
-        | AlignContent::FlexEnd
-        | AlignContent::Center
-        | AlignContent::SpaceBetween
-        | AlignContent::SpaceAround
-        | AlignContent::SpaceEvenly => justify_spacing(
-            match align {
-                AlignContent::FlexStart => JustifyContent::FlexStart,
-                AlignContent::FlexEnd => JustifyContent::FlexEnd,
-                AlignContent::Center => JustifyContent::Center,
-                AlignContent::SpaceBetween => JustifyContent::SpaceBetween,
-                AlignContent::SpaceAround => JustifyContent::SpaceAround,
-                _ => JustifyContent::SpaceEvenly,
-            },
-            free_space,
-            n_lines,
-        ),
+    // `stretch` fills the free cross space by growing each line's cross
+    // size by `free / n` (no leading / trailing / inter-line gap) — the
+    // browser semantics. The line growth itself is applied in
+    // `layout_flex_items` via `stretch_extra`; the pair returned here is
+    // only the line-offset distribution, which for stretch is zero (lines
+    // are already stacked edge-to-edge by their grown sizes).
+    let justify = match align {
+        AlignContent::Stretch => None,
+        AlignContent::FlexStart => Some(JustifyContent::FlexStart),
+        AlignContent::FlexEnd => Some(JustifyContent::FlexEnd),
+        AlignContent::Center => Some(JustifyContent::Center),
+        AlignContent::SpaceBetween => Some(JustifyContent::SpaceBetween),
+        AlignContent::SpaceAround => Some(JustifyContent::SpaceAround),
+        AlignContent::SpaceEvenly => Some(JustifyContent::SpaceEvenly),
+    };
+    match justify {
+        Some(justify) => justify_spacing(justify, free_space, n_lines),
+        None => (0, 0),
     }
 }
 

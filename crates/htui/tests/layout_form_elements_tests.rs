@@ -21,6 +21,7 @@ use htui::layout::{BoxConstraint, Cursor, layout_tree};
 use htui::script::{ScriptEngine, ScriptMsg};
 use htui::tdom::node::{NodeArena, NodeId, NodeType};
 use htui::tui::graph_api::{InputState, OverlayKind, RenderCmd, TermLayout, handle_mouse_down};
+use std::sync::Arc;
 
 const COLS: u16 = 80;
 const ROWS: u16 = 24;
@@ -132,7 +133,7 @@ fn build_geometry(html: &str) -> (ScriptEngine, Geometry) {
         term_map.rows as usize,
     );
     let geo = Geometry {
-        arena,
+        arena: Arc::new(arena),
         boxes,
         root_id,
     };
@@ -290,6 +291,26 @@ fn test_progress_author_width_controls_bar() {
     );
     assert_eq!(count_word(&tl, "█"), 10);
     assert_eq!(count_word(&tl, "░"), 10);
+}
+
+#[test]
+fn test_progress_accent_color() {
+    init();
+    let tl = draw(
+        r#"<progress value="0.5"></progress>"#,
+        "progress { accent-color: #ff0000; }",
+    );
+    let filled: Vec<_> = tl.layout.iter().filter(|b| b.word == "█").collect();
+    assert!(!filled.is_empty());
+    assert!(
+        filled.iter().all(|b| b.fcolor
+            == Some(Color::Rgb {
+                r: 0xff,
+                g: 0x00,
+                b: 0x00
+            })),
+        "accent-color themes the progress fill"
+    );
 }
 
 #[test]

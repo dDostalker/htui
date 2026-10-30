@@ -10,16 +10,15 @@ use std::time::{Duration, Instant};
 
 use crate::config::Config;
 use crate::events::{HitMap, SharedGeometry, SharedHitMap};
+use crate::html::css_parse::Viewport;
 use crate::html::css_parse::{DynamicState, PseudoClass, css_pseudo_rule_set};
 use crate::html::html_parse::ParsedDocument;
-use crate::layout::layout::TermMap;
 use crate::source::SharedSourceText;
 use crate::tdom::node::NodeId;
-use crate::tui::graph_api::{DrainedBatch, InputState, RenderCmd};
+use crate::tui::graph_api::{DrainedBatch, InputState, RenderCmd, SharedScrollbarVisibility};
 
 use super::GeometrySender;
-use super::LiveDocument;
-use super::pipeline::{combined_css_source, flush_frame, parse_css_source};
+use super::pipeline::{combined_css_source, flush_frame, parse_css_source, term_map_or_none};
 use super::state::RenderState;
 
 pub(super) fn render_thread(
@@ -29,7 +28,9 @@ pub(super) fn render_thread(
     max_scroll: Arc<AtomicU32>,
     geo_tx: GeometrySender,
     selection_text: Arc<Mutex<String>>,
+    scrollbars_visible: SharedScrollbarVisibility,
     render_beat: Arc<AtomicU64>,
+    live_geo: super::LiveGeoSlot,
     config: Config,
 ) {
     // One persistent write buffer for the whole session: every frame writes
@@ -57,7 +58,9 @@ pub(super) fn render_thread(
         text_selection: None,
         selection_text,
         open_select: None,
+        scrollbars_visible,
         max_scroll,
+        live_geo,
     };
 
     let mut last_frame_at: Option<Instant> = None;
@@ -108,18 +111,31 @@ pub(super) fn render_thread(
                 state.handle_input(&mut out, node_id, value, cursor, focused, selection);
             }
         }
+        for cmd in batch.drain_scrolls() {
+            match cmd {
+                RenderCmd::RenderScroll { node_id, scroll_y } => {
+                    let Some(term_map) = term_map_or_none() else {
+                        break 'frame;
+                    };
+                    state.render_scroll(&mut out, &geo_tx, &term_map, node_id, scroll_y);
+                }
+                RenderCmd::RenderScrollX { node_id, scroll_x } => {
+                    let Some(term_map) = term_map_or_none() else {
+                        break 'frame;
+                    };
+                    state.render_scroll_x(&mut out, &geo_tx, &term_map, node_id, scroll_x);
+                }
+                _ => {}
+            }
+        }
         for sel_cmd in batch.drain_selects() {
             state.handle_select(&mut out, sel_cmd);
         }
 
         for css_cmd in batch.drain_css_reloads() {
             if let RenderCmd::ReloadCss { css } = css_cmd {
-                let term_map = match TermMap::get_ter_map() {
-                    Ok(m) => m,
-                    Err(e) => {
-                        log::error!("Failed to get terminal size: {}", e);
-                        break 'frame;
-                    }
+                let Some(term_map) = term_map_or_none() else {
+                    break 'frame;
                 };
                 state.reload_css(&mut out, &geo_tx, &term_map, css);
             }
@@ -129,14 +145,9 @@ pub(super) fn render_thread(
         // input loop's watchdog uses it to tell a *stuck* render thread
         // (infinite layout loop, an enormous canvas allocation, a blocked
         // console write) apart from an idle or no-op one, which is still
-        // alive and must not trip the watchdog.
-        render_beat.store(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64,
-            Ordering::Relaxed,
-        );
+        // alive and must not trip the watchdog. Any changing counter works;
+        // an incrementing one is immune to wall-clock steps.
+        render_beat.fetch_add(1, Ordering::Relaxed);
         last_frame_at = Some(Instant::now());
 
         // Process the deferred `TextSelection` *before* the snapshot command:
@@ -198,12 +209,8 @@ pub(super) fn render_thread(
                     }
 
                     RenderCmd::Redraw { scroll_y, zoom } => {
-                        let term_map = match TermMap::get_ter_map() {
-                            Ok(m) => m,
-                            Err(e) => {
-                                log::error!("Failed to get terminal size: {}", e);
-                                break 'snapshot;
-                            }
+                        let Some(term_map) = term_map_or_none() else {
+                            break 'snapshot;
                         };
                         state.redraw(&mut out, &geo_tx, &term_map, scroll_y, zoom);
                     }
@@ -222,18 +229,14 @@ pub(super) fn render_thread(
                         // state is unchanged.
                         let state_changed = state.dynamic != dynamic;
                         state.dynamic = dynamic;
-                        let term_map = match TermMap::get_ter_map() {
-                            Ok(m) => m,
-                            Err(e) => {
-                                log::error!("Failed to get terminal size: {}", e);
-                                break 'snapshot;
-                            }
+                        let Some(term_map) = term_map_or_none() else {
+                            break 'snapshot;
                         };
                         state.render_arena(
                             &mut out,
                             &geo_tx,
                             &term_map,
-                            &arena,
+                            arena,
                             root_id,
                             scroll_y,
                             zoom,
@@ -250,12 +253,8 @@ pub(super) fn render_thread(
                         zoom,
                         dirty,
                     } => {
-                        let term_map = match TermMap::get_ter_map() {
-                            Ok(m) => m,
-                            Err(e) => {
-                                log::error!("Failed to get terminal size: {}", e);
-                                break 'snapshot;
-                            }
+                        let Some(term_map) = term_map_or_none() else {
+                            break 'snapshot;
                         };
                         state.render_document(
                             &mut out,
@@ -271,29 +270,15 @@ pub(super) fn render_thread(
                     }
 
                     RenderCmd::Hover { node_id } => {
-                        let prev = state.dynamic.hovered;
-                        state.dynamic.hovered = node_id;
-                        // Without any `:hover` rule the cascade is identical for every
-                        // pointer position, so nothing can change on screen — skip the
-                        // repaint entirely (browser behaviour: moving the pointer with
-                        // no `:hover` styles produces no drawing).
-                        if !state.pseudo_rules.contains_pseudo(PseudoClass::Hover) {
+                        if !apply_hover(&mut state, &mut out, node_id) {
                             break 'snapshot;
                         }
-                        state.repaint_dynamic(&mut out, PseudoClass::Hover, prev, node_id);
                     }
 
                     RenderCmd::Focus { node_id } => {
-                        let prev = state.dynamic.focused;
-                        state.dynamic.focused = node_id;
-                        // Without any `:focus` rule the cascade is identical for every
-                        // focus position, so nothing can change on screen — skip the
-                        // repaint entirely (browser behaviour: focusing with no
-                        // `:focus` styles produces no drawing).
-                        if !state.pseudo_rules.contains_pseudo(PseudoClass::Focus) {
+                        if !apply_focus(&mut state, &mut out, node_id) {
                             break 'snapshot;
                         }
-                        state.repaint_dynamic(&mut out, PseudoClass::Focus, prev, node_id);
                     }
 
                     // Select dropdown commands share one handler so the pending pass
@@ -317,6 +302,9 @@ pub(super) fn render_thread(
                     } => {
                         state.handle_input(&mut out, node_id, value, cursor, focused, selection);
                     }
+                    RenderCmd::RenderScroll { .. } | RenderCmd::RenderScrollX { .. } => {
+                        log::debug!("Scroll command reached the snapshot queue; dropped");
+                    }
 
                     // JS `el.focus()` / `el.blur()` requests are intercepted by the
                     // input loop (they mutate input-loop state); if one ever reaches
@@ -327,6 +315,15 @@ pub(super) fn render_thread(
                     RenderCmd::ReloadCss { .. } => {}
                     RenderCmd::FocusRequest { .. } | RenderCmd::BlurRequest { .. } => {
                         log::debug!("Focus request reached the render thread — dropping");
+                    }
+
+                    // Scroll markers are intercepted by the run loop (the
+                    // scroll state lives on the input side); a leaked one
+                    // renders nothing.
+                    RenderCmd::ScrollAnimate { .. }
+                    | RenderCmd::ScrollSet { .. }
+                    | RenderCmd::ScrollIntoView { .. } => {
+                        log::debug!("Scroll marker reached the render thread — dropping");
                     }
                 }
             }
@@ -343,23 +340,49 @@ pub(super) fn render_thread(
         // A deferred `Hover` runs last so its repaint re-applies the newer
         // hover highlight on top of both the arena render and the selection.
         if let Some(RenderCmd::Hover { node_id }) = batch.take_hover() {
-            let prev = state.dynamic.hovered;
-            state.dynamic.hovered = node_id;
-            if state.pseudo_rules.contains_pseudo(PseudoClass::Hover) {
-                state.repaint_dynamic(&mut out, PseudoClass::Hover, prev, node_id);
-            }
+            apply_hover(&mut state, &mut out, node_id);
         }
         // A deferred `Focus` (queued behind a `Redraw` / `Rerender`) runs
         // after the snapshot render for the same reason: it re-styles the
         // fresh frame instead of displacing it.
         if let Some(RenderCmd::Focus { node_id }) = batch.take_focus() {
-            let prev = state.dynamic.focused;
-            state.dynamic.focused = node_id;
-            if state.pseudo_rules.contains_pseudo(PseudoClass::Focus) {
-                state.repaint_dynamic(&mut out, PseudoClass::Focus, prev, node_id);
-            }
+            apply_focus(&mut state, &mut out, node_id);
         }
     }
+}
+
+/// Update the `:hover` target and repaint the affected region — but only when
+/// the stylesheet has `:hover` rules: without them the cascade is identical
+/// for every pointer position, so nothing can change on screen (browser
+/// behaviour: moving the pointer with no `:hover` styles produces no
+/// drawing). Returns `false` when the repaint was skipped.
+fn apply_hover(
+    state: &mut RenderState,
+    out: &mut BufWriter<std::io::Stdout>,
+    node_id: Option<NodeId>,
+) -> bool {
+    let prev = std::mem::replace(&mut state.dynamic.hovered, node_id);
+    if !state.pseudo_rules.contains_pseudo(PseudoClass::Hover) {
+        return false;
+    }
+    state.repaint_dynamic(out, PseudoClass::Hover, prev, node_id);
+    true
+}
+
+/// Update the `:focus` target and repaint the affected region when the
+/// stylesheet has `:focus` rules (see [`apply_hover`]). Returns `false` when
+/// the repaint was skipped.
+fn apply_focus(
+    state: &mut RenderState,
+    out: &mut BufWriter<std::io::Stdout>,
+    node_id: Option<NodeId>,
+) -> bool {
+    let prev = std::mem::replace(&mut state.dynamic.focused, node_id);
+    if !state.pseudo_rules.contains_pseudo(PseudoClass::Focus) {
+        return false;
+    }
+    state.repaint_dynamic(out, PseudoClass::Focus, prev, node_id);
+    true
 }
 
 /// Worker of the dedicated hit-test thread.
@@ -380,13 +403,18 @@ pub(super) fn hit_test_thread(rx: mpsc::Receiver<SharedGeometry>, hit_map: Share
 
 /// Fold one `ScriptResponse::Event` into the current frame: hover updates,
 /// host-pushed render commands, and — when JS mutated the DOM — a fresh arena
-/// snapshot + dirty set forwarded as a (region-repaint) `RenderArena`.
-/// Shared by the key-gate wait and the ordinary async reply fold.
+/// snapshot + dirty set forwarded as a (region-repaint) `RenderArena`. The
+/// snapshot `Arc` moves into the command unshared: the input loop reads the
+/// DOM through the render thread's published geometry instead of holding the
+/// snapshot, which is what lets the render thread unwrap and cascade it in
+/// place. Shared by the key-gate wait and the ordinary async reply fold.
+/// `viewport` is the input loop's terminal size, carried into the arena's
+/// dynamic state for the `@media` re-cascade.
 pub(super) fn fold_script_event(
     state: &mut InputState,
     cmds: &mut Vec<RenderCmd>,
     hovered: &mut Option<NodeId>,
-    live_dom: &mut Option<LiveDocument>,
+    viewport: Viewport,
     ev: crate::script::ScriptEvent,
 ) {
     *hovered = ev.hovered;
@@ -396,7 +424,6 @@ pub(super) fn fold_script_event(
         if document_reloaded {
             state.reset_document_state(cmds);
         }
-        *live_dom = Some((Arc::clone(&d.arena), d.root_id));
         if let Some(document_css) = d.document_css {
             cmds.push(RenderCmd::RenderDocument {
                 arena: d.arena,
@@ -415,6 +442,7 @@ pub(super) fn fold_script_event(
                 dynamic: DynamicState {
                     hovered: ev.hovered,
                     focused: state.focused_input,
+                    viewport,
                 },
                 dirty: d.dirty,
             });

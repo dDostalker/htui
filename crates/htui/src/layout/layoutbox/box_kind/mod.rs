@@ -18,8 +18,9 @@
 ///
 /// Browsers treat `<img>` as a *replaced element*: the box's content is
 /// supplied by an external source (the image file) rather than by the box's
-/// own subtree. We model that as a dedicated [`ReplacedContent`] variant so
-/// future replaced elements (`<video>`, `<input>`, ...) have a natural home.
+/// own subtree. The engine extends that model to the form controls, which
+/// own their terminal chrome and interactive value instead of rendering a
+/// subtree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplacedContent {
     /// `<img>` rasterized into a fixed-size grid of `cols` × `rows` cells.

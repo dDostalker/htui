@@ -3,55 +3,173 @@
   htui music player demo — interface + interaction only (no audio).
   Works in the terminal via htui and in a regular browser (standard DOM).
   Theme: "neon night" — charcoal slate + mint/cyan/violet/coral accents.
-  Features: animated spectrum, waveform progress, lyrics, up-next queue,
+  Features: animated spectrum, playlist scrolling, seek/volume, lyrics, queue,
   favorites with filtering, seek, repeat/shuffle, volume, live clock.
-  Layout: viewport-fit — the page is exactly 100vh (flex column); panels
-  stretch on tall terminals and clip gracefully on small ones, so it never
-  scrolls.
+  Layout: viewport-fit with an edge-triggered hover pop-out library and
+  fixed playback dock.
+  Inner lists scroll instead of allowing controls to leave the screen.
 -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>htui wave</title>
 <style>
-  body { background-color: #0b0e14; color: #e4eaf7; margin: 0; }
+  /* ---------- design tokens ---------- */
+  :root {
+    --bg: #0b0e14;
+    --bg-raised: #0e121c;
+    --bg-card: #10141d;
+    --bg-btn: #1a2233;
+    --bg-btn-hover: #26314a;
+    --bg-accent-dim: #0f2a22;
+    --border: #1f2740;
+    --border-art: #2a3554;
+    --accent: #43e5a0;
+    --accent-hover: #6ff0b8;
+    --cyan: #56c8f5;
+    --violet: #a78bfa;
+    --coral: #ff7a90;
+    --gold: #f5c169;
+    --text: #e4eaf7;
+    --text-bright: #ffffff;
+    --text-body: #c3cde8;
+    --text-dim: #8b96b5;
+    --text-muted: #556085;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    margin: 0;
+    height: 100vh;
+    padding-bottom: 4ch;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
 
   /* ---------- viewport-fit frame ----------
-     Each region is a plain block with a definite vh height. Definite
-     blocks never grow with their content: inner layout may overflow, but
-     the paint clip chain drops everything past the region's border box,
-     so rendered rows never exceed the viewport and the page never
-     scrolls at any terminal size. The footer is viewport-fixed. */
+     The playback dock is pinned to the viewport so seek and volume cannot be
+     pushed off screen. Now-playing and library use viewport-relative heights;
+     their inner lists scroll when decorative content does not fit. */
 
   /* ---------- top bar ---------- */
   .top {
-    height: 1ch;
+    flex: 0 0 auto;
+    min-height: 1ch;
     margin: 0 1ch;
-    border: 1ch solid #1f2740;
+    border: 1ch solid var(--border);
     border-radius: 1;
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 0 1ch;
-    background-color: #0e121c;
+    background-color: var(--bg-raised);
   }
-  .brand { color: #43e5a0; font-weight: bold; }
-  .feed { color: #556085; margin-left: auto; }
-  #state-label { color: #43e5a0; margin-left: 2ch; }
-  #state-label.off { color: #8b96b5; }
-  .clock { color: #56c8f5; font-weight: bold; margin-left: 2ch; }
+  .brand, .feed, .clock {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    flex-shrink: 1;
+  }
+  .brand {
+    color: transparent;
+    font-weight: bold;
+    background: linear-gradient(to right, var(--accent), var(--cyan), #c66ad8);
+    background-clip: text;
+  }
+  .feed { color: var(--text-muted); margin-left: auto; }
+  #state-label {
+    color: var(--accent);
+    margin-left: 2ch;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
+  }
+  #state-label.off { color: var(--text-dim); }
+  .clock { color: var(--cyan); font-weight: bold; margin-left: 2ch; }
 
   /* ---------- layout ---------- */
-  .main-wrap { margin: 1ch 1ch 0 1ch; height: 40vh; overflow: hidden; }
-  .main { display: flex; gap: 1ch; align-items: flex-start; }
-  .np { flex: 1 1 0; display: flex; flex-direction: column; }
-  .side { width: 30ch; flex-shrink: 0; display: flex; flex-direction: column; gap: 1ch; }
+  .main-wrap {
+    flex: 0 0 auto;
+    height: 60vh;
+    min-height: 0;
+    margin: 1ch 1ch 0 1ch;
+    overflow: hidden;
+  }
+  .main { height: 60vh; display: flex; gap: 1ch; align-items: stretch; overflow: hidden; }
+  .np { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .np-expand { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  .side {
+    flex: 0 0 30%;
+    min-width: 14ch;
+    height: 60vh;
+    padding-right: 1ch;
+    display: flex;
+    flex-direction: column;
+    gap: 1ch;
+    overflow: hidden;
+  }
+  .side-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .side .card + .card { margin-top: 1ch; }
+
+  /* ---------- hover trigger ----------
+     Invisible full-height strip along the right viewport edge: resting
+     the pointer anywhere on it pops the library drawer out. It only
+     exists while the drawer rests closed, so it never blocks the
+     drawer itself; the playbar (z-10) stays above it, so the volume
+     slider keeps working inside the zone. */
+  .side-trigger {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 16ch;
+    height: 100vh;
+    z-index: 5;
+  }
 
   .card {
-    border: 1ch solid #1f2740;
+    /* The vh heights below assume browser content-box math; keep it explicit
+       so terminal engines defaulting to border-box agree with the browser. */
+    box-sizing: content-box;
+    border: 1ch solid var(--border);
     border-radius: 1;
-    background-color: #10141d;
+    background-color: var(--bg-card);
     padding: 1ch;
+  }
+
+  /* The dock is intentionally frameless: these control rows are the
+     guaranteed minimum UI. Borders would waste rows at terminal heights
+     where every row matters. */
+  .playbar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+    padding: 0 1ch;
+    display: flex;
+    flex-direction: column;
+    background-color: var(--bg-card);
+  }
+  .playbar-row {
+    display: flex;
+    gap: 1ch;
+    align-items: center;
+    margin-top: 1ch;
+  }
+  .playbar .controls { flex: 0 1 auto; margin-top: 0; }
+  .playbar .vol {
+    flex: 1 1 10ch;
+    min-width: 0;
+    margin-top: 0;
   }
   .card-head {
     display: flex;
@@ -59,15 +177,22 @@
     align-items: center;
     margin-bottom: 1ch;
   }
-  .head-label { color: #556085; text-transform: uppercase; font-weight: bold; }
-  .head-extra { color: #43e5a0; }
+  .head-label { color: var(--text-muted); text-transform: uppercase; font-weight: bold; }
+  .head-extra { color: var(--accent); }
 
   /* ---------- now playing ---------- */
-  .np-body { flex: 1 1 auto; min-height: 0; display: flex; gap: 1ch; align-items: flex-start; }
+  .np-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    gap: 1ch;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
   .art {
-    width: 14ch;
-    flex-shrink: 0;
-    border: 1ch solid #2a3554;
+    flex: 0 1 20%;
+    min-width: 5ch;
+    border: 1ch solid var(--border-art);
     border-radius: 1;
     display: flex;
     flex-direction: column;
@@ -75,6 +200,10 @@
     overflow: hidden;
   }
   .band { flex: 0 0 auto; height: 1ch; }
+  .band, .art-cap {
+    overflow: hidden;
+    white-space: nowrap;
+  }
   .band1 { background-color: #101c2e; color: #1d3a5f; }
   .band2 { background-color: #0f2438; color: #1f5f8a; }
   .band3 { background-color: #0d3346; color: #1f8fb8; }
@@ -82,140 +211,305 @@
   .band5 { background-color: #0d5547; color: #2fe6a8; }
   .band6 { background-color: #2a2a52; color: #7c7cf0; }
   .band7 { background-color: #33224a; color: #a06ae0; }
-  .band8 { background-color: #3a1f3d; color: #c66ad8; }
   .art-cap {
     flex: 0 0 auto;
     height: 1ch;
-    background-color: #0b0e14;
-    color: #556085;
+    background-color: var(--bg);
+    color: var(--text-muted);
     text-align: center;
   }
 
-  .np-info { flex: 1; display: flex; flex-direction: column; }
+  .np-info {
+    flex: 1 1 12ch;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
   .np-titlerow { display: flex; justify-content: space-between; align-items: center; }
-  .np-title { color: #ffffff; font-weight: bold; }
-  .like { color: #556085; }
-  .like:hover { color: #ff7a90; }
-  .like.on { color: #ff7a90; }
-  .np-artist { color: #8b96b5; }
-  .badges { display: flex; gap: 1ch; margin-top: 1ch; }
+  .np-title {
+    color: var(--text-bright);
+    font-weight: bold;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .like { color: var(--text-muted); }
+  .like:hover { color: var(--coral); }
+  .like.on { color: var(--coral); }
+  .np-artist { color: var(--text-dim); }
+  .badges { display: flex; gap: 1ch; margin-top: 1ch; flex-wrap: wrap; }
   .badge {
     border-radius: 1;
     padding: 0 1ch;
-    background-color: #1a2233;
-    color: #8b96b5;
+    background-color: var(--bg-btn);
+    color: var(--text-dim);
   }
-  .tag-SYNTH   { background-color: #221e42; color: #a78bfa; }
-  .tag-LOFI    { background-color: #0e2a3d; color: #56c8f5; }
-  .tag-AMBIENT { background-color: #0f2a22; color: #43e5a0; }
-  .tag-HOUSE   { background-color: #3a1a26; color: #ff7a90; }
-  .tag-JAZZ    { background-color: #3a2f14; color: #f5c169; }
+  .tag-SYNTH   { background-color: #221e42; color: var(--violet); }
+  .tag-LOFI    { background-color: #0e2a3d; color: var(--cyan); }
+  .tag-AMBIENT { background-color: var(--bg-accent-dim); color: var(--accent); }
+  .tag-HOUSE   { background-color: #3a1a26; color: var(--coral); }
+  .tag-JAZZ    { background-color: #3a2f14; color: var(--gold); }
   .tag-ROCK    { background-color: #22330f; color: #a3e635; }
 
   .spacer { flex: 0 0 auto; height: 1ch; }
   .wave { white-space: pre; }
-  .wave-on { color: #43e5a0; }
+  .wave-on { color: var(--accent); }
   .wave-off { color: #24304e; }
-  .times { display: flex; justify-content: space-between; color: #556085; }
+  .times { display: flex; justify-content: space-between; color: var(--text-muted); }
+  input[type="range"] {
+    height: 1ch;
+    accent-color: var(--accent);
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    color: var(--text-muted);
+  }
+  .seek { width: 100%; }
 
   .controls { display: flex; gap: 1ch; align-items: center; margin-top: 1ch; }
   .btn {
     display: inline-block;
     padding: 0 1ch;
     border-radius: 1;
-    background-color: #1a2233;
-    color: #c3cde8;
-    flex-shrink: 0;
+    background-color: var(--bg-btn);
+    color: var(--text-body);
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
-  .btn:hover { background-color: #26314a; color: #ffffff; }
+  .btn:hover { background-color: var(--bg-btn-hover); color: var(--text-bright); }
   .btn-main {
-    background-color: #43e5a0;
-    color: #0b0e14;
+    background-color: var(--accent);
+    color: var(--bg);
     font-weight: bold;
     padding: 0 2ch;
   }
-  .btn-main:hover { background-color: #6ff0b8; color: #0b0e14; }
-  .btn.on { color: #f5c169; background-color: #2a2410; }
+  .btn-main:hover { background-color: var(--accent-hover); color: var(--bg); }
+  .btn.on { color: var(--gold); background-color: #2a2410; }
 
-  .vol { display: flex; gap: 1ch; align-items: center; margin-top: 1ch; }
-  .vol-label { color: #556085; }
-  .vol-on { color: #43e5a0; }
-  .vol-off { color: #24304e; }
-  .vol-pct { color: #56c8f5; }
+  .vol { display: flex; gap: 1ch; align-items: center; }
+  .vol-label { color: var(--text-muted); flex-shrink: 0; }
+  .vol-range { flex: 1; }
+  .vol-pct { color: var(--cyan); }
 
   /* ---------- spectrum ---------- */
-  .viz { display: flex; gap: 2ch; }
-  .viz-pre { white-space: pre; height: 4ch; }
-  #viz-l { color: #43e5a0; }
-  #viz-r { color: #a78bfa; }
+  .spectrum-card {
+    flex: 0 0 auto;
+    border: 0;
+    padding: 0;
+    background-color: transparent;
+  }
+  .viz {
+    display: flex;
+    justify-content: center;
+    gap: 1ch;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .viz-pre {
+    flex: 0 1 8ch;
+    min-width: 0;
+    height: 4ch;
+    overflow: hidden;
+    white-space: pre;
+  }
+  #viz-l { color: var(--accent); }
+  #viz-r { color: var(--violet); }
 
   /* ---------- queue / lyrics ---------- */
-  .qrow { display: flex; gap: 1ch; padding: 0 1ch; border-left: 1ch solid #1f2740; }
-  .qrow.next { border-left: 1ch solid #43e5a0; background-color: #0f1a24; }
-  .qrow.next .qtitle { color: #43e5a0; }
-  .qidx { width: 3ch; flex-shrink: 0; color: #556085; text-align: right; }
-  .qtitle { flex: 1; color: #c3cde8; }
-  .qartist { color: #556085; }
+  .qrow { display: flex; gap: 1ch; padding: 0 1ch; border-left: 1ch solid var(--border); }
+  .qrow.next { border-left: 1ch solid var(--accent); background-color: #0f1a24; }
+  .qrow.next .qtitle { color: var(--accent); }
+  .qidx { width: 3ch; flex-shrink: 0; color: var(--text-muted); text-align: right; }
+  .qtitle {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--text-body);
+  }
+  .qartist {
+    flex: 0 1 12ch;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--text-muted);
+  }
 
-  .card-lyr { flex: 1; }
+  .card-lyr { min-height: 6ch; }
   .ly { color: #4a5372; }
   .ly::before { content: "   "; }
-  .ly.on { color: #43e5a0; font-weight: bold; }
+  .ly.on { color: var(--accent); font-weight: bold; }
   .ly.on::before { content: "▸  "; }
 
-  /* ---------- library ---------- */
-  .lib-wrap { margin: 1ch 1ch 0 1ch; height: 18vh; overflow: hidden; }
-  .lib { display: flex; flex-direction: column; }
+  /* ---------- library sidebar ---------- */
+  .library {
+    flex: 0 0 auto;
+    height: 30vh;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
   .lib-head { flex: 0 0 auto; display: flex; align-items: center; gap: 2ch; margin-bottom: 1ch; }
-  .lib-title { font-weight: bold; color: #ffffff; text-transform: uppercase; }
+  .lib-title { font-weight: bold; color: var(--text-bright); text-transform: uppercase; }
   .tabs { display: flex; gap: 1ch; }
   .tab {
     display: inline-block;
     padding: 0 1ch;
     border-radius: 1;
-    background-color: #1a2233;
-    color: #8b96b5;
+    background-color: var(--bg-btn);
+    color: var(--text-dim);
   }
-  .tab:hover { color: #ffffff; background-color: #26314a; }
-  .tab.on { color: #43e5a0; background-color: #0f2a22; }
-  .lib-meta { flex: 1; text-align: right; color: #556085; }
+  .tab:hover { color: var(--text-bright); background-color: var(--bg-btn-hover); }
+  .tab.on { color: var(--accent); background-color: var(--bg-accent-dim); }
+  .plist {
+    flex: 0 0 auto;
+    height: 20vh;
+    min-height: 2ch;
+    overflow-y: auto;
+  }
 
   .row { display: flex; gap: 2ch; padding: 0 1ch; }
   .row:nth-child(odd) { background-color: #0e1220; }
   .row:hover { background-color: #161c2c; }
-  .row.active { background-color: #0f2a22; border-radius: 1; }
-  .idx { width: 4ch; flex-shrink: 0; text-align: right; color: #556085; }
-  .row.active .idx { color: #43e5a0; }
-  .ptitle { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row.active .ptitle { color: #43e5a0; font-weight: bold; }
-  .heart { color: #ff7a90; }
-  .heart.off { color: #556085; }
-  .heart:hover { color: #ff7a90; }
-  .partist { width: 20ch; flex-shrink: 0; color: #8b96b5; }
+  .row.active { background-color: var(--bg-accent-dim); border-radius: 1; }
+  .idx { width: 4ch; flex-shrink: 0; text-align: right; color: var(--text-muted); }
+  .row.active .idx { color: var(--accent); }
+  .ptitle {
+    flex: 1 1 auto;
+    min-width: 4ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .row.active .ptitle { color: var(--accent); font-weight: bold; }
+  .heart { color: var(--coral); }
+  .heart.off { color: var(--text-muted); }
+  .heart:hover { color: var(--coral); }
+  .partist {
+    flex: 2 1 20ch;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-dim);
+  }
   .ptag {
-    width: 10ch;
-    flex-shrink: 0;
+    flex: 0 1 10ch;
+    min-width: 0;
+    overflow: hidden;
     text-align: center;
     border-radius: 1;
   }
-  .pq { width: 8ch; flex-shrink: 0; text-align: center; color: #556085; }
-  .pdur { width: 5ch; flex-shrink: 0; text-align: right; color: #556085; }
+  .pq {
+    flex: 0 1 8ch;
+    min-width: 0;
+    overflow: hidden;
+    text-align: center;
+    color: var(--text-muted);
+  }
+  .pdur {
+    flex: 0 0 auto;
+    min-width: 4ch;
+    text-align: right;
+    color: var(--text-muted);
+  }
 
   /* ---------- footer ---------- */
   .footer {
-    position: fixed;
-    bottom: 0;
-    left: 1ch;
-    right: 1ch;
-    border: 1ch solid #1f2740;
+    flex: 0 0 auto;
+    margin: 1ch 1ch 0 1ch;
+    border: 1ch solid var(--border);
     border-radius: 1;
     display: flex;
     justify-content: space-between;
     padding: 0 1ch;
-    color: #556085;
-    background-color: #0e121c;
+    color: var(--text-muted);
+    background-color: var(--bg-raised);
   }
-  .foot-key { color: #8b96b5; }
+  .foot-key { color: var(--text-dim); }
+
+  /* ---------- responsive behaviour ----------
+     @media units are terminal cells (1ch = 1 column / 1 row).
+     Core playback controls (.playbar) are NEVER hidden — only decorative
+     content is progressively removed as the viewport shrinks. */
+  @media (max-width: 72ch) {
+    .feed,
+    .partist { display: none; }
+  }
+
+  @media (max-width: 64ch) {
+    .side { flex-basis: 24ch; min-width: 0; }
+    .pq { display: none; }
+  }
+
+  @media (max-width: 56ch) {
+    .ptag { display: none; }
+  }
+
+  @media (max-width: 48ch) {
+    .clock { display: none; }
+    .playbar-row { flex-wrap: wrap; }
+    .controls { flex-wrap: wrap; }
+    .playbar .vol { flex-basis: 100%; }
+    .btn-main { flex: 1 1 auto; text-align: center; }
+    #btn-repeat,
+    #btn-shuffle { display: none; }
+  }
+
+  @media (max-width: 40ch) {
+    .foot-key,
+    .badges,
+    .times { display: none; }
+  }
+
+  @media (max-width: 32ch) {
+    #state-label,
+    .heart,
+    .idx { display: none; }
+    .row { gap: 1ch; }
+    .aux,
+    .transport { display: none; }
+  }
+
+  @media (max-height: 24ch) {
+    .library { height: 25vh; }
+    /* Let the list yield rows (it scrolls internally) so it stays inside
+       the shrunken card instead of spilling past its bottom border. */
+    .plist { height: auto; flex: 0 1 auto; }
+    .queue-card,
+    .card-lyr { display: none; }
+  }
+
+  @media (max-height: 16ch) {
+    .viz { display: none; }
+    .side-scroll { display: none; }
+    .main-wrap,
+    .footer { margin: 0 1ch; }
+  }
+
+  @media (max-height: 12ch) {
+    .footer,
+    .side,
+    .side-trigger { display: none; }
+    .card-lyr { display: none; }
+    .card { border: 0; padding: 0; }
+    .top { height: 1ch; border: 0; padding: 0 1ch; }
+    .main-wrap { height: 2ch; }
+    .plist { min-height: 1ch; }
+    .card-head { margin-bottom: 0; }
+    .np-body { gap: 1ch; }
+    .art { min-width: 4ch; }
+    .lib-head { margin-bottom: 0; }
+  }
+
+  @media (max-height: 9ch) {
+    .np-expand { display: none; }
+  }
 </style>
 </head>
 <body>
@@ -229,105 +523,109 @@
   <div class="main-wrap">
   <div class="main">
     <div class="np card">
-      <div class="card-head">
-        <span class="head-label">Now Playing</span>
-        <span id="np-state" class="head-extra">IDLE</span>
-      </div>
-      <div class="np-body">
-        <div class="art">
-          <div class="band band1">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
-          <div class="band band2">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
-          <div class="band band3">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
-          <div class="band band4">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
-          <div class="band band5">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
-          <div class="band band6">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
-          <div class="band band7">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
-          <div class="art-cap">NEON NIGHTS</div>
+      <div class="np-expand">
+        <div class="card-head">
+          <span class="head-label">Now Playing</span>
+          <span id="np-state" class="head-extra">IDLE</span>
         </div>
-
-        <div class="np-info">
-          <div class="np-titlerow">
-            <span id="title" class="np-title">-</span>
-            <span id="btn-like" class="like" onclick="toggleLike()">&#9825;</span>
+        <div class="np-body">
+          <div class="art">
+            <div class="band band1">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+            <div class="band band2">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+            <div class="band band3">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+            <div class="band band4">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+            <div class="band band5">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+            <div class="band band6">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+            <div class="band band7">&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;&#9604;</div>
+            <div class="art-cap">NEON NIGHTS</div>
           </div>
-          <div id="artist" class="np-artist">-</div>
-          <div class="badges">
-            <span id="badge-genre" class="badge">-</span>
-            <span id="badge-q" class="badge">-</span>
-            <span id="badge-bpm" class="badge">-</span>
-          </div>
-
-          <div class="spacer"></div>
-          <div class="wave"><span id="wave-on" class="wave-on"></span><span id="wave-off" class="wave-off"></span></div>
-          <div class="times">
-            <span id="t-cur">0:00</span>
-            <span id="t-rem">-0:00</span>
-          </div>
-
-          <div class="controls">
-            <span class="btn" onclick="seek(-10)">-10</span>
-            <span class="btn" onclick="prev()">&#9664;&#9664;</span>
-            <span id="btn-play" class="btn btn-main" onclick="togglePlay()">&#9654; PLAY</span>
-            <span class="btn" onclick="next()">&#9654;&#9654;</span>
-            <span class="btn" onclick="seek(10)">+10</span>
-            <span id="btn-repeat" class="btn" onclick="toggleRepeat()">rep</span>
-            <span id="btn-shuffle" class="btn" onclick="toggleShuffle()">shuf</span>
-          </div>
-
-          <div class="vol">
-            <span class="vol-label">VOL</span>
-            <span id="btn-voldown" class="btn" onclick="volDown()">-</span>
-            <span><span id="vol-on" class="vol-on"></span><span id="vol-off" class="vol-off"></span></span>
-            <span id="btn-volup" class="btn" onclick="volUp()">+</span>
-            <span id="vol-pct" class="vol-pct">80%</span>
+          <div class="np-info">
+            <div class="np-titlerow">
+              <span id="title" class="np-title">-</span>
+              <span id="btn-like" class="like" onclick="toggleLike()">&#9825;</span>
+            </div>
+            <div id="artist" class="np-artist">-</div>
+            <div class="badges">
+              <span id="badge-genre" class="badge">-</span>
+              <span id="badge-q" class="badge">-</span>
+              <span id="badge-bpm" class="badge">-</span>
+            </div>
+            <div class="spacer"></div>
+            <div class="wave"><span id="wave-on" class="wave-on"></span><span id="wave-off" class="wave-off"></span></div>
+            <div class="times">
+              <span id="t-cur">0:00</span>
+              <span id="t-rem">-0:00</span>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="side">
-      <div class="card">
-        <div class="card-head">
-          <span class="head-label">Spectrum</span>
-          <span class="head-extra">L / R</span>
+    <div id="music-side" class="side" style="display:none" onmouseover="sideEnter()" onmouseout="sideLeave()">
+      <div class="library card">
+        <div class="lib-head">
+          <span class="lib-title">Library</span>
+          <span class="tabs">
+            <span id="tab-all" class="tab on" onclick="setTab('all')">All</span>
+            <span id="tab-fav" class="tab" onclick="setTab('fav')">Fav</span>
+          </span>
         </div>
-        <div class="viz">
-          <div id="viz-l" class="viz-pre"> </div>
-          <div id="viz-r" class="viz-pre"> </div>
-        </div>
+        <div id="plist" class="plist"></div>
       </div>
 
-      <div class="card">
-        <div class="card-head">
-          <span class="head-label">Up Next</span>
-          <span class="head-extra">AUTO</span>
+      <div class="side-scroll">
+        <div class="card spectrum-card">
+          <div class="card-head">
+            <span class="head-label">Spectrum</span>
+            <span class="head-extra">L / R</span>
+          </div>
+          <div class="viz">
+            <div id="viz-l" class="viz-pre"> </div>
+            <div id="viz-r" class="viz-pre"> </div>
+          </div>
         </div>
-        <div id="queue"></div>
-      </div>
 
-      <div class="card card-lyr">
-        <div class="card-head">
-          <span class="head-label">Lyrics</span>
-          <span class="head-extra">&#9835;</span>
+        <div class="card queue-card">
+          <div class="card-head">
+            <span class="head-label">Up Next</span>
+            <span class="head-extra">AUTO</span>
+          </div>
+          <div id="queue"></div>
         </div>
-        <div id="lyr"></div>
+
+        <div class="card card-lyr">
+          <div class="card-head">
+            <span class="head-label">Lyrics</span>
+            <span class="head-extra">&#9835;</span>
+          </div>
+          <div id="lyr"></div>
+        </div>
       </div>
     </div>
   </div>
+  <div id="side-trigger" class="side-trigger" onmouseover="sideEnter()" onmouseout="sideLeave()"></div>
   </div>
 
-  <div class="lib-wrap">
-  <div class="lib">
-    <div class="lib-head">
-      <span class="lib-title">Library</span>
-      <span class="tabs">
-        <span id="tab-all" class="tab on" onclick="setTab('all')">All</span>
-        <span id="tab-fav" class="tab" onclick="setTab('fav')">&#9825; Fav</span>
-      </span>
-      <span id="lib-meta" class="lib-meta"></span>
+  <div class="playbar">
+    <input id="seek" class="range seek" type="range" min="0" max="214" step="1" value="0"
+      aria-label="Seek" oninput="scrub(this.value)">
+    <div class="playbar-row">
+      <div class="controls">
+        <span class="btn aux" onclick="seek(-10)">-10</span>
+        <span class="btn transport" onclick="prev()">&#9664;&#9664;</span>
+        <span id="btn-play" class="btn btn-main" onclick="togglePlay()">&#9654; PLAY</span>
+        <span class="btn transport" onclick="next()">&#9654;&#9654;</span>
+        <span class="btn aux" onclick="seek(10)">+10</span>
+        <span id="btn-repeat" class="btn" onclick="toggleRepeat()">rep</span>
+        <span id="btn-shuffle" class="btn" onclick="toggleShuffle()">shuf</span>
+      </div>
+      <div class="vol">
+        <span class="vol-label">VOL</span>
+        <input id="volume" class="range vol-range" type="range" min="0" max="100" step="10" value="80"
+          aria-label="Volume" oninput="setVolume(this.value)">
+        <span id="vol-pct" class="vol-pct">80%</span>
+      </div>
     </div>
-    <div id="plist"></div>
-  </div>
   </div>
 
   <div class="footer">
@@ -356,16 +654,20 @@
     var playing = false;
     var repeat = false;
     var shuffle = false;
-    var volume = 8;
+    var volume = 80;
     var tab = "all";
 
     var WAVE_N = 48;
-    var VOL_N = 10;
+    var seeking = false;
+    var lastScrubAt = 0;
     var VIZ_H = 4;
-    var CAPS = [" ", "\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587"];
-    var FULL = "\u2588";
-    var EMPTY = "\u2591";
-    var BLOCKS = ["\u2581", "\u2582", "\u2583", "\u2584", "\u2585", "\u2586", "\u2587", "\u2588"];
+    var VIZ_COLS = 16;
+    /* One 9-char intensity ramp: CAPS is the fractional-cap slice, BLOCKS
+       the filled slice (CAPS[i+1] === BLOCKS[i]). */
+    var RAMP = " ▁▂▃▄▅▆▇█";
+    var CAPS = RAMP.slice(0, 8);
+    var BLOCKS = RAMP.slice(1);
+    var FULL = "█";
 
     function $(id) { return document.getElementById(id); }
 
@@ -375,12 +677,6 @@
       var m = Math.floor(s / 60);
       var r = Math.floor(s % 60);
       return m + ":" + pad2(r);
-    }
-
-    function repeatStr(s, n) {
-      var out = "";
-      for (var i = 0; i < n; i++) { out += s; }
-      return out;
     }
 
     function waveChar(i) {
@@ -400,10 +696,15 @@
       $("wave-off").textContent = off;
     }
 
+    function updateSeek() {
+      var input = $("seek");
+      input.setAttribute("max", String(tracks[current].dur));
+      if (!seeking) { input.value = String(elapsed); }
+    }
+
     function updateVolume() {
-      $("vol-on").textContent = repeatStr(FULL, volume);
-      $("vol-off").textContent = repeatStr(EMPTY, VOL_N - volume);
-      $("vol-pct").textContent = (volume * 10) + "%";
+      $("volume").value = String(volume);
+      $("vol-pct").textContent = volume + "%";
     }
 
     function setOn(id, on) {
@@ -417,8 +718,9 @@
       $("artist").textContent = t.artist;
       $("t-cur").textContent = fmt(elapsed);
       $("t-rem").textContent = "-" + fmt(t.dur - elapsed);
-      $("badge-genre").textContent = t.genre;
-      $("badge-genre").className = "badge tag-" + t.genre.replace("-", "");
+      var badge = $("badge-genre");
+      badge.textContent = t.genre;
+      badge.className = "badge tag-" + t.genre.replace("-", "");
       $("badge-q").textContent = t.q;
       $("badge-bpm").textContent = t.bpm + " BPM";
       $("np-state").textContent = playing ? "\u25b6 " + fmt(elapsed) + " / " + fmt(t.dur) : "IDLE";
@@ -431,6 +733,7 @@
       setOn("btn-shuffle", shuffle);
       document.title = (playing ? "\u25b6 " : "\u275a\u275a ") + t.title + " \u2014 " + t.artist;
       updateWave();
+      updateSeek();
       updateVolume();
     }
 
@@ -456,9 +759,6 @@
           + '</div>';
       }
       $("plist").innerHTML = html;
-      var allTotal = 0;
-      for (var j = 0; j < tracks.length; j++) { allTotal += tracks[j].dur; }
-      $("lib-meta").textContent = count + " TRACKS \u00b7 " + fmt(total) + (tab === "all" ? " \u00b7 TOTAL " + fmt(allTotal) : "");
     }
 
     function renderQueue() {
@@ -474,12 +774,19 @@
       $("queue").innerHTML = html;
     }
 
+    var lyricsKey = null;
     function renderLyrics() {
       var lines = tracks[current].lyrics;
       var active = -1;
       for (var i = 0; i < lines.length; i++) {
         if (elapsed >= lines[i][0]) { active = i; }
       }
+      /* Skip no-op writes: the 1s progress tick re-runs this every second
+         but the active line changes rarely, and a repeated innerHTML still
+         costs a full re-cascade + repaint. */
+      var key = current + "/" + active;
+      if (key === lyricsKey) { return; }
+      lyricsKey = key;
       var html = "";
       for (var j = 0; j < lines.length; j++) {
         html += '<div class="' + (j === active ? "ly on" : "ly") + '">' + lines[j][1] + '</div>';
@@ -492,6 +799,7 @@
       renderPlaylist();
       renderQueue();
       renderLyrics();
+      syncViz();
     }
 
     function pick(i) {
@@ -548,10 +856,159 @@
       renderLyrics();
     }
 
+    function scrub(value) {
+      /* Hold off the 1-second progress timer while a drag is active. There
+         is no separate release event (htui fires `change` with `input`), so
+         the progress tick itself clears the flag after a quiet period. */
+      seeking = true;
+      lastScrubAt = Date.now();
+      seek(Number(value) - elapsed);
+    }
+
+    function setVolume(value) {
+      volume = Math.min(100, Math.max(0, Math.round(Number(value) || 0)));
+      updateVolume();
+    }
+
+    /* Hover pop-out state: the drawer rests closed; resting the pointer
+       on the invisible right-edge trigger pops it out, and leaving the
+       zone retracts it. No button, no chrome: pure pointer intent. */
+    var libraryOpen = false;
+    var sideTimer = null;
+    var closeTimer = null;
+    /* Last applied flex-basis value + unit. Starts at 0 (rests closed);
+       the stylesheet at-rest basis takes over only at the end of an open
+       tween, so inline and cleared end states always agree. */
+    var sideBasis = 0;
+    var sideUnit = "%";
+
+    /* The at-rest basis the stylesheet gives the sidebar at the current
+       viewport (matchMedia shares the @media grammar with the CSS). */
+    function atRestBasis() {
+      return matchMedia("(max-width: 64ch)").matches
+        ? { v: 24, u: "ch" }
+        : { v: 30, u: "%" };
+    }
+
+    /* Ease-out cubic: fast start, decelerating stop (same curve as scroll). */
+    function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+    /* The edge trigger only exists while the drawer rests closed. It
+       flips at tween COMPLETION (not start): flipping mid-flight would
+       steal hover from the animating drawer (or park it on the drawer)
+       and read as a bogus leave/enter, retracting a drawer the pointer
+       is still inside. */
+    function setTriggerVisible(visible) {
+      var trigger = document.getElementById("side-trigger");
+      if (trigger) { trigger.style.display = visible ? "block" : "none"; }
+    }
+
+    /* Last seen pointer position (viewport cells), kept current from
+       every bubbled mouseover so the close decision can verify where
+       the pointer really is before retracting. */
+    var lastPX = -1;
+    var lastPY = -1;
+    document.body.addEventListener("mouseover", function (e) {
+      lastPX = e.clientX;
+      lastPY = e.clientY;
+    });
+
+    function pointerInDrawer() {
+      if (lastPX < 0) { return false; }
+      var side = document.getElementById("music-side");
+      if (!side) { return false; }
+      var r = side.getBoundingClientRect();
+      return lastPX >= r.left && lastPX < r.right && lastPY >= r.top && lastPY < r.bottom;
+    }
+
+    function setLibrary(open) {
+      libraryOpen = open;
+      if (sideTimer !== null) { cancelAnimationFrame(sideTimer); sideTimer = null; }
+      var side = document.getElementById("music-side");
+
+      var rest = atRestBasis();
+      /* Retarget from wherever the drawer currently is: reversing
+         mid-animation extends the glide instead of jumping. */
+      var from = sideBasis;
+      var to = open ? rest.v : 0;
+      /* Travel-proportional duration: a full swing takes the max, a
+         quick retarget mid-flight lands proportionally faster. */
+      var MIN_MS = 80;
+      /* Retracts are snappier than the reveal: leaving should feel like the
+         drawer gets out of the way, not like a second animation starts. */
+      var MAX_MS = open ? 280 : 160;
+      var duration = Math.max(MIN_MS, Math.min(MAX_MS, Math.abs(to - from) / rest.v * MAX_MS));
+
+      side.style.display = "flex";
+      side.style.minWidth = "0";
+      /* Pin the inline basis in the same JS turn as the display flip: a
+         from-rest open must not paint one frame at the stylesheet width. */
+      side.style.flexBasis = from + rest.u;
+      sideBasis = from;
+      sideUnit = rest.u;
+
+      if (from === to) {
+        if (!open) { side.style.display = "none"; }
+        setTriggerVisible(!open);
+        return;
+      }
+
+      /* The first frame anchors the tween clock, so t is a pure function
+         of the animation timeline and a dropped frame shows the correct
+         current position. */
+      var start = null;
+
+      function step(ts) {
+        if (start === null) { start = ts; }
+        var t = Math.min(1, (ts - start) / duration);
+        /* Two decimals: every frame lands on its own terminal column. */
+        var basis = Math.round((from + (to - from) * easeOutCubic(t)) * 100) / 100;
+        /* Skip no-op writes: a repeated value still costs a full
+           re-cascade + re-layout + repaint. */
+        if (basis !== sideBasis) {
+          sideBasis = basis;
+          side.style.flexBasis = basis + sideUnit;
+        }
+        if (t < 1) {
+          sideTimer = requestAnimationFrame(step);
+        } else {
+          sideTimer = null;
+          if (!open) { side.style.display = "none"; }
+          setTriggerVisible(!open);
+          /* Drop the inline override; the stylesheet basis takes over. */
+          side.style.flexBasis = "";
+          side.style.minWidth = "";
+        }
+      }
+      sideTimer = requestAnimationFrame(step);
+    }
+
+    /* Hover zone = edge trigger + drawer. mouseover/out bubble in both
+       the browser and htui, so one handler pair covers descendants. */
+    function sideEnter() {
+      if (closeTimer !== null) { clearTimeout(closeTimer); closeTimer = null; }
+      if (!libraryOpen) { setLibrary(true); }
+    }
+
+    /* Leaving the zone retracts after a short grace period; re-entering
+       cancels the pending close (covers the trigger-to-drawer gap). The
+       timer double-checks the pointer against the drawer rect, so a
+       leave produced by the trigger flipping (not by the pointer) can
+       never retract a drawer the pointer still rests in. */
+    function sideLeave() {
+      if (!libraryOpen || closeTimer !== null) { return; }
+      closeTimer = setTimeout(function () {
+        closeTimer = null;
+        if (libraryOpen && !pointerInDrawer()) { setLibrary(false); }
+      /* 0ms grace: within-drawer moves dispatch leave+enter in the SAME move
+         (enter cancels before any timer callback can run); the rect check
+         guards the trigger-flip artifact. So the retract starts on the very
+         next script-loop turn after a genuine exit. */
+      }, 0);
+    }
+
     function toggleRepeat() { repeat = !repeat; update(); }
     function toggleShuffle() { shuffle = !shuffle; update(); }
-    function volDown() { if (volume > 0) { volume--; updateVolume(); } }
-    function volUp() { if (volume < VOL_N) { volume++; updateVolume(); } }
 
     function setTab(t) {
       tab = t;
@@ -562,8 +1019,9 @@
 
     /* ---------- spectrum ---------- */
     var vizLevels = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    var vizTick = 0;
     var vizPhase = 0;
+    var vizTimer = null;
+    var VIZ_INTERVAL_MS = 150;
 
     function renderViz() {
       var left = "";
@@ -571,7 +1029,7 @@
       for (var row = 0; row < VIZ_H; row++) {
         var lineL = "";
         var lineR = "";
-        for (var col = 0; col < 16; col++) {
+        for (var col = 0; col < VIZ_COLS; col++) {
           var rem = VIZ_H - 1 - row;
           var lv = vizLevels[col] * VIZ_H;
           var filled = Math.floor(lv);
@@ -588,20 +1046,34 @@
       $("viz-r").textContent = right;
     }
 
-    function tickViz() {
-      vizTick++;
-      /* rAF fires ~60fps; only touch the DOM every 9th frame (~150ms).
-         Without this the script thread drowns in repaint commands and
-         click handling feels laggy / queued clicks fire in bursts. */
-      if (vizTick % 9 !== 0) { return; }
+    /* The meter updates at ~7 Hz (every DOM write costs a full re-cascade,
+       so 60fps would starve click handling), decaying to the idle floor
+       after pause and stopping entirely until playback resumes — a permanent
+       60fps rAF would pin the input loop at animation cadence forever. */
+    function stepViz() {
       vizPhase++;
-      for (var i = 0; i < 16; i++) {
+      var settled = !playing;
+      for (var i = 0; i < VIZ_COLS; i++) {
         var base = 0.5 + 0.5 * Math.sin(vizPhase * 0.35 + i * 0.85);
         var target = playing ? base * (0.3 + 0.7 * Math.random()) : 0.05;
         vizLevels[i] = vizLevels[i] + (target - vizLevels[i]) * 0.5;
         if (vizLevels[i] < 0.02) { vizLevels[i] = 0.02; }
+        if (playing || Math.abs(vizLevels[i] - 0.05) > 0.005) { settled = false; }
       }
       renderViz();
+      return settled;
+    }
+
+    /* (Re)arm the meter loop; a no-op while it is already running. Called
+       from refresh() so every playback state change re-drives it. */
+    function syncViz() {
+      if (vizTimer !== null) { return; }
+      vizTimer = setInterval(function () {
+        if (stepViz()) {
+          clearInterval(vizTimer);
+          vizTimer = null;
+        }
+      }, VIZ_INTERVAL_MS);
     }
 
     /* ---------- timers ---------- */
@@ -611,6 +1083,7 @@
     }, 1000);
 
     setInterval(function () {
+      if (seeking && Date.now() - lastScrubAt >= 1000) { seeking = false; }
       if (!playing) { return; }
       elapsed++;
       if (elapsed >= tracks[current].dur) {
@@ -625,8 +1098,10 @@
       renderLyrics();
     }, 1000);
 
+    /* Start closed: the drawer pops out when the rail senses the pointer. */
+    setLibrary(false);
+
     refresh();
-    requestAnimationFrame(tickViz);
   </script>
 </body>
 </html>

@@ -1,9 +1,9 @@
 //! Page text selection: per-row line bands, highlight bounds and text
-//! extraction over the painted canvas.
+//! extraction from the layout inline runs.
 
 use crate::layout::{LayoutBox, Rect};
 use crate::tdom::node::NodeArena;
-use crate::tui::graph_api::{SelectionMode, TermLayout};
+use crate::tui::graph_api::SelectionMode;
 
 use super::state::TextSel;
 
@@ -81,36 +81,12 @@ pub(super) fn highlight_lines(
 ) -> Vec<(u32, u32, u32)> {
     let raw = selection_lines(sel, cols);
     match sel.mode {
-        SelectionMode::Flow => crate::layout::selection_text_lines(arena, boxes, &raw),
+        SelectionMode::Flow => {
+            // Keep the drag inside the block it started in: a vertical drag
+            // in one column must not highlight a side-by-side card's text.
+            let raw = crate::layout::clip_flow_lines_scoped(boxes, sel.anchor, sel.end, &raw);
+            crate::layout::selection_text_lines(arena, boxes, &raw)
+        }
         SelectionMode::Block => raw,
     }
-}
-
-/// Extract the text covered by the selection's line bands, row by row.
-///
-/// Filler cells of wide glyphs are skipped (their glyph lives in the first
-/// column), and trailing spaces are trimmed per row so a flow selection of a
-/// paragraph does not copy its right-edge padding.
-pub(super) fn extract_selection(tl: &TermLayout, lines: &[(u32, u32, u32)]) -> String {
-    let cols = tl.columns as usize;
-    let max = tl.layout.len();
-    let mut out = String::new();
-    for &(y, xs, xe) in lines {
-        let row_start = (y as usize).saturating_mul(cols);
-        let xe = (xe as usize).min(cols);
-        let mut line = String::new();
-        for x in (xs as usize)..xe {
-            let idx = row_start.saturating_add(x);
-            if idx >= max {
-                break;
-            }
-            let word = &tl.layout[idx].word;
-            if !word.is_empty() {
-                line.push_str(word);
-            }
-        }
-        out.push_str(line.trim_end());
-        out.push('\n');
-    }
-    out
 }

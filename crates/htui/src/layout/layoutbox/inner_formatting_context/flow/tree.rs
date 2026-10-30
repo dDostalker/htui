@@ -11,6 +11,8 @@
 //! flex containers first, and non-flex nodes fall through to the per-element
 //! block handlers declared in this module's siblings.
 
+use std::collections::HashMap;
+
 use crate::{
     html::css_parse::{FontContext, Viewport, WhiteSpace},
     layout::{
@@ -37,6 +39,33 @@ pub fn layout_tree(
     viewport_cols: usize,
     viewport_rows: usize,
 ) -> Vec<LayoutBox> {
+    let scroll_offsets = HashMap::new();
+    layout_tree_with_scroll_offsets(
+        arena,
+        root_id,
+        containing,
+        cursor,
+        viewport_cols,
+        viewport_rows,
+        &scroll_offsets,
+        &NO_X,
+    )
+}
+
+/// Empty x-offset table for the compatibility wrapper.
+static NO_X: std::sync::LazyLock<HashMap<NodeId, u32>> = std::sync::LazyLock::new(HashMap::new);
+
+/// Build a layout forest while preserving native scroll-container offsets.
+pub fn layout_tree_with_scroll_offsets(
+    arena: &NodeArena,
+    root_id: NodeId,
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+    viewport_cols: usize,
+    viewport_rows: usize,
+    scroll_offsets: &HashMap<NodeId, u32>,
+    scroll_x_offsets: &HashMap<NodeId, u32>,
+) -> Vec<LayoutBox> {
     // The top level dispatches one box per rendered root child. Root-level
     // `display: contents` elements splice their children into the sibling
     // list first — the same flatten every block walk applies — and each
@@ -57,6 +86,8 @@ pub fn layout_tree(
                 cols: viewport_cols,
                 rows: viewport_rows,
             },
+            scroll_offsets,
+            scroll_x_offsets,
         },
     );
     // Positioned boxes resolve against their containing blocks once the whole

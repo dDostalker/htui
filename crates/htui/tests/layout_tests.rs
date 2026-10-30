@@ -973,3 +973,162 @@ fn test_hsl_background_through_cascade_and_paint() {
         "hsl() through the `background` shorthand must paint the canvas"
     );
 }
+
+#[test]
+fn test_linear_gradient_background_paints_each_cell() {
+    init();
+    let html = "<div id='gradient'>ok</div>";
+    let css = "#gradient { width: 20ch; height: 2; \
+               background: linear-gradient(to right, red, blue); }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let first = tl.layout[0].bcolor.expect("gradient start color");
+    let last = tl.layout[19].bcolor.expect("gradient end color");
+    assert_ne!(first, last);
+    assert!(
+        matches!(first, Color::Rgb { r, b, .. } if r > b),
+        "the left edge should lean red, got {first:?}"
+    );
+    assert!(
+        matches!(last, Color::Rgb { r, b, .. } if b > r),
+        "the right edge should lean blue, got {last:?}"
+    );
+    assert!(tl.layout[..20].iter().all(|cell| cell.bcolor.is_some()));
+}
+
+#[test]
+fn test_child_preserves_gradient_origin_from_parent() {
+    init();
+    let html = "<div id='gradient'><div>one</div><div>two</div></div>";
+    let css = "#gradient { width: 20ch; height: 4ch; \
+               background: linear-gradient(to bottom, red, blue); } \
+               #gradient > div { height: 1ch; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let cols = term_map.columns as usize;
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let first = tl.layout[0].bcolor.expect("first child background");
+    let second = tl.layout[cols].bcolor.expect("second child background");
+    assert!(
+        matches!((first, second), (
+            Color::Rgb { b: first_b, .. },
+            Color::Rgb { b: second_b, .. }
+        ) if second_b > first_b),
+        "child fills must continue the parent gradient: {first:?} -> {second:?}"
+    );
+}
+
+#[test]
+fn test_background_clip_text_paints_gradient_glyphs() {
+    init();
+    let html = "<div id='text'>AB</div>";
+    let css = "#text { width: 2ch; color: transparent; \
+               background: linear-gradient(to right, red, blue); \
+               background-clip: text; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let first = tl.layout[0].fcolor.expect("first glyph color");
+    let second = tl.layout[1].fcolor.expect("second glyph color");
+    assert!(
+        matches!(first, Color::Rgb { r, b, .. } if r > b)
+            && matches!(second, Color::Rgb { r, b, .. } if b > r),
+        "text gradient should progress from red to blue: {first:?} -> {second:?}"
+    );
+    assert!(
+        tl.layout[..2].iter().all(|cell| cell.bcolor.is_none()),
+        "background-clip: text must not paint the box background"
+    );
+}
+
+#[test]
+fn example_spectrum_stays_inside_sidebar_scroll_area() {
+    init();
+    let html = include_str!("../../../example/src/player.html")
+        // The sidebar is edge-triggered in the live demo; make it visible for
+        // this pure-layout regression test.
+        .replace(
+            "<div id=\"music-side\" class=\"side\" style=\"display:none\"",
+            "<div id=\"music-side\" class=\"side\"",
+        )
+        .replace(
+            "<div id=\"viz-l\" class=\"viz-pre\"> </div>",
+            "<div id=\"viz-l\" class=\"viz-pre\">1&#9601;2&#9602;3&#9603;4&#9604;</div>",
+        )
+        .replace(
+            "<div id=\"viz-r\" class=\"viz-pre\"> </div>",
+            "<div id=\"viz-r\" class=\"viz-pre\">8&#9608;7&#9607;6&#9606;5&#9605;</div>",
+        );
+    let mut html_parser = html_parse::Parser::new(&html);
+    let (root_id, base_arena, embedded_css) = html_parser.parse();
+
+    for (cols, rows) in [(100, 30), (80, 24), (60, 20), (50, 20), (40, 20)] {
+        let mut arena = base_arena.clone();
+        let mut css_parser = css_parse::Parser::new(&embedded_css);
+        let rules = css_parser.parse();
+        css_parse::css_into_node_with_state(
+            &mut arena,
+            root_id,
+            &rules,
+            &css_parse::DynamicState {
+                viewport: css_parse::Viewport { cols, rows },
+                ..Default::default()
+            },
+        );
+        let term_map = TermMap {
+            columns: cols as u16,
+            rows: rows as u16,
+        };
+        let mut tl = TermLayout::new(&term_map, 1.0);
+        let boxes = tl.draw(&arena, root_id, &term_map);
+
+        fn find<'a>(
+            arena: &NodeArena,
+            boxes: &'a [htui::layout::LayoutBox],
+            class_name: &str,
+        ) -> Option<&'a htui::layout::LayoutBox> {
+            for lb in boxes {
+                let class = arena[lb.node_id]
+                    .attributes
+                    .get("class")
+                    .map(String::as_str)
+                    .unwrap_or("");
+                if class.split_whitespace().any(|part| part == class_name) {
+                    return Some(lb);
+                }
+                if let Some(found) = find(arena, &lb.children, class_name) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+
+        let side = find(&arena, &boxes, "side").expect("sidebar exists");
+        let scroll = find(&arena, &boxes, "side-scroll").expect("sidebar scroll exists");
+        let spectrum = find(&arena, &boxes, "spectrum-card").expect("spectrum card exists");
+        let viz = find(&arena, &boxes, "viz-pre").expect("spectrum bars exist");
+
+        assert!(
+            scroll.rect.y.saturating_add(scroll.rect.height)
+                <= side.rect.y.saturating_add(side.rect.height),
+            "{cols}x{rows}: sidebar scroll must stay inside the sidebar"
+        );
+        assert!(
+            spectrum.rect.y >= scroll.rect.y
+                && spectrum.rect.y < scroll.rect.y.saturating_add(scroll.rect.height),
+            "{cols}x{rows}: spectrum card must start inside the scroll viewport"
+        );
+        assert!(
+            viz.rect.x.saturating_add(viz.rect.width)
+                <= scroll.rect.x.saturating_add(scroll.rect.width),
+            "{cols}x{rows}: spectrum must not paint outside the scroll area"
+        );
+    }
+}

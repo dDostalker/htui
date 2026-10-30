@@ -31,9 +31,9 @@ use crossterm::style::Color;
 
 use crate::{
     graphics::{Block, FontStyle, ImageCache, InputRenderState, TermLayout},
-    html::css_parse::{Position, Visibility},
+    html::css_parse::{Background, Position, Visibility},
     layout::{BoxKind, LayoutBox, Rect, ReplacedContent},
-    tdom::node::{NodeArena, NodeId, NodeType},
+    tdom::node::{Node, NodeArena, NodeId, NodeType},
 };
 
 use self::block::paint_block;
@@ -50,20 +50,60 @@ use self::textarea::paint_textarea;
 /// mirroring a browser's UA field colour.
 pub(super) const CONTROL_DEFAULT_BG: Color = Color::DarkGrey;
 
+/// Highlight colour for the selected character range of an editable control
+/// (`<input>` / `<textarea>`) — the same Tokyo Night selection the page
+/// selection uses.
+pub(super) const SELECTION_BG: Color = Color::Rgb {
+    r: 0x3b,
+    g: 0x42,
+    b: 0x61,
+};
+
+/// Shared prelude of the replaced-control painters: clamp the control's rect
+/// to the canvas, then intersect with the inherited clip. `None` when the
+/// control paints nothing.
+pub(super) fn control_clip(lb: &LayoutBox, canvas: &PaintCanvas<'_>, clip: Rect) -> Option<Rect> {
+    let r = clamp_rect_to_canvas(lb.rect, canvas.columns as usize)?;
+    intersect_rects(r, clip)
+}
+
+/// `(fg, bg)` pair painting the caret block: `caret-color` paints the caret
+/// with the declared colour; the default is the inverted cell (field
+/// background ↔ text colour swap).
+pub(super) fn caret_cell(
+    node: &Node,
+    fg: Option<Color>,
+    bg: Option<Color>,
+) -> (Option<Color>, Option<Color>) {
+    match node.css_attr.get_caret_color() {
+        Some(cc) => (Some(bg.unwrap_or(Color::Black)), Some(cc)),
+        None => (
+            Some(bg.unwrap_or(Color::Black)),
+            Some(fg.unwrap_or(Color::White)),
+        ),
+    }
+}
+
 /// Paint a replaced control's shared chrome: the background fill across the
 /// whole border-box (the CSS `background-color`, or [`CONTROL_DEFAULT_BG`]
 /// when unset), then the CSS `border` frame when one is declared. Returns the
 /// content rect — the border-box shrunk by the border thickness — that the
-/// caller draws its value / label into; with no border this is the full box.
+/// caller draws its value / label into (with no border this is the full box),
+/// plus the resolved background so callers can sample per-cell colours
+/// without resolving it a second time.
 pub(super) fn paint_control_chrome(
     lb: &LayoutBox,
     arena: &NodeArena,
     canvas: &mut PaintCanvas<'_>,
     rect: Rect,
     fg: Option<Color>,
-) -> Rect {
+) -> (Rect, Background) {
     let node = &arena[lb.node_id];
-    let bg = node.css_attr.get_bg_color().or(Some(CONTROL_DEFAULT_BG));
+    let bg = control_background(node);
+    let bg_fill = BackgroundFill {
+        background: &bg,
+        rect,
+    };
     let cols = canvas.columns as usize;
     let start = canvas.cell_index(rect.x, rect.y);
     for row_off in 0..rect.height {
@@ -74,7 +114,7 @@ pub(super) fn paint_control_chrome(
                 if cell.word.is_empty() {
                     cell.word.push(' ');
                 }
-                cell.bcolor = bg;
+                cell.bcolor = bg_fill.color_at(rect.x + col_off, rect.y + row_off);
             }
         }
     }
@@ -82,23 +122,47 @@ pub(super) fn paint_control_chrome(
     // resolved at layout time).
     let sides = &lb.paint_style.box_edges.border;
     if sides.any_visible() {
-        paint_borders(lb, rect, canvas, fg, bg);
+        // `rect` arrives pre-clipped from the control painters; clipping the
+        // glyphs to the rect itself is a no-op that keeps every cell they
+        // already painted reachable.
+        paint_borders(lb, rect, canvas, fg, Some(bg_fill), rect);
     }
-    Rect::new(
-        rect.x.saturating_add(sides.left.thickness()),
-        rect.y.saturating_add(sides.top.thickness()),
-        rect.width
-            .saturating_sub(sides.left.thickness())
-            .saturating_sub(sides.right.thickness()),
-        rect.height
-            .saturating_sub(sides.top.thickness())
-            .saturating_sub(sides.bottom.thickness()),
+    (
+        Rect::new(
+            rect.x.saturating_add(sides.left.thickness()),
+            rect.y.saturating_add(sides.top.thickness()),
+            rect.width
+                .saturating_sub(sides.left.thickness())
+                .saturating_sub(sides.right.thickness()),
+            rect.height
+                .saturating_sub(sides.top.thickness())
+                .saturating_sub(sides.bottom.thickness()),
+        ),
+        bg,
     )
+}
+
+/// Resolve a replaced control's background, falling back to the UA field
+/// colour. Gradients use the same CSS background parser as normal boxes.
+pub(super) fn control_background(node: &Node) -> Background {
+    node.css_attr
+        .get_background()
+        .unwrap_or(Background::Color(CONTROL_DEFAULT_BG))
+}
+
+/// Resolve a replaced control's background at one absolute canvas cell.
+pub(super) fn control_background_at(
+    background: &Background,
+    x: usize,
+    y: usize,
+    rect: Rect,
+) -> Option<Color> {
+    background_at(Some(BackgroundFill { background, rect }), x, y)
 }
 
 /// Shared caret-centred value-window computation for `<input>` fields, used by
 /// both the painter and the input loop's column→character mapping.
-pub(crate) use self::input::value_window;
+pub(crate) use self::input::{range_is_vertical, range_spec, value_window};
 /// Shared `<textarea>` line math (visual lines / caret position / scroll /
 /// inverse mapping), used by the painter and the input loop's caret movement
 /// and click placement.
@@ -129,6 +193,9 @@ pub(super) struct PaintCanvas<'a> {
     /// The `<select>` node whose dropdown is currently open (`None` = none).
     /// Read by the select painter for the open-frame colour.
     pub open_select: Option<NodeId>,
+    /// Whether each native scrollbar paints in this pass. Their geometry stays
+    /// available for hit-testing while the chrome is hidden.
+    pub scrollbars_visible: &'a HashMap<NodeId, bool>,
 }
 
 impl<'a> PaintCanvas<'a> {
@@ -221,6 +288,7 @@ pub fn paint_layout_tree(boxes: &[LayoutBox], arena: &NodeArena, term_layout: &m
         region: None,
         input_states: &term_layout.input_states,
         open_select: term_layout.open_select,
+        scrollbars_visible: &term_layout.scrollbars_visible,
     };
     for b in boxes {
         paint_box(b, arena, &mut canvas, None, None);
@@ -264,6 +332,7 @@ pub fn paint_layout_tree_region(
         region: Some(region),
         input_states: &term_layout.input_states,
         open_select: term_layout.open_select,
+        scrollbars_visible: &term_layout.scrollbars_visible,
     };
     for b in boxes {
         if intersect_rects(b.rect, region).is_some() {
@@ -293,30 +362,20 @@ fn fill_canvas_background(
     };
     let cols = canvas.columns as usize;
     let rows = canvas.layout.len() / cols;
+    let bg_rect = Rect::new(0, 0, cols, rows);
     let start_row = content_bottom.min(rows);
-    let region = canvas.region;
     for y in start_row..rows {
         let row_start = y * cols;
-        for (i, cell) in canvas.layout[row_start..row_start + cols]
-            .iter_mut()
-            .enumerate()
-        {
-            let in_region = match region {
-                None => true,
-                Some(r) => {
-                    i >= r.x
-                        && i < r.x.saturating_add(r.width)
-                        && y >= r.y
-                        && y < r.y.saturating_add(r.height)
-                }
-            };
-            if !in_region {
+        for i in 0..cols {
+            let idx = row_start + i;
+            if !canvas.in_region(idx) {
                 continue;
             }
+            let cell = &mut canvas.layout[idx];
             // Only still-default cells: never clobber content that happens to
             // sit below `content_bottom` (e.g. a positioned child).
             if cell.word == " " && cell.bcolor.is_none() && cell.style.is_empty() {
-                cell.bcolor = Some(bg);
+                cell.bcolor = bg.color_at(i, y, bg_rect.width, bg_rect.height);
             }
         }
     }
@@ -325,7 +384,7 @@ fn fill_canvas_background(
 /// The colour the canvas should paint: the `<html>` background, or the
 /// `<body>` background when `<html>` has none (browser propagation). `None`
 /// when neither element paints one.
-fn find_canvas_background(boxes: &[LayoutBox], arena: &NodeArena) -> Option<Color> {
+fn find_canvas_background(boxes: &[LayoutBox], arena: &NodeArena) -> Option<Background> {
     for b in boxes {
         if let Some(bg) = box_canvas_background(b, arena) {
             return Some(bg);
@@ -334,15 +393,18 @@ fn find_canvas_background(boxes: &[LayoutBox], arena: &NodeArena) -> Option<Colo
     None
 }
 
-fn box_canvas_background(lb: &LayoutBox, arena: &NodeArena) -> Option<Color> {
+fn box_canvas_background(lb: &LayoutBox, arena: &NodeArena) -> Option<Background> {
     let node = &arena[lb.node_id];
     if node.node_type == NodeType::Html {
-        if let Some(bg) = node.css_attr.get_bg_color() {
+        if !node.css_attr.background_clips_to_text()
+            && let Some(bg) = node.css_attr.get_background()
+        {
             return Some(bg);
         }
         for child in &lb.children {
             if arena[child.node_id].node_type == NodeType::Body
-                && let Some(bg) = arena[child.node_id].css_attr.get_bg_color()
+                && !arena[child.node_id].css_attr.background_clips_to_text()
+                && let Some(bg) = arena[child.node_id].css_attr.get_background()
             {
                 return Some(bg);
             }
@@ -355,6 +417,41 @@ fn box_canvas_background(lb: &LayoutBox, arena: &NodeArena) -> Option<Color> {
         }
     }
     None
+}
+
+/// A background source plus the rectangle its gradient coordinates use.
+#[derive(Clone, Copy)]
+pub(super) struct BackgroundFill<'a> {
+    pub background: &'a Background,
+    pub rect: Rect,
+}
+
+impl BackgroundFill<'_> {
+    pub(super) fn color_at(&self, x: usize, y: usize) -> Option<Color> {
+        self.background.color_at(
+            x.saturating_sub(self.rect.x),
+            y.saturating_sub(self.rect.y),
+            self.rect.width,
+            self.rect.height,
+        )
+    }
+}
+
+/// Resolve an inherited background at one canvas cell.
+pub(super) fn background_at(fill: Option<BackgroundFill<'_>>, x: usize, y: usize) -> Option<Color> {
+    fill.and_then(|fill| fill.color_at(x, y))
+}
+
+/// Resolve a text glyph's foreground, preferring an explicit solid color and
+/// falling back to the per-cell background sample used by
+/// `background-clip: text`.
+pub(super) fn text_color_at(
+    fg: Option<Color>,
+    fill: Option<BackgroundFill<'_>>,
+    x: usize,
+    y: usize,
+) -> Option<Color> {
+    fg.or_else(|| background_at(fill, x, y))
 }
 
 /// Clamp `a` to the intersection with `b`, or return `None` when the two
@@ -414,7 +511,7 @@ fn paint_box(
     lb: &LayoutBox,
     arena: &NodeArena,
     canvas: &mut PaintCanvas<'_>,
-    parent_bg: Option<Color>,
+    parent_bg: Option<BackgroundFill<'_>>,
     clip: Option<Rect>,
 ) {
     let canvas_cols = canvas.columns as usize;
@@ -426,17 +523,10 @@ fn paint_box(
     // the content area / children clip derived below also end at the canvas
     // edge — otherwise a child's background would cover the parent's
     // (clamped) border cell and leave the frame with a hole on the right
-    // side when the terminal shrinks.
-    let rect = if lb.rect.x >= canvas_cols || lb.rect.width == 0 {
-        lb.rect
-    } else {
-        Rect::new(
-            lb.rect.x,
-            lb.rect.y,
-            lb.rect.width.min(canvas_cols.saturating_sub(lb.rect.x)),
-            lb.rect.height,
-        )
-    };
+    // side when the terminal shrinks. A rect beyond the canvas / zero-width
+    // keeps its geometry: the zero-area branch below still lets positioned
+    // children paint.
+    let rect = clamp_rect_to_canvas(lb.rect, canvas_cols).unwrap_or(lb.rect);
     // This box's own clip = inherited clip ∩ own border-box. A box never
     // paints outside its ancestors' borders.
     let own_clip = match clip {
@@ -471,7 +561,7 @@ fn paint_box(
         })
     };
     let my_bg = match &lb.kind {
-        BoxKind::Normal => arena[lb.node_id].css_attr.get_bg_color(),
+        BoxKind::Normal => arena[lb.node_id].css_attr.get_background(),
         BoxKind::Replaced(_) => None,
         BoxKind::Anonymous => None,
     };
@@ -486,7 +576,7 @@ fn paint_box(
     if !visibility_hidden {
         match &lb.kind {
             BoxKind::Normal => {
-                paint_block(lb, arena, canvas, my_bg, parent_bg, own_paint_clip);
+                paint_block(lb, arena, canvas, my_bg.as_ref(), parent_bg, own_paint_clip);
             }
             BoxKind::Replaced(ReplacedContent::Image { cols, rows, .. }) => {
                 paint_image(lb, canvas, *cols, *rows, own_clip);
@@ -513,7 +603,14 @@ fn paint_box(
     // any descendant. If the current box has its own bg, that wins; otherwise
     // we inherit. This is what lets `<aside bg=cyan><p>30col</p></aside>`
     // render the text with cyan bg even though `<p>` itself has no bg.
-    let effective_bg = my_bg.or(parent_bg);
+    let effective_bg = if arena[lb.node_id].css_attr.background_clips_to_text() {
+        parent_bg
+    } else {
+        my_bg
+            .as_ref()
+            .map(|background| BackgroundFill { background, rect })
+            .or(parent_bg)
+    };
     // Children of a clipping box are bounded by the content-box (the rect
     // shrunk by border + padding): anything that spills out of it — e.g. a
     // squeezed flex item's wrapped lines — is dropped rather than painted
@@ -540,6 +637,57 @@ fn paint_box(
         clip
     };
     paint_children(lb, arena, canvas, effective_bg, children_clip);
+    paint_scrollbar(lb, arena, canvas);
+}
+
+/// Paint the native scrollbars after clipped content so they always overlay
+/// the container's right gutter (vertical) / bottom edge (horizontal).
+fn paint_scrollbar(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintCanvas<'_>) {
+    if !canvas
+        .scrollbars_visible
+        .get(&lb.node_id)
+        .copied()
+        .unwrap_or(false)
+    {
+        return;
+    }
+    let Some(scroll) = lb.paint_style.scrollbar else {
+        return;
+    };
+    let fg = arena
+        .get(lb.node_id)
+        .and_then(|node| node.css_attr.get_color());
+    let dim = Some(fg.unwrap_or(crossterm::style::Color::DarkGrey));
+    if let Some(track) = clamp_rect_to_canvas(scroll.track, canvas.columns as usize) {
+        for y in track.y..track.y.saturating_add(track.height) {
+            let inside_thumb =
+                y >= scroll.thumb.y && y < scroll.thumb.y.saturating_add(scroll.thumb.height);
+            put(
+                canvas,
+                cell_index(canvas, track.x, y),
+                Some(if inside_thumb { '\u{2588}' } else { '\u{2502}' }),
+                dim,
+                None,
+            );
+        }
+    }
+    // Horizontal chrome: one-row bottom track, `─` track cells and a `█`
+    // thumb over the viewport columns.
+    if let Some(h_track) = clamp_rect_to_canvas(scroll.h_track, canvas.columns as usize)
+        && h_track.height > 0
+    {
+        for x in h_track.x..h_track.x.saturating_add(h_track.width) {
+            let inside_thumb =
+                x >= scroll.h_thumb.x && x < scroll.h_thumb.x.saturating_add(scroll.h_thumb.width);
+            put(
+                canvas,
+                cell_index(canvas, x, h_track.y),
+                Some(if inside_thumb { '\u{2588}' } else { '\u{2500}' }),
+                dim,
+                None,
+            );
+        }
+    }
 }
 
 /// Paint `lb`'s children in stacking order.
@@ -556,7 +704,7 @@ fn paint_children(
     lb: &LayoutBox,
     arena: &NodeArena,
     canvas: &mut PaintCanvas<'_>,
-    effective_bg: Option<Color>,
+    effective_bg: Option<BackgroundFill<'_>>,
     children_clip: Option<Rect>,
 ) {
     for child in sorted_children(lb) {

@@ -8,7 +8,9 @@ use boa_engine::JsValue;
 use crossterm::style::Color;
 use htui::events::{
     ElementRef, EventBindings, EventType, Geometry, HitMap, HitRegion,
-    interaction::{HoverState, on_click, on_move},
+    interaction::{
+        HoverState, on_click, on_mouse_down, on_mouse_move_dispatch, on_mouse_up, on_move,
+    },
 };
 use htui::html::css_parse::{
     DynamicState, Parser as CssParser, PseudoClass, Selector, css_into_node,
@@ -392,6 +394,39 @@ fn drag_on_page_text_emits_text_selection() {
 }
 
 #[test]
+fn page_drag_fires_selectionchange_at_gesture_end() {
+    // Browser selectionchange is a coalesced change notification rather than
+    // one event per pointer pixel. The terminal gesture boundary is mouse-up.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+             globalThis.selectionChanges = 0;
+             window.addEventListener('selectionchange', () => {
+               globalThis.selectionChanges += 1;
+             });
+           </script>
+           <div id="a">some text</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let mut state = InputState::new();
+    mouse_down(&mut state, &mut engine, &map, 0, 0, MouseButton::Left);
+    state.pressed = Some((0, 0));
+    let _ = mouse_move(&mut state, &mut engine, &map, 4, 0);
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.selectionChanges)"),
+        "0",
+        "drag motion must not flood selectionchange"
+    );
+
+    mouse_up(&mut state, &mut engine, &map, 4, 0);
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.selectionChanges)"),
+        "1",
+        "selectionchange fires once when the drag gesture ends"
+    );
+}
+
+#[test]
 fn pressing_elsewhere_replaces_the_page_selection() {
     // A second press clears the previous selection (rendering it away); the
     // new selection is anchored only once its drag begins — the render thread
@@ -401,9 +436,9 @@ fn pressing_elsewhere_replaces_the_page_selection() {
     let map = HitMap::build(&geo);
 
     let mut state = InputState::new();
-    mouse_down(&mut state, &mut engine, &map, 5, 5, MouseButton::Left);
+    mouse_down(&mut state, &mut engine, &map, 0, 0, MouseButton::Left);
     state.pressed = Some((0, 0));
-    mouse_move(&mut state, &mut engine, &map, 8, 5);
+    mouse_move(&mut state, &mut engine, &map, 3, 0);
     assert!(state.text_sel_anchor.is_some(), "a selection now exists");
 
     let cmds = mouse_down(&mut state, &mut engine, &map, 2, 2, MouseButton::Left);
@@ -421,6 +456,34 @@ fn pressing_elsewhere_replaces_the_page_selection() {
     assert_eq!(
         state.text_sel_anchor, None,
         "the new selection is deferred until its drag begins"
+    );
+}
+
+#[test]
+fn blank_body_press_can_anchor_an_upward_flow_drag() {
+    // A browser can start a drag in body whitespace outside the text box. The
+    // terminal hit map has no box there, but body remains the implicit target;
+    // dragging upward may then enter text and produce a selection.
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="text">some text</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let mut state = InputState::new();
+    mouse_down(&mut state, &mut engine, &map, 5, 5, MouseButton::Left);
+    state.pressed = Some((5, 5));
+    let cmds = mouse_move(&mut state, &mut engine, &map, 3, 0);
+
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            RenderCmd::TextSelection {
+                anchor: Some((5, 5)),
+                end: Some((3, 0)),
+                mode: SelectionMode::Flow
+            }
+        )),
+        "body whitespace must be usable as a flow-selection origin"
     );
 }
 
@@ -501,6 +564,76 @@ fn jittery_click_on_a_button_leaves_no_selection() {
     mouse_up(&mut state, &mut engine, &map, (bx + 1) as u16, by as u16);
     assert_eq!(state.text_sel_anchor, None, "no residue after release");
     assert_eq!(state.text_sel_end, None);
+}
+
+#[test]
+fn drag_from_a_button_never_selects_page_text_or_clicks() {
+    // A button owns its gesture. Even when the pointer travels far enough to
+    // be a drag, it must not arm the page flow selection; and because the
+    // gesture crossed the drag threshold, release must not activate it either.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+             globalThis.clicks = 0;
+             document.getElementById('btn')
+               .addEventListener('click', () => globalThis.clicks += 1);
+           </script>
+           <button id="btn">Save</button><div id="next">other</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let btn = map.resolve_by_id("btn").expect("button region");
+    let (bx, by) = center(btn.rect);
+
+    let mut state = InputState::new();
+    mouse_down(&mut state, &mut engine, &map, bx, by, MouseButton::Left);
+    state.pressed = Some((bx as u16, by as u16));
+
+    let cmds = mouse_move(&mut state, &mut engine, &map, bx + 3, by);
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, RenderCmd::TextSelection { .. })),
+        "a drag originating on a button must not queue a page TextSelection"
+    );
+    assert_eq!(state.text_sel_anchor, None);
+    assert_eq!(state.text_sel_end, None);
+
+    mouse_up(&mut state, &mut engine, &map, (bx + 3) as u16, by as u16);
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.clicks)"),
+        "0",
+        "a real drag must not turn into a button click"
+    );
+}
+
+#[test]
+fn small_jitter_on_a_button_still_clicks() {
+    // Movement below the shared threshold is a sloppy click, not a drag. The
+    // release must remain on the same logical button for activation.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+             globalThis.clicks = 0;
+             document.getElementById('btn')
+               .addEventListener('click', () => globalThis.clicks += 1);
+           </script>
+           <button id="btn">Save</button>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let btn = map.resolve_by_id("btn").expect("button region");
+    let (bx, by) = center(btn.rect);
+
+    let mut state = InputState::new();
+    mouse_down(&mut state, &mut engine, &map, bx, by, MouseButton::Left);
+    state.pressed = Some((bx as u16, by as u16));
+    let _ = mouse_move(&mut state, &mut engine, &map, bx + 1, by);
+    mouse_up(&mut state, &mut engine, &map, (bx + 1) as u16, by as u16);
+
+    assert_eq!(
+        eval_str(&mut engine, "String(globalThis.clicks)"),
+        "1",
+        "a sub-threshold jitter on the same button is a click"
+    );
 }
 
 #[test]
@@ -646,7 +779,6 @@ fn reset_document_state_clears_replaced_document_interaction() {
         rect: Rect::new(0, 0, 4, 2),
         options: Vec::new(),
         rows: Vec::new(),
-        selected: 0,
         highlight: 0,
     });
 
@@ -684,7 +816,7 @@ fn focus_behind_a_pending_arena_merges_into_the_arena_dynamic() {
         zoom: 1.0,
         dynamic: DynamicState {
             hovered: Some(NodeId::default()),
-            focused: None,
+            ..Default::default()
         },
         dirty: DirtyInfo::default(),
     });
@@ -1193,6 +1325,71 @@ fn selection_text_lines_clip_to_actual_text() {
 }
 
 #[test]
+fn user_select_none_excludes_flow_highlight_and_copy() {
+    // CSS `user-select: none` is a document author's selection boundary: the
+    // text still renders, but neither highlight bands nor copied flow text may
+    // include it.
+    let geo = build_styled_geometry(
+        "<style>.secret { user-select: none; }</style>\
+         <div>one</div><div id=\"secret\" class=\"secret\">secret</div><div>two</div>",
+    );
+    let lines: Vec<_> = (0..4).map(|row| (row, 0, 200)).collect();
+    assert_eq!(
+        htui::layout::selection_text_lines(&geo.arena, &geo.boxes, &lines),
+        vec![(0, 0, 3), (2, 0, 3)],
+        "user-select:none must produce no highlight bands"
+    );
+    assert_eq!(
+        htui::layout::extract_flow_text(&geo.arena, &geo.boxes, &lines),
+        "one\ntwo",
+        "user-select:none must not leak into copied text"
+    );
+}
+
+#[test]
+fn user_select_none_blocks_a_left_drag_selection_start() {
+    let html = "<style>.secret { user-select: none; }</style>\
+                <div id=\"secret\" class=\"secret\">secret</div><div id=\"next\">other</div>";
+    let geo = build_styled_geometry(html);
+    let map = HitMap::build(&geo);
+    let secret = map.resolve_by_id("secret").cloned().expect("secret region");
+    let (sx, sy) = center(secret.rect);
+    let mut engine = ScriptEngine::new(html, "", EventBindings::default()).expect("engine");
+
+    let mut state = InputState::new();
+    mouse_down(&mut state, &mut engine, &map, sx, sy, MouseButton::Left);
+    state.pressed = Some((sx as u16, sy as u16));
+    let cmds = mouse_move(&mut state, &mut engine, &map, sx + 3, sy);
+
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, RenderCmd::TextSelection { .. })),
+        "a drag starting on user-select:none must not queue TextSelection"
+    );
+    assert_eq!(state.text_sel_anchor, None);
+    assert_eq!(state.text_sel_end, None);
+}
+
+#[test]
+fn flow_extraction_omits_replaced_control_text() {
+    // A left-drag flow selection copies document text. Control values and
+    // button labels belong to their own interaction/copy paths, so crossing a
+    // `<button>` must not inject its label into the page-selection clipboard.
+    let (_, geo) = build_geometry(
+        "<div>before</div><button>Save</button><div>after</div>",
+        EventBindings::default(),
+    );
+    let lines: Vec<_> = (0..6).map(|row| (row, 0, 200)).collect();
+    let copied = htui::layout::extract_flow_text(&geo.arena, &geo.boxes, &lines);
+    assert_eq!(copied, "before\nafter");
+    assert!(
+        !copied.contains("Save"),
+        "button labels must not leak into flow selection text"
+    );
+}
+
+#[test]
 fn selection_text_lines_keep_partial_columns() {
     // A selection that starts inside the text keeps the intersection, and a
     // band past the text yields nothing.
@@ -1203,6 +1400,58 @@ fn selection_text_lines_keep_partial_columns() {
     assert!(
         past.is_empty(),
         "a band past the text must highlight nothing"
+    );
+}
+
+#[test]
+fn flow_copy_stays_inside_the_dragged_column() {
+    // Side-by-side flex columns share canvas rows. The raw flow bands are
+    // full-canvas-width for every row between the anchor and the end, so a
+    // straight vertical drag inside the right column would collect the left
+    // column's text on the same rows. The bands must be clipped to the drag's
+    // common block (the right column) before highlighting and copying.
+    let geo = build_styled_geometry(
+        "<style>.wrap { display: flex; } .col { width: 20ch; }</style>\
+         <div class=\"wrap\">\
+         <div class=\"col\"><div>left-a</div><div>left-b</div></div>\
+         <div class=\"col\"><div id=\"r1\">right-a</div><div id=\"r2\">right-b</div>\
+         <div id=\"r3\">right-c</div></div></div>",
+    );
+    let map = HitMap::build(&geo);
+    let r1 = map.resolve_by_id("r1").cloned().expect("right row 1");
+    let r3 = map.resolve_by_id("r3").cloned().expect("right row 3");
+    // Anchor on the first row's first character, end past the last row's
+    // text — a straight vertical drag with the column-wide sweep.
+    let anchor = (r1.rect.x as u32, r1.rect.y as u32);
+    let end = (r3.rect.x as u32 + 6, r3.rect.y as u32);
+
+    // Raw bands exactly as `selection_lines` builds them for a downward drag:
+    // the anchor row from the anchor column, full-width middle rows, the end
+    // row up to the end column.
+    let (ay, ey) = (anchor.1, end.1);
+    assert!(ey > ay + 1, "the fixture needs a full-width middle row");
+    let mut raw = vec![(ay, anchor.0, 200u32)];
+    for y in ay + 1..ey {
+        raw.push((y, 0, 200));
+    }
+    raw.push((ey, 0, end.0 + 1));
+
+    let unscoped = htui::layout::extract_flow_text(&geo.arena, &geo.boxes, &raw);
+    assert!(
+        unscoped.contains("left-b"),
+        "fixture hazard: the full-width middle band must cover the left column"
+    );
+
+    let scoped = htui::layout::clip_flow_lines_scoped(&geo.boxes, anchor, end, &raw);
+    let copied = htui::layout::extract_flow_text(&geo.arena, &geo.boxes, &scoped);
+    assert_eq!(
+        copied, "right-a\nright-b\nright-c",
+        "a vertical drag in one column must not copy the neighbouring column"
+    );
+    let highlighted = htui::layout::selection_text_lines(&geo.arena, &geo.boxes, &scoped);
+    assert!(
+        highlighted.iter().all(|&(_, cs, _)| cs >= r1.rect.x as u32),
+        "the highlight must stay inside the dragged column: {highlighted:?}"
     );
 }
 
@@ -1322,7 +1571,7 @@ fn build_geometry(html: &str, bindings: EventBindings) -> (ScriptEngine, Geometr
         term_map.rows as usize,
     );
     let geo = Geometry {
-        arena,
+        arena: Arc::new(arena),
         boxes,
         root_id,
     };
@@ -1355,7 +1604,7 @@ fn build_styled_geometry(html: &str) -> Geometry {
         term_map.rows as usize,
     );
     Geometry {
-        arena,
+        arena: Arc::new(arena),
         boxes,
         root_id,
     }
@@ -1430,6 +1679,7 @@ fn region_of(arena: &NodeArena, node_id: NodeId) -> HitRegion {
     HitRegion {
         node_id,
         rect: Rect::new(0, 0, 0, 0),
+        client: Rect::new(0, 0, 0, 0),
         path: path.into(),
     }
 }
@@ -1460,7 +1710,7 @@ fn drive_msgs(
                 zoom: state.zoom,
                 dynamic: DynamicState {
                     hovered: ev.hovered,
-                    focused: None,
+                    ..Default::default()
                 },
                 dirty: d.dirty,
             });
@@ -1513,9 +1763,10 @@ fn mouse_move(
     x: u32,
     y: u32,
 ) -> Vec<RenderCmd> {
+    let arena = engine.arena();
     let mut msgs = Vec::new();
     let mut cmds = Vec::new();
-    handle_mouse_move(state, map, x, y, &mut msgs, &mut cmds);
+    handle_mouse_move(state, map, &arena, x, y, &mut msgs, &mut cmds);
     cmds.extend(drive_msgs(state, engine, map, msgs));
     cmds
 }
@@ -1991,7 +2242,7 @@ fn relayout(engine: &ScriptEngine, columns: u16, rows: u16) -> Geometry {
         term_map.rows as usize,
     );
     Geometry {
-        arena,
+        arena: Arc::new(arena),
         boxes,
         root_id,
     }
@@ -2111,8 +2362,9 @@ fn stale_press_from_lost_release_does_not_kill_hover() {
     // (the console delivered the `Down` but lost the `Up`). The input loop
     // clears it on the next button-free `Moved` event, so hover tracking
     // (`ScriptMsg::Move`) resumes instead of every move being read as a drag.
-    let (_, geo) = build_geometry("<div id='a'>a</div>", EventBindings::default());
+    let (engine, geo) = build_geometry("<div id='a'>a</div>", EventBindings::default());
     let map = HitMap::build(&geo);
+    let arena = engine.arena();
     let region = map.resolve_by_id("a").expect("a region");
     let (x, y) = center(region.rect);
     let mut state = InputState::new();
@@ -2125,7 +2377,7 @@ fn stale_press_from_lost_release_does_not_kill_hover() {
 
     let mut msgs = Vec::new();
     let mut cmds = Vec::new();
-    handle_mouse_move(&mut state, &map, x, y, &mut msgs, &mut cmds);
+    handle_mouse_move(&mut state, &map, &arena, x, y, &mut msgs, &mut cmds);
     assert!(
         msgs.iter().any(|m| matches!(m, ScriptMsg::Move { .. })),
         "hover tracking must resume after a stale press is cleared"
@@ -2520,7 +2772,7 @@ fn press_and_drag_away_clears_the_button_hover_on_release() {
 
     // Drag away while the button is held: hover must stay frozen on it.
     let mut drag_msgs = Vec::new();
-    handle_mouse_move(&mut state, &map, ox, oy, &mut drag_msgs, &mut cmds);
+    handle_mouse_move(&mut state, &map, &arena, ox, oy, &mut drag_msgs, &mut cmds);
     assert!(
         drag_msgs.is_empty(),
         "no hover updates may be queued while a button is held"
@@ -2597,6 +2849,12 @@ fn click_region(node_id: NodeId, id: &str) -> HitRegion {
     HitRegion {
         node_id,
         rect: Rect {
+            x: 0,
+            y: 0,
+            width: 10,
+            height: 1,
+        },
+        client: Rect {
             x: 0,
             y: 0,
             width: 10,
@@ -2711,4 +2969,411 @@ fn appended_child_onclick_becomes_clickable() {
         "1",
         "an appended element whose onclick was set before insertion must fire"
     );
+}
+
+#[test]
+fn range_slider_drag_commits_value_and_dispatches_events() {
+    let html = r#"
+      <script>
+        window.events = [];
+        const range = document.getElementById('range');
+        range.addEventListener('input', () => {
+          window.events.push('input:' + range.value);
+        });
+        range.addEventListener('change', () => {
+          window.events.push('change:' + range.value);
+        });
+      </script>
+      <input id="range" type="range" min="0" max="10" step="1" value="0" width="11">
+    "#;
+    let (mut engine, geo) = build_geometry(html, EventBindings::default());
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("range").expect("range region");
+    let y = center(region.rect).1;
+    let left = region.rect.x as u32;
+    let right = left + region.rect.width.max(1) as u32 - 1;
+
+    let mut state = InputState::new();
+    state.pressed = Some((left as u16, y as u16));
+    let _ = mouse_down(&mut state, &mut engine, &map, left, y, MouseButton::Left);
+    assert!(state.drag_selecting, "range press enters drag mode");
+    assert_eq!(
+        eval_str(&mut engine, "range.value").as_str(),
+        "0",
+        "clicking on the initial thumb does not change the value"
+    );
+
+    let middle = left + 5;
+    state.pressed = Some((middle as u16, y as u16));
+    let _ = mouse_move(&mut state, &mut engine, &map, middle, y);
+    assert_eq!(eval_str(&mut engine, "range.value"), "5");
+    assert_eq!(
+        eval_str(&mut engine, "window.events.join(',')"),
+        "input:5,change:5"
+    );
+
+    // The console may deliver release without a final drag event; the slider
+    // must still commit at the release coordinate.
+    state.pressed = Some((right as u16, y as u16));
+    let _ = mouse_up(&mut state, &mut engine, &map, right as u16, y as u16);
+    assert_eq!(eval_str(&mut engine, "range.value"), "10");
+    assert_eq!(
+        eval_str(&mut engine, "window.events.join(',')"),
+        "input:5,change:5,input:10,change:10"
+    );
+}
+
+#[test]
+fn mousedown_dispatches_to_listener() {
+    let seen = Arc::new(Mutex::new(false));
+    let s2 = Arc::clone(&seen);
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="pad" onmousedown="go()">press</div>"#,
+        host_bindings("go", move |_| {
+            *s2.lock().unwrap() = true;
+            JsValue::undefined()
+        }),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("pad").expect("region");
+    let (x, y) = center(region.rect);
+    on_mouse_down(&map, &mut engine, x, y);
+    assert!(*seen.lock().unwrap(), "mousedown listener fires");
+}
+
+#[test]
+fn mouseup_dispatches_to_listener() {
+    let seen = Arc::new(Mutex::new(false));
+    let s2 = Arc::clone(&seen);
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="pad" onmouseup="go()">release</div>"#,
+        host_bindings("go", move |_| {
+            *s2.lock().unwrap() = true;
+            JsValue::undefined()
+        }),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("pad").expect("region");
+    let (x, y) = center(region.rect);
+    on_mouse_up(&map, &mut engine, x, y);
+    assert!(*seen.lock().unwrap(), "mouseup listener fires");
+}
+
+#[test]
+fn mousemove_dispatches_to_listener() {
+    let seen = Arc::new(Mutex::new(0usize));
+    let s2 = Arc::clone(&seen);
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="pad" onmousemove="go()">move</div>"#,
+        host_bindings("go", move |_| {
+            *s2.lock().unwrap() += 1;
+            JsValue::undefined()
+        }),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("pad").expect("region");
+    let (x, y) = center(region.rect);
+    on_mouse_move_dispatch(&map, &mut engine, x, y);
+    on_mouse_move_dispatch(&map, &mut engine, x + 1, y);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        2,
+        "mousemove fires on every dispatch"
+    );
+}
+
+#[test]
+fn mouse_events_work_via_apply_message() {
+    let count = Arc::new(Mutex::new(0usize));
+    let c2 = Arc::clone(&count);
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="pad" onmousedown="go()" onmouseup="go()" onmousemove="go()">x</div>"#,
+        host_bindings("go", move |_| {
+            *c2.lock().unwrap() += 1;
+            JsValue::undefined()
+        }),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("pad").expect("region");
+    let (x, y) = center(region.rect);
+    let mut hover = HoverState::new();
+    apply_message(&mut engine, &mut hover, &map, ScriptMsg::MouseDown { x, y });
+    apply_message(&mut engine, &mut hover, &map, ScriptMsg::MouseMove { x, y });
+    apply_message(&mut engine, &mut hover, &map, ScriptMsg::MouseUp { x, y });
+    assert_eq!(*count.lock().unwrap(), 3, "all three mouse events fire");
+}
+
+#[test]
+fn add_event_listener_mousemove_works() {
+    let count = Arc::new(Mutex::new(0usize));
+    let c2 = Arc::clone(&count);
+    let (mut engine, geo) = build_geometry(
+        r#"<div id="pad">x</div>
+        <script>document.getElementById("pad").addEventListener("mousemove", function() { go() })</script>"#,
+        host_bindings("go", move |_| {
+            *c2.lock().unwrap() += 1;
+            JsValue::undefined()
+        }),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("pad").expect("region");
+    let (x, y) = center(region.rect);
+    let mut hover = HoverState::new();
+    apply_message(&mut engine, &mut hover, &map, ScriptMsg::MouseMove { x, y });
+    assert_eq!(
+        *count.lock().unwrap(),
+        1,
+        "addEventListener('mousemove') fires"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// dblclick / contextmenu / wheel / enter-leave / mouse payload coords
+// ---------------------------------------------------------------------------
+
+/// Read `globalThis.__seen` (a JS array of strings) as a comma-joined string.
+fn eval_seen(engine: &mut ScriptEngine) -> String {
+    engine
+        .eval_source("globalThis.__seen.join(',')")
+        .expect("eval")
+        .as_string()
+        .map(|s| s.to_std_string_lossy())
+        .unwrap_or_default()
+}
+
+#[test]
+fn second_quick_click_on_same_cell_emits_dblclick() {
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          globalThis.__seen = [];
+          document.getElementById("t").addEventListener("click", function(){ __seen.push("click") });
+          document.getElementById("t").addEventListener("dblclick", function(){ __seen.push("dblclick") });
+        </script>
+        <div id="t" style="width: 20; height: 2">target</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("t").expect("region");
+    let (x, y) = center(region.rect);
+
+    // Input side: the second click on the same cell emits the DblClick msg.
+    let mut state = InputState::new();
+    let mut msgs = Vec::new();
+    let mut cmds = Vec::new();
+    handle_click(
+        &mut state,
+        &map,
+        &engine.arena(),
+        x,
+        y,
+        &mut msgs,
+        &mut cmds,
+    );
+    handle_click(
+        &mut state,
+        &map,
+        &engine.arena(),
+        x,
+        y,
+        &mut msgs,
+        &mut cmds,
+    );
+    assert!(
+        msgs.iter().any(|m| matches!(m, ScriptMsg::DblClick { .. })),
+        "second click must emit DblClick: {msgs:?}"
+    );
+
+    // Script side: the dispatch reaches the element's dblclick listeners.
+    let mut hover = HoverState::new();
+    apply_message(&mut engine, &mut hover, &map, ScriptMsg::DblClick { x, y });
+    assert_eq!(eval_seen(&mut engine), "dblclick");
+}
+
+#[test]
+fn contextmenu_dispatches_to_hit_target() {
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          globalThis.__seen = [];
+          document.getElementById("t").addEventListener("contextmenu", function(e){
+            __seen.push("ctx:" + e.isTrusted);
+          });
+        </script>
+        <div id="t" style="width: 20; height: 2">target</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("t").expect("region");
+    let (x, y) = center(region.rect);
+    let mut hover = HoverState::new();
+    apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::ContextMenu { x, y },
+    );
+    assert_eq!(eval_seen(&mut engine), "ctx:true");
+}
+
+#[test]
+fn wheel_dispatch_reports_prevent_default_verdict() {
+    // Without preventDefault: gate verdict false — the built-in scroll runs.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          globalThis.__delta = null;
+          document.getElementById("t").addEventListener("wheel", function(e){
+            __delta = e.deltaY;
+          });
+        </script>
+        <div id="t" style="width: 20; height: 2">target</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("t").expect("region");
+    let (x, y) = center(region.rect);
+    let mut hover = HoverState::new();
+    let event = apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::Wheel {
+            gate_id: 7,
+            x,
+            y,
+            up: false,
+        },
+    );
+    assert_eq!(event.wheel_gate, Some((7, false)), "no preventDefault");
+    let delta = engine
+        .eval_source("String(globalThis.__delta)")
+        .expect("eval")
+        .as_string()
+        .map(|s| s.to_std_string_lossy())
+        .unwrap_or_default();
+    assert_eq!(delta, "3", "downward tick carries +3");
+
+    // With preventDefault: gate verdict true — the built-in scroll is skipped.
+    let (mut engine2, geo2) = build_geometry(
+        r#"<script>
+          document.getElementById("t").addEventListener("wheel", function(e){
+            e.preventDefault();
+          });
+        </script>
+        <div id="t" style="width: 20; height: 2">target</div>"#,
+        EventBindings::default(),
+    );
+    let map2 = HitMap::build(&geo2);
+    let region2 = map2.resolve_by_id("t").expect("region");
+    let (x2, y2) = center(region2.rect);
+    let mut hover2 = HoverState::new();
+    let event2 = apply_message(
+        &mut engine2,
+        &mut hover2,
+        &map2,
+        ScriptMsg::Wheel {
+            gate_id: 9,
+            x: x2,
+            y: y2,
+            up: false,
+        },
+    );
+    assert_eq!(event2.wheel_gate, Some((9, true)), "preventDefault gates");
+}
+
+#[test]
+fn mouseenter_leave_fire_on_target_only_while_over_out_bubble() {
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          globalThis.__seen = [];
+          for (var id of ["outer", "inner"]) {
+            var el = document.getElementById(id);
+            el.addEventListener("mouseenter", function(){ __seen.push(this.id + ":enter") });
+            el.addEventListener("mouseover", function(){ __seen.push(this.id + ":over") });
+            el.addEventListener("mouseleave", function(){ __seen.push(this.id + ":leave") });
+            el.addEventListener("mouseout", function(){ __seen.push(this.id + ":out") });
+          }
+        </script>
+        <div id="outer" style="width: 30; height: 4"><div id="inner" style="width: 10; height: 2">i</div></div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let inner = map.resolve_by_id("inner").expect("inner");
+    let outer = map.resolve_by_id("outer").expect("outer");
+    let (ix, iy) = center(inner.rect);
+    // A point on the outer box away from the inner one.
+    let (ox, oy) = ((outer.rect.x + 1) as u32, (outer.rect.y + 1) as u32);
+
+    let mut hover = HoverState::new();
+    // Move onto inner: `mouseenter` fires only on inner (no bubble), while
+    // `mouseover` bubbles to outer.
+    apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::Move { x: ix, y: iy },
+    );
+    let seen = eval_seen(&mut engine);
+    assert!(
+        seen.contains("inner:enter") && !seen.contains("outer:enter"),
+        "mouseenter does not bubble: {seen}"
+    );
+    assert!(
+        seen.contains("inner:over") && seen.contains("outer:over"),
+        "mouseover bubbles: {seen}"
+    );
+
+    // Move to outer: `mouseleave` fires only on inner, `mouseout` bubbles.
+    apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::Move { x: ox, y: oy },
+    );
+    let seen = eval_seen(&mut engine);
+    assert!(
+        seen.contains("inner:leave") && !seen.contains("outer:leave"),
+        "mouseleave does not bubble: {seen}"
+    );
+    assert!(
+        seen.contains("inner:out") && seen.contains("outer:out"),
+        "mouseout bubbles: {seen}"
+    );
+}
+
+#[test]
+fn mouse_events_carry_client_and_page_coordinates() {
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          globalThis.__coords = null;
+          document.getElementById("t").addEventListener("click", function(e){
+            __coords = [e.clientX, e.clientY, e.pageX, e.pageY, String(e.isTrusted)];
+          });
+        </script>
+        <div id="t" style="width: 20; height: 2">target</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("t").expect("region");
+    let (x, y) = center(region.rect);
+    let mut hover = HoverState::new();
+    // Direct-engine dispatch has no input loop attached → scroll offset 0 →
+    // client == page (the offset path is covered by the spawned-thread test
+    // in script_dom_api_tests).
+    apply_message(&mut engine, &mut hover, &map, ScriptMsg::Click { x, y });
+    let coords = engine
+        .eval_source("globalThis.__coords.join('/')")
+        .expect("eval")
+        .as_string()
+        .map(|s| s.to_std_string_lossy())
+        .unwrap_or_default();
+    let parts: Vec<&str> = coords.split('/').collect();
+    assert_eq!(parts.len(), 5, "coords: {coords}");
+    assert_eq!(parts[4], "true", "engine dispatch is trusted");
+    let px: f64 = parts[2].parse().expect("pageX");
+    let py: f64 = parts[3].parse().expect("pageY");
+    let cx: f64 = parts[0].parse().expect("clientX");
+    let cy: f64 = parts[1].parse().expect("clientY");
+    assert_eq!(px, f64::from(x), "pageX = canvas x");
+    assert_eq!(py, f64::from(y), "pageY = canvas y");
+    assert_eq!(cx, px, "clientX = pageX (no horizontal scroll)");
+    assert_eq!(cy, py, "clientY = pageY (no page scroll attached)");
 }

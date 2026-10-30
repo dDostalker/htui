@@ -44,16 +44,16 @@ use super::values::{
     AlignContent, AlignItems, BoxSizing, CaptionSide, ColumnFill, ColumnsResolved, CornerRadii,
     CssDisplay, EmptyCells, FlexBasis, FlexDirection, FlexShorthand, FlexWrap, FontStyleKind,
     FontWeight, GapSizes, JustifyContent, Length, LineHeight, ListStyleType, OverflowWrap,
-    TableLayout, TextAlign, TextDecoration, TextTransform, Visibility, WhiteSpace, WordBreak,
-    merge_border_longhand, parse_align_content, parse_align_items, parse_border_radius,
-    parse_border_side, parse_border_style, parse_border_width, parse_box_sizing,
-    parse_caption_side, parse_color_str, parse_column_count, parse_column_fill, parse_column_rule,
-    parse_columns_shorthand, parse_edge_auto, parse_edge_sizes, parse_empty_cells,
-    parse_flex_basis, parse_flex_direction, parse_flex_flow, parse_flex_shorthand, parse_flex_wrap,
-    parse_gap_shorthand, parse_justify_content, parse_line_height, parse_list_style_type,
-    parse_margin_sizes, parse_non_negative_number, parse_order, parse_overflow_wrap,
-    parse_table_layout, parse_text_transform, parse_visibility, parse_white_space,
-    parse_word_break, resolve_flex_basis,
+    TableLayout, TextAlign, TextDecoration, TextTransform, UserSelect, Visibility, WhiteSpace,
+    WordBreak, merge_border_longhand, parse_align_content, parse_align_items, parse_background_str,
+    parse_border_radius, parse_border_side, parse_border_style, parse_border_width,
+    parse_box_sizing, parse_caption_side, parse_color_str, parse_column_count, parse_column_fill,
+    parse_column_rule, parse_columns_shorthand, parse_edge_auto, parse_edge_sizes,
+    parse_empty_cells, parse_flex_basis, parse_flex_direction, parse_flex_flow,
+    parse_flex_shorthand, parse_flex_wrap, parse_gap_shorthand, parse_justify_content,
+    parse_line_height, parse_list_style_type, parse_margin_sizes, parse_non_negative_number,
+    parse_order, parse_overflow_wrap, parse_table_layout, parse_text_transform, parse_user_select,
+    parse_visibility, parse_white_space, parse_word_break, resolve_flex_basis,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -108,6 +108,15 @@ impl CssAttr {
     pub fn get_color(&self) -> Option<Color> {
         self.0.get("color").and_then(|c| parse_color_str(c))
     }
+    /// Whether the element's background is clipped to its text glyphs.
+    pub fn background_clips_to_text(&self) -> bool {
+        self.0.get("background-clip").is_some_and(|value| {
+            value
+                .split_whitespace()
+                .last()
+                .is_some_and(|keyword| keyword.eq_ignore_ascii_case("text"))
+        })
+    }
 
     /// Cursor colour (CSS `caret-color`). `None` for `auto` / unset — the
     /// painter then uses the default inverted-cell caret.
@@ -120,12 +129,26 @@ impl CssAttr {
             }
         })
     }
+    /// Accent colour for form controls (CSS `accent-color`). Browsers use
+    /// this to theme native widgets (checkbox, radio, range, progress, meter);
+    /// htui falls back to it when no pseudo-element colour is declared.
+    pub fn get_accent_color(&self) -> Option<Color> {
+        self.0.get("accent-color").and_then(|v| parse_color_str(v))
+    }
+
     /// Background color (CSS `background-color`, falls back to `background`).
     pub fn get_bg_color(&self) -> Option<Color> {
         self.0
             .get("background-color")
             .or_else(|| self.0.get("background"))
             .and_then(|c| parse_color_str(c))
+    }
+    /// Background paint source, including CSS gradients.
+    pub fn get_background(&self) -> Option<crate::html::css_parse::Background> {
+        self.0
+            .get("background-color")
+            .or_else(|| self.0.get("background"))
+            .and_then(|value| parse_background_str(value))
     }
     /// Text alignment (CSS `text-align`).
     ///
@@ -246,6 +269,18 @@ impl CssAttr {
             .and_then(|s| parse_overflow_wrap(s.as_ref()))
             .unwrap_or_default()
     }
+    /// Text selection behaviour (CSS `user-select`).
+    ///
+    /// The property itself is not inherited. Callers resolve `Auto` against
+    /// ancestors so an explicit `text` descendant can opt back in under a
+    /// `none` container, matching CSS UI used-value resolution.
+    pub fn get_user_select(&self) -> UserSelect {
+        self.0
+            .get("user-select")
+            .and_then(|s| parse_user_select(s.as_ref()))
+            .unwrap_or_default()
+    }
+
     /// Element visibility (CSS `visibility`). Inherited, so a child without
     /// an explicit value picks up its parent's. `Hidden` keeps the box's
     /// layout space but paints nothing; a descendant with an explicit
@@ -278,6 +313,67 @@ impl CssAttr {
         } else {
             Overflow::Visible
         }
+    }
+
+    /// Whether the vertical axis explicitly prevents viewport scrolling.
+    /// This is the root/body propagation rule for `overflow: hidden` / `clip`;
+    /// `auto` / `scroll` still create a scrollable viewport.
+    pub fn locks_vertical_scroll(&self) -> bool {
+        let axis = |key: &str| {
+            self.0
+                .get(key)
+                .map(|s| {
+                    let value = s.trim().to_ascii_lowercase();
+                    value == "hidden" || value == "clip"
+                })
+                .unwrap_or(false)
+        };
+        axis("overflow-y") || (!self.0.contains_key("overflow-y") && axis("overflow"))
+    }
+
+    /// Whether the resolved vertical overflow is `visible` when no axis value
+    /// prevents scrolling. Root propagation consults this before applying the
+    /// body rule.
+    pub fn vertical_scroll_visible(&self) -> bool {
+        let key = if self.0.contains_key("overflow-y") {
+            "overflow-y"
+        } else {
+            "overflow"
+        };
+        self.0.get(key).is_none_or(|s| {
+            let value = s.trim().to_ascii_lowercase();
+            value != "hidden" && value != "clip"
+        })
+    }
+
+    /// Whether this box establishes a vertical browser-style scroll
+    /// container. `auto` shows a scrollbar only when content overflows;
+    /// `scroll` reserves one whenever the box has a fixed height.
+    pub fn scrolls_vertically(&self) -> bool {
+        let axis = |key: &str| {
+            self.0
+                .get(key)
+                .map(|s| {
+                    s.trim().eq_ignore_ascii_case("auto") || s.trim().eq_ignore_ascii_case("scroll")
+                })
+                .unwrap_or(false)
+        };
+        axis("overflow-y") || axis("overflow")
+    }
+
+    /// Whether this box establishes a horizontal browser-style scroll
+    /// container (`overflow-x: auto/scroll`, or `overflow` as the fallback
+    /// for both axes). Same auto/scroll semantics as the vertical axis.
+    pub fn scrolls_horizontally(&self) -> bool {
+        let axis = |key: &str| {
+            self.0
+                .get(key)
+                .map(|s| {
+                    s.trim().eq_ignore_ascii_case("auto") || s.trim().eq_ignore_ascii_case("scroll")
+                })
+                .unwrap_or(false)
+        };
+        axis("overflow-x") || axis("overflow")
     }
     /// Element width (CSS `width`).
     ///

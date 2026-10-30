@@ -5,7 +5,7 @@ use crate::{
     layout::{BorderStyle, LayoutBox, Rect},
 };
 
-use super::PaintCanvas;
+use super::{BackgroundFill, PaintCanvas, background_at};
 
 /// Render the four border edges of a block-level box.
 ///
@@ -15,12 +15,19 @@ use super::PaintCanvas;
 /// color. Borders with width > 1 currently render as a single row/column —
 /// terminals cannot express thicker edges without mis-aligning the inner
 /// content area, so any width > 1 is treated as 1.
+///
+/// `clip` bounds where glyphs may land. Edge / corner positions always come
+/// from the box's own `r`: a box that overflows a clipping ancestor has its
+/// out-of-clip glyphs *dropped*, never relocated — shrinking the rect before
+/// painting would drag the bottom edge up to the clip boundary and fabricate
+/// a border row on top of whatever else paints there.
 pub(crate) fn paint_borders(
     lb: &LayoutBox,
     r: Rect,
     canvas: &mut PaintCanvas<'_>,
     fg: Option<Color>,
-    bg: Option<Color>,
+    bg: Option<BackgroundFill<'_>>,
+    clip: Rect,
 ) {
     let sides = &lb.paint_style.box_edges.border;
     if !sides.any_visible() {
@@ -33,6 +40,14 @@ pub(crate) fn paint_borders(
     let cols = canvas.columns as usize;
     let cell_start = canvas.cell_index(r.x, r.y);
     let max_cells = canvas.layout.len();
+
+    // Whether the canvas cell at absolute (x, y) may receive a border glyph.
+    let in_clip = |x: usize, y: usize| -> bool {
+        x >= clip.x
+            && y >= clip.y
+            && x < clip.x.saturating_add(clip.width)
+            && y < clip.y.saturating_add(clip.height)
+    };
 
     // Effective border thickness per side, clamped to the rect size and
     // collapsed to 1 — see function-level note.
@@ -58,7 +73,8 @@ pub(crate) fn paint_borders(
             let row_start = cell_start + row_offset * cols;
             for col in left_t..right_col_start {
                 let idx = row_start + col;
-                if idx < max_cells && canvas.in_region(idx) {
+                if idx < max_cells && canvas.in_region(idx) && in_clip(r.x + col, r.y + row_offset)
+                {
                     // In-place: capsule-reuse the 4-byte buffer from
                     // `Block::default()` to push `─` (3 bytes) without
                     // reallocating.
@@ -66,7 +82,7 @@ pub(crate) fn paint_borders(
                     cell.word.clear();
                     cell.word.push('─');
                     cell.fcolor = top_color;
-                    cell.bcolor = bg;
+                    cell.bcolor = background_at(bg, idx % cols, idx / cols);
                     cell.style = style;
                 }
             }
@@ -76,16 +92,20 @@ pub(crate) fn paint_borders(
     // Bottom edge: rows (height-bottom_t)..height, columns left_t..right_col_start.
     if sides.bottom.style == BorderStyle::Solid && bottom_t > 0 {
         let bottom_row = cell_start + (r.height - bottom_t) * cols;
+        let bottom_y = r.y + r.height - bottom_t;
         for row_offset in 0..bottom_t {
             let row_start = bottom_row + row_offset * cols;
             for col in left_t..right_col_start {
                 let idx = row_start + col;
-                if idx < max_cells && canvas.in_region(idx) {
+                if idx < max_cells
+                    && canvas.in_region(idx)
+                    && in_clip(r.x + col, bottom_y + row_offset)
+                {
                     let cell = &mut canvas.layout[idx];
                     cell.word.clear();
                     cell.word.push('─');
                     cell.fcolor = bottom_color;
-                    cell.bcolor = bg;
+                    cell.bcolor = background_at(bg, idx % cols, idx / cols);
                     cell.style = style;
                 }
             }
@@ -98,12 +118,15 @@ pub(crate) fn paint_borders(
             let row_start = cell_start + row_offset * cols;
             for col_offset in 0..left_t {
                 let idx = row_start + col_offset;
-                if idx < max_cells && canvas.in_region(idx) {
+                if idx < max_cells
+                    && canvas.in_region(idx)
+                    && in_clip(r.x + col_offset, r.y + row_offset)
+                {
                     let cell = &mut canvas.layout[idx];
                     cell.word.clear();
                     cell.word.push('│');
                     cell.fcolor = left_color;
-                    cell.bcolor = bg;
+                    cell.bcolor = background_at(bg, idx % cols, idx / cols);
                     cell.style = style;
                 }
             }
@@ -116,19 +139,25 @@ pub(crate) fn paint_borders(
             let row_start = cell_start + row_offset * cols;
             for col_offset in 0..right_t {
                 let idx = row_start + right_col_start + col_offset;
-                if idx < max_cells && canvas.in_region(idx) {
+                if idx < max_cells
+                    && canvas.in_region(idx)
+                    && in_clip(r.x + right_col_start + col_offset, r.y + row_offset)
+                {
                     let cell = &mut canvas.layout[idx];
                     cell.word.clear();
                     cell.word.push('│');
                     cell.fcolor = right_color;
-                    cell.bcolor = bg;
+                    cell.bcolor = background_at(bg, idx % cols, idx / cols);
                     cell.style = style;
                 }
             }
         }
     }
 
-    // Corners: overwrite the 4 corner cells so the edges join cleanly.
+    // Corners: overwrite the 4 corner cells so the edges join cleanly. A
+    // corner belongs to the pair of sides meeting there, so it only paints
+    // when both are visible — a `border-left`-only box must not grow
+    // fabricated `┌` / `└` corner glyphs (the browser draws just the edge).
     // `border-radius: …` (any non-zero corner) swaps the square glyphs for
     // the rounded box-drawing set; radii larger than 1 render identically
     // to radius 1 because the terminal grid has no finer rounding primitive.
@@ -149,17 +178,30 @@ pub(crate) fn paint_borders(
         bottom_color.or(left_color),
         bottom_color.or(right_color),
     ];
+    let top_visible = sides.top.style == BorderStyle::Solid && top_t > 0;
+    let bottom_visible = sides.bottom.style == BorderStyle::Solid && bottom_t > 0;
+    let left_visible = sides.left.style == BorderStyle::Solid && left_t > 0;
+    let right_visible = sides.right.style == BorderStyle::Solid && right_t > 0;
+    let corner_visible = [
+        top_visible && left_visible,
+        top_visible && right_visible,
+        bottom_visible && left_visible,
+        bottom_visible && right_visible,
+    ];
     for i in 0..4 {
+        if !corner_visible[i] {
+            continue;
+        }
         let ch = corner_chars[i];
         let (cx, cy) = corner_positions[i];
         let color = corner_colors[i];
         let idx = cell_start + cy * cols + cx;
-        if idx < max_cells && canvas.in_region(idx) {
+        if idx < max_cells && canvas.in_region(idx) && in_clip(r.x + cx, r.y + cy) {
             let cell = &mut canvas.layout[idx];
             cell.word.clear();
             cell.word.push(ch);
             cell.fcolor = color;
-            cell.bcolor = bg;
+            cell.bcolor = background_at(bg, idx % cols, idx / cols);
             cell.style = style;
         }
     }
