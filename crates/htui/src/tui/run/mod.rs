@@ -45,7 +45,8 @@ use crate::{
     tdom::node::{NodeId, SharedNodeArena},
     tui::graph_api::{
         ANIM_POLL_MS, DirtyInfo, InputState, KEY_GATE_TIMEOUT, RenderCmd, ScrollAnim, ScrollTarget,
-        apply_focus_requests, reapply_console_modes, scroll_into_view_target, trigger_refresh,
+        apply_focus_requests, default_wheel_scroll, reapply_console_modes, scroll_into_view_target,
+        trigger_refresh,
     },
 };
 
@@ -286,6 +287,7 @@ fn run_inner(
     });
 
     let mut state = InputState::new();
+    state.ui = Some(Arc::clone(&ui_state));
     state.zoom = config.zoom;
     state.copy_flow = config.copy_flow;
     state.copy_block = config.copy_block;
@@ -627,7 +629,11 @@ fn run_inner(
         // script thread never stalls scrolling / quitting (decoupling). The
         // wait also folds any responses that arrive meanwhile (hover, DOM
         // mutations from key handlers).
-        if let Some(gate) = state.key_gate.take() {
+        // Keys and gated wheel ticks share the wait/verdict machinery; the
+        // wheel verdict additionally re-runs the built-in scroll when cleared.
+        let wheel_pending = state.wheel_gate.is_some();
+        let gate = state.key_gate.take().or_else(|| state.wheel_gate.take());
+        if let Some(gate) = gate {
             let mut gate_cmds = gate.cmds;
             let mut resolved = false;
             // The budget is an *absolute* deadline, not a per-`recv` timeout:
@@ -641,7 +647,10 @@ fn run_inner(
                 match script_out_rx.recv_timeout(deadline.saturating_duration_since(Instant::now()))
                 {
                     Ok(ScriptResponse::Event(ev)) => {
-                        let verdict = ev.key_gate.filter(|(id, _)| *id == gate.id);
+                        let verdict = ev
+                            .key_gate
+                            .filter(|(id, _)| *id == gate.id)
+                            .or_else(|| ev.wheel_gate.filter(|(id, _)| *id == gate.id));
                         fold_script_event(
                             &mut state,
                             &mut cmds,
@@ -656,11 +665,26 @@ fn run_inner(
                         script_activity = true;
                         if let Some((_, prevented)) = verdict {
                             if !prevented {
-                                log::debug!(
-                                    "Key gate cleared for key id {} — applying built-in",
-                                    gate.id
-                                );
+                                log::debug!("Gate cleared for id {} — applying built-in", gate.id);
                                 cmds.extend(std::mem::take(&mut gate_cmds));
+                                // Cleared wheel verdict: run the default
+                                // container / page scroll for the held tick.
+                                if wheel_pending
+                                    && let Some((x, y, up)) = state.pending_wheel.take()
+                                {
+                                    let hit_guard = hit_map.lock().ok();
+                                    let arena = live_dom.as_ref().map(|(a, _)| a);
+                                    default_wheel_scroll(
+                                        &mut state,
+                                        hit_guard.as_ref().map(|g| g.as_ref()),
+                                        arena.map(|a| &**a),
+                                        max_scroll_val,
+                                        x,
+                                        y,
+                                        up,
+                                        &mut cmds,
+                                    );
+                                }
                             }
                             resolved = true;
                         }
@@ -671,11 +695,22 @@ fn run_inner(
                     Err(RecvTimeoutError::Timeout) => {
                         // Script thread busy / blocked in a host function:
                         // fall back to the built-in so input stays responsive.
-                        log::debug!(
-                            "Key gate timed out for key id {} — running built-in",
-                            gate.id
-                        );
+                        log::debug!("Gate timed out for id {} — running built-in", gate.id);
                         cmds.extend(std::mem::take(&mut gate_cmds));
+                        if wheel_pending && let Some((x, y, up)) = state.pending_wheel.take() {
+                            let hit_guard = hit_map.lock().ok();
+                            let arena = live_dom.as_ref().map(|(a, _)| a);
+                            default_wheel_scroll(
+                                &mut state,
+                                hit_guard.as_ref().map(|g| g.as_ref()),
+                                arena.map(|a| &**a),
+                                max_scroll_val,
+                                x,
+                                y,
+                                up,
+                                &mut cmds,
+                            );
+                        }
                         resolved = true;
                     }
                     Err(RecvTimeoutError::Disconnected) => {

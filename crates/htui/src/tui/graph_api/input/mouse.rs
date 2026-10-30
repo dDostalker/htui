@@ -4,6 +4,7 @@ use crate::events::HitMap;
 use crate::script::ScriptMsg;
 use crate::tdom::node::{NodeArena, NodeId, NodeType};
 
+use super::DBLCLICK_MS;
 use super::InputState;
 use super::TEXT_SEL_DRAG_THRESHOLD;
 use super::cmd::{RenderCmd, SelectionMode};
@@ -43,6 +44,18 @@ pub fn handle_click(
     }
     msgs.push(ScriptMsg::MouseDown { x, y });
     msgs.push(ScriptMsg::Click { x, y });
+    // Double click: a second click on the same cell inside the window emits
+    // `DblClick` after the `Click` pair (browser order) and resets the
+    // tracker (three rapid clicks = click + dblclick + click).
+    let now = std::time::Instant::now();
+    if state.last_click.is_some_and(|(at, px, py)| {
+        now.duration_since(at).as_millis() <= DBLCLICK_MS && (px, py) == (x, y)
+    }) {
+        state.last_click = None;
+        msgs.push(ScriptMsg::DblClick { x, y });
+    } else {
+        state.last_click = Some((now, x, y));
+    }
     // Clicking an `<input>` / `<textarea>` focuses it; a click on a `<label>`
     // delegates to its associated control (`for` or a wrapped element). Any
     // other click blurs the previously focused field.
@@ -210,6 +223,10 @@ pub fn handle_mouse_up(
         // Right-drag block selection ends here; field drags are left-only.
         if page_selection_drag {
             msgs.push(ScriptMsg::SelectionChange);
+        } else if button == MouseButton::Right {
+            // A right release without a selection drag is a context menu
+            // request (the terminal has no native menu — page JS only).
+            msgs.push(ScriptMsg::ContextMenu { x, y });
         }
         return;
     }

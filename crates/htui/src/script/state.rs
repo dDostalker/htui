@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -135,6 +135,11 @@ pub struct SharedUiState {
     /// Focused field's `NodeId` opaque bits (slotmap `KeyData::as_ffi`);
     /// `0` when nothing is focused. `document.activeElement` reads it.
     pub focused: AtomicU64,
+    /// Whether the page registered any `wheel` listener. The input loop
+    /// checks it per wheel tick: unset → the built-in scroll runs with no
+    /// script round-trip; set → the tick is dispatched as a gated `wheel`
+    /// event whose `preventDefault()` cancels the built-in scroll.
+    pub has_wheel_listeners: AtomicBool,
 }
 
 impl SharedUiState {
@@ -180,6 +185,17 @@ pub(crate) fn with_focused() -> u64 {
             .as_ref()
             .map_or(0, |ui| ui.focused.load(Ordering::Relaxed))
     })
+}
+
+/// Record that the page registered a `wheel` listener (addEventListener /
+/// `onwheel` attribute): flips the shared flag the input loop's wheel path
+/// gates on. Never cleared — a removed listener only costs a no-op dispatch.
+pub(crate) fn note_wheel_listener() {
+    UI_STATE.with(|cell| {
+        if let Some(ui) = cell.borrow().as_ref() {
+            ui.has_wheel_listeners.store(true, Ordering::Relaxed);
+        }
+    });
 }
 
 /// Publish the hit map channel for the current (script) thread; geometry-read

@@ -28,7 +28,7 @@ pub use field::{
 pub use focus::apply_focus_requests;
 pub use key_info::key_event_info;
 pub use mouse::{handle_click, handle_mouse_down, handle_mouse_move, handle_mouse_up};
-pub use refresh::trigger_refresh;
+pub use refresh::{default_wheel_scroll, trigger_refresh};
 pub use scroll_anim::{
     ANIM_POLL_MS, ScrollAnim, ScrollIntoViewBlock, ScrollTarget, active_scroll_target,
     ease_out_cubic, scroll_anim_duration, scroll_into_view_target, step_target,
@@ -166,7 +166,26 @@ pub struct InputState {
     /// `keydown` gate verdict (`None` = no key pending). Set by
     /// [`trigger_refresh`], consumed by the run loop after the wait.
     pub key_gate: Option<KeyGate>,
+    /// A wheel tick waiting for its gated `wheel` verdict. When the verdict
+    /// clears (no `preventDefault()`), [`Self::pending_wheel`] re-runs the
+    /// built-in container / page scroll for that tick.
+    pub wheel_gate: Option<KeyGate>,
+    /// Coordinates + direction of the wheel tick held behind
+    /// [`Self::wheel_gate`] (the default scroll runs only when not
+    /// prevented).
+    pub pending_wheel: Option<(u32, u32, bool)>,
+    /// Time + cell of the last synthesized click (double-click detection:
+    /// a second click on the same cell inside [`DBLCLICK_MS`] emits
+    /// `DblClick`).
+    pub last_click: Option<(Instant, u32, u32)>,
+    /// The input loop's shared UI state (viewport / scroll / focus atomics
+    /// plus the `wheel`-listener flag the wheel path gates on). `None` in
+    /// bare-test states without a run loop.
+    pub ui: Option<Arc<crate::script::SharedUiState>>,
 }
+
+/// Two clicks on the same cell within this window are a double click.
+const DBLCLICK_MS: u128 = 500;
 
 impl InputState {
     /// Create the default input state (top of page, 100% zoom, no focus or selection).
@@ -205,6 +224,10 @@ impl InputState {
             open_select: None,
             next_key_id: 0,
             key_gate: None,
+            wheel_gate: None,
+            pending_wheel: None,
+            last_click: None,
+            ui: None,
         }
     }
 

@@ -1,3 +1,4 @@
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseButton, MouseEventKind};
@@ -424,47 +425,29 @@ pub fn trigger_refresh(
                         return cmds;
                     }
                     let (x, y) = canvas_pos(state, mouse.column, mouse.row);
-                    if let (Some(hit_map), Some(arena)) = (hit_map, arena)
-                        && let Some(cmd) = scroll_at_wheel(state, hit_map, arena, x, y, up)
+                    // A page `wheel` listener gates the built-in scroll on the
+                    // script verdict (same shape as the `keydown` gate): the
+                    // tick dispatches as a `wheel` event and the default
+                    // container / page scroll only runs when no handler calls
+                    // `preventDefault()`. Without listeners the built-in runs
+                    // immediately with no script round-trip.
+                    if state
+                        .ui
+                        .as_ref()
+                        .is_some_and(|ui| ui.has_wheel_listeners.load(Ordering::Relaxed))
                     {
-                        cmds.push(cmd);
+                        state.next_key_id = state.next_key_id.wrapping_add(1);
+                        let gate_id = state.next_key_id;
+                        msgs.push(ScriptMsg::Wheel { gate_id, x, y, up });
+                        state.pending_wheel = Some((x, y, up));
+                        state.wheel_gate = Some(KeyGate {
+                            id: gate_id,
+                            cmds: Vec::new(),
+                        });
                         return cmds;
                     }
-                    if state.smooth_scroll {
-                        // Glide: the run loop converts the marker into the
-                        // eased page animation (a repeat tick builds on the
-                        // animation's target, not the mid-flight position).
-                        let base = active_scroll_target(state, ScrollTarget::Page)
-                            .unwrap_or(state.scroll_y);
-                        let delta = if up {
-                            -(SCROLL_LINES_PER_TICK as i32)
-                        } else {
-                            SCROLL_LINES_PER_TICK as i32
-                        };
-                        if let Some(to) = step_target(base, delta, 0, max_scroll) {
-                            cmds.push(RenderCmd::ScrollAnimate {
-                                target: ScrollTarget::Page,
-                                to,
-                            });
-                        }
-                        return cmds;
-                    }
-                    let next = if up {
-                        state.scroll_y == 0
-                    } else {
-                        state.scroll_y >= max_scroll
-                    };
-                    if next {
-                        return cmds;
-                    }
-                    state.scroll_y = if up {
-                        state.scroll_y.saturating_sub(SCROLL_LINES_PER_TICK)
-                    } else {
-                        state.scroll_y.saturating_add(SCROLL_LINES_PER_TICK)
-                    };
-                    cmds.push(RenderCmd::Rerender {
-                        scroll_y: state.scroll_y,
-                    });
+                    default_wheel_scroll(state, hit_map, arena, max_scroll, x, y, up, &mut cmds);
+                    return cmds;
                 }
                 MouseEventKind::Down(button) => {
                     if let (Some(hit_map), Some(arena)) = (hit_map, arena) {
@@ -576,4 +559,60 @@ pub fn trigger_refresh(
 
         _ => cmds,
     }
+}
+
+/// The built-in default for an ungated (or gate-cleared) wheel tick: scroll
+/// the nearest native scroll container under the pointer, falling back to the
+/// page. Extracted so the run loop can re-run it when a gated `wheel`
+/// dispatch comes back not-prevented.
+pub fn default_wheel_scroll(
+    state: &mut InputState,
+    hit_map: Option<&HitMap>,
+    arena: Option<&NodeArena>,
+    max_scroll: u32,
+    x: u32,
+    y: u32,
+    up: bool,
+    cmds: &mut Vec<RenderCmd>,
+) {
+    if let (Some(hit_map), Some(arena)) = (hit_map, arena)
+        && let Some(cmd) = scroll_at_wheel(state, hit_map, arena, x, y, up)
+    {
+        cmds.push(cmd);
+        return;
+    }
+    if state.smooth_scroll {
+        // Glide: the run loop converts the marker into the eased page
+        // animation (a repeat tick builds on the animation's target, not the
+        // mid-flight position).
+        let base = active_scroll_target(state, ScrollTarget::Page).unwrap_or(state.scroll_y);
+        let delta = if up {
+            -(SCROLL_LINES_PER_TICK as i32)
+        } else {
+            SCROLL_LINES_PER_TICK as i32
+        };
+        if let Some(to) = step_target(base, delta, 0, max_scroll) {
+            cmds.push(RenderCmd::ScrollAnimate {
+                target: ScrollTarget::Page,
+                to,
+            });
+        }
+        return;
+    }
+    let at_edge = if up {
+        state.scroll_y == 0
+    } else {
+        state.scroll_y >= max_scroll
+    };
+    if at_edge {
+        return;
+    }
+    state.scroll_y = if up {
+        state.scroll_y.saturating_sub(SCROLL_LINES_PER_TICK)
+    } else {
+        state.scroll_y.saturating_add(SCROLL_LINES_PER_TICK)
+    };
+    cmds.push(RenderCmd::Rerender {
+        scroll_y: state.scroll_y,
+    });
 }

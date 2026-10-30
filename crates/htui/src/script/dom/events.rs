@@ -244,7 +244,12 @@ pub(super) fn native_add_event_listener(
     // `dispatchEvent` on a CustomEvent type reaches its listeners, like a
     // browser's open event-type namespace.
     match parse_event_type(args.first(), context) {
-        Ok(event_type) => add_listener(context, node_id, event_type, fn_val)?,
+        Ok(event_type) => {
+            if event_type == EventType::Wheel {
+                crate::script::note_wheel_listener();
+            }
+            add_listener(context, node_id, event_type, fn_val)?
+        }
         Err(_) => add_listener_by_name(context, node_id, &type_name, fn_val)?,
     }
     Ok(JsValue::undefined())
@@ -342,6 +347,13 @@ fn event_type_str(et: EventType) -> &'static str {
         EventType::Resize => "resize",
         EventType::Scroll => "scroll",
         EventType::SelectionChange => "selectionchange",
+        EventType::DblClick => "dblclick",
+        EventType::Wheel => "wheel",
+        EventType::ContextMenu => "contextmenu",
+        EventType::MouseEnter => "mouseenter",
+        EventType::MouseLeave => "mouseleave",
+        EventType::DomContentLoaded => "DOMContentLoaded",
+        EventType::Load => "load",
     }
 }
 
@@ -367,6 +379,13 @@ const ALL_EVENT_TYPES: &[EventType] = &[
     EventType::Resize,
     EventType::Scroll,
     EventType::SelectionChange,
+    EventType::DblClick,
+    EventType::Wheel,
+    EventType::ContextMenu,
+    EventType::MouseEnter,
+    EventType::MouseLeave,
+    EventType::DomContentLoaded,
+    EventType::Load,
 ];
 
 pub(crate) fn parse_event_type(

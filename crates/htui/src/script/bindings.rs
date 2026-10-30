@@ -112,6 +112,12 @@ pub(super) const ATTRIBUTE_EVENT_TYPES: &[(&str, EventType)] = &[
     ("onreset", EventType::Reset),
     ("ontoggle", EventType::Toggle),
     ("onclose", EventType::Close),
+    ("ondblclick", EventType::DblClick),
+    ("onwheel", EventType::Wheel),
+    ("oncontextmenu", EventType::ContextMenu),
+    ("onmouseenter", EventType::MouseEnter),
+    ("onmouseleave", EventType::MouseLeave),
+    ("onload", EventType::Load),
 ];
 
 /// Map an `on*` attribute name to the event type it wires; `None` for any
@@ -243,6 +249,9 @@ pub(super) fn compile_node_attribute_listeners(
     };
 
     for (body, event_type) in attr_bodies {
+        if event_type == EventType::Wheel {
+            crate::script::note_wheel_listener();
+        }
         // `(function (event) { <body> })` — attribute value is *code*.
         let wrapped = format!("(function (event) {{ {body} }})");
         let fn_val = match context.eval(Source::from_bytes(wrapped.as_bytes())) {

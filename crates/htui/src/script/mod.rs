@@ -53,8 +53,8 @@ pub use msg::{
 };
 pub use state::SharedUiState;
 pub(crate) use state::{
-    ENGINE_STATE, ScriptState, TimerEntry, selection_text, set_hit_map, set_selection_text,
-    set_ui_state, with_focused, with_hit_map, with_ui,
+    ENGINE_STATE, ScriptState, TimerEntry, note_wheel_listener, selection_text, set_hit_map,
+    set_selection_text, set_ui_state, with_focused, with_hit_map, with_ui,
 };
 
 use state::{EngineBuildError, EngineParts};

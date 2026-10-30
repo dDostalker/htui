@@ -127,6 +127,33 @@ pub enum EventType {
     /// The event has no payload; it is a change notification, matching the
     /// browser's document-level event shape.
     SelectionChange,
+    /// Second click of a double click (`ondblclick`): a click on the same
+    /// cell within the double-click window. Dispatched to the click target
+    /// and bubbles like [`EventType::Click`].
+    DblClick,
+    /// A wheel tick over the document (`onwheel`). Only dispatched when the
+    /// page registered a `wheel` listener (the input loop checks the shared
+    /// flag); when a listener calls `preventDefault()` the built-in
+    /// container / page scroll for that tick is cancelled (same gate the
+    /// `keydown` shortcuts use).
+    Wheel,
+    /// Right-button release without a drag (`oncontextmenu`). No native
+    /// context menu exists — the event is purely for page JS.
+    ContextMenu,
+    /// The pointer entered an element (`onmouseenter`). Unlike
+    /// [`EventType::MouseOver`] it does not bubble: only the element the
+    /// pointer moved onto receives it.
+    MouseEnter,
+    /// The pointer left an element (`onmouseleave`). Non-bubbling, dispatched
+    /// only to the element the pointer left.
+    MouseLeave,
+    /// The DOM is ready: fired once after the document parsed and every
+    /// inline / session script ran (`DOMContentLoaded`, window + `<body>`
+    /// listeners). A whole-document reload fires it again (browser refresh
+    /// semantics).
+    DomContentLoaded,
+    /// Fired right after [`EventType::DomContentLoaded`] (window `load`).
+    Load,
 }
 
 /// Terminal-agnostic keyboard payload carried by [`EventType::KeyDown`] /

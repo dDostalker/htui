@@ -417,3 +417,65 @@ fn scroll_metrics_read_hit_map_and_scroll_top_write_pushes_cmd() {
     assert!(saw_render_scroll, "scrollTop write must push RenderScroll");
     let _ = (captured(&captures, "scrollTop"),);
 }
+
+#[test]
+fn client_y_subtracts_the_published_scroll_offset() {
+    let captures: Captures = Arc::new(Mutex::new(Vec::new()));
+    let page = r#"<script>
+      setTimeout(function(){
+        var box = document.getElementById('box');
+        box.addEventListener('click', function(e){
+          __report('clientY', e.clientY);
+          __report('pageY', e.pageY);
+        });
+        __report('ready', '1');
+      }, 10);
+    </script>
+    <p style="height: 5">spacer</p>
+    <div id="box" style="height: 3">b</div>"#;
+    let (tx, out_rx, handle, hit_map, ui, _selection) =
+        spawn_script(page, report_bindings(&captures));
+    let mut parser = htui::html::html_parse::Parser::new(page);
+    let doc = parser.parse_with_scripts();
+    publish_hit_map(&hit_map, &doc.arena, doc.root_id);
+    ui.scroll_y.store(2, std::sync::atomic::Ordering::Relaxed);
+    captured(&captures, "ready");
+
+    // Dispatch a click through the script thread with the canvas coordinate
+    // of #box (the input loop sends canvas coords; clientY subtracts the
+    // published scroll offset).
+    let region = hit_map
+        .lock()
+        .expect("hit map")
+        .region_for(find_node(&doc.arena, "box"))
+        .expect("box region")
+        .clone();
+    let x = region.rect.x as u32 + 1;
+    let y = region.rect.y as u32;
+    tx.send(ScriptMsg::Click { x, y }).expect("send click");
+    let _ = out_rx.recv_timeout(Duration::from_secs(5));
+    let page_y: f64 = captured(&captures, "pageY").parse().expect("pageY number");
+    let client_y: f64 = captured(&captures, "clientY")
+        .parse()
+        .expect("clientY number");
+    assert_eq!(page_y, f64::from(y), "pageY is the canvas coordinate");
+    assert_eq!(client_y, page_y - 2.0, "clientY subtracts scroll offset");
+    let _ = tx.send(ScriptMsg::Quit);
+    let _ = handle.join();
+}
+
+#[test]
+fn dom_content_loaded_and_load_fire_once_after_build() {
+    let captures: Captures = Arc::new(Mutex::new(Vec::new()));
+    let page = r#"<script>
+      __report('order', 'script');
+      document.addEventListener('DOMContentLoaded', function(){ __report('dcl', 'fired'); });
+      window.addEventListener('load', function(){ __report('load', 'fired'); });
+    </script><p>hi</p>"#;
+    let (tx, _out_rx, handle, _hit_map, _ui, _selection) =
+        spawn_script(page, report_bindings(&captures));
+    settle(&tx, handle, &captures, "load");
+    assert_eq!(captured(&captures, "order"), "script");
+    assert_eq!(captured(&captures, "dcl"), "fired");
+    assert_eq!(captured(&captures, "load"), "fired");
+}

@@ -3126,3 +3126,254 @@ fn add_event_listener_mousemove_works() {
         "addEventListener('mousemove') fires"
     );
 }
+
+// ---------------------------------------------------------------------------
+// dblclick / contextmenu / wheel / enter-leave / mouse payload coords
+// ---------------------------------------------------------------------------
+
+/// Read `globalThis.__seen` (a JS array of strings) as a comma-joined string.
+fn eval_seen(engine: &mut ScriptEngine) -> String {
+    engine
+        .eval_source("globalThis.__seen.join(',')")
+        .expect("eval")
+        .as_string()
+        .map(|s| s.to_std_string_lossy())
+        .unwrap_or_default()
+}
+
+#[test]
+fn second_quick_click_on_same_cell_emits_dblclick() {
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          globalThis.__seen = [];
+          document.getElementById("t").addEventListener("click", function(){ __seen.push("click") });
+          document.getElementById("t").addEventListener("dblclick", function(){ __seen.push("dblclick") });
+        </script>
+        <div id="t" style="width: 20; height: 2">target</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("t").expect("region");
+    let (x, y) = center(region.rect);
+
+    // Input side: the second click on the same cell emits the DblClick msg.
+    let mut state = InputState::new();
+    let mut msgs = Vec::new();
+    let mut cmds = Vec::new();
+    handle_click(
+        &mut state,
+        &map,
+        &engine.arena(),
+        x,
+        y,
+        &mut msgs,
+        &mut cmds,
+    );
+    handle_click(
+        &mut state,
+        &map,
+        &engine.arena(),
+        x,
+        y,
+        &mut msgs,
+        &mut cmds,
+    );
+    assert!(
+        msgs.iter().any(|m| matches!(m, ScriptMsg::DblClick { .. })),
+        "second click must emit DblClick: {msgs:?}"
+    );
+
+    // Script side: the dispatch reaches the element's dblclick listeners.
+    let mut hover = HoverState::new();
+    apply_message(&mut engine, &mut hover, &map, ScriptMsg::DblClick { x, y });
+    assert_eq!(eval_seen(&mut engine), "dblclick");
+}
+
+#[test]
+fn contextmenu_dispatches_to_hit_target() {
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          globalThis.__seen = [];
+          document.getElementById("t").addEventListener("contextmenu", function(e){
+            __seen.push("ctx:" + e.isTrusted);
+          });
+        </script>
+        <div id="t" style="width: 20; height: 2">target</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("t").expect("region");
+    let (x, y) = center(region.rect);
+    let mut hover = HoverState::new();
+    apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::ContextMenu { x, y },
+    );
+    assert_eq!(eval_seen(&mut engine), "ctx:true");
+}
+
+#[test]
+fn wheel_dispatch_reports_prevent_default_verdict() {
+    // Without preventDefault: gate verdict false — the built-in scroll runs.
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          globalThis.__delta = null;
+          document.getElementById("t").addEventListener("wheel", function(e){
+            __delta = e.deltaY;
+          });
+        </script>
+        <div id="t" style="width: 20; height: 2">target</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("t").expect("region");
+    let (x, y) = center(region.rect);
+    let mut hover = HoverState::new();
+    let event = apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::Wheel {
+            gate_id: 7,
+            x,
+            y,
+            up: false,
+        },
+    );
+    assert_eq!(event.wheel_gate, Some((7, false)), "no preventDefault");
+    let delta = engine
+        .eval_source("String(globalThis.__delta)")
+        .expect("eval")
+        .as_string()
+        .map(|s| s.to_std_string_lossy())
+        .unwrap_or_default();
+    assert_eq!(delta, "3", "downward tick carries +3");
+
+    // With preventDefault: gate verdict true — the built-in scroll is skipped.
+    let (mut engine2, geo2) = build_geometry(
+        r#"<script>
+          document.getElementById("t").addEventListener("wheel", function(e){
+            e.preventDefault();
+          });
+        </script>
+        <div id="t" style="width: 20; height: 2">target</div>"#,
+        EventBindings::default(),
+    );
+    let map2 = HitMap::build(&geo2);
+    let region2 = map2.resolve_by_id("t").expect("region");
+    let (x2, y2) = center(region2.rect);
+    let mut hover2 = HoverState::new();
+    let event2 = apply_message(
+        &mut engine2,
+        &mut hover2,
+        &map2,
+        ScriptMsg::Wheel {
+            gate_id: 9,
+            x: x2,
+            y: y2,
+            up: false,
+        },
+    );
+    assert_eq!(event2.wheel_gate, Some((9, true)), "preventDefault gates");
+}
+
+#[test]
+fn mouseenter_leave_fire_on_target_only_while_over_out_bubble() {
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          globalThis.__seen = [];
+          for (var id of ["outer", "inner"]) {
+            var el = document.getElementById(id);
+            el.addEventListener("mouseenter", function(){ __seen.push(this.id + ":enter") });
+            el.addEventListener("mouseover", function(){ __seen.push(this.id + ":over") });
+            el.addEventListener("mouseleave", function(){ __seen.push(this.id + ":leave") });
+            el.addEventListener("mouseout", function(){ __seen.push(this.id + ":out") });
+          }
+        </script>
+        <div id="outer" style="width: 30; height: 4"><div id="inner" style="width: 10; height: 2">i</div></div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let inner = map.resolve_by_id("inner").expect("inner");
+    let outer = map.resolve_by_id("outer").expect("outer");
+    let (ix, iy) = center(inner.rect);
+    // A point on the outer box away from the inner one.
+    let (ox, oy) = ((outer.rect.x + 1) as u32, (outer.rect.y + 1) as u32);
+
+    let mut hover = HoverState::new();
+    // Move onto inner: `mouseenter` fires only on inner (no bubble), while
+    // `mouseover` bubbles to outer.
+    apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::Move { x: ix, y: iy },
+    );
+    let seen = eval_seen(&mut engine);
+    assert!(
+        seen.contains("inner:enter") && !seen.contains("outer:enter"),
+        "mouseenter does not bubble: {seen}"
+    );
+    assert!(
+        seen.contains("inner:over") && seen.contains("outer:over"),
+        "mouseover bubbles: {seen}"
+    );
+
+    // Move to outer: `mouseleave` fires only on inner, `mouseout` bubbles.
+    apply_message(
+        &mut engine,
+        &mut hover,
+        &map,
+        ScriptMsg::Move { x: ox, y: oy },
+    );
+    let seen = eval_seen(&mut engine);
+    assert!(
+        seen.contains("inner:leave") && !seen.contains("outer:leave"),
+        "mouseleave does not bubble: {seen}"
+    );
+    assert!(
+        seen.contains("inner:out") && seen.contains("outer:out"),
+        "mouseout bubbles: {seen}"
+    );
+}
+
+#[test]
+fn mouse_events_carry_client_and_page_coordinates() {
+    let (mut engine, geo) = build_geometry(
+        r#"<script>
+          globalThis.__coords = null;
+          document.getElementById("t").addEventListener("click", function(e){
+            __coords = [e.clientX, e.clientY, e.pageX, e.pageY, String(e.isTrusted)];
+          });
+        </script>
+        <div id="t" style="width: 20; height: 2">target</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let region = map.resolve_by_id("t").expect("region");
+    let (x, y) = center(region.rect);
+    let mut hover = HoverState::new();
+    // Direct-engine dispatch has no input loop attached → scroll offset 0 →
+    // client == page (the offset path is covered by the spawned-thread test
+    // in script_dom_api_tests).
+    apply_message(&mut engine, &mut hover, &map, ScriptMsg::Click { x, y });
+    let coords = engine
+        .eval_source("globalThis.__coords.join('/')")
+        .expect("eval")
+        .as_string()
+        .map(|s| s.to_std_string_lossy())
+        .unwrap_or_default();
+    let parts: Vec<&str> = coords.split('/').collect();
+    assert_eq!(parts.len(), 5, "coords: {coords}");
+    assert_eq!(parts[4], "true", "engine dispatch is trusted");
+    let px: f64 = parts[2].parse().expect("pageX");
+    let py: f64 = parts[3].parse().expect("pageY");
+    let cx: f64 = parts[0].parse().expect("clientX");
+    let cy: f64 = parts[1].parse().expect("clientY");
+    assert_eq!(px, f64::from(x), "pageX = canvas x");
+    assert_eq!(py, f64::from(y), "pageY = canvas y");
+    assert_eq!(cx, px, "clientX = pageX (no horizontal scroll)");
+    assert_eq!(cy, py, "clientY = pageY (no page scroll attached)");
+}

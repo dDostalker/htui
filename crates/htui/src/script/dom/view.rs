@@ -692,6 +692,9 @@ pub(crate) fn native_add_window_event_listener(
             .with_message("addEventListener expects a function")
             .into());
     }
+    if type_name == "wheel" {
+        crate::script::note_wheel_listener();
+    }
     let registry = window_listeners_registry(context)?;
     let entry = match registry
         .get(js_string!(WINDOW_KEY), context)?
