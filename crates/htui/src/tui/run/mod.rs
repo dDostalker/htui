@@ -509,7 +509,7 @@ fn run_inner(
         let poll_timeout = if state.scroll_anim.is_some() || script_engaged {
             Duration::from_millis(ANIM_POLL_MS)
         } else {
-            Duration::from_millis(100)
+            Duration::from_millis(25)
         };
         let mut cmds = if events_active {
             let map = match hit_map.lock() {
@@ -525,7 +525,9 @@ fn run_inner(
             // geometry: the element under a stationary pointer may have
             // reflowed to something else, and a synthetic `Move` fires the
             // correct MouseOut / MouseOver (+ a fresh `Hover` highlight).
-            if state.take_resize_revalidation()
+            let hover_revalidation =
+                state.take_resize_revalidation() || state.take_pointer_revalidation();
+            if hover_revalidation
                 && let Some((col, row)) = state.last_mouse
             {
                 let (x, y) = (col as u32, row as u32 + state.scroll_y);
@@ -610,6 +612,11 @@ fn run_inner(
                     log::debug!(
                         "Script thread busy: dropping pointer move ({moves_in_flight} in flight)"
                     );
+                    // Dropping the newest position would strand hover on the
+                    // old element (a boundary crossing is a one-shot event).
+                    // Schedule a synthetic Move at the last known position so
+                    // hover converges once the backlog drains.
+                    state.request_pointer_revalidation();
                     continue;
                 }
                 moves_in_flight += 1;

@@ -131,6 +131,7 @@ pub struct InputState {
     /// run loop re-validates the pointer hover once the rebuilt hit map is in
     /// place (consumed by [`InputState::take_resize_revalidation`]).
     pub resize_pending: bool,
+    pub pointer_revalidation: bool,
     /// Canvas-space anchor of the page text selection (start point; `None`
     /// when no text selection is active).
     pub text_sel_anchor: Option<(u32, u32)>,
@@ -221,6 +222,7 @@ impl InputState {
             scroll_drag_x: None,
             last_mouse: None,
             resize_pending: false,
+            pointer_revalidation: false,
             text_sel_anchor: None,
             text_sel_end: None,
             text_sel_mode: SelectionMode::Flow,
@@ -377,6 +379,20 @@ impl InputState {
     /// fresh hit map.
     pub fn take_resize_revalidation(&mut self) -> bool {
         std::mem::take(&mut self.resize_pending)
+    }
+
+    /// Remember that a pointer move was dropped; the run loop re-synthesises
+    /// a `Move` at [`InputState::last_mouse`] (see
+    /// [`InputState::take_pointer_revalidation`]).
+    pub fn request_pointer_revalidation(&mut self) {
+        self.pointer_revalidation = true;
+    }
+
+    /// Consume the pending dropped-move flag; `true` when the run loop
+    /// should synthesise a `Move` at [`InputState::last_mouse`] so the
+    /// script thread hover state converges on the pointer true position.
+    pub fn take_pointer_revalidation(&mut self) -> bool {
+        std::mem::take(&mut self.pointer_revalidation)
     }
 
     /// Mirror the render thread's scroll clamp: after a terminal grow / a

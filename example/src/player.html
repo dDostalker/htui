@@ -1,11 +1,12 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <!--
   htui music player demo — interface + interaction only (no audio).
   Works in the terminal via htui and in a regular browser (standard DOM).
   Theme: "neon night" — charcoal slate + mint/cyan/violet/coral accents.
   Features: animated spectrum, playlist scrolling, seek/volume, lyrics, queue,
   favorites with filtering, seek, repeat/shuffle, volume, live clock.
-  Layout: viewport-fit with a collapsible library sidebar and fixed playback dock.
+  Layout: viewport-fit with an edge-triggered hover pop-out library and
+  fixed playback dock.
   Inner lists scroll instead of allowing controls to leave the screen.
 -->
 <html lang="en">
@@ -119,6 +120,21 @@
   }
   .side .card + .card { margin-top: 1ch; }
 
+  /* ---------- hover trigger ----------
+     Invisible full-height strip along the right viewport edge: resting
+     the pointer anywhere on it pops the library drawer out. It only
+     exists while the drawer rests closed, so it never blocks the
+     drawer itself; the playbar (z-10) stays above it, so the volume
+     slider keeps working inside the zone. */
+  .side-trigger {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 16ch;
+    height: 100vh;
+    z-index: 5;
+  }
+
   .card {
     /* The vh heights below assume browser content-box math; keep it explicit
        so terminal engines defaulting to border-box agree with the browser. */
@@ -150,10 +166,6 @@
     margin-top: 1ch;
   }
   .playbar .controls { flex: 0 1 auto; margin-top: 0; }
-  #lib-toggle {
-    flex-shrink: 0;
-    min-width: 5ch;
-  }
   .playbar .vol {
     flex: 1 1 10ch;
     min-width: 0;
@@ -482,7 +494,8 @@
 
   @media (max-height: 12ch) {
     .footer,
-    .side { display: none; }
+    .side,
+    .side-trigger { display: none; }
     .card-lyr { display: none; }
     .card { border: 0; padding: 0; }
     .top { height: 1ch; border: 0; padding: 0 1ch; }
@@ -504,7 +517,6 @@
     <span class="brand">&#9679; HTUI&middot;WAVE &middot; DEMO</span>
     <span class="feed">44.1 kHz &middot; 24-BIT &middot; STEREO</span>
     <span id="state-label">&#9679; PAUSED</span>
-    <span id="lib-toggle" class="btn lib-toggle" onclick="toggleLibrary()">&#171; LIB</span>
     <span id="clock" class="clock">00:00:00</span>
   </div>
 
@@ -549,7 +561,7 @@
       </div>
     </div>
 
-    <div id="music-side" class="side">
+    <div id="music-side" class="side" style="display:none" onmouseover="sideEnter()" onmouseout="sideLeave()">
       <div class="library card">
         <div class="lib-head">
           <span class="lib-title">Library</span>
@@ -591,6 +603,7 @@
       </div>
     </div>
   </div>
+  <div id="side-trigger" class="side-trigger" onmouseover="sideEnter()" onmouseout="sideLeave()"></div>
   </div>
 
   <div class="playbar">
@@ -857,13 +870,16 @@
       updateVolume();
     }
 
-    var libraryOpen = true;
+    /* Hover pop-out state: the drawer rests closed; resting the pointer
+       on the invisible right-edge trigger pops it out, and leaving the
+       zone retracts it. No button, no chrome: pure pointer intent. */
+    var libraryOpen = false;
     var sideTimer = null;
-    /* Last applied flex-basis value + unit (null = still at the stylesheet
-       at-rest value). Kept in the stylesheet's own unit (30% wide, 24ch
-       under the 64ch media query) so the inline tween and the cleared
-       inline end state agree — no snap on completion. */
-    var sideBasis = null;
+    var closeTimer = null;
+    /* Last applied flex-basis value + unit. Starts at 0 (rests closed);
+       the stylesheet at-rest basis takes over only at the end of an open
+       tween, so inline and cleared end states always agree. */
+    var sideBasis = 0;
     var sideUnit = "%";
 
     /* The at-rest basis the stylesheet gives the sidebar at the current
@@ -877,56 +893,78 @@
     /* Ease-out cubic: fast start, decelerating stop (same curve as scroll). */
     function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
 
-    function toggleLibrary() {
-      libraryOpen = !libraryOpen;
+    /* The edge trigger only exists while the drawer rests closed. It
+       flips at tween COMPLETION (not start): flipping mid-flight would
+       steal hover from the animating drawer (or park it on the drawer)
+       and read as a bogus leave/enter, retracting a drawer the pointer
+       is still inside. */
+    function setTriggerVisible(visible) {
+      var trigger = document.getElementById("side-trigger");
+      if (trigger) { trigger.style.display = visible ? "block" : "none"; }
+    }
+
+    /* Last seen pointer position (viewport cells), kept current from
+       every bubbled mouseover so the close decision can verify where
+       the pointer really is before retracting. */
+    var lastPX = -1;
+    var lastPY = -1;
+    document.body.addEventListener("mouseover", function (e) {
+      lastPX = e.clientX;
+      lastPY = e.clientY;
+    });
+
+    function pointerInDrawer() {
+      if (lastPX < 0) { return false; }
+      var side = document.getElementById("music-side");
+      if (!side) { return false; }
+      var r = side.getBoundingClientRect();
+      return lastPX >= r.left && lastPX < r.right && lastPY >= r.top && lastPY < r.bottom;
+    }
+
+    function setLibrary(open) {
+      libraryOpen = open;
       if (sideTimer !== null) { cancelAnimationFrame(sideTimer); sideTimer = null; }
       var side = document.getElementById("music-side");
-      var toggle = document.getElementById("lib-toggle");
-      toggle.textContent = libraryOpen ? "\u00ab LIB" : "LIB \u00bb";
 
       var rest = atRestBasis();
-      if (sideBasis === null) { sideBasis = rest.v; }
-      var unit = rest.u;
-      /* Retarget from wherever the sidebar currently is: reversing
-         mid-animation extends the glide instead of jumping to an endpoint. */
+      /* Retarget from wherever the drawer currently is: reversing
+         mid-animation extends the glide instead of jumping. */
       var from = sideBasis;
-      var to = libraryOpen ? rest.v : 0;
-      /* Travel-proportional duration (the scroll-anim rule): a full swing
-         takes the max, a quick re-toggle mid-flight lands proportionally
-         faster. Clamped so a nudge still reads as motion. */
+      var to = open ? rest.v : 0;
+      /* Travel-proportional duration: a full swing takes the max, a
+         quick retarget mid-flight lands proportionally faster. */
       var MIN_MS = 80;
-      var MAX_MS = 280;
+      /* Retracts are snappier than the reveal: leaving should feel like the
+         drawer gets out of the way, not like a second animation starts. */
+      var MAX_MS = open ? 280 : 160;
       var duration = Math.max(MIN_MS, Math.min(MAX_MS, Math.abs(to - from) / rest.v * MAX_MS));
 
-      if (libraryOpen) side.style.display = "flex";
+      side.style.display = "flex";
       side.style.minWidth = "0";
-      /* Pin the inline basis in the same JS turn as the display flip — a
+      /* Pin the inline basis in the same JS turn as the display flip: a
          from-rest open must not paint one frame at the stylesheet width. */
-      side.style.flexBasis = from + unit;
+      side.style.flexBasis = from + rest.u;
       sideBasis = from;
-      sideUnit = unit;
+      sideUnit = rest.u;
 
       if (from === to) {
-        if (!libraryOpen) side.style.display = "none";
+        if (!open) { side.style.display = "none"; }
+        setTriggerVisible(!open);
         return;
       }
 
-      /* ts is the frame's grid timestamp (ms since session start, browser
-         DOMHighResTimeStamp semantics — a late frame still reports its grid
-         time). The first frame anchors the tween clock, so t is a pure
-         function of the animation timeline and a dropped frame shows the
-         correct current position. */
+      /* The first frame anchors the tween clock, so t is a pure function
+         of the animation timeline and a dropped frame shows the correct
+         current position. */
       var start = null;
 
       function step(ts) {
         if (start === null) { start = ts; }
         var t = Math.min(1, (ts - start) / duration);
-        /* Two decimals: every frame lands on its own terminal column;
-           integer quantization reads as early jumps + a frozen tail. */
+        /* Two decimals: every frame lands on its own terminal column. */
         var basis = Math.round((from + (to - from) * easeOutCubic(t)) * 100) / 100;
-        /* Skip no-op writes: a repeated value still costs a full re-cascade +
-           re-layout + repaint, congesting the pipeline and starving the
-           frames that do move. */
+        /* Skip no-op writes: a repeated value still costs a full
+           re-cascade + re-layout + repaint. */
         if (basis !== sideBasis) {
           sideBasis = basis;
           side.style.flexBasis = basis + sideUnit;
@@ -935,14 +973,38 @@
           sideTimer = requestAnimationFrame(step);
         } else {
           sideTimer = null;
-          if (!libraryOpen) side.style.display = "none";
-          /* Drop the inline override; the stylesheet's at-rest basis takes
-             over (an identical value — see atRestBasis). */
+          if (!open) { side.style.display = "none"; }
+          setTriggerVisible(!open);
+          /* Drop the inline override; the stylesheet basis takes over. */
           side.style.flexBasis = "";
           side.style.minWidth = "";
         }
       }
       sideTimer = requestAnimationFrame(step);
+    }
+
+    /* Hover zone = edge trigger + drawer. mouseover/out bubble in both
+       the browser and htui, so one handler pair covers descendants. */
+    function sideEnter() {
+      if (closeTimer !== null) { clearTimeout(closeTimer); closeTimer = null; }
+      if (!libraryOpen) { setLibrary(true); }
+    }
+
+    /* Leaving the zone retracts after a short grace period; re-entering
+       cancels the pending close (covers the trigger-to-drawer gap). The
+       timer double-checks the pointer against the drawer rect, so a
+       leave produced by the trigger flipping (not by the pointer) can
+       never retract a drawer the pointer still rests in. */
+    function sideLeave() {
+      if (!libraryOpen || closeTimer !== null) { return; }
+      closeTimer = setTimeout(function () {
+        closeTimer = null;
+        if (libraryOpen && !pointerInDrawer()) { setLibrary(false); }
+      /* 0ms grace: within-drawer moves dispatch leave+enter in the SAME move
+         (enter cancels before any timer callback can run); the rect check
+         guards the trigger-flip artifact. So the retract starts on the very
+         next script-loop turn after a genuine exit. */
+      }, 0);
     }
 
     function toggleRepeat() { repeat = !repeat; update(); }
@@ -1035,6 +1097,9 @@
       update();
       renderLyrics();
     }, 1000);
+
+    /* Start closed: the drawer pops out when the rail senses the pointer. */
+    setLibrary(false);
 
     refresh();
   </script>
