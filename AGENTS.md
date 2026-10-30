@@ -259,7 +259,7 @@ htui/
 │           ├── 5.日志.md                    # 日志使用说明
 │           ├── 6.0示例-实现性能监控器.md      # 示例：性能监控器（占位，待编写）
 │           ├── 6.1-示例-实现贪吃蛇.md        # 示例：贪吃蛇（占位，待编写）
-│           ├── 6.2调试.md                   # 调试（占位，待编写）
+│           ├── 6.2调试.md                   # 调试（日志 / 热重载 / panic 恢复 / 排查清单 / TermLayout 测试观察）
 │           └── script-layer.md              # 脚本层完整使用与架构文档（脚本 / on* / 宿主函数 / RenderArena）
 ├── example/                # 音乐播放器示例（cd example && cargo run；纯界面 + 交互演示，无音频）
 │   ├── Cargo.toml          # 空 [workspace] 表脱离根 workspace，可独立运行
