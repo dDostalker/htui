@@ -122,6 +122,12 @@ pub enum RenderCmd {
         node_id: NodeId,
         scroll_y: u32,
     },
+    /// Horizontal counterpart of [`RenderCmd::RenderScroll`](Self::RenderScroll):
+    /// update one `overflow-x` container and re-layout.
+    RenderScrollX {
+        node_id: NodeId,
+        scroll_x: u32,
+    },
     /// Glide the page viewport or one native scroll container to `to` with an
     /// ease-out animation. Intercepted by the run loop (never forwarded to the
     /// render thread): the animation lives on the input side and emits one
@@ -280,7 +286,9 @@ impl DrainedBatch {
     pub fn absorb(&mut self, cmd: RenderCmd) {
         match cmd {
             RenderCmd::RenderInput { .. } => self.inputs.push(cmd),
-            RenderCmd::RenderScroll { .. } => self.scrolls.push(cmd),
+            RenderCmd::RenderScroll { .. } | RenderCmd::RenderScrollX { .. } => {
+                self.scrolls.push(cmd)
+            }
             // Never forwarded (the run loop intercepts markers before the
             // channel) — dropped here so a leaked one cannot displace a real
             // snapshot.

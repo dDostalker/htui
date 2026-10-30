@@ -48,8 +48,12 @@ pub fn layout_tree(
         viewport_cols,
         viewport_rows,
         &scroll_offsets,
+        &NO_X,
     )
 }
+
+/// Empty x-offset table for the compatibility wrapper.
+static NO_X: std::sync::LazyLock<HashMap<NodeId, u32>> = std::sync::LazyLock::new(HashMap::new);
 
 /// Build a layout forest while preserving native scroll-container offsets.
 pub fn layout_tree_with_scroll_offsets(
@@ -60,6 +64,7 @@ pub fn layout_tree_with_scroll_offsets(
     viewport_cols: usize,
     viewport_rows: usize,
     scroll_offsets: &HashMap<NodeId, u32>,
+    scroll_x_offsets: &HashMap<NodeId, u32>,
 ) -> Vec<LayoutBox> {
     // The top level dispatches one box per rendered root child. Root-level
     // `display: contents` elements splice their children into the sibling
@@ -82,6 +87,7 @@ pub fn layout_tree_with_scroll_offsets(
                 rows: viewport_rows,
             },
             scroll_offsets,
+            scroll_x_offsets,
         },
     );
     // Positioned boxes resolve against their containing blocks once the whole

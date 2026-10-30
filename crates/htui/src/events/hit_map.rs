@@ -290,6 +290,18 @@ pub struct ScrollbarRegion {
     pub content_height: u32,
     /// Visible viewport height in rows (`el.clientHeight` of the scroller).
     pub viewport_height: u32,
+    /// Current horizontal content offset in columns.
+    pub scroll_x: u32,
+    /// Maximum valid horizontal offset.
+    pub max_scroll_x: u32,
+    /// Full scrollable content width in columns (`el.scrollWidth`).
+    pub content_width: u32,
+    /// Visible viewport width in columns.
+    pub viewport_width: u32,
+    /// One-row bottom track rectangle (zero-height when there is no
+    /// horizontal overflow).
+    pub h_track: Rect,
+    pub h_thumb: Rect,
 }
 
 impl ScrollbarRegion {
@@ -302,7 +314,32 @@ impl ScrollbarRegion {
             max_scroll: scroll.max_scroll as u32,
             content_height: scroll.content_height as u32,
             viewport_height: scroll.viewport_height as u32,
+            scroll_x: scroll.scroll_x as u32,
+            max_scroll_x: scroll.max_scroll_x as u32,
+            content_width: scroll.content_width as u32,
+            viewport_width: scroll.viewport_width as u32,
+            h_track: scroll.h_track,
+            h_thumb: scroll.h_thumb,
         }
+    }
+
+    /// Content offset for a pointer column, preserving a thumb-grab offset
+    /// (horizontal scrollbar drag).
+    pub fn offset_at_x(&self, x: u32, grab_offset: u32) -> u32 {
+        if self.h_track.width <= 1 || self.max_scroll_x == 0 {
+            return 0;
+        }
+        let x = x as usize;
+        let target = x
+            .saturating_sub(grab_offset as usize)
+            .saturating_sub(self.h_track.x)
+            .min(self.h_track.width.saturating_sub(self.h_thumb.width.max(1)));
+        let travel = self
+            .h_track
+            .width
+            .saturating_sub(self.h_thumb.width.max(1))
+            .max(1);
+        ((target as u64 * self.max_scroll_x as u64) / travel as u64) as u32
     }
 
     /// Content offset for a pointer row, preserving a thumb-grab offset.

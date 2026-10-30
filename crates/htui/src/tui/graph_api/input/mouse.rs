@@ -101,10 +101,15 @@ pub fn handle_click(
     }
 }
 
-/// Apply a wheel tick to the nearest native scroll container under `x/y`.
+/// Apply a wheel tick to the nearest native scroll container under `x/y`
+/// that can still move in the requested direction.
 ///
 /// With smooth scrolling enabled the tick returns a `ScrollAnimate` marker
 /// for the run loop's eased animation instead of moving the container here.
+/// Browser scroll chaining: a container already at its edge passes the tick
+/// to the next outer scroll container; when every container is at its edge
+/// (or there is no container under the pointer) the tick falls through to
+/// the page (`None`).
 pub(super) fn scroll_at_wheel(
     state: &mut InputState,
     hit_map: &HitMap,
@@ -114,44 +119,124 @@ pub(super) fn scroll_at_wheel(
     up: bool,
 ) -> Option<RenderCmd> {
     let hit = hit_map.hit_test(x, y)?;
-    let scroll = hit_map.scroll_container(Some(hit.node_id), arena)?;
-    let current = state
-        .scroll_offsets
-        .get(&scroll.node_id)
-        .copied()
-        .unwrap_or(scroll.scroll_y);
-    if state.smooth_scroll {
-        let base =
-            active_scroll_target(state, ScrollTarget::Container(scroll.node_id)).unwrap_or(current);
-        let delta = if up {
-            -(super::SCROLL_LINES_PER_TICK as i32)
-        } else {
-            super::SCROLL_LINES_PER_TICK as i32
+    let delta = if up {
+        -(super::SCROLL_LINES_PER_TICK as i32)
+    } else {
+        super::SCROLL_LINES_PER_TICK as i32
+    };
+    // Walk the DOM ancestor chain, trying each active scroll container; the
+    // first one that can move consumes the tick.
+    let mut current = Some(hit.node_id);
+    while let Some(node_id) = current {
+        current = arena.get(node_id).and_then(|node| node.parent);
+        let Some(scroll) = hit_map.scrollbars.get(&node_id) else {
+            continue;
         };
-        return step_target(base, delta, 0, scroll.max_scroll).map(|to| {
-            state.show_scrollbar(scroll.node_id);
-            RenderCmd::ScrollAnimate {
-                target: ScrollTarget::Container(scroll.node_id),
-                to,
-            }
+        let at_edge = if up {
+            state
+                .scroll_offsets
+                .get(&scroll.node_id)
+                .copied()
+                .unwrap_or(scroll.scroll_y)
+                == 0
+        } else {
+            state
+                .scroll_offsets
+                .get(&scroll.node_id)
+                .copied()
+                .unwrap_or(scroll.scroll_y)
+                >= scroll.max_scroll
+        };
+        if at_edge {
+            continue;
+        }
+        let base = state
+            .scroll_offsets
+            .get(&scroll.node_id)
+            .copied()
+            .unwrap_or(scroll.scroll_y);
+        if state.smooth_scroll {
+            let base = active_scroll_target(state, ScrollTarget::Container(scroll.node_id))
+                .unwrap_or(base);
+            return step_target(base, delta, 0, scroll.max_scroll).map(|to| {
+                state.show_scrollbar(scroll.node_id);
+                RenderCmd::ScrollAnimate {
+                    target: ScrollTarget::Container(scroll.node_id),
+                    to,
+                }
+            });
+        }
+        let next = step_target(base, delta, 0, scroll.max_scroll)?;
+        state.show_scrollbar(scroll.node_id);
+        state.scroll_offsets.insert(scroll.node_id, next);
+        return Some(RenderCmd::RenderScroll {
+            node_id: scroll.node_id,
+            scroll_y: next,
         });
     }
-    let next = step_target(
-        current,
-        if up {
-            -(super::SCROLL_LINES_PER_TICK as i32)
+    None
+}
+
+/// Horizontal counterpart of [`scroll_at_wheel`]: route a horizontal wheel
+/// tick (`ScrollLeft` / `ScrollRight`) through the `overflow-x` containers
+/// under the pointer, chaining past at-edge containers. The page never
+/// scrolls horizontally — exhaustion is a no-op.
+pub(super) fn scroll_at_wheel_x(
+    state: &mut InputState,
+    hit_map: &HitMap,
+    arena: &NodeArena,
+    x: u32,
+    y: u32,
+    left: bool,
+) -> Option<RenderCmd> {
+    let hit = hit_map.hit_test(x, y)?;
+    let delta = if left {
+        -(super::SCROLL_LINES_PER_TICK as i32)
+    } else {
+        super::SCROLL_LINES_PER_TICK as i32
+    };
+    let mut current = Some(hit.node_id);
+    while let Some(node_id) = current {
+        current = arena.get(node_id).and_then(|node| node.parent);
+        let Some(scroll) = hit_map.scrollbars.get(&node_id) else {
+            continue;
+        };
+        if scroll.max_scroll_x == 0 {
+            continue;
+        }
+        let at_edge = if left {
+            state
+                .scroll_x_offsets
+                .get(&scroll.node_id)
+                .copied()
+                .unwrap_or(scroll.scroll_x)
+                == 0
         } else {
-            super::SCROLL_LINES_PER_TICK as i32
-        },
-        0,
-        scroll.max_scroll,
-    )?;
-    state.show_scrollbar(scroll.node_id);
-    state.scroll_offsets.insert(scroll.node_id, next);
-    Some(RenderCmd::RenderScroll {
-        node_id: scroll.node_id,
-        scroll_y: next,
-    })
+            state
+                .scroll_x_offsets
+                .get(&scroll.node_id)
+                .copied()
+                .unwrap_or(scroll.scroll_x)
+                >= scroll.max_scroll_x
+        };
+        if at_edge {
+            continue;
+        }
+        let base = state
+            .scroll_x_offsets
+            .get(&scroll.node_id)
+            .copied()
+            .unwrap_or(scroll.scroll_x);
+        if let Some(next) = step_target(base, delta, 0, scroll.max_scroll_x) {
+            state.show_scrollbar(scroll.node_id);
+            state.scroll_x_offsets.insert(scroll.node_id, next);
+            return Some(RenderCmd::RenderScrollX {
+                node_id: scroll.node_id,
+                scroll_x: next,
+            });
+        }
+    }
+    None
 }
 
 /// Reveal a scrollbar when the pointer is over its track, even while idle.
@@ -207,6 +292,7 @@ pub fn handle_mouse_up(
 ) {
     let range_drag = state.drag_selecting && state.field_drag_started && state.focused_is_range;
     let scroll_drag = state.scroll_drag.take();
+    state.scroll_drag_x = None;
     let pressed = state.pressed.take();
     let press_target = state.pressed_target.take();
     let press_origin = state.press_screen.take();
@@ -386,33 +472,59 @@ pub fn handle_mouse_down(
     state.pressed_target = None;
     state.field_drag_started = false;
     // A native scrollbar owns its press before text selection / controls.
-    let scrollbar_hit = (button == MouseButton::Left)
-        .then(|| {
-            hit_map
-                .scrollbars
-                .values()
-                .find(|scroll| scroll.track.contains(x, y))
-                .map(|scroll| {
-                    let grab_offset = y
-                        .saturating_sub(scroll.thumb.y as u32)
-                        .min(scroll.thumb.height as u32);
-                    let offset = scroll.offset_at(y, grab_offset);
-                    (scroll.node_id, grab_offset, offset)
-                })
-        })
-        .flatten();
-    if let Some((node_id, grab_offset, offset)) = scrollbar_hit {
-        // Grabbing the thumb takes over from any glide in progress. A same-
-        // offset command still reveals chrome that a previous timeout hid.
-        state.scroll_anim = None;
-        state.show_scrollbar(node_id);
-        state.scroll_drag = Some((node_id, grab_offset));
-        state.scroll_offsets.insert(node_id, offset);
-        cmds.push(RenderCmd::RenderScroll {
-            node_id,
-            scroll_y: offset,
-        });
-        return;
+    // The bottom horizontal track wins when the point also touches a
+    // vertical track's corner cell.
+    if button == MouseButton::Left {
+        let h_hit = hit_map
+            .scrollbars
+            .values()
+            .find(|scroll| scroll.h_track.height > 0 && scroll.h_track.contains(x, y))
+            .map(|scroll| {
+                let grab_offset = x
+                    .saturating_sub(scroll.h_thumb.x as u32)
+                    .min(scroll.h_thumb.width as u32);
+                (
+                    scroll.node_id,
+                    grab_offset,
+                    scroll.offset_at_x(x, grab_offset),
+                )
+            });
+        if let Some((node_id, grab_offset, offset)) = h_hit {
+            state.scroll_anim = None;
+            state.show_scrollbar(node_id);
+            state.scroll_drag = Some((node_id, grab_offset));
+            state.scroll_drag_x = Some(grab_offset);
+            state.scroll_x_offsets.insert(node_id, offset);
+            cmds.push(RenderCmd::RenderScrollX {
+                node_id,
+                scroll_x: offset,
+            });
+            return;
+        }
+        let scrollbar_hit = hit_map
+            .scrollbars
+            .values()
+            .find(|scroll| scroll.track.contains(x, y))
+            .map(|scroll| {
+                let grab_offset = y
+                    .saturating_sub(scroll.thumb.y as u32)
+                    .min(scroll.thumb.height as u32);
+                let offset = scroll.offset_at(y, grab_offset);
+                (scroll.node_id, grab_offset, offset)
+            });
+        if let Some((node_id, grab_offset, offset)) = scrollbar_hit {
+            // Grabbing the thumb takes over from any glide in progress. A same-
+            // offset command still reveals chrome that a previous timeout hid.
+            state.scroll_anim = None;
+            state.show_scrollbar(node_id);
+            state.scroll_drag = Some((node_id, grab_offset));
+            state.scroll_offsets.insert(node_id, offset);
+            cmds.push(RenderCmd::RenderScroll {
+                node_id,
+                scroll_y: offset,
+            });
+            return;
+        }
     }
 
     // An open dropdown takes priority: a press on an option row picks it, a
@@ -607,6 +719,24 @@ pub fn handle_mouse_move(
             node_id: open.node_id,
             highlight: idx,
         });
+    }
+
+    // Horizontal scrollbar drag: same contract as the vertical thumb, mapped
+    // through `offset_at_x` into the container's `scroll_x_offsets`.
+    if let Some((node_id, grab_offset)) = state.scroll_drag
+        && state.scroll_drag_x.is_some()
+        && let Some(scroll) = hit_map.scrollbars.get(&node_id)
+    {
+        state.show_scrollbar(node_id);
+        let offset = scroll.offset_at_x(x, grab_offset);
+        if state.scroll_x_offsets.get(&node_id) != Some(&offset) {
+            state.scroll_x_offsets.insert(node_id, offset);
+            cmds.push(RenderCmd::RenderScrollX {
+                node_id,
+                scroll_x: offset,
+            });
+        }
+        return;
     }
 
     if let Some((node_id, grab_offset)) = state.scroll_drag

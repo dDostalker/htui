@@ -64,6 +64,8 @@ pub struct InputState {
     pub scroll_y: u32,
     /// Current offsets for native scroll containers.
     pub scroll_offsets: HashMap<NodeId, u32>,
+    /// Current horizontal offsets for native `overflow-x` containers.
+    pub scroll_x_offsets: HashMap<NodeId, u32>,
     /// Active eased scroll animation (`None` = none). Wheel and page-jump
     /// input glides toward its target through this state; any direct scroll
     /// write (arrow keys, scrollbar drag) cancels it.
@@ -116,7 +118,11 @@ pub struct InputState {
     /// Disabled controls and scrollbar/dropdown-only presses leave it clear.
     pressed_target: Option<NodeId>,
     /// Native scrollbar thumb currently dragged: owning node + grab offset.
+    /// The axis flag selects the vertical track or the bottom horizontal one.
     pub scroll_drag: Option<(NodeId, u32)>,
+    /// Grab offset of the active horizontal scrollbar drag (set alongside
+    /// [`Self::scroll_drag`]).
+    pub scroll_drag_x: Option<u32>,
     /// Screen coordinates of the last pointer event (any button state). Lets
     /// the run loop re-validate hover against a freshly rebuilt hit map after
     /// a viewport change by synthesising a `Move` at the known position.
@@ -193,6 +199,7 @@ impl InputState {
         Self {
             scroll_y: 0,
             scroll_offsets: HashMap::new(),
+            scroll_x_offsets: HashMap::new(),
             scroll_anim: None,
             scrollbars_visible: Arc::new(Mutex::new(HashMap::new())),
             scrollbar_hide_at: HashMap::new(),
@@ -211,6 +218,7 @@ impl InputState {
             field_drag_started: false,
             pressed_target: None,
             scroll_drag: None,
+            scroll_drag_x: None,
             last_mouse: None,
             resize_pending: false,
             text_sel_anchor: None,

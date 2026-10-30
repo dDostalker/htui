@@ -398,10 +398,34 @@ pub(crate) fn native_get_scroll_left(
     _args: &[JsValue],
     context: &mut Context,
 ) -> JsResult<JsValue> {
-    let _ = this_node_id(this, context)?;
-    // Horizontal container scrolling is not implemented yet (the x axis is
-    // read-only zero until then, like `window.scrollX`).
-    Ok(0.0.into())
+    let node_id = this_node_id(this, context)?;
+    Ok(f64::from(
+        node_geometry(node_id)
+            .and_then(|g| g.scroll)
+            .map_or(0, |s| s.scroll_x),
+    )
+    .into())
+}
+
+/// `element.scrollLeft = n` — re-scroll an active horizontal scroll container
+/// (clamped to its live maximum); a no-op on non-scrolling elements.
+pub(crate) fn native_set_scroll_left(
+    this: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let node_id = this_node_id(this, context)?;
+    let value = args.first().cloned().unwrap_or_else(JsValue::undefined);
+    let to = clamp_cell(value.to_number(context).unwrap_or(0.0));
+    if let Some(geo) = node_geometry(node_id)
+        && let Some(scroll) = geo.scroll
+    {
+        push_scroll_cmd(RenderCmd::RenderScrollX {
+            node_id,
+            scroll_x: to.min(scroll.max_scroll_x),
+        });
+    }
+    Ok(JsValue::undefined())
 }
 
 pub(crate) fn native_get_scroll_height(
@@ -425,9 +449,10 @@ pub(crate) fn native_get_scroll_width(
     context: &mut Context,
 ) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
-    Ok(node_geometry(node_id)
-        .map_or(0.0, |g| f64::from(g.rect.width as u32))
-        .into())
+    let value = node_geometry(node_id).map_or(0.0, |g| {
+        f64::from(g.scroll.map_or(g.rect.width, |s| s.content_width as usize) as u32)
+    });
+    Ok(value.into())
 }
 
 /// `document.activeElement` — the focused `<input>` / `<textarea>` wrapper,

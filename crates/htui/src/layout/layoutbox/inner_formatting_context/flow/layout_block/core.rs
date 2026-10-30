@@ -456,61 +456,160 @@ pub fn layout_block(
         outer_height + opts.spacing_after
     };
 
-    // Native vertical scroll containers keep their fixed frame and translate
-    // overflowing flow content by the current offset. The scrollbar is an
-    // engine-owned component: it is not a DOM child, so paint can draw it
-    // after clipped content and input can hit it independently.
-    let scrollbar = if node.css_attr.scrolls_vertically() {
+    // Native scroll containers keep their fixed frame and translate
+    // overflowing flow content by the current offsets. The scrollbars are
+    // engine-owned components: they are not DOM children, so paint can draw
+    // them after clipped content and input can hit them independently.
+    let scrollbar = if node.css_attr.scrolls_vertically() || node.css_attr.scrolls_horizontally() {
         let inner_v = edges.padding.vertical() + edges.border.vertical_thickness();
         let viewport_height = outer_height.saturating_sub(inner_v);
         let max_scroll = content_height.saturating_sub(viewport_height);
-        if viewport_height > 0 && max_scroll > 0 {
-            let scroll_y = (context
+        let vertical = node.css_attr.scrolls_vertically() && viewport_height > 0 && max_scroll > 0;
+        let scroll_y = if vertical {
+            (context
                 .scroll_offsets
                 .get(&node_id)
                 .copied()
                 .unwrap_or(0)
-                .min(max_scroll as u32)) as usize;
-            let border_rect = build_border_rect(geom, rect_height);
-            let track = Rect::new(
+                .min(max_scroll as u32)) as usize
+        } else {
+            0
+        };
+        let border_rect = build_border_rect(geom, rect_height);
+        let track = if vertical {
+            Rect::new(
                 border_rect
                     .x
                     .saturating_add(border_rect.width.saturating_sub(1)),
                 content_top,
                 1,
                 viewport_height,
-            );
-            // Thumb height proportional to the visible fraction
-            // (viewport / content), rounded half-up in integer math.
-            let content = content_height.max(1);
-            let thumb_height = (viewport_height
+            )
+        } else {
+            Rect::new(0, 0, 0, 0)
+        };
+        // Thumb height proportional to the visible fraction
+        // (viewport / content), rounded half-up in integer math.
+        let content = content_height.max(1);
+        let thumb_height = if vertical {
+            (viewport_height
                 .saturating_mul(viewport_height)
                 .saturating_add(content / 2)
                 / content)
-                .clamp(1, viewport_height);
-            let thumb_y = track.y
-                + if max_scroll == 0 {
+                .clamp(1, viewport_height)
+        } else {
+            0
+        };
+        let thumb_y = track
+            .y
+            .saturating_add(if max_scroll == 0 {
+                0
+            } else {
+                ((scroll_y as f32 / max_scroll as f32)
+                    * (track.height.saturating_sub(thumb_height) as f32))
+                    .round() as usize
+            })
+            .min(
+                track
+                    .y
+                    .saturating_add(track.height.saturating_sub(thumb_height)),
+            );
+
+        // Horizontal axis: measure the widest content extent (child subtrees
+        // plus the box's own inline lines) against the content-box width.
+        // A child box rect alone under-reports — a `nowrap` block child keeps
+        // its allotted width while its runs overflow — so each subtree also
+        // contributes its own-run extent.
+        let inner_h = edges.padding.horizontal() + edges.border.horizontal_thickness();
+        let viewport_width = border_rect.width.saturating_sub(inner_h);
+        let content_left = border_rect.x + edges.border.left.width + edges.padding.left;
+        let child_extent = children
+            .iter()
+            .map(|c| horizontal_content_extent(c).saturating_sub(content_left))
+            .max()
+            .unwrap_or(0);
+        let line_extent = wrapped_lines
+            .iter()
+            .map(|line| line.iter().map(|run| run.width()).sum::<usize>())
+            .max()
+            .unwrap_or(0);
+        let content_width = child_extent.max(line_extent);
+        let max_scroll_x = content_width.saturating_sub(viewport_width);
+        let horizontal =
+            node.css_attr.scrolls_horizontally() && viewport_width > 0 && max_scroll_x > 0;
+        let scroll_x = if horizontal {
+            (context
+                .scroll_x_offsets
+                .get(&node_id)
+                .copied()
+                .unwrap_or(0)
+                .min(max_scroll_x as u32)) as usize
+        } else {
+            0
+        };
+        let (h_track, h_thumb) = if horizontal {
+            // One-row track hugging the border-box bottom edge over the
+            // viewport columns; thumb width proportional to the visible
+            // fraction.
+            let h_track = Rect::new(
+                content_left,
+                border_rect
+                    .y
+                    .saturating_add(border_rect.height.saturating_sub(1)),
+                viewport_width,
+                1,
+            );
+            // Thumb width proportional to the visible fraction
+            // (viewport / content), rounded half-up in integer math — the
+            // same rule the vertical track applies with heights.
+            let content = content_width.max(1);
+            let thumb_width = (viewport_width
+                .saturating_mul(viewport_width)
+                .saturating_add(content / 2)
+                / content)
+                .clamp(1, viewport_width);
+            let thumb_x = h_track
+                .x
+                .saturating_add(if max_scroll_x == 0 {
                     0
                 } else {
-                    ((scroll_y as f32 / max_scroll as f32)
-                        * (track.height.saturating_sub(thumb_height) as f32))
+                    ((scroll_x as f32 / max_scroll_x as f32)
+                        * (h_track.width.saturating_sub(thumb_width) as f32))
                         .round() as usize
-                }
-                .min(track.height.saturating_sub(thumb_height));
-            for child in &mut children {
-                translate_scroll_content(child, -(scroll_y as i64));
-            }
-            Some(ScrollbarLayout {
-                scroll_y,
-                max_scroll,
-                content_height,
-                viewport_height,
-                track,
-                thumb: Rect::new(track.x, thumb_y, 1, thumb_height),
-            })
+                })
+                .min(
+                    h_track
+                        .x
+                        .saturating_add(h_track.width.saturating_sub(thumb_width)),
+                );
+            (h_track, Rect::new(thumb_x, h_track.y, thumb_width, 1))
         } else {
-            None
+            (Rect::new(0, 0, 0, 0), Rect::new(0, 0, 0, 0))
+        };
+        if vertical {
+            for child in &mut children {
+                translate_scroll_content(child, -(scroll_y as i64), 0);
+            }
         }
+        if horizontal {
+            for child in &mut children {
+                translate_scroll_content(child, 0, -(scroll_x as i64));
+            }
+        }
+        Some(ScrollbarLayout {
+            scroll_y,
+            max_scroll,
+            content_height,
+            viewport_height,
+            track,
+            thumb: Rect::new(track.x, thumb_y, 1, thumb_height),
+            scroll_x,
+            max_scroll_x,
+            content_width,
+            viewport_width,
+            h_track,
+            h_thumb,
+        })
     } else {
         None
     };
@@ -555,15 +654,41 @@ pub fn layout_block(
     )
 }
 
-/// Shift one scroll-container child and its subtree up by `dy`. Fixed children
-/// remain viewport-anchored and are translated again by the global fixed pass.
-fn translate_scroll_content(child: &mut crate::layout::LayoutBox, dy: i64) {
+/// Shift one scroll-container child and its subtree by `dy` rows / `dx`
+/// columns. Fixed children remain viewport-anchored and are translated again
+/// by the global fixed pass.
+fn translate_scroll_content(child: &mut crate::layout::LayoutBox, dy: i64, dx: i64) {
     if !matches!(
         child.positioning.position,
         crate::html::css_parse::Position::Fixed
     ) {
-        translate_subtree(child, 0, dy);
+        translate_subtree(child, dx, dy);
     }
+}
+
+/// The rightmost content extent of one laid-out subtree in absolute canvas
+/// columns: box rectangles and, per box, its own inline lines measured from
+/// the box's content left (a `nowrap` line may overflow its box). Used by the
+/// horizontal scroll measurement — the box rect alone under-reports.
+fn horizontal_content_extent(lb: &crate::layout::LayoutBox) -> usize {
+    let box_right = lb.rect.x.saturating_add(lb.rect.width);
+    let runs = &lb.paint_style.runs;
+    let content_left = lb.rect.x
+        + lb.paint_style.box_edges.border.left.width
+        + lb.paint_style.box_edges.padding.left;
+    let run_right = runs
+        .iter()
+        .flatten()
+        .map(|line| content_left.saturating_add(line.iter().map(|run| run.width()).sum::<usize>()))
+        .max()
+        .unwrap_or(0);
+    let subtree = lb
+        .children
+        .iter()
+        .map(horizontal_content_extent)
+        .max()
+        .unwrap_or(0);
+    box_right.max(run_right).max(subtree)
 }
 
 /// Layer the browser UA default border (`opts.ua_border`) onto the resolved

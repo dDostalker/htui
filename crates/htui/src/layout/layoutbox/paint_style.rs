@@ -30,7 +30,7 @@ pub struct ColumnLayout {
     pub height: usize,
 }
 
-/// Layout facts for a box's native vertical scrollbar.
+/// Layout facts for a box's native scrollbars.
 ///
 /// Layout computes them after measuring overflowing children so the input
 /// layer and paint phase share one canonical thumb geometry.
@@ -48,6 +48,20 @@ pub struct ScrollbarLayout {
     pub track: crate::layout::Rect,
     /// Absolute thumb rectangle inside `track`.
     pub thumb: crate::layout::Rect,
+    /// Current content offset in columns (0 when the box does not scroll
+    /// horizontally).
+    pub scroll_x: usize,
+    /// Maximum valid horizontal offset (`content_width - viewport_width`).
+    pub max_scroll_x: usize,
+    /// Full scrollable content width in columns.
+    pub content_width: usize,
+    /// Visible content width in columns, excluding padding / border.
+    pub viewport_width: usize,
+    /// Absolute one-row bottom track rectangle; zero-height when the box has
+    /// no horizontal overflow.
+    pub h_track: crate::layout::Rect,
+    /// Absolute thumb rectangle inside `h_track`.
+    pub h_thumb: crate::layout::Rect,
 }
 
 /// Paint-only data carried by every [`crate::layout::LayoutBox`].

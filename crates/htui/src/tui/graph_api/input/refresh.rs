@@ -22,7 +22,7 @@ use super::focus::{blur_input, push_input_render};
 use super::key_info::key_event_info;
 use super::mouse::{
     canvas_pos, handle_mouse_down, handle_mouse_move, handle_mouse_up, reveal_scrollbar_at,
-    scroll_at_wheel,
+    scroll_at_wheel, scroll_at_wheel_x,
 };
 use super::page::page_level_builtins;
 use super::scroll_anim::{ScrollTarget, active_scroll_target, step_target};
@@ -449,6 +449,42 @@ pub fn trigger_refresh(
                     default_wheel_scroll(state, hit_map, arena, max_scroll, x, y, up, &mut cmds);
                     return cmds;
                 }
+                MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight => {
+                    // Horizontal wheel ticks route through `overflow-x`
+                    // containers only — the page has no horizontal axis. With
+                    // a `wheel` listener registered the tick dispatches the
+                    // gated event instead (the listener may scroll).
+                    let (x, y) = canvas_pos(state, mouse.column, mouse.row);
+                    if let (Some(hit_map), Some(arena)) = (hit_map, arena) {
+                        let left = matches!(mouse.kind, MouseEventKind::ScrollLeft);
+                        let wheel_listeners = state
+                            .ui
+                            .as_ref()
+                            .is_some_and(|ui| ui.has_wheel_listeners.load(Ordering::Relaxed));
+                        if wheel_listeners {
+                            state.next_key_id = state.next_key_id.wrapping_add(1);
+                            let gate_id = state.next_key_id;
+                            msgs.push(ScriptMsg::Wheel {
+                                gate_id,
+                                x,
+                                y,
+                                up: false,
+                            });
+                            // No default horizontal action to defer; the gate
+                            // exists so JS can observe the tick.
+                            state.pending_wheel = None;
+                            state.wheel_gate = Some(KeyGate {
+                                id: gate_id,
+                                cmds: Vec::new(),
+                            });
+                        } else if let Some(cmd) =
+                            scroll_at_wheel_x(state, hit_map, arena, x, y, left)
+                        {
+                            cmds.push(cmd);
+                        }
+                    }
+                    return cmds;
+                }
                 MouseEventKind::Down(button) => {
                     if let (Some(hit_map), Some(arena)) = (hit_map, arena) {
                         state.pressed = Some((mouse.column, mouse.row));
@@ -510,7 +546,6 @@ pub fn trigger_refresh(
                         handle_mouse_move(state, hit_map, arena, x, y, msgs, &mut cmds);
                     }
                 }
-                _ => {}
             }
             cmds
         }

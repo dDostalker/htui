@@ -52,6 +52,7 @@ fn overflow_y_creates_a_native_scrollbar_and_translates_content() {
         map.columns as usize,
         map.rows as usize,
         &offsets,
+        &std::collections::HashMap::new(),
     );
     let list = find_layout(&boxes, &arena, |node_type| {
         matches!(node_type, NodeType::Div)
@@ -201,6 +202,122 @@ fn term_map() -> TermMap {
         columns: 80,
         rows: 24,
     }
+}
+
+#[test]
+fn overflow_x_creates_a_bottom_scrollbar_and_translates_content() {
+    // A fixed-width `overflow-x: auto` container holding one nowrap child
+    // far wider than the viewport: layout must expose a bottom one-row
+    // track with a proportional thumb, report the measured content width,
+    // and translate the subtree by the horizontal offset.
+    let (root_id, arena) = setup(
+        r#"<div id="h"><div id="wide">AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA</div></div>"#,
+        "#h { width: 30ch; height: 3ch; overflow-x: auto; }\n#h div { white-space: nowrap; }",
+    );
+    let map = term_map();
+    let mut cursor = Cursor::new();
+    let boxes = layout_tree(
+        &arena,
+        root_id,
+        BoxConstraint::root(&map),
+        &mut cursor,
+        map.columns as usize,
+        map.rows as usize,
+    );
+    let container =
+        find_layout(&boxes, &arena, |t| matches!(t, NodeType::Div)).expect("container exists");
+    let scroll = container
+        .paint_style
+        .scrollbar
+        .expect("horizontal overflow activates the scrollbar");
+    assert!(
+        scroll.max_scroll_x > 0,
+        "content wider than 30 columns: content_width={}",
+        scroll.content_width
+    );
+    assert_eq!(scroll.viewport_width, 30, "content-box width");
+    assert!(scroll.content_width > 30);
+    assert_eq!(scroll.h_track.height, 1, "one-row bottom track");
+    assert_eq!(scroll.h_track.width, 30);
+    assert_eq!(
+        scroll.h_track.y,
+        container.rect.y + container.rect.height - 1
+    );
+    assert!(
+        scroll.h_thumb.width >= 1 && scroll.h_thumb.width <= 30,
+        "thumb inside the track"
+    );
+    // Un-scrolled: content sits at its natural offset.
+    let wide = container.children.first().expect("wide child in the tree");
+    assert_eq!(wide.rect.x, container.rect.x);
+
+    // Apply a horizontal offset: the child subtree shifts left, the thumb
+    // slides right.
+    let offsets = std::collections::HashMap::new();
+    let x_offsets = [(container.node_id, 4u32)].into_iter().collect();
+    let mut cursor = Cursor::new();
+    let scrolled = layout_tree_with_scroll_offsets(
+        &arena,
+        root_id,
+        BoxConstraint::root(&map),
+        &mut cursor,
+        map.columns as usize,
+        map.rows as usize,
+        &offsets,
+        &x_offsets,
+    );
+    let container =
+        find_layout(&scrolled, &arena, |t| matches!(t, NodeType::Div)).expect("container exists");
+    let scroll = container
+        .paint_style
+        .scrollbar
+        .expect("scrollbar survives scrolling");
+    assert_eq!(scroll.scroll_x, 4, "offset applied from the x table");
+    let wide = container.children.first().expect("wide child in the tree");
+    assert_eq!(
+        wide.rect.x,
+        container.rect.x.saturating_sub(4),
+        "content translated left by the offset"
+    );
+    assert!(
+        scroll.h_thumb.x > scroll.h_track.x,
+        "thumb slides toward the track end (scroll_x={} max_scroll_x={} content_width={} thumb_x={} track_x={})",
+        scroll.scroll_x,
+        scroll.max_scroll_x,
+        scroll.content_width,
+        scroll.h_thumb.x,
+        scroll.h_track.x
+    );
+}
+
+#[test]
+fn scrollbar_region_maps_pointer_columns_to_offsets() {
+    // Pure math over the input-facing region: `offset_at_x` maps a pointer
+    // column onto the content offset, honouring the grab offset.
+    let region = htui::events::ScrollbarRegion {
+        node_id: Default::default(),
+        track: htui::layout::Rect::new(0, 0, 0, 0),
+        thumb: htui::layout::Rect::new(0, 0, 0, 0),
+        scroll_y: 0,
+        max_scroll: 0,
+        content_height: 0,
+        viewport_height: 0,
+        scroll_x: 0,
+        max_scroll_x: 40,
+        content_width: 50,
+        viewport_width: 10,
+        h_track: htui::layout::Rect::new(0, 3, 10, 1),
+        h_thumb: htui::layout::Rect::new(0, 3, 2, 1),
+    };
+    assert_eq!(region.offset_at_x(0, 0), 0, "track start = 0");
+    assert_eq!(region.offset_at_x(10, 0), 40, "track end = max");
+    let mid = region.offset_at_x(5, 0);
+    assert!(
+        (15..=25).contains(&mid),
+        "mid track ≈ mid offset, got {mid}"
+    );
+    // Grab offset shifts the pointer→offset mapping.
+    assert_eq!(region.offset_at_x(2, 2), 0, "grabbed thumb start stays 0");
 }
 
 #[test]

@@ -112,11 +112,20 @@ pub(super) fn render_thread(
             }
         }
         for cmd in batch.drain_scrolls() {
-            if let RenderCmd::RenderScroll { node_id, scroll_y } = cmd {
-                let Some(term_map) = term_map_or_none() else {
-                    break 'frame;
-                };
-                state.render_scroll(&mut out, &geo_tx, &term_map, node_id, scroll_y);
+            match cmd {
+                RenderCmd::RenderScroll { node_id, scroll_y } => {
+                    let Some(term_map) = term_map_or_none() else {
+                        break 'frame;
+                    };
+                    state.render_scroll(&mut out, &geo_tx, &term_map, node_id, scroll_y);
+                }
+                RenderCmd::RenderScrollX { node_id, scroll_x } => {
+                    let Some(term_map) = term_map_or_none() else {
+                        break 'frame;
+                    };
+                    state.render_scroll_x(&mut out, &geo_tx, &term_map, node_id, scroll_x);
+                }
+                _ => {}
             }
         }
         for sel_cmd in batch.drain_selects() {
@@ -293,7 +302,7 @@ pub(super) fn render_thread(
                     } => {
                         state.handle_input(&mut out, node_id, value, cursor, focused, selection);
                     }
-                    RenderCmd::RenderScroll { .. } => {
+                    RenderCmd::RenderScroll { .. } | RenderCmd::RenderScrollX { .. } => {
                         log::debug!("Scroll command reached the snapshot queue; dropped");
                     }
 

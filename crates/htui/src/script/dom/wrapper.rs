@@ -51,7 +51,7 @@ use super::{
         native_get_bounding_client_rect, native_get_client_height, native_get_client_left,
         native_get_client_top, native_get_client_width, native_get_scroll_height,
         native_get_scroll_left, native_get_scroll_top, native_get_scroll_width,
-        native_scroll_into_view, native_set_scroll_top,
+        native_scroll_into_view, native_set_scroll_left, native_set_scroll_top,
     },
     with_state,
 };
@@ -165,6 +165,7 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
     let get_scroll_top = js_fn(context, NativeFunction::from_fn_ptr(native_get_scroll_top));
     let set_scroll_top = js_fn(context, NativeFunction::from_fn_ptr(native_set_scroll_top));
     let get_scroll_left = js_fn(context, NativeFunction::from_fn_ptr(native_get_scroll_left));
+    let set_scroll_left = js_fn(context, NativeFunction::from_fn_ptr(native_set_scroll_left));
     let get_scroll_height = js_fn(
         context,
         NativeFunction::from_fn_ptr(native_get_scroll_height),
@@ -537,7 +538,7 @@ pub(super) fn make_node_wrapper(context: &mut Context, node_id: NodeId) -> JsRes
         init.accessor(
             js_string!("scrollLeft"),
             Some(get_scroll_left),
-            None,
+            Some(set_scroll_left),
             Attribute::all(),
         );
         init.accessor(

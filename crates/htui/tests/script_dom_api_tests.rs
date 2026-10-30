@@ -479,3 +479,50 @@ fn dom_content_loaded_and_load_fire_once_after_build() {
     assert_eq!(captured(&captures, "dcl"), "fired");
     assert_eq!(captured(&captures, "load"), "fired");
 }
+
+#[test]
+fn horizontal_scroll_metrics_read_and_scroll_left_write() {
+    let captures: Captures = Arc::new(Mutex::new(Vec::new()));
+    let page = r#"<script>
+      setTimeout(function(){
+        var box = document.getElementById('box');
+        __report('scrollLeft', box.scrollLeft);
+        __report('scrollWidth', box.scrollWidth);
+        box.scrollLeft = 3;
+      }, 10);
+    </script>
+    <div id="box" style="width: 20ch; height: 2ch; overflow-x: auto; white-space: nowrap">AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA</div>"#;
+    let (tx, out_rx, handle, hit_map, _ui, _selection) =
+        spawn_script(page, report_bindings(&captures));
+
+    let mut parser = htui::html::html_parse::Parser::new(page);
+    let mut doc = parser.parse_with_scripts();
+    let css = htui::html::css_parse::Parser::new(doc.css.as_ref()).parse();
+    if let Some(arena) = Arc::get_mut(&mut doc.arena) {
+        htui::html::css_parse::css_into_node(arena, doc.root_id, &css);
+    }
+    publish_hit_map(&hit_map, &doc.arena, doc.root_id);
+
+    settle(&tx, handle, &captures, "scrollLeft");
+    let scroll_left: f64 = captured(&captures, "scrollLeft").parse().expect("number");
+    assert_eq!(scroll_left, 0.0, "starts unscrolled");
+    let scroll_width: f64 = captured(&captures, "scrollWidth").parse().expect("number");
+    assert!(
+        scroll_width > 20.0,
+        "scrollWidth is the nowrap content extent, got {scroll_width}"
+    );
+    // `scrollLeft = 3` rides back as a RenderScrollX command via the timer
+    // event batch.
+    let mut saw_scroll_x = false;
+    while let Ok(resp) = out_rx.recv_timeout(Duration::from_millis(200)) {
+        if let ScriptResponse::Event(event) = resp
+            && event
+                .cmds
+                .iter()
+                .any(|c| matches!(c, RenderCmd::RenderScrollX { scroll_x: 3, .. }))
+        {
+            saw_scroll_x = true;
+        }
+    }
+    assert!(saw_scroll_x, "scrollLeft write must push RenderScrollX");
+}

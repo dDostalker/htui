@@ -50,6 +50,8 @@ pub struct LayoutContext<'a> {
     pub viewport: Viewport,
     /// Session scroll offsets for native `overflow-y` containers.
     pub scroll_offsets: &'a HashMap<NodeId, u32>,
+    /// Session scroll offsets for native `overflow-x` containers.
+    pub scroll_x_offsets: &'a HashMap<NodeId, u32>,
 }
 
 /// Empty offset table for callers that do not create scroll containers.
@@ -63,6 +65,7 @@ impl<'a> LayoutContext<'a> {
             font: self.font.child(child_font_size_cells),
             viewport: self.viewport,
             scroll_offsets: self.scroll_offsets,
+            scroll_x_offsets: self.scroll_x_offsets,
         }
     }
 }

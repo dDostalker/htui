@@ -446,6 +446,35 @@ impl RenderState {
         self.redraw(out, geo_tx, term_map, page_scroll_y, zoom);
     }
 
+    /// Horizontal counterpart of [`RenderState::render_scroll`]: update one
+    /// `overflow-x` container's offset and re-layout.
+    pub(super) fn render_scroll_x<W: Write>(
+        &mut self,
+        out: &mut BufWriter<W>,
+        geo_tx: &GeometrySender,
+        term_map: &TermMap,
+        node_id: NodeId,
+        scroll_x: u32,
+    ) {
+        let Some(tl) = self.term_layout.as_mut() else {
+            return;
+        };
+        let shared_visible = self
+            .scrollbars_visible
+            .lock()
+            .map(|visible| visible.get(&node_id).copied().unwrap_or(false))
+            .unwrap_or(false);
+        let reveals_hidden_chrome =
+            shared_visible && tl.scrollbars_visible.get(&node_id) != Some(&true);
+        if tl.scroll_x_offsets.get(&node_id) == Some(&scroll_x) && !reveals_hidden_chrome {
+            return;
+        }
+        tl.scrollbars_visible.insert(node_id, shared_visible);
+        tl.scroll_x_offsets.insert(node_id, scroll_x);
+        let (page_scroll_y, zoom) = (tl.scroll_y, tl.zoom);
+        self.redraw(out, geo_tx, term_map, page_scroll_y, zoom);
+    }
+
     /// Replace the session's injected-CSS set with `injected` (host ? css)
     /// and re-parse the combined stylesheet ? but only when the set actually
     /// changed: a timer tick that re-injects identical styles rebuilds the

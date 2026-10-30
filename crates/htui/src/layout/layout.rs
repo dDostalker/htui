@@ -89,6 +89,7 @@ impl TermLayout {
             image_cache: ImageCache::new(),
             input_states: std::collections::HashMap::new(),
             scroll_offsets: std::collections::HashMap::new(),
+            scroll_x_offsets: std::collections::HashMap::new(),
             open_select: None,
             scrollbars_visible: std::collections::HashMap::new(),
         }
@@ -161,6 +162,7 @@ impl TermLayout {
             term_map.columns as usize,
             term_map.rows as usize,
             &self.scroll_offsets,
+            &self.scroll_x_offsets,
         );
         // Re-anchor `position: fixed` / `sticky` boxes to the *current*
         // scroll offset so they stay pinned to their screen position while the

@@ -360,6 +360,21 @@ impl CssAttr {
         };
         axis("overflow-y") || axis("overflow")
     }
+
+    /// Whether this box establishes a horizontal browser-style scroll
+    /// container (`overflow-x: auto/scroll`, or `overflow` as the fallback
+    /// for both axes). Same auto/scroll semantics as the vertical axis.
+    pub fn scrolls_horizontally(&self) -> bool {
+        let axis = |key: &str| {
+            self.0
+                .get(key)
+                .map(|s| {
+                    s.trim().eq_ignore_ascii_case("auto") || s.trim().eq_ignore_ascii_case("scroll")
+                })
+                .unwrap_or(false)
+        };
+        axis("overflow-x") || axis("overflow")
+    }
     /// Element width (CSS `width`).
     ///
     /// - `auto` / missing / unsupported unit → `None` (fill available)

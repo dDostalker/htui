@@ -640,8 +640,8 @@ fn paint_box(
     paint_scrollbar(lb, arena, canvas);
 }
 
-/// Paint the native scrollbar after clipped content so it always overlays the
-/// container's right gutter.
+/// Paint the native scrollbars after clipped content so they always overlay
+/// the container's right gutter (vertical) / bottom edge (horizontal).
 fn paint_scrollbar(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintCanvas<'_>) {
     if !canvas
         .scrollbars_visible
@@ -654,23 +654,39 @@ fn paint_scrollbar(lb: &LayoutBox, arena: &NodeArena, canvas: &mut PaintCanvas<'
     let Some(scroll) = lb.paint_style.scrollbar else {
         return;
     };
-    let Some(track) = clamp_rect_to_canvas(scroll.track, canvas.columns as usize) else {
-        return;
-    };
     let fg = arena
         .get(lb.node_id)
         .and_then(|node| node.css_attr.get_color());
-
-    for y in track.y..track.y.saturating_add(track.height) {
-        let inside_thumb =
-            y >= scroll.thumb.y && y < scroll.thumb.y.saturating_add(scroll.thumb.height);
-        put(
-            canvas,
-            cell_index(canvas, track.x, y),
-            Some(if inside_thumb { '\u{2588}' } else { '\u{2502}' }),
-            Some(fg.unwrap_or(crossterm::style::Color::DarkGrey)),
-            None,
-        );
+    let dim = Some(fg.unwrap_or(crossterm::style::Color::DarkGrey));
+    if let Some(track) = clamp_rect_to_canvas(scroll.track, canvas.columns as usize) {
+        for y in track.y..track.y.saturating_add(track.height) {
+            let inside_thumb =
+                y >= scroll.thumb.y && y < scroll.thumb.y.saturating_add(scroll.thumb.height);
+            put(
+                canvas,
+                cell_index(canvas, track.x, y),
+                Some(if inside_thumb { '\u{2588}' } else { '\u{2502}' }),
+                dim,
+                None,
+            );
+        }
+    }
+    // Horizontal chrome: one-row bottom track, `─` track cells and a `█`
+    // thumb over the viewport columns.
+    if let Some(h_track) = clamp_rect_to_canvas(scroll.h_track, canvas.columns as usize)
+        && h_track.height > 0
+    {
+        for x in h_track.x..h_track.x.saturating_add(h_track.width) {
+            let inside_thumb =
+                x >= scroll.h_thumb.x && x < scroll.h_thumb.x.saturating_add(scroll.h_thumb.width);
+            put(
+                canvas,
+                cell_index(canvas, x, h_track.y),
+                Some(if inside_thumb { '\u{2588}' } else { '\u{2500}' }),
+                dim,
+                None,
+            );
+        }
     }
 }
 
