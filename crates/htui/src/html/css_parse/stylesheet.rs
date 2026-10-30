@@ -476,10 +476,7 @@ fn parse_declarations_into<'i, 't>(
             } else if name == "grid-template" {
                 // Only the areas form expands; a plain track-list shorthand
                 // (or `none`) keeps the raw-name path.
-                match expand_grid_template(&cleaned) {
-                    Some(pairs) => Some(Some(pairs)),
-                    None => None,
-                }
+                expand_grid_template(&cleaned).map(Some)
             } else {
                 None
             };
