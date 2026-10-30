@@ -6,17 +6,21 @@
 //! - track lists with auto, lengths/percentages, fr, and repeat()
 //! - explicit line-number/span placement and automatic row/column placement
 //!   (including dense)
+//! - `grid-template-areas` named areas; a bare area name in a placement
+//!   resolves to that area's edge line, unknown names fall back to `auto`
+//! - implicit track lists cycled across consecutive implicit tracks
 //! - row/column gaps and per-item start/end/center/stretch alignment
+//!   (align-self/justify-self over align-items/justify-items defaults)
 //!
-//! Named lines/areas, minmax(), fit-content functions and subgrid are not
-//! part of this first implementation; unsupported declarations are rejected
-//! at the CSS value layer rather than guessed.
+//! Named lines (beyond area names), minmax(), fit-content functions and
+//! subgrid are not part of this implementation; unsupported declarations are
+//! rejected at the CSS value layer rather than guessed.
 
 use std::collections::HashSet;
 
 use crate::html::css_parse::{
-    AlignContent, AlignItems, GridAutoFlow, GridLine, GridPlacements, GridTrack, JustifyContent,
-    OverflowWrap, WhiteSpace, WordBreak,
+    AlignContent, AlignItems, GridAreas, GridAutoFlow, GridLine, GridPlacements, GridTrack,
+    JustifyContent, OverflowWrap, WhiteSpace, WordBreak,
 };
 use crate::layout::{
     BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext, OuterDisplay, PaintStyle, Rect,
@@ -57,7 +61,7 @@ struct AnonymousGridText {
     overflow_wrap: OverflowWrap,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct RawPlacement {
     start: Option<GridLine>,
     end: Option<GridLine>,
@@ -72,8 +76,8 @@ impl RawPlacement {
     }
 
     fn span(&self) -> usize {
-        match (self.start, self.end) {
-            (Some(GridLine::Span(n)), _) | (_, Some(GridLine::Span(n))) => n.max(1),
+        match (&self.start, &self.end) {
+            (Some(GridLine::Span(n)), _) | (_, Some(GridLine::Span(n))) => (*n).max(1),
             _ => 1,
         }
     }
@@ -183,11 +187,13 @@ fn layout_grid_container(
     let definite_content_height = container_css_height;
 
     let template = css.get_grid_template(child_context.font, child_context.viewport);
+    let areas = css.get_grid_template_areas();
     let auto_columns = css.get_grid_auto_columns();
     let auto_rows = css.get_grid_auto_rows();
     let auto_flow = css.get_grid_auto_flow();
     let gap = css.get_gap(child_context.font, child_context.viewport);
     let align_items = css.get_align_items();
+    let justify_items = css.get_justify_items();
     let align_content = css.get_align_content();
     let justify_content = css.get_justify_content();
 
@@ -202,10 +208,14 @@ fn layout_grid_container(
 
     let mut placements: Vec<Placed> = Vec::with_capacity(items.len());
     let mut occupied: HashSet<(usize, usize)> = HashSet::new();
+    // `grid-template-areas` extends the explicit grid: tracks beyond
+    // `grid-template-columns`/`rows` stay implicit and use `grid-auto-*`.
     let mut column_count = explicit_count(&template.columns)
+        .max(areas.as_ref().map(|a| a.column_count()).unwrap_or(0))
         .max(min_tracks(&items, Axis::Column))
         .max(1);
     let mut row_count = explicit_count(&template.rows)
+        .max(areas.as_ref().map(|a| a.row_count()).unwrap_or(0))
         .max(min_tracks(&items, Axis::Row))
         .max(1);
     let mut flow_cursor = (0usize, 0usize);
@@ -247,7 +257,7 @@ fn layout_grid_container(
 
     let columns = track_sizes(
         &template.columns,
-        auto_columns,
+        &auto_columns,
         &column_hints,
         Some(content_width),
         gap.column,
@@ -256,7 +266,7 @@ fn layout_grid_container(
     );
     let rows = track_sizes(
         &template.rows,
-        auto_rows,
+        &auto_rows,
         &row_hints,
         definite_content_height,
         gap.row,
@@ -341,6 +351,7 @@ fn layout_grid_container(
             column_area,
             row_area,
             align_items,
+            justify_items,
             align_content,
             definite_content_height,
             content_width,
@@ -458,6 +469,7 @@ fn collect_grid_items(
     let white_space = node.css_attr.get_white_space(&node.node_type);
     let word_break = node.css_attr.get_word_break();
     let overflow_wrap = node.css_attr.get_overflow_wrap();
+    let areas = node.css_attr.get_grid_template_areas();
     let mut items = Vec::new();
     let mut text_runs = Vec::new();
 
@@ -518,8 +530,16 @@ fn collect_grid_items(
             continue;
         }
         let placement = child.css_attr.get_grid_placements();
-        let (row_start, row_end) = placement_rows(placement);
-        let (column_start, column_end) = placement_columns(placement);
+        let GridPlacements {
+            row_start,
+            column_start,
+            row_end,
+            column_end,
+        } = placement;
+        let row_start = resolve_area_line(row_start, true, false, areas.as_ref());
+        let row_end = resolve_area_line(row_end, true, true, areas.as_ref());
+        let column_start = resolve_area_line(column_start, false, false, areas.as_ref());
+        let column_end = resolve_area_line(column_end, false, true, areas.as_ref());
         let natural = crate::layout::inner_formatting_context::flex::natural_grid_item_size(
             arena,
             child_id,
@@ -547,12 +567,48 @@ fn collect_grid_items(
     items
 }
 
-fn placement_rows(placement: GridPlacements) -> (Option<GridLine>, Option<GridLine>) {
-    (placement.row_start, placement.row_end)
+/// Resolve an area-name line against the container's `grid-template-areas`.
+/// Unknown names fall back to `auto`, like a missing implicit line.
+fn resolve_area_line(
+    line: Option<GridLine>,
+    row_axis: bool,
+    end_edge: bool,
+    areas: Option<&GridAreas>,
+) -> Option<GridLine> {
+    let Some(GridLine::Name(name)) = &line else {
+        return line;
+    };
+    let areas = areas?;
+    let (row, row_span, column, column_span) = find_area(areas, name)?;
+    let (origin, span) = if row_axis {
+        (row, row_span)
+    } else {
+        (column, column_span)
+    };
+    // `GridLine::Line` numbers are 1-based; an end edge sits after the area.
+    let number = if end_edge {
+        origin + span + 1
+    } else {
+        origin + 1
+    };
+    Some(GridLine::Line(number as isize))
 }
 
-fn placement_columns(placement: GridPlacements) -> (Option<GridLine>, Option<GridLine>) {
-    (placement.column_start, placement.column_end)
+/// Bounding box `(row, row_span, column, column_span)` of one named area.
+/// The parser guarantees rectangularity, so the bounds cover every cell.
+fn find_area(areas: &GridAreas, name: &str) -> Option<(usize, usize, usize, usize)> {
+    let mut bounds: Option<(usize, usize, usize, usize)> = None;
+    for (r, row) in areas.cells.iter().enumerate() {
+        for (c, cell) in row.iter().enumerate() {
+            if cell.as_deref() == Some(name) {
+                bounds = Some(match bounds {
+                    None => (r, r, c, c),
+                    Some((r0, r1, c0, c1)) => (r0, r1.max(r), c0, c1.max(c)),
+                });
+            }
+        }
+    }
+    bounds.map(|(r0, r1, c0, c1)| (r0, r1 - r0 + 1, c0, c1 - c0 + 1))
 }
 
 #[derive(Clone, Copy)]
@@ -566,20 +622,20 @@ fn min_tracks(items: &[GridItemPrep], axis: Axis) -> usize {
     let mut count = 1;
     for item in items {
         let placement = match axis {
-            Axis::Row => item.row,
-            Axis::Column => item.column,
+            Axis::Row => &item.row,
+            Axis::Column => &item.column,
         };
-        for line in [placement.start, placement.end] {
+        for line in [&placement.start, &placement.end] {
             if let Some(GridLine::Line(n)) = line
-                && n > 0
+                && *n > 0
             {
-                count = count.max(n as usize);
+                count = count.max(*n as usize);
             }
         }
-        if let Some(GridLine::Line(n)) = placement.start
-            && n > 0
+        if let Some(GridLine::Line(n)) = &placement.start
+            && *n > 0
         {
-            count = count.max(n as usize - 1 + placement.span());
+            count = count.max(*n as usize - 1 + placement.span());
         }
     }
     count.max(1)
@@ -597,48 +653,34 @@ fn place_item(
     cursor: &mut (usize, usize),
     occupied: &HashSet<(usize, usize)>,
 ) -> Placed {
-    let raw_row = item.row;
-    let raw_column = item.column;
+    let raw_row = &item.row;
+    let raw_column = &item.column;
     let column_span = raw_column.span();
     let row_span = raw_row.span();
 
-    let definite_start = |axis: Axis, raw: RawPlacement| -> Option<usize> {
-        match raw.start {
-            Some(GridLine::Line(n)) => {
-                let count = match axis {
-                    Axis::Row => row_count,
-                    Axis::Column => column_count,
-                };
-                Some(resolve_line(n, count))
-            }
-            _ => None,
-        }
-    };
-    let definite_end = |axis: Axis, raw: RawPlacement| -> Option<usize> {
-        match raw.end {
-            Some(GridLine::Line(n)) => {
-                let count = match axis {
-                    Axis::Row => row_count,
-                    Axis::Column => column_count,
-                };
-                Some(resolve_line(n, count))
-            }
-            _ => None,
-        }
+    let definite_line = |axis: Axis, line: Option<&GridLine>| -> Option<usize> {
+        let Some(GridLine::Line(n)) = line else {
+            return None;
+        };
+        let count = match axis {
+            Axis::Row => row_count,
+            Axis::Column => column_count,
+        };
+        Some(resolve_line(*n, count))
     };
 
-    let row_start = definite_start(Axis::Row, raw_row);
-    let column_start = definite_start(Axis::Column, raw_column);
-    let row_end = definite_end(Axis::Row, raw_row);
-    let column_end = definite_end(Axis::Column, raw_column);
+    let row_start = definite_line(Axis::Row, raw_row.start.as_ref());
+    let column_start = definite_line(Axis::Column, raw_column.start.as_ref());
+    let row_end = definite_line(Axis::Row, raw_row.end.as_ref());
+    let column_end = definite_line(Axis::Column, raw_column.end.as_ref());
 
-    let row_span = match (raw_row.end, row_start, row_end) {
-        (Some(GridLine::Span(n)), _, _) => n.max(1),
+    let row_span = match (&raw_row.end, row_start, row_end) {
+        (Some(GridLine::Span(n)), _, _) => (*n).max(1),
         (_, Some(start), Some(end)) => end.saturating_sub(start).max(1),
         _ => row_span,
     };
-    let column_span = match (raw_column.end, column_start, column_end) {
-        (Some(GridLine::Span(n)), _, _) => n.max(1),
+    let column_span = match (&raw_column.end, column_start, column_end) {
+        (Some(GridLine::Span(n)), _, _) => (*n).max(1),
         (_, Some(start), Some(end)) => end.saturating_sub(start).max(1),
         _ => column_span,
     };
@@ -822,14 +864,25 @@ where
 
 fn track_sizes(
     explicit: &[GridTrack],
-    implicit: GridTrack,
+    implicit: &[GridTrack],
     hints: &[usize],
     definite_size: Option<usize>,
     gap: usize,
     font: crate::html::css_parse::FontContext,
     viewport: crate::html::css_parse::Viewport,
 ) -> Vec<usize> {
-    let track = |index: usize| explicit.get(index).copied().unwrap_or(implicit);
+    // Implicit tracks cycle through the `grid-auto-*` list; an empty list
+    // behaves as a single `auto`.
+    let track = |index: usize| {
+        explicit.get(index).copied().unwrap_or_else(|| {
+            let list: &[GridTrack] = if implicit.is_empty() {
+                &[GridTrack::Auto]
+            } else {
+                implicit
+            };
+            list[(index - explicit.len()) % list.len()]
+        })
+    };
     let count = hints.len().max(explicit.len()).max(1);
     let gap_total = if count > 1 {
         gap.saturating_mul(count - 1)
@@ -937,6 +990,7 @@ fn layout_grid_item(
     column_area: TrackArea,
     row_area: TrackArea,
     container_align: AlignItems,
+    container_justify_items: AlignItems,
     _container_align_content: AlignContent,
     container_height: Option<usize>,
     content_width: usize,
@@ -949,7 +1003,7 @@ fn layout_grid_item(
         .or(Some(container_align))
         .map(grid_align)
         .unwrap_or(AlignItems::Stretch);
-    let justify = grid_align(item.justify.unwrap_or(AlignItems::Stretch));
+    let justify = grid_align(item.justify.unwrap_or(container_justify_items));
     let align_stretch = align == AlignItems::Stretch;
     let justify_stretch = justify == AlignItems::Stretch;
 
