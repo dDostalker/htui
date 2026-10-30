@@ -490,3 +490,50 @@ fn grid_definite_end_line_anchors_the_span() {
         rows[0]
     );
 }
+
+#[test]
+fn grid_template_shorthand_expands_area_strings() {
+    init();
+    let rows = render_rows(
+        r#"<div class="g"><div class="a">A</div><div class="b">B</div><div class="c">C</div></div>"#,
+        r#"
+        .g { display: grid; grid-template: "head head" 1fr "side main" 2ch / 2ch 2ch; }
+        .a { grid-area: head; }
+        .b { grid-area: side; }
+        .c { grid-area: main; }
+        "#,
+    );
+    assert_eq!(
+        rows[0].find('A'),
+        Some(0),
+        "area head spans the first area row: {:?}",
+        rows[0]
+    );
+    assert_eq!(
+        rows[1].find('B'),
+        Some(0),
+        "area side sits in the second row's first column: {:?}",
+        rows[1]
+    );
+    assert_eq!(
+        rows[1].find('C'),
+        Some(2),
+        "area main sits beside side: {:?}",
+        rows[1]
+    );
+}
+
+#[test]
+fn grid_template_shorthand_keeps_plain_track_lists() {
+    init();
+    let rows = render_rows(
+        r#"<div class="g"><div>A</div><div>B</div></div>"#,
+        ".g { display: grid; grid-template: 3ch 3ch; }",
+    );
+    assert_eq!(
+        rows[0].find('B'),
+        Some(3),
+        "a plain grid-template lists the columns: {:?}",
+        rows[0]
+    );
+}

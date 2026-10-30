@@ -4360,3 +4360,49 @@ fn grid_line_parses_named_spans() {
     assert_eq!(GridLine::parse("span 2 3"), None, "two integers");
     assert_eq!(GridLine::parse("span head tail"), None, "two idents");
 }
+
+#[test]
+fn grid_template_shorthand_expands_area_strings() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            .g { grid-template: "head head" 1fr "side main" 2ch / 2ch 1fr; }
+        </style><div class="g"></div>"#,
+    );
+    let div = find_first_by_tag(&arena, root, NodeType::Div);
+    assert_eq!(
+        arena[div]
+            .css_attr
+            .0
+            .get("grid-template-areas")
+            .map(|s| s.as_ref()),
+        Some(r#""head head" "side main""#)
+    );
+    assert_eq!(
+        arena[div]
+            .css_attr
+            .0
+            .get("grid-template-rows")
+            .map(|s| s.as_ref()),
+        Some("1fr 2ch"),
+        "each area row gets its size, defaulting to auto"
+    );
+    assert_eq!(
+        arena[div]
+            .css_attr
+            .0
+            .get("grid-template-columns")
+            .map(|s| s.as_ref()),
+        Some("2ch 1fr")
+    );
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            .p { grid-template: 2ch 1fr; }
+        </style><div class="p"></div>"#,
+    );
+    let div = find_first_by_tag(&arena, root, NodeType::Div);
+    assert!(
+        arena[div].css_attr.0.contains_key("grid-template"),
+        "the plain track-list form keeps the raw shorthand"
+    );
+    assert!(!arena[div].css_attr.0.contains_key("grid-template-areas"));
+}
