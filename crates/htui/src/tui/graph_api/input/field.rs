@@ -431,8 +431,10 @@ pub(super) fn clear_text_selection(state: &mut InputState, cmds: &mut Vec<Render
 
 #[cfg(test)]
 mod range_key_tests {
-    use super::*;
-    use crate::tdom::node::NodeType;
+    use super::{InputState, apply_range_key};
+    use crate::tdom::node::{NodeArena, NodeType};
+    use compact_str::CompactString;
+    use crossterm::event::KeyCode;
 
     #[test]
     fn range_keys_step_and_clamp_without_text_editing() {

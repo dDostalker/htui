@@ -763,7 +763,6 @@ impl Length {
         // parse through their own reader; the cssparser tokenizer below
         // would otherwise reject the function token.
         if let Some(math) = parse_math_function(s) {
-            let _ = allow_signed;
             return Some(Length::Math(math));
         }
         // cssparser's tokenizer handles `40`, `40.5`, `40px`, `1.5em`, `50%`,

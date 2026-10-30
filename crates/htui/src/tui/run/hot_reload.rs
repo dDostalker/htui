@@ -175,7 +175,9 @@ pub(super) fn spawn(watches: SourceWatches<'_>) -> HotReloadWatcher {
 
             // The baseline must exist before a caller starts a negative-test
             // window; otherwise a slow scheduler could make a later write look
-            // like the watcher's first observation.
+            // like the watcher's first observation. The main thread may
+            // already be gone at shutdown, so the signal is best-effort.
+            // ast-grep-ignore-next-line no-ignore-result
             let _ = ready_tx.send(());
 
             while !thread_stop.load(Ordering::Relaxed) {
@@ -211,8 +213,9 @@ fn read(path: &Path) -> std::io::Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use std::time::SystemTime;
+    use super::{HotReloadEvent, POLL_INTERVAL, SourceKind, spawn};
+    use std::fs;
+    use std::time::{Duration, SystemTime};
 
     #[test]
     fn watcher_sends_only_stable_changed_contents() {
@@ -246,6 +249,9 @@ mod tests {
             .expect("stable change reaches the watcher channel");
         assert!(matches!(changed, HotReloadEvent::Css(css) if css.contains("blue")));
 
+        // Temp fixture cleanup is best-effort; a leftover file in the
+        // temp directory is harmless.
+        // ast-grep-ignore-next-line no-ignore-result
         let _ = fs::remove_file(path);
         drop(watcher);
     }
@@ -291,6 +297,9 @@ mod tests {
             "metadata-only changes must not reset the page"
         );
 
+        // Temp fixture cleanup is best-effort; a leftover file in the
+        // temp directory is harmless.
+        // ast-grep-ignore-next-line no-ignore-result
         let _ = fs::remove_file(path);
         drop(watcher);
         Ok(())

@@ -382,7 +382,6 @@ fn layout_grid_container(
         let Some(child_box) = layout_grid_item(
             arena,
             item,
-            placed,
             column_area,
             row_area,
             align_items,
@@ -1302,7 +1301,6 @@ fn track_alignment_offset(alignment: JustifyContent, available: usize, content: 
 fn layout_grid_item(
     arena: &NodeArena,
     item: &GridItemPrep,
-    placed: &Placed,
     column_area: TrackArea,
     row_area: TrackArea,
     container_align: AlignItems,
@@ -1313,7 +1311,6 @@ fn layout_grid_item(
     context: LayoutContext,
     container_id: NodeId,
 ) -> Option<LayoutBox> {
-    let _ = placed;
     let align = item
         .align
         .or(Some(container_align))

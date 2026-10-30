@@ -120,11 +120,11 @@ fn run_inner(
     css: &str,
     js: &str,
     session: &mut Session,
-    hot_reload_paths: HotReloadPaths<'_>,
-) {
     // The paths are consumed only by the debug watcher below.
-    #[cfg(not(debug_assertions))]
-    let _ = hot_reload_paths;
+    #[cfg_attr(not(debug_assertions), allow(unused_variables))] hot_reload_paths: HotReloadPaths<
+        '_,
+    >,
+) {
     install_panic_hook();
 
     if let Err(e) = enable_raw_mode() {

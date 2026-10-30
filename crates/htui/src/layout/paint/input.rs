@@ -483,7 +483,7 @@ fn put_bare(canvas: &mut PaintCanvas<'_>, idx: usize, word: Option<char>, fg: Op
 
 #[cfg(test)]
 mod range_tests {
-    use super::*;
+    use super::{Node, range_is_vertical, range_spec};
     use crate::tdom::node::NodeType;
 
     fn range_node(min: &str, max: &str, step: &str, value: &str) -> Node {

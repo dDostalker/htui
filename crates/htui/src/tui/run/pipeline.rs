@@ -740,9 +740,16 @@ impl RenderState {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{
+        DirtyInfo, DynamicState, RenderState, SharedSourceText, combined_css_source,
+        css_pseudo_rule_set, document_scroll_locked, parse_css_source,
+    };
+    use crate::html::css_parse;
     use crate::html::html_parse::Parser;
+    use crate::layout::layout::TermMap;
     use crossterm::style::Color;
+    use std::io::BufWriter;
+    use std::sync::Arc;
     use std::sync::Mutex;
     use std::sync::atomic::AtomicU32;
 
