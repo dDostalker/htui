@@ -83,6 +83,7 @@ htui/
 │   │   │   │       │   ├── box_values.rs # BoxSizing/Position/Visibility/InsetSides/Positioning/CornerRadii/CssDisplay
 │   │   │   │       │   ├── flex.rs # FlexDirection/FlexWrap/FlexBasis/FlexShorthand/flex-flow/justify·align-*/place 简写/gap/order
 │   │   │   │       │   ├── multicol.rs # ColumnFill/columns 简写/column-rule
+│   │   │   │       │   ├── grid.rs # CSS Grid 值（GridTrack/GridTemplate/GridAreas/GridLine/GridPlacements/GridAutoFlow + track list/repeat/areas/放置解析）
 │   │   │   │       │   ├── color.rs# 颜色解析（hex / rgb / 命名色）
 │   │   │   │       │   └── length.rs # 长度体系（Length / FontContext / 简写解析）
 │   │   │   │       └── properties/ # CssAttr + AlignSelf
@@ -140,7 +141,7 @@ htui/
 │   │   │   │   │       │       ├── items.rs        #   layout_flex_items
 │   │   │   │   │       │       ├── prepare.rs      #   prepare_flex_item + measure_text_content_width + natural_cross_axis_size + resolve_item_cross_size
 │   │   │   │   │       │       └── algorithm.rs    #   effective_align + wrap_into_lines + distribute_main_axis + justify_spacing + align_content_spacing + align_on_cross_axis
-│   │   │   │   │       └── grid/           # CSS Grid 核心子集（track / 放置 / gap / item 对齐）
+│   │   │   │   │       └── grid/           # CSS Grid 核心子集（track / 放置 / areas / gap / item 对齐）
 │   │   │   │   │           └── mod.rs              # layout_grid_dispatch + impl FormattingContext::Grid
 │   │   │   │   └── paint/                # 绘制编排（与布局解耦，独立阶段）
 │   │   │   │       ├── mod.rs      # paint_layout_tree() 编排器 + PaintCanvas + paint_box()
@@ -611,6 +612,12 @@ let x = find(b).unwrap();
 | `Position`         | `html::css_parse::values` | CSS `position` 枚举（`Static` / `Relative` / `Absolute` / `Fixed`） |
 | `InsetSides`       | `html::css_parse::values` | `top`/`right`/`bottom`/`left` 解析结果（`Option<usize>`） |
 | `Positioning`      | `html::css_parse::values` | 定位组合（position + inset + z-index），布局期解析后存于 `LayoutBox.positioning` |
+| `GridTrack`        | `html::css_parse::values` | 单个 track 尺寸（`Auto` / `Length` / `Fr`），`grid-template-*` 与 `grid-auto-*` 共用 |
+| `GridTemplate`     | `html::css_parse::values` | `grid-template`/`-columns`/`-rows` 的显式 track 列表（`columns` / `rows`） |
+| `GridAreas`        | `html::css_parse::values` | `grid-template-areas` 矩阵（`cells: Vec<Vec<Option<Arc<str>>>>`，`None` 为 `.` 空单元格；`row_count()` / `column_count()`） |
+| `GridLine`         | `html::css_parse::values` | 放置 line 原始值（`Auto` / `Line(isize)` / `Span(usize)` / `Name(area)`，Name 在布局期解析） |
+| `GridPlacements`   | `html::css_parse::values` | item 四边 raw placement（`grid-area`/`grid-row`/`grid-column` 展开结果） |
+| `GridAutoFlow`     | `html::css_parse::values` | 自动放置（`row: bool` + `dense: bool`） |
 
 ### 盒模型在 `CssAttr` 上的访问器
 
