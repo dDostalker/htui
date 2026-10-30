@@ -83,7 +83,7 @@ htui/
 │   │   │   │       │   ├── box_values.rs # BoxSizing/Position/Visibility/InsetSides/Positioning/CornerRadii/CssDisplay
 │   │   │   │       │   ├── flex.rs # FlexDirection/FlexWrap/FlexBasis/FlexShorthand/flex-flow/justify·align-*/place 简写/gap/order
 │   │   │   │       │   ├── multicol.rs # ColumnFill/columns 简写/column-rule
-│   │   │   │       │   ├── grid.rs # CSS Grid 值（GridTrack/GridTemplate/GridAreas/GridLine/GridPlacements/GridAutoFlow + track list/repeat/areas/放置解析）
+│   │   │   │       │   ├── grid.rs # CSS Grid 值（GridTrack/GridTemplate/GridAreas/GridLine/GridPlacements/GridAutoFlow + track list/repeat/areas/放置/模板简写展开解析）
 │   │   │   │       │   ├── color.rs# 颜色解析（hex / rgb / 命名色）
 │   │   │   │       │   └── length.rs # 长度体系（Length / FontContext / 简写解析）
 │   │   │   │       └── properties/ # CssAttr + AlignSelf
