@@ -341,3 +341,48 @@ fn grid_justify_items_centers_items_without_justify_self() {
         rows = rows[0]
     );
 }
+
+#[test]
+fn grid_minmax_columns_grow_to_their_max() {
+    init();
+    let rows = render_rows(
+        r#"<div class="g"><div>A</div><div>B</div></div>"#,
+        r#".g { display: grid; width: 8ch; grid-template-columns: minmax(1ch, 3ch) minmax(1ch, 3ch); }"#,
+    );
+    assert_eq!(
+        rows[0].find('B'),
+        Some(3),
+        "free space grows both minmax tracks from 1ch to their 3ch limit: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn grid_minmax_growth_is_capped_by_free_space() {
+    init();
+    let rows = render_rows(
+        r#"<div class="g"><div>A</div><div>B</div></div>"#,
+        r#".g { display: grid; width: 5ch; grid-template-columns: minmax(1ch, 3ch) minmax(1ch, 3ch); }"#,
+    );
+    assert_eq!(
+        rows[0].find('B'),
+        Some(2),
+        "only the available free space (not the 3ch limit) can be distributed: {:?}",
+        rows[0]
+    );
+}
+
+#[test]
+fn grid_fit_content_caps_track_growth() {
+    init();
+    let rows = render_rows(
+        r#"<div class="g"><div>A</div><div>B</div></div>"#,
+        r#".g { display: grid; width: 8ch; grid-template-columns: fit-content(2ch) 2ch; }"#,
+    );
+    assert_eq!(
+        rows[0].find('B'),
+        Some(2),
+        "fit-content(2ch) grows the content-sized track up to two cells: {:?}",
+        rows[0]
+    );
+}

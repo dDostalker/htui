@@ -4271,3 +4271,43 @@ fn grid_template_areas_rejects_ragged_or_non_rectangular_values() {
     assert!(parse_grid_template_areas("a b").is_none(), "unquoted cells");
     assert!(parse_grid_template_areas("").is_none());
 }
+
+#[test]
+fn grid_track_parses_minmax_and_fit_content() {
+    use htui::html::css_parse::{GridTrack, Length, parse_grid_track_list};
+    let length_track = |s: &str| GridTrack::Length(Length::parse(s).expect("test lengths parse"));
+    assert_eq!(
+        GridTrack::parse("minmax(1ch, 3ch)"),
+        Some(GridTrack::MinMax {
+            min: Box::new(length_track("1ch")),
+            max: Box::new(length_track("3ch")),
+        })
+    );
+    assert_eq!(
+        GridTrack::parse("minmax(1fr, 2ch)"),
+        None,
+        "the min side of minmax is never flexible"
+    );
+    assert_eq!(
+        GridTrack::parse("minmax(minmax(1ch, 2ch), 3ch)"),
+        None,
+        "a breadth is never a nested function"
+    );
+    assert_eq!(
+        GridTrack::parse("FIT-CONTENT(2ch)"),
+        Some(GridTrack::MinMax {
+            min: Box::new(GridTrack::Auto),
+            max: Box::new(length_track("2ch")),
+        }),
+        "fit-content desugars to minmax(auto, length); function names are case-insensitive"
+    );
+    let fr_max = GridTrack::parse("minmax(auto, 1fr)").expect("a flexible max is valid");
+    assert!(fr_max.is_fr(), "a flexible max joins fr distribution");
+    let repeated = parse_grid_track_list("repeat(2, minmax(1ch, 3ch))").expect("repeat expands");
+    assert_eq!(repeated.len(), 2);
+    assert!(
+        repeated
+            .iter()
+            .all(|t| matches!(t, GridTrack::MinMax { .. }))
+    );
+}
