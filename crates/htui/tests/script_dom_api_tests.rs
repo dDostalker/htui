@@ -225,6 +225,69 @@ fn geometry_reads_return_zeros_without_input_loop() {
     );
 }
 
+#[test]
+fn style_set_property_supports_custom_properties_and_var_flow() {
+    let mut engine = ScriptEngine::new(
+        r#"<style>
+          div { color: var(--brand); background-color: var(--bg, blue); }
+        </style>
+        <div id="d">D</div>"#,
+        "",
+        EventBindings::default(),
+    )
+    .expect("engine");
+    engine
+        .eval_source(
+            r#"globalThis.s = document.getElementById('d').style;
+               s.setProperty('--brand', 'red');
+               s.setProperty('FONT-WEIGHT', 'bold');
+               'ok'"#,
+        )
+        .expect("eval");
+    // Custom properties read back case-sensitively; regular names lowercase.
+    assert_eq!(
+        eval_str(&mut engine, "s.getPropertyValue('--brand')"),
+        "red"
+    );
+    assert_eq!(
+        eval_str(&mut engine, "s.getPropertyValue('font-weight')"),
+        "bold"
+    );
+    assert_eq!(eval_str(&mut engine, "s.getPropertyValue('--missing')"), "");
+    // The style attribute carries both forms for the cascade to re-read.
+    let css_text = eval_str(&mut engine, "s.cssText");
+    assert!(css_text.contains("--brand: red"), "cssText: {css_text}");
+    assert!(
+        css_text.contains("font-weight: bold"),
+        "cssText: {css_text}"
+    );
+
+    // Re-cascading the mutated arena substitutes var() from the custom
+    // property written via setProperty (level at which the render thread
+    // consumes each dirty batch).
+    let mut arena = engine.arena();
+    let root = engine.root_id();
+    let css = htui::html::css_parse::Parser::new(engine.document_css().as_ref()).parse();
+    htui::html::css_parse::css_into_node(&mut arena, root, &css);
+    let div = find_node(&arena, "d");
+    let attr = &arena.get(div).expect("div").css_attr;
+    // `red` parses to Rgb { 255, 0, 0 }: substituted from --brand, not left
+    // as an unparseable `var(...)` string (which would read None).
+    assert_eq!(
+        attr.get_color(),
+        Some(crossterm::style::Color::Rgb { r: 255, g: 0, b: 0 })
+    );
+    // Missing --bg falls back to the var() default `blue`.
+    assert_eq!(
+        attr.get_bg_color(),
+        Some(crossterm::style::Color::Rgb { r: 0, g: 0, b: 255 })
+    );
+
+    // removeProperty returns the removed value and clears it.
+    assert_eq!(eval_str(&mut engine, "s.removeProperty('--brand')"), "red");
+    assert_eq!(eval_str(&mut engine, "s.getPropertyValue('--brand')"), "");
+}
+
 /// Evaluate `String(expr)` and return its text.
 fn eval_str(engine: &mut ScriptEngine, expr: &str) -> String {
     let v = engine
