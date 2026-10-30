@@ -3,7 +3,8 @@
 //! Implements the engine's terminal-grid subset:
 //!
 //! - display: grid / inline-grid
-//! - track lists with auto, lengths/percentages, fr, and repeat()
+//! - track lists with auto, lengths/percentages, fr, minmax()/fit-content(),
+//!   and repeat() (minmax tracks grow base→limit before the fr pass)
 //! - explicit line-number/span placement and automatic row/column placement
 //!   (including dense)
 //! - `grid-template-areas` named areas; a bare area name in a placement
@@ -12,9 +13,9 @@
 //! - row/column gaps and per-item start/end/center/stretch alignment
 //!   (align-self/justify-self over align-items/justify-items defaults)
 //!
-//! Named lines (beyond area names), minmax(), fit-content functions and
-//! subgrid are not part of this implementation; unsupported declarations are
-//! rejected at the CSS value layer rather than guessed.
+//! Named lines (beyond area names) and subgrid are not part of this
+//! implementation; unsupported declarations are rejected at the CSS value
+//! layer rather than guessed.
 
 use std::collections::HashSet;
 
@@ -873,14 +874,14 @@ fn track_sizes(
 ) -> Vec<usize> {
     // Implicit tracks cycle through the `grid-auto-*` list; an empty list
     // behaves as a single `auto`.
-    let track = |index: usize| {
-        explicit.get(index).copied().unwrap_or_else(|| {
+    let track = |index: usize| -> GridTrack {
+        explicit.get(index).cloned().unwrap_or_else(|| {
             let list: &[GridTrack] = if implicit.is_empty() {
                 &[GridTrack::Auto]
             } else {
                 implicit
             };
-            list[(index - explicit.len()) % list.len()]
+            list[(index - explicit.len()) % list.len()].clone()
         })
     };
     let count = hints.len().max(explicit.len()).max(1);
@@ -889,37 +890,86 @@ fn track_sizes(
     } else {
         0
     };
+    let resolve = |length: crate::html::css_parse::Length, hint: usize| -> usize {
+        length
+            .resolve(crate::html::css_parse::LengthContext {
+                containing: definite_size.unwrap_or(hint),
+                font,
+                viewport,
+            })
+            .max(1)
+    };
+    // Pass 1: base sizes (the min side / content hint) and growth limits
+    // (the max side). Flexible tracks wait for the distribution pass.
+    let tracks: Vec<GridTrack> = (0..count).map(track).collect();
     let mut sizes = Vec::with_capacity(count);
+    let mut limits = vec![0usize; count];
     let mut total_fr = 0.0f32;
-    for index in 0..count {
+    for (index, spec) in tracks.iter().enumerate() {
         let hint = hints.get(index).copied().unwrap_or(1).max(1);
-        let size = match track(index) {
-            GridTrack::Auto => hint,
-            GridTrack::Length(length) => length
-                .resolve(crate::html::css_parse::LengthContext {
-                    containing: definite_size.unwrap_or(hint),
-                    font,
-                    viewport,
-                })
-                .max(1),
-            GridTrack::Fr(n) => {
-                total_fr += n.max(0.0);
-                0
+        let (base, limit, fr) = match spec {
+            GridTrack::Auto => (hint, hint, 0.0),
+            GridTrack::Length(length) => {
+                let size = resolve(*length, hint);
+                (size, size, 0.0)
+            }
+            GridTrack::Fr(n) => (0, 0, n.max(0.0)),
+            GridTrack::MinMax { min, max } => {
+                let base = match **min {
+                    // Parse rejects flexible/nested mins; the content hint is
+                    // the safe fallback if one still reaches layout.
+                    GridTrack::Auto | GridTrack::Fr(_) | GridTrack::MinMax { .. } => hint,
+                    GridTrack::Length(length) => resolve(length, hint),
+                };
+                let limit = match **max {
+                    GridTrack::Length(length) => resolve(length, hint).max(base),
+                    GridTrack::Auto | GridTrack::Fr(_) | GridTrack::MinMax { .. } => base,
+                };
+                let fr = match &**max {
+                    GridTrack::Fr(n) => n.max(0.0),
+                    _ => 0.0,
+                };
+                (base, limit, fr)
             }
         };
-        sizes.push(size);
+        total_fr += fr;
+        sizes.push(base);
+        limits[index] = limit;
     }
 
-    let definite_size = definite_size.filter(|_| total_fr > 0.0);
     if let Some(available) = definite_size {
-        let fixed: usize = sizes.iter().sum::<usize>().saturating_add(gap_total);
-        let free = available.saturating_sub(fixed);
+        // Maximize tracks: grow tracks toward their limits before the `fr`
+        // pass claims the leftover space.
+        let mut free =
+            available.saturating_sub(sizes.iter().sum::<usize>().saturating_add(gap_total));
+        while free > 0 {
+            let growable: Vec<usize> = (0..count).filter(|&i| limits[i] > sizes[i]).collect();
+            if growable.is_empty() {
+                break;
+            }
+            let share = free / growable.len();
+            if share == 0 {
+                break;
+            }
+            let mut distributed = 0usize;
+            for index in growable {
+                let add = share.min(limits[index] - sizes[index]);
+                sizes[index] += add;
+                distributed += add;
+            }
+            if distributed == 0 {
+                break;
+            }
+            free -= distributed;
+        }
         if total_fr > f32::EPSILON {
+            let free =
+                available.saturating_sub(sizes.iter().sum::<usize>().saturating_add(gap_total));
             for (index, size) in sizes.iter_mut().enumerate() {
-                if let GridTrack::Fr(n) = track(index)
-                    && n > 0.0
+                if let Some(weight) = track_fr_weight(&tracks[index])
+                    && weight > 0.0
                 {
-                    let share = (free as f32 * (n / total_fr)).round() as usize;
+                    let share = (free as f32 * (weight / total_fr)).round() as usize;
                     *size = (*size).max(share);
                 }
             }
@@ -929,6 +979,18 @@ fn track_sizes(
         *size = (*size).max(1);
     }
     sizes
+}
+
+/// The `fr` weight of a track: a bare `Fr(n)` or a `minmax(_, Fr(n))` max.
+fn track_fr_weight(track: &GridTrack) -> Option<f32> {
+    match track {
+        GridTrack::Fr(n) => Some(*n),
+        GridTrack::MinMax { max, .. } => match &**max {
+            GridTrack::Fr(n) => Some(*n),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// Union the areas covered by one item across consecutive tracks. Gaps

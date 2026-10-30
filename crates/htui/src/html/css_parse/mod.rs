@@ -35,6 +35,7 @@ pub use values::{
     TextTransform, UserSelect, Viewport, Visibility, WhiteSpace, WordBreak, glyph_row_within_line,
     parse_align_content, parse_align_items, parse_background_str, parse_color_str,
     parse_flex_direction, parse_flex_flow, parse_flex_shorthand, parse_flex_wrap, parse_grid_area,
-    parse_grid_axis_shorthand, parse_grid_template_areas, parse_overflow, parse_position,
-    parse_text_overflow, parse_user_select, parse_visibility, resolve_line_height_cells,
+    parse_grid_axis_shorthand, parse_grid_template_areas, parse_grid_track_list, parse_overflow,
+    parse_position, parse_text_overflow, parse_user_select, parse_visibility,
+    resolve_line_height_cells,
 };

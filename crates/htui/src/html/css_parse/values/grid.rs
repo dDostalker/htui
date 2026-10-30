@@ -15,7 +15,7 @@ use super::length::Length;
 // ============================================================
 
 /// One track size in `grid-template-columns` / `grid-template-rows`.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum GridTrack {
     /// `auto`: size to the track's content.
     Auto,
@@ -23,6 +23,14 @@ pub enum GridTrack {
     Length(Length),
     /// `<flex>`: share the remaining space after fixed and auto tracks.
     Fr(f32),
+    /// `minmax(min, max)`: the base size comes from the `min` side (a
+    /// content hint or length), free space then grows the track up to the
+    /// `max` side before `fr` distribution. `fit-content(x)` parses as
+    /// `minmax(auto, x)`.
+    MinMax {
+        min: Box<GridTrack>,
+        max: Box<GridTrack>,
+    },
 }
 
 impl GridTrack {
@@ -40,13 +48,55 @@ impl GridTrack {
             let n = raw.trim().parse::<f32>().ok()?;
             return (!n.is_nan() && n >= 0.0).then_some(GridTrack::Fr(n));
         }
+        if let Some(inner) = function_args(s, "minmax") {
+            let mut parts = split_top_level(inner, ',')?;
+            if parts.len() != 2 {
+                return None;
+            }
+            let max = parts.pop()?;
+            let min = parts.pop()?;
+            let min = GridTrack::parse(&min)?;
+            let max = GridTrack::parse(&max)?;
+            // A track breadth is never flexible on the min side and never a
+            // nested function on either side.
+            if matches!(min, GridTrack::Fr(_) | GridTrack::MinMax { .. })
+                || matches!(max, GridTrack::MinMax { .. })
+            {
+                return None;
+            }
+            return Some(GridTrack::MinMax {
+                min: Box::new(min),
+                max: Box::new(max),
+            });
+        }
+        if let Some(inner) = function_args(s, "fit-content") {
+            let length = Length::parse(inner.trim())?;
+            return Some(GridTrack::MinMax {
+                min: Box::new(GridTrack::Auto),
+                max: Box::new(GridTrack::Length(length)),
+            });
+        }
         Length::parse(s).map(GridTrack::Length)
     }
 
     /// Whether this track participates in flex (fr) distribution.
     pub fn is_fr(self) -> bool {
-        matches!(self, GridTrack::Fr(_))
+        match self {
+            GridTrack::Fr(_) => true,
+            GridTrack::MinMax { max, .. } => matches!(*max, GridTrack::Fr(_)),
+            _ => false,
+        }
     }
+}
+
+/// Slice the argument list out of a case-insensitive `name(...)` call.
+fn function_args<'a>(token: &'a str, name: &str) -> Option<&'a str> {
+    let token = token.trim();
+    let lower = token.to_ascii_lowercase();
+    let open = format!("{name}(");
+    let inner = lower.strip_prefix(&open)?.strip_suffix(')')?;
+    // ASCII-only lowercasing keeps byte offsets valid in the original.
+    Some(&token[open.len()..open.len() + inner.len()])
 }
 
 /// Explicit template tracks and the track used for implicit tracks.
@@ -60,9 +110,9 @@ pub struct GridTemplate {
 
 /// Parse a whitespace-separated track list, expanding `repeat(N, ...)`.
 ///
-/// The terminal grid model does not yet accept named lines, named areas,
-/// `minmax()` or fit-content functions; returning `None` makes the CSS
-/// parser drop the declaration instead of silently approximating it.
+/// The terminal grid model does not accept named lines or named-area
+/// strings; returning `None` makes the CSS parser drop the declaration
+/// instead of silently approximating it.
 pub fn parse_grid_track_list(value: &str) -> Option<Vec<GridTrack>> {
     let value = value.trim();
     if value.is_empty() {
@@ -427,5 +477,9 @@ fn parse_repeat(token: &str) -> Option<Vec<GridTrack>> {
         return None;
     }
     let tracks = parse_grid_track_list(&second)?;
-    Some(tracks.repeat(count))
+    let mut out = Vec::with_capacity(tracks.len().saturating_mul(count));
+    for _ in 0..count {
+        out.extend(tracks.iter().cloned());
+    }
+    Some(out)
 }
