@@ -100,6 +100,9 @@ impl Default for CssRule {
 
 // Parser
 
+/// A CSS stylesheet parser: [`Parser::parse`] walks the input once and
+/// collects qualified rules, `@media` blocks and keyframes into a
+/// [`CssRule`] table. Parse errors are logged and skipped, never fatal.
 #[derive(Debug, Clone)]
 pub struct Parser {
     context: String,

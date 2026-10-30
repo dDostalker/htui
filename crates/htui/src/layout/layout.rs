@@ -25,6 +25,9 @@ pub const MAX_TERM_COLS: u16 = 1000;
 /// [`MAX_TERM_COLS`]); real terminals stay well below 500 rows.
 pub const MAX_TERM_ROWS: u16 = 500;
 
+/// The terminal viewport size in cells — the coordinate space every layout
+/// and paint function works in. Columns/rows cap at [`MAX_TERM_COLS`] /
+/// [`MAX_TERM_ROWS`].
 #[derive(Debug)]
 pub struct TermMap {
     pub columns: u16,

@@ -261,6 +261,10 @@ impl AttributeSelector {
     }
 }
 
+/// One simple selector inside a compound: a type / id / class match, a
+/// structural or dynamic pseudo-class, or an attribute test. Variants carry
+/// their own match semantics; [`Selector::Universal`] through
+/// [`Selector::Not`] are structural, the rest depend on element state.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Selector {
     /// `*` — the universal selector: matches any element (never text,
@@ -311,16 +315,29 @@ pub enum Selector {
     Attribute(AttributeSelector),
 }
 
+/// The combinator between two adjacent compounds of a complex selector.
+/// The engine is LTR-only, so `NextSibling` / `SubsequentSibling` match the
+/// immediately preceding / any preceding element sibling respectively.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Combinator {
+    /// ` ` — any ancestor.
     Descendant,
+    /// `>` — the direct parent.
     Child,
+    /// `+` — the immediately preceding element sibling.
     NextSibling,
+    /// `~` — any preceding element sibling.
     SubsequentSibling,
 }
 
+/// One compound selector: simple selectors that must all match the same
+/// element (`div.card#main`), no combinators inside.
 pub type CompoundSelector = Vec<Selector>;
 
+/// A complex selector: compounds joined by combinators, read left to right
+/// (`ancestor > child + next`). Matches when the last compound matches the
+/// candidate and every combinator chain holds; specificity is the sum over
+/// the compounds.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CssSelector {
     pub compounds: Vec<CompoundSelector>,

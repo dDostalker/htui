@@ -59,6 +59,10 @@ use super::values::{
     parse_visibility, parse_white_space, parse_word_break, resolve_flex_basis,
 };
 
+/// A node's cascaded CSS declarations: raw `property → raw value text`
+/// pairs (insertion-ordered). Accessors parse each value lazily against the
+/// current layout context, so a declaration that fails to parse just reads
+/// as its default instead of poisoning the node.
 #[derive(Debug, Clone, Default)]
 pub struct CssAttr(pub IndexMap<Arc<str>, Arc<str>>);
 

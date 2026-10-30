@@ -104,6 +104,10 @@ pub fn effective_font_size_cells(
 // Node — 纯数据，不含所有权
 // ============================================================
 
+/// One DOM tree node: pure data (type, text data, parent/child IDs and the
+/// parsed attribute + CSS bags), owned by the [`NodeArena`] slotmap and
+/// referenced everywhere by its [`NodeId`]. No behavior lives here — tree
+/// queries and mutations are `NodeArena` methods.
 #[derive(Debug, Clone)]
 pub struct Node {
     pub node_type: NodeType,
@@ -327,6 +331,8 @@ impl Node {
 
 // 迭代器
 
+/// Depth-first pre-order iterator over a subtree: yields `(id, node)` for
+/// the start node itself and then all descendants, arena lookups included.
 pub struct Descendants<'a> {
     arena: &'a NodeArena,
     stack: Vec<NodeId>,

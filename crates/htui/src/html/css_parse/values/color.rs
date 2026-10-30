@@ -25,6 +25,10 @@ pub struct Gradient {
 }
 
 impl Gradient {
+    /// The interpolated stop color at canvas cell `(x, y)` inside a
+    /// `width × height` region (cell centers map to gradient space). A
+    /// single stop paints that color everywhere; an empty stop list yields
+    /// `None`.
     pub fn color_at(&self, x: usize, y: usize, width: usize, height: usize) -> Option<Color> {
         let first = self.stops.first()?;
         if self.stops.len() == 1 {

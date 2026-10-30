@@ -98,6 +98,10 @@ fn resize_filter(src: (u32, u32), dst: (u32, u32)) -> FilterType {
     }
 }
 
+/// A decoded, rasterized image: the source `mem://` path, the terminal
+/// footprint it was rasterized at, and the pre-rendered cell grid the paint
+/// phase copies onto the canvas. `picture` is `None` when the source could
+/// not be decoded or is still loading.
 #[derive(Debug)]
 pub struct Img {
     pub path: PathBuf,

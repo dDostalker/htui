@@ -33,6 +33,9 @@ impl Default for Session {
 }
 
 impl Session {
+    /// A session with an empty `mem://` registry, default [`Config`] and no
+    /// host bindings. Fill it via [`Session::registry`], [`Session::config`]
+    /// and [`Session::set_bindings`] before [`Session::render`].
     pub fn new() -> Self {
         Self {
             registry: Arc::new(ResourceRegistry::new()),
