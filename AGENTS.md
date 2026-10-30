@@ -140,8 +140,8 @@ htui/
 │   │   │   │   │       │       ├── items.rs        #   layout_flex_items
 │   │   │   │   │       │       ├── prepare.rs      #   prepare_flex_item + measure_text_content_width + natural_cross_axis_size + resolve_item_cross_size
 │   │   │   │   │       │       └── algorithm.rs    #   effective_align + wrap_into_lines + distribute_main_axis + justify_spacing + align_content_spacing + align_on_cross_axis
-│   │   │   │   │       └── grid/           # Grid Formatting Context（预留）
-│   │   │   │   │           └── mod.rs              # GridExt + impl FormattingContext::Grid
+│   │   │   │   │       └── grid/           # CSS Grid 核心子集（track / 放置 / gap / item 对齐）
+│   │   │   │   │           └── mod.rs              # layout_grid_dispatch + impl FormattingContext::Grid
 │   │   │   │   └── paint/                # 绘制编排（与布局解耦，独立阶段）
 │   │   │   │       ├── mod.rs      # paint_layout_tree() 编排器 + PaintCanvas + paint_box()
 │   │   │   │       ├── block.rs    # paint_block
@@ -206,6 +206,7 @@ htui/
 │   │   │   ├── layout_columns_tests.rs # CSS 多列布局测试（column-count/width/gap/rule/fill）
 │   │   │   ├── layout_html_body_tests.rs
 │   │   │   ├── layout_flex_tests.rs   # CSS flexbox (display: flex) 布局测试
+│   │   │   ├── layout_grid_tests.rs  # CSS Grid 核心子集布局测试（track/放置/dense/span/gap）
 │   │   │   ├── layout_pipeline_tests.rs # box generation + geometry + mixed end-to-end regression
 │   │   │   ├── layout_a_tests.rs
 │   │   │   ├── layout_display_tests.rs
