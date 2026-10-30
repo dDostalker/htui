@@ -837,7 +837,10 @@ impl CssAttr {
     }
 
     /// Resolve `grid-template`; longhand tracks win over the shorthand when
-    /// either longhand is present.
+    /// either longhand is present. `repeat(auto-fill | auto-fit, …)` entries
+    /// are returned unresolved; only the grid layout expands them. The
+    /// areas form of the shorthand never reaches here — the stylesheet
+    /// parser expands it into the longhands at declaration time.
     pub fn get_grid_template(&self, _font_ctx: FontContext, _viewport: Viewport) -> GridTemplate {
         let columns = self
             .0
