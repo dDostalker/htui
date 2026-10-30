@@ -54,7 +54,7 @@ impl OuterDisplay {
                 OuterDisplay::BlockLevel { container: false }
             }
             // All block-level keywords establish a new FC (or, for the
-            // reserved grid variants, would). `flow-root` is the
+            // grid variants do). `flow-root` is the
             // canonical BFC root; the rest of the block-level set is
             // treated the same way for v1.
             _ => OuterDisplay::BlockLevel { container: true },

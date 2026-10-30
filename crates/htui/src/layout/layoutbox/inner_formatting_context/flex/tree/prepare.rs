@@ -432,6 +432,21 @@ fn intrinsic_len(raw: Option<&str>, context: LayoutContext) -> Option<usize> {
 ///   size is a sum (single line / column) or a max (cross axis). Gaps
 ///   between children are added in the appropriate direction. Then
 ///   padding and border are added to give the border-box size.
+/// Public intrinsic-size bridge for the CSS Grid item preparation pass.
+///
+/// Grid items use the same replaced/block/flex intrinsic model as flex items.
+/// A nested grid container is measured by the conservative generic block
+/// branch in this first implementation.
+pub(crate) fn natural_grid_item_size(
+    arena: &NodeArena,
+    node_id: NodeId,
+    context: LayoutContext,
+    containing_width: Option<usize>,
+) -> (usize, usize) {
+    let natural = natural_intrinsic_size(arena, node_id, context, containing_width);
+    (natural.width, natural.height)
+}
+
 fn natural_intrinsic_size(
     arena: &NodeArena,
     node_id: NodeId,

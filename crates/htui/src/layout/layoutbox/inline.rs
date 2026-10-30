@@ -221,12 +221,10 @@ fn walk_runs(
         {
             continue;
         }
-        // `display: grid` / `inline-grid` produce no box (the grid layout
-        // algorithm is a documented reject), so the element contributes no
-        // inline runs either — otherwise an inline-grid element's text would
-        // leak into the parent's runs as plain text while its block-level
-        // grid sibling's content vanishes entirely. Both variants fall back
-        // to the same "skipped box" behaviour.
+        // `display: grid` / `inline-grid` establish their own grid items, so
+        // the element itself contributes no inline runs to its parent. This
+        // keeps atomic inline-grid boxes from being painted twice (once as
+        // an item box and again as text folded into the parent's runs).
         if child.css_attr.display().is_some_and(|d| d.is_grid()) {
             continue;
         }

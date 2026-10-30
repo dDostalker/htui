@@ -117,11 +117,14 @@ pub fn layout_generated_box(
             )?
         }
         (GeneratedBoxKind::Normal, _, FormattingContext::Grid) => {
-            log::debug!(
-                "Grid geometry is not implemented for node {}",
-                generated.node_id
-            );
-            return None;
+            crate::layout::inner_formatting_context::grid::layout_grid_dispatch(
+                arena,
+                generated.node_id,
+                containing,
+                working_cursor,
+                context,
+                pre_allocated_rect,
+            )?
         }
         (GeneratedBoxKind::Text | GeneratedBoxKind::Anonymous, _, _) => return None,
     };
