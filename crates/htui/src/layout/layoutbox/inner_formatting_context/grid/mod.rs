@@ -1085,27 +1085,51 @@ fn track_sizes(
             free -= distributed;
         }
         if total_fr > f32::EPSILON {
-            // CSS §12.7: flexible tracks share the space left by the
-            // non-flexible tracks; their own base sizes are not subtracted
-            // first (a base only floors the track). Cumulative rounding
-            // keeps the integer shares summing to the free space.
+            // CSS §12.7 "find the size of an fr": the space to fill is what
+            // the non-flexible tracks leave; flexible tracks share it by
+            // weight, but a track whose base exceeds its share freezes at
+            // the base and its space is redistributed among the rest
+            // (restart until no violation). Cumulative rounding keeps the
+            // integer shares summing to the leftover space.
             let non_flexible: usize = sizes
                 .iter()
                 .enumerate()
                 .filter(|(index, _)| tracks[*index].fr_weight() == 0.0)
                 .map(|(_, size)| *size)
                 .sum();
-            let free = available.saturating_sub(non_flexible.saturating_add(gap_total));
-            let mut allocated = 0.0f32;
-            for (index, size) in sizes.iter_mut().enumerate() {
-                let weight = tracks[index].fr_weight();
-                if weight <= 0.0 {
-                    continue;
+            let mut leftover = available.saturating_sub(non_flexible.saturating_add(gap_total));
+            let mut flexible: Vec<(usize, f32)> = (0..count)
+                .filter(|index| tracks[*index].fr_weight() > 0.0)
+                .map(|index| (index, tracks[index].fr_weight()))
+                .collect();
+            loop {
+                let weight_total: f32 = flexible.iter().map(|(_, weight)| weight).sum();
+                if weight_total <= f32::EPSILON || leftover == 0 {
+                    break;
                 }
+                let fr = leftover as f32 / weight_total;
+                let violators: Vec<usize> = flexible
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(position, (index, weight))| {
+                        (fr * weight < sizes[*index] as f32).then_some(position)
+                    })
+                    .collect();
+                if violators.is_empty() {
+                    break;
+                }
+                for position in violators.into_iter().rev() {
+                    let (index, _) = flexible.remove(position);
+                    leftover = leftover.saturating_sub(sizes[index]);
+                }
+            }
+            let weight_total: f32 = flexible.iter().map(|(_, weight)| weight).sum();
+            let mut allocated = 0.0f32;
+            for (index, weight) in &flexible {
                 let previous = allocated;
-                allocated += free as f32 * (weight / total_fr);
+                allocated += leftover as f32 * (weight / weight_total);
                 let share = (allocated.round() as usize).saturating_sub(previous.round() as usize);
-                *size = (*size).max(share);
+                sizes[*index] = (sizes[*index]).max(share);
             }
         }
     }

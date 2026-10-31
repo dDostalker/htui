@@ -537,3 +537,33 @@ fn grid_template_shorthand_keeps_plain_track_lists() {
         rows[0]
     );
 }
+
+#[test]
+fn grid_frozen_flexible_track_redistributes_leftover_space() {
+    init();
+    let rows = render_rows(
+        r#"<div class="g"><div>A</div><div>B</div><div>C</div><div class="d">D</div></div>"#,
+        r#"
+        .g { display: grid; width: 9ch; grid-template-columns: minmax(4ch, 1fr) 1fr 1fr; }
+        .d { grid-column: 4; }
+        "#,
+    );
+    assert_eq!(
+        rows[0].find('B'),
+        Some(4),
+        "the minmax track freezes at its 4ch base: {:?}",
+        rows[0]
+    );
+    assert_eq!(
+        rows[0].find('C'),
+        Some(6),
+        "the frozen base is subtracted before the rest share: {:?}",
+        rows[0]
+    );
+    assert_eq!(
+        rows[0].find('D'),
+        Some(8),
+        "the freed space stays inside the container instead of overflowing: {:?}",
+        rows[0]
+    );
+}
