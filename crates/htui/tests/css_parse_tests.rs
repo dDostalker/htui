@@ -4406,3 +4406,32 @@ fn grid_template_shorthand_expands_area_strings() {
     );
     assert!(!arena[div].css_attr.0.contains_key("grid-template-areas"));
 }
+
+#[test]
+fn stylesheet_prelude_blocks_do_not_truncate_selectors() {
+    // Regression: the rule-prelude reader used to stop at the first `[…]`
+    // block (block content never advanced the position), silently dropping
+    // every rule whose selector carried an attribute selector — the page's
+    // `input[type="range"]` accent-color styling never applied. Argumented
+    // pseudo-classes (`:not(…)`) hit the same truncation.
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            :root { --accent: #43e5a0; }
+            input[type="range"] { accent-color: var(--accent); }
+            p:not(.x) { color: #ff7a90; }
+        </style>
+        <input type="range"><p>one</p>"#,
+    );
+    let input = find_first_by_tag(&arena, root, NodeType::Input);
+    assert_eq!(
+        arena[input].css_attr.get_accent_color(),
+        parse_color_str("#43e5a0"),
+        "an attribute-selector rule applies, with var() substituted"
+    );
+    let p = find_first_by_tag(&arena, root, NodeType::P);
+    assert_eq!(
+        arena[p].css_attr.get_color(),
+        parse_color_str("#ff7a90"),
+        "an argumented pseudo-class rule applies"
+    );
+}

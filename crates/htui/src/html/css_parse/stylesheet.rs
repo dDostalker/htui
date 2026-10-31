@@ -184,11 +184,12 @@ impl<'i> QualifiedRuleParser<'i> for CssParseState {
         input: &mut CssParser<'i, 't>,
     ) -> std::result::Result<String, ParseError<'i, Self::Error>> {
         let start = input.position();
-        while !input.is_exhausted() {
-            if input.next_including_whitespace_and_comments().is_err() {
-                break;
-            }
-        }
+        // `parse_until_before` skips balanced `[…]` / `(…)` blocks as units so
+        // the slice covers the whole prelude text — a plain `next()` loop
+        // stops at the first block opening (block contents never advance the
+        // position), truncating selectors like `input[type="range"]`.
+        let _: std::result::Result<(), ParseError<()>> =
+            input.parse_until_before(Delimiter::CurlyBracketBlock, |_| Ok(()));
         let text = input.slice_from(start).trim().to_string();
         if text.is_empty() {
             return Err(input.new_error(BasicParseErrorKind::QualifiedRuleInvalid));
