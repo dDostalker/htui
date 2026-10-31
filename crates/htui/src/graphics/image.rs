@@ -112,7 +112,7 @@ pub struct Img {
     /// paint phase can copy cells into the canvas without re-formatting,
     /// and the diff renderer compares stable cell state.
     pub picture: Option<Vec<Block>>,
-    pub cloumns: u32,
+    pub columns: u32,
     pub rows: u32,
 }
 
@@ -123,7 +123,7 @@ impl Img {
             path,
             term_size,
             picture: None,
-            cloumns: 0,
+            columns: 0,
             rows: 0,
         }
     }
@@ -169,9 +169,9 @@ impl Img {
         );
         let (width, height) = img.dimensions();
 
-        self.cloumns = width.div_ceil(IMAGE_PIXELS_PER_CELL_COL);
+        self.columns = width.div_ceil(IMAGE_PIXELS_PER_CELL_COL);
         self.rows = height.div_ceil(IMAGE_PIXELS_PER_CELL_ROW);
-        let mut picture = Vec::with_capacity((self.cloumns * self.rows) as usize);
+        let mut picture = Vec::with_capacity((self.columns * self.rows) as usize);
         for y in (0..height).step_by(IMAGE_PIXELS_PER_CELL_ROW as usize) {
             for x in (0..width).step_by(IMAGE_PIXELS_PER_CELL_COL as usize) {
                 // height is exactly `rows * 2`, so the bottom pixel always
@@ -479,7 +479,7 @@ pub fn render_image_at_slice(
         .ok_or_else(|| ImageError::DataEmpty {
             path: path.to_string(),
         })?;
-    let img_cols = img_data.cloumns as usize;
+    let img_cols = img_data.columns as usize;
     let img_rows = img_data.rows as usize;
     let canvas_cols = canvas_cols as usize;
     let max = layout.len();

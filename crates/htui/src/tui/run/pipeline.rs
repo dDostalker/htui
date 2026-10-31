@@ -99,7 +99,7 @@ pub(super) fn viewport_of(map: &TermMap) -> Viewport {
 
 /// Current terminal size, or `None` (logged) when the console query fails.
 pub(super) fn term_map_or_none() -> Option<TermMap> {
-    match TermMap::get_ter_map() {
+    match TermMap::get_term_map() {
         Ok(map) => Some(map),
         Err(e) => {
             log::error!("Failed to get terminal size: {}", e);

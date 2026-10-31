@@ -294,7 +294,7 @@ fn run_inner(
     state.smooth_scroll = config.smooth_scroll;
     state.selection_text = Arc::clone(&selection_text);
     state.scrollbars_visible = Arc::clone(&scrollbars_visible);
-    let (mut columns, mut rows): (u16, u16) = match TermMap::get_ter_map() {
+    let (mut columns, mut rows): (u16, u16) = match TermMap::get_term_map() {
         Ok(m) => (m.columns, m.rows),
         Err(e) => {
             log::error!("Failed to get terminal size: {}", e);
@@ -438,11 +438,11 @@ fn run_inner(
         // looks like input is frozen. Polling per iteration re-syncs both
         // within one loop pass and (on Windows) re-applies the console input
         // mode the resize may have reset. The size is normalized exactly like
-        // `TermMap::get_ter_map` so both sides always agree.
+        // `TermMap::get_term_map` so both sides always agree.
         let mut size_changed = false;
         match size() {
             Ok((c, r)) => {
-                // Clamp the same way `TermMap::get_ter_map` does: a transiently
+                // Clamp the same way `TermMap::get_term_map` does: a transiently
                 // inverted Windows `SMALL_RECT` during a resize can report
                 // values like 65535 (i16 → u16 wrap), which would make the
                 // render thread allocate a gigantic canvas and freeze the app.
@@ -931,7 +931,7 @@ fn run_inner(
             // delta would be absorbed by a stale snapshot and the `:focus`
             // highlight would freeze on the previous field.
             cmd.refresh_dynamic_focus(state.focused_input);
-            if was_redraw && let Ok(map) = TermMap::get_ter_map() {
+            if was_redraw && let Ok(map) = TermMap::get_term_map() {
                 rows = map.rows;
             }
             if let Err(e) = tx.send(cmd) {

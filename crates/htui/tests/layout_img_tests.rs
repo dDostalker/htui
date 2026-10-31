@@ -303,7 +303,7 @@ fn image_cache_reuses_decoded_raster() {
         let first = cache
             .get_or_decode(&key, (40, 10))
             .expect("first decode should succeed");
-        let (cols, rows, size) = (first.cloumns, first.rows, first.term_size);
+        let (cols, rows, size) = (first.columns, first.rows, first.term_size);
 
         // The raster is cached: unregistering the source must not break a second
         // request, which would otherwise re-resolve the bytes and fail.
@@ -312,7 +312,7 @@ fn image_cache_reuses_decoded_raster() {
         let second = cache
             .get_or_decode(&key, (40, 10))
             .expect("cached entry must serve the second request without re-reading");
-        assert_eq!(cols, second.cloumns);
+        assert_eq!(cols, second.columns);
         assert_eq!(rows, second.rows);
         assert_eq!(size, second.term_size);
     });
@@ -330,13 +330,13 @@ fn image_cache_keys_by_size() {
             let small = cache
                 .get_or_decode(&key, (20, 5))
                 .expect("decode small size");
-            (small.cloumns, small.rows)
+            (small.columns, small.rows)
         };
         let (large_cols, large_rows) = {
             let large = cache
                 .get_or_decode(&key, (40, 10))
                 .expect("decode large size");
-            (large.cloumns, large.rows)
+            (large.columns, large.rows)
         };
         assert_eq!((small_cols, small_rows), (20, 5));
         assert_eq!((large_cols, large_rows), (40, 10));
