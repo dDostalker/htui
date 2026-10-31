@@ -260,7 +260,10 @@ pub(crate) fn paint_input(
         let accent = node.css_attr.get_accent_color();
         let thumb_fg = pseudo_color("thumb").or(accent).or(track_fg);
         let fill_fg = pseudo_color("progress").or(accent).or(track_fg);
-        let empty_fg = pseudo_color("track").or(accent).or(Some(Color::DarkGrey));
+        // The unfilled track stays neutral (browsers dim it, Chrome with a
+        // translucent accent tint): a full-accent fallback would make the
+        // whole bar read as filled.
+        let empty_fg = pseudo_color("track").or(Some(Color::DarkGrey));
 
         if range_is_vertical(node) {
             if content.height == 0 {
