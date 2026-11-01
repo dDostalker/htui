@@ -452,9 +452,9 @@ pub(crate) fn reapply_console_modes() {}
 #[cfg(test)]
 mod scrollbar_visibility_tests {
     use slotmap::Key;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
-    use super::*;
+    use super::{InputState, NodeId};
 
     #[test]
     fn expired_scrollbar_visibility_transitions_once() {

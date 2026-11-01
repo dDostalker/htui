@@ -25,6 +25,9 @@ pub const MAX_TERM_COLS: u16 = 1000;
 /// [`MAX_TERM_COLS`]); real terminals stay well below 500 rows.
 pub const MAX_TERM_ROWS: u16 = 500;
 
+/// The terminal viewport size in cells — the coordinate space every layout
+/// and paint function works in. Columns/rows cap at [`MAX_TERM_COLS`] /
+/// [`MAX_TERM_ROWS`].
 #[derive(Debug)]
 pub struct TermMap {
     pub columns: u16,
@@ -37,7 +40,7 @@ impl TermMap {
     /// transiently-inverted Windows `SMALL_RECT` during a resize is clamped
     /// instead of being taken literally (see [`MAX_TERM_COLS`] /
     /// [`MAX_TERM_ROWS`]).
-    pub fn get_ter_map() -> std::io::Result<TermMap> {
+    pub fn get_term_map() -> std::io::Result<TermMap> {
         let (raw_c, raw_r) = terminal::size()?;
         let columns = if raw_c == 0 {
             80
@@ -72,7 +75,7 @@ impl TermLayout {
         // pre-allocating the whole scroll capacity up front.
         //
         // `saturating_mul` guards against a pathological size slipping through
-        // the clamps in [`TermMap::get_ter_map`] (an allocation of billions of
+        // the clamps in [`TermMap::get_term_map`] (an allocation of billions of
         // cells would hang the render thread).
         let viewport_cells = (map.columns as usize)
             .saturating_mul(map.rows as usize)

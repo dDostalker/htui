@@ -1,5 +1,10 @@
 use crate::html::css_parse::{CssDisplay, WhiteSpace};
 
+/// The kind of one DOM node: the 90 supported HTML tags plus the synthetic
+/// Document / DocumentType / DocumentFragment / Text / Comment kinds. Every
+/// tag's `tag_name()` mapping, the CSS type-selector mapping and the
+/// `html_parse` tag table derive from this enum — add a variant there first
+/// when supporting a new element.
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Hash)]
 pub enum NodeType {
     /// Document root (`nodeType` 9). The synthetic root node inserted by the

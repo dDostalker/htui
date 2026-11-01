@@ -24,6 +24,9 @@ bitflags! {
     }
 }
 
+/// One terminal character cell: a grapheme cluster plus its foreground /
+/// background colors and [`FontStyle`] flags. A cell grid of these is the
+/// unit the diff renderer compares and the ANSI writer serializes.
 #[derive(Debug, Clone)]
 pub struct Block {
     pub word: CompactString,

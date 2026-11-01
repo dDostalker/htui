@@ -83,6 +83,7 @@ htui/
 │   │   │   │       │   ├── box_values.rs # BoxSizing/Position/Visibility/InsetSides/Positioning/CornerRadii/CssDisplay
 │   │   │   │       │   ├── flex.rs # FlexDirection/FlexWrap/FlexBasis/FlexShorthand/flex-flow/justify·align-*/place 简写/gap/order
 │   │   │   │       │   ├── multicol.rs # ColumnFill/columns 简写/column-rule
+│   │   │   │       │   ├── grid.rs # CSS Grid 值（GridTrack/GridTemplate/GridAreas/GridLine/GridPlacements/GridAutoFlow + track list/repeat/areas/放置/模板简写展开解析）
 │   │   │   │       │   ├── color.rs# 颜色解析（hex / rgb / 命名色）
 │   │   │   │       │   └── length.rs # 长度体系（Length / FontContext / 简写解析）
 │   │   │   │       └── properties/ # CssAttr + AlignSelf
@@ -140,7 +141,7 @@ htui/
 │   │   │   │   │       │       ├── items.rs        #   layout_flex_items
 │   │   │   │   │       │       ├── prepare.rs      #   prepare_flex_item + measure_text_content_width + natural_cross_axis_size + resolve_item_cross_size
 │   │   │   │   │       │       └── algorithm.rs    #   effective_align + wrap_into_lines + distribute_main_axis + justify_spacing + align_content_spacing + align_on_cross_axis
-│   │   │   │   │       └── grid/           # CSS Grid 核心子集（track / 放置 / gap / item 对齐）
+│   │   │   │   │       └── grid/           # CSS Grid 核心子集（track / 放置 / areas / gap / item 对齐）
 │   │   │   │   │           └── mod.rs              # layout_grid_dispatch + impl FormattingContext::Grid
 │   │   │   │   └── paint/                # 绘制编排（与布局解耦，独立阶段）
 │   │   │   │       ├── mod.rs      # paint_layout_tree() 编排器 + PaintCanvas + paint_box()
@@ -258,7 +259,7 @@ htui/
 │           ├── 5.日志.md                    # 日志使用说明
 │           ├── 6.0示例-实现性能监控器.md      # 示例：性能监控器（占位，待编写）
 │           ├── 6.1-示例-实现贪吃蛇.md        # 示例：贪吃蛇（占位，待编写）
-│           ├── 6.2调试.md                   # 调试（占位，待编写）
+│           ├── 6.2调试.md                   # 调试（日志 / 热重载 / panic 恢复 / 排查清单 / TermLayout 测试观察）
 │           └── script-layer.md              # 脚本层完整使用与架构文档（脚本 / on* / 宿主函数 / RenderArena）
 ├── example/                # 音乐播放器示例（cd example && cargo run；纯界面 + 交互演示，无音频）
 │   ├── Cargo.toml          # 空 [workspace] 表脱离根 workspace，可独立运行
@@ -571,6 +572,9 @@ let x = find(b).unwrap();
 | `OuterDisplay`     | `layout::layoutbox::outer_display` | 盒子在父级流中的角色（`BlockLevel { container }` / `Inline { block }`） |
 | `FormattingContext`| `layout::layoutbox::inner_formatting_context` | 盒子安排子项的格式化上下文（`Flow` / `Flex` / `Grid`） |
 | `AlignSelf`        | `html::css_parse::properties::align_self` | `align-self` 解析结果（`Auto` / `Value(AlignItems)`） |
+| `AlignItems`       | `html::css_parse::values` | 对齐关键字（`Stretch` / `FlexStart` / `FlexEnd` / `Center` / `Baseline`），align-items/justify-items/self 共用 |
+| `AlignContent`     | `html::css_parse::values` | 行组分布（`Stretch` 默认 / flex-start / flex-end / center / space-between / around / evenly） |
+| `JustifyContent`   | `html::css_parse::values` | 主轴分布（同 AlignContent 去掉 `Stretch`）；grid 轨道对齐与 flex 主轴共用 |
 | `LayoutFn`         | `layout::mod`           | 布局函数签名              |
 | `TermMap`          | `layout::layout`        | 终端尺寸信息              |
 | `TermLayout`       | `graphics`（`tui::graph_api` re-export） | 终端画布 + 渲染方法        |
@@ -611,6 +615,12 @@ let x = find(b).unwrap();
 | `Position`         | `html::css_parse::values` | CSS `position` 枚举（`Static` / `Relative` / `Absolute` / `Fixed`） |
 | `InsetSides`       | `html::css_parse::values` | `top`/`right`/`bottom`/`left` 解析结果（`Option<usize>`） |
 | `Positioning`      | `html::css_parse::values` | 定位组合（position + inset + z-index），布局期解析后存于 `LayoutBox.positioning` |
+| `GridTrack`        | `html::css_parse::values` | 单个 track 尺寸（`Auto` / `Length` / `Fr` / `MinMax{min,max}` / `AutoRepeat{fit,tracks}`），`grid-template-*` 与 `grid-auto-*` 共用；`fit-content(x)` 解析为 `MinMax{auto, x}`，auto-repeat 由布局期按容器定尺寸展开 |
+| `GridTemplate`     | `html::css_parse::values` | `grid-template`/`-columns`/`-rows` 的显式 track 列表（`columns` / `rows`） |
+| `GridAreas`        | `html::css_parse::values` | `grid-template-areas` 矩阵（`cells: Vec<Vec<Option<Arc<str>>>>`，`None` 为 `.` 空单元格；`row_count()` / `column_count()`） |
+| `GridLine`         | `html::css_parse::values` | 放置 line 原始值（`Auto` / `Line(isize)` / `Span(usize)` / `SpanName{span,name}` / `Name(area)`，Name/SpanName 在布局期对 `grid-template-areas` 解析） |
+| `GridPlacements`   | `html::css_parse::values` | item 四边 raw placement（`grid-area`/`grid-row`/`grid-column` 展开结果） |
+| `GridAutoFlow`     | `html::css_parse::values` | 自动放置（`row: bool` + `dense: bool`） |
 
 ### 盒模型在 `CssAttr` 上的访问器
 

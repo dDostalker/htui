@@ -289,7 +289,7 @@ pub fn resolve_url(base_href: Option<&str>, url: &str) -> String {
 
 #[cfg(all(test, debug_assertions))]
 mod reload_tests {
-    use super::*;
+    use super::ResourceRegistry;
 
     #[test]
     fn register_and_unregister_notify_reload_subscribers() {

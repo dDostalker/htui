@@ -1,5 +1,7 @@
 use super::length::{FontContext, Length, LengthContext, Viewport};
 
+/// Horizontal alignment of inline runs inside their block (CSS
+/// `text-align`; `justify` is not modelled and falls back to `Left`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextAlign {
     Left,

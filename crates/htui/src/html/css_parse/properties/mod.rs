@@ -43,22 +43,26 @@ use crate::html::box_edges::{
 use super::values::{
     AlignContent, AlignItems, BoxSizing, CaptionSide, ColumnFill, ColumnsResolved, CornerRadii,
     CssDisplay, EmptyCells, FlexBasis, FlexDirection, FlexShorthand, FlexWrap, FontStyleKind,
-    FontWeight, GapSizes, GridAutoFlow, GridLine, GridPlacements, GridTemplate, GridTrack,
-    JustifyContent, Length, LineHeight, ListStyleType, OverflowWrap, TableLayout, TextAlign,
-    TextDecoration, TextTransform, UserSelect, Visibility, WhiteSpace, WordBreak,
+    FontWeight, GapSizes, GridAreas, GridAutoFlow, GridLine, GridPlacements, GridTemplate,
+    GridTrack, JustifyContent, Length, LineHeight, ListStyleType, OverflowWrap, TableLayout,
+    TextAlign, TextDecoration, TextTransform, UserSelect, Visibility, WhiteSpace, WordBreak,
     merge_border_longhand, parse_align_content, parse_align_items, parse_background_str,
     parse_border_radius, parse_border_side, parse_border_style, parse_border_width,
     parse_box_sizing, parse_caption_side, parse_color_str, parse_column_count, parse_column_fill,
     parse_column_rule, parse_columns_shorthand, parse_edge_auto, parse_edge_sizes,
     parse_empty_cells, parse_flex_basis, parse_flex_direction, parse_flex_flow,
     parse_flex_shorthand, parse_flex_wrap, parse_gap_shorthand, parse_grid_area,
-    parse_grid_auto_flow, parse_grid_axis_shorthand, parse_grid_template, parse_grid_track_list,
-    parse_justify_content, parse_line_height, parse_list_style_type, parse_margin_sizes,
-    parse_non_negative_number, parse_order, parse_overflow_wrap, parse_table_layout,
-    parse_text_transform, parse_user_select, parse_visibility, parse_white_space, parse_word_break,
-    resolve_flex_basis,
+    parse_grid_auto_flow, parse_grid_axis_shorthand, parse_grid_template,
+    parse_grid_template_areas, parse_grid_track_list, parse_justify_content, parse_line_height,
+    parse_list_style_type, parse_margin_sizes, parse_non_negative_number, parse_order,
+    parse_overflow_wrap, parse_table_layout, parse_text_transform, parse_user_select,
+    parse_visibility, parse_white_space, parse_word_break, resolve_flex_basis,
 };
 
+/// A node's cascaded CSS declarations: raw `property → raw value text`
+/// pairs (insertion-ordered). Accessors parse each value lazily against the
+/// current layout context, so a declaration that fails to parse just reads
+/// as its default instead of poisoning the node.
 #[derive(Debug, Clone, Default)]
 pub struct CssAttr(pub IndexMap<Arc<str>, Arc<str>>);
 
@@ -693,6 +697,16 @@ impl CssAttr {
             .unwrap_or(AlignItems::Stretch)
     }
 
+    /// `justify-items` for a grid container (defaults to `Stretch`). Grid
+    /// items without an explicit `justify-self` inherit this alignment. The
+    /// `place-items` shorthand is expanded into this longhand at parse time.
+    pub fn get_justify_items(&self) -> AlignItems {
+        self.0
+            .get("justify-items")
+            .and_then(|v| parse_align_items(v))
+            .unwrap_or(AlignItems::Stretch)
+    }
+
     /// `align-self` for a single flex item (defaults to `Auto`).
     ///
     /// `Auto` means "inherit the parent's `align-items`"; the layout
@@ -822,34 +836,11 @@ impl CssAttr {
         GapSizes { row, column }
     }
 
-    /// Resolve the explicit column tracks, including the `grid-template`
-    /// shorthand. Longhand declarations win over the shorthand when present.
-    pub fn get_grid_template_columns(
-        &self,
-        font_ctx: FontContext,
-        viewport: Viewport,
-    ) -> Vec<GridTrack> {
-        if let Some(value) = self.0.get("grid-template-columns") {
-            return parse_grid_track_list(value).unwrap_or_default();
-        }
-        self.get_grid_template(font_ctx, viewport).columns
-    }
-
-    /// Resolve the explicit row tracks, including the `grid-template`
-    /// shorthand. Longhand declarations win over the shorthand when present.
-    pub fn get_grid_template_rows(
-        &self,
-        font_ctx: FontContext,
-        viewport: Viewport,
-    ) -> Vec<GridTrack> {
-        if let Some(value) = self.0.get("grid-template-rows") {
-            return parse_grid_track_list(value).unwrap_or_default();
-        }
-        self.get_grid_template(font_ctx, viewport).rows
-    }
-
     /// Resolve `grid-template`; longhand tracks win over the shorthand when
-    /// either longhand is present.
+    /// either longhand is present. `repeat(auto-fill | auto-fit, …)` entries
+    /// are returned unresolved; only the grid layout expands them. The
+    /// areas form of the shorthand never reaches here — the stylesheet
+    /// parser expands it into the longhands at declaration time.
     pub fn get_grid_template(&self, _font_ctx: FontContext, _viewport: Viewport) -> GridTemplate {
         let columns = self
             .0
@@ -874,20 +865,46 @@ impl CssAttr {
             })
     }
 
-    /// One implicit column track size; an invalid declaration is `auto`.
-    pub fn get_grid_auto_columns(&self) -> GridTrack {
+    /// The `grid-template-areas` cell matrix, or `None` when the property is
+    /// absent or its declaration is invalid (`none`, ragged rows or
+    /// non-rectangular areas also yield `None`/empty).
+    pub fn get_grid_template_areas(&self) -> Option<GridAreas> {
         self.0
-            .get("grid-auto-columns")
-            .and_then(|v| GridTrack::parse(v))
-            .unwrap_or(GridTrack::Auto)
+            .get("grid-template-areas")
+            .and_then(|v| parse_grid_template_areas(v))
+            .filter(|areas| !areas.cells.is_empty())
     }
 
-    /// One implicit row track size; an invalid declaration is `auto`.
-    pub fn get_grid_auto_rows(&self) -> GridTrack {
+    /// Implicit track sizes beyond the explicit template, cycled across
+    /// consecutive implicit tracks. An invalid declaration is `auto`;
+    /// `repeat(auto-fill | auto-fit, …)` is only legal in the explicit
+    /// template lists and rejects here.
+    pub fn get_grid_auto_columns(&self) -> Vec<GridTrack> {
+        self.0
+            .get("grid-auto-columns")
+            .and_then(|v| parse_grid_track_list(v))
+            .filter(|list| {
+                !list
+                    .iter()
+                    .any(|track| matches!(track, GridTrack::AutoRepeat { .. }))
+            })
+            .unwrap_or_else(|| vec![GridTrack::Auto])
+    }
+
+    /// Implicit row track sizes beyond the explicit template, cycled across
+    /// consecutive implicit tracks. An invalid declaration is `auto`;
+    /// `repeat(auto-fill | auto-fit, …)` is only legal in the explicit
+    /// template lists and rejects here.
+    pub fn get_grid_auto_rows(&self) -> Vec<GridTrack> {
         self.0
             .get("grid-auto-rows")
-            .and_then(|v| GridTrack::parse(v))
-            .unwrap_or(GridTrack::Auto)
+            .and_then(|v| parse_grid_track_list(v))
+            .filter(|list| {
+                !list
+                    .iter()
+                    .any(|track| matches!(track, GridTrack::AutoRepeat { .. }))
+            })
+            .unwrap_or_else(|| vec![GridTrack::Auto])
     }
 
     /// `grid-auto-flow`, defaulting to sparse row placement.
@@ -902,8 +919,9 @@ impl CssAttr {
     }
 
     /// Raw placements after expanding `grid-area`, `grid-row`, and
-    /// `grid-column` shorthands. Named lines are unsupported and therefore
-    /// reject their containing declaration.
+    /// `grid-column` shorthands. A bare custom-ident names a
+    /// `grid-template-areas` area and is resolved to its edge line at layout
+    /// time.
     pub fn get_grid_placements(&self) -> GridPlacements {
         if let Some(value) = self.0.get("grid-area") {
             return parse_grid_area(value).unwrap_or_default();
@@ -919,14 +937,17 @@ impl CssAttr {
         let line = |key: &str, shorthand: Option<GridLine>| -> Option<GridLine> {
             shorthand.or_else(|| self.0.get(key).and_then(|v| GridLine::parse(v)))
         };
+        let (row_start_short, row_end_short) = row_shorthand
+            .map(|(start, end)| (Some(start), Some(end)))
+            .unwrap_or((None, None));
+        let (column_start_short, column_end_short) = column_shorthand
+            .map(|(start, end)| (Some(start), Some(end)))
+            .unwrap_or((None, None));
         GridPlacements {
-            row_start: line("grid-row-start", row_shorthand.map(|(start, _)| start)),
-            column_start: line(
-                "grid-column-start",
-                column_shorthand.map(|(start, _)| start),
-            ),
-            row_end: line("grid-row-end", row_shorthand.map(|(_, end)| end)),
-            column_end: line("grid-column-end", column_shorthand.map(|(_, end)| end)),
+            row_start: line("grid-row-start", row_start_short),
+            column_start: line("grid-column-start", column_start_short),
+            row_end: line("grid-row-end", row_end_short),
+            column_end: line("grid-column-end", column_end_short),
         }
     }
 
@@ -936,8 +957,8 @@ impl CssAttr {
         self.0.get("align-self").and_then(|v| parse_align_items(v))
     }
 
-    /// Item horizontal alignment on its grid area. `None` means the
-    /// container's grid justify alignment (terminal v1: stretch/start).
+    /// Item horizontal alignment on its grid area. `None` means inherit the
+    /// container's `justify-items`.
     pub fn get_grid_justify_self(&self) -> Option<AlignItems> {
         self.0
             .get("justify-self")

@@ -42,6 +42,7 @@ pub struct EdgeSizes {
 }
 
 impl EdgeSizes {
+    /// Per-side sizes in CSS top / right / bottom / left order, in cells.
     pub const fn new(top: usize, right: usize, bottom: usize, left: usize) -> Self {
         Self {
             top,
@@ -81,6 +82,8 @@ pub struct MarginSizes {
 }
 
 impl MarginSizes {
+    /// Per-side margins in CSS top / right / bottom / left order; the
+    /// horizontal sides are signed cells (negative pulls the box outward).
     pub const fn new(top: usize, right: isize, bottom: usize, left: isize) -> Self {
         Self {
             top,
@@ -119,6 +122,7 @@ pub struct EdgeAuto {
 }
 
 impl EdgeAuto {
+    /// Per-side auto flags in CSS top / right / bottom / left order.
     pub const fn new(top: bool, right: bool, bottom: bool, left: bool) -> Self {
         Self {
             top,
@@ -165,6 +169,7 @@ pub struct Border {
 }
 
 impl Border {
+    /// One border side from its cell width, [`BorderStyle`] and color.
     pub const fn new(width: usize, style: BorderStyle, color: Option<Color>) -> Self {
         Self {
             width,
@@ -192,6 +197,7 @@ pub struct BorderSides {
 }
 
 impl BorderSides {
+    /// Apply one [`Border`] to all four sides (the `border: …` shorthand).
     pub const fn all(b: Border) -> Self {
         Self {
             top: b,

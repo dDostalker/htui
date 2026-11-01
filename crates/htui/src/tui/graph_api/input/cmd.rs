@@ -45,6 +45,11 @@ impl DirtyInfo {
     }
 }
 
+/// One frame request from the input / script threads to the render thread.
+/// Snapshot commands (`Rerender` / `Redraw` / `RenderArena` / `RenderHtml`)
+/// collapse to the newest one in a batch; incremental ones (`Hover`,
+/// `Focus`, `TextSelection`, select overlays) keep their order. See the
+/// command-merging notes in the module docs of `graph_api`.
 #[derive(Debug, Clone)]
 pub enum RenderCmd {
     Rerender {

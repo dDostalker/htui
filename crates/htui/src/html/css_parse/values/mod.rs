@@ -26,9 +26,11 @@ pub(crate) use flex::{
     alignment_longhand_valid, expand_place_shorthand, is_alignment_longhand,
     is_place_shorthand_name,
 };
+pub(crate) use grid::expand_grid_template;
 pub use grid::{
-    GridAutoFlow, GridLine, GridPlacements, GridTemplate, GridTrack, parse_grid_area,
-    parse_grid_auto_flow, parse_grid_axis_shorthand, parse_grid_template, parse_grid_track_list,
+    GridAreas, GridAutoFlow, GridLine, GridPlacements, GridTemplate, GridTrack, parse_grid_area,
+    parse_grid_auto_flow, parse_grid_axis_shorthand, parse_grid_template,
+    parse_grid_template_areas, parse_grid_track_list,
 };
 pub(crate) use length::merge_border_longhand;
 pub use length::{FontContext, Length, LengthContext, PX_PER_CELL, Viewport};

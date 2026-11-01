@@ -5,8 +5,9 @@
   Theme: "neon night" — charcoal slate + mint/cyan/violet/coral accents.
   Features: animated spectrum, playlist scrolling, seek/volume, lyrics, queue,
   favorites with filtering, seek, repeat/shuffle, volume, live clock.
-  Layout: viewport-fit with an edge-triggered hover pop-out library and
-  fixed playback dock.
+  Layout: CSS Grid for the top bar, now-playing split, spectrum columns and
+  the column-aligned playlist/queue rows; flex keeps the animated library
+  drawer (JS-driven flex-basis) and the fixed playback dock.
   Inner lists scroll instead of allowing controls to leave the screen.
 -->
 <html lang="en">
@@ -53,15 +54,18 @@
      pushed off screen. Now-playing and library use viewport-relative heights;
      their inner lists scroll when decorative content does not fit. */
 
-  /* ---------- top bar ---------- */
+  /* ---------- top bar ----------
+     Grid columns keep the brand filling the left and the status cluster
+     right-aligned without margin-left:auto hacks. */
   .top {
     flex: 0 0 auto;
     min-height: 1ch;
     margin: 0 1ch;
     border: 1ch solid var(--border);
     border-radius: 1;
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+    gap: 2ch;
     align-items: center;
     padding: 0 1ch;
     background-color: var(--bg-raised);
@@ -71,7 +75,6 @@
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
-    flex-shrink: 1;
   }
   .brand {
     color: transparent;
@@ -79,18 +82,16 @@
     background: linear-gradient(to right, var(--accent), var(--cyan), #c66ad8);
     background-clip: text;
   }
-  .feed { color: var(--text-muted); margin-left: auto; }
+  .feed { color: var(--text-muted); }
   #state-label {
     color: var(--accent);
-    margin-left: 2ch;
     min-width: 0;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
-    flex-shrink: 0;
   }
   #state-label.off { color: var(--text-dim); }
-  .clock { color: var(--cyan); font-weight: bold; margin-left: 2ch; }
+  .clock { color: var(--cyan); font-weight: bold; }
 
   /* ---------- layout ---------- */
   .main-wrap {
@@ -160,14 +161,14 @@
     background-color: var(--bg-card);
   }
   .playbar-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: auto minmax(10ch, 1fr);
     gap: 1ch;
     align-items: center;
     margin-top: 1ch;
   }
-  .playbar .controls { flex: 0 1 auto; margin-top: 0; }
+  .playbar .controls { margin-top: 0; }
   .playbar .vol {
-    flex: 1 1 10ch;
     min-width: 0;
     margin-top: 0;
   }
@@ -184,14 +185,12 @@
   .np-body {
     flex: 1 1 auto;
     min-height: 0;
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(5ch, 20%) minmax(0, 1fr);
     gap: 1ch;
     align-items: flex-start;
-    flex-wrap: wrap;
   }
   .art {
-    flex: 0 1 20%;
-    min-width: 5ch;
     border: 1ch solid var(--border-art);
     border-radius: 1;
     display: flex;
@@ -302,14 +301,14 @@
     background-color: transparent;
   }
   .viz {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(2, 8ch);
     justify-content: center;
     gap: 1ch;
     min-width: 0;
     overflow: hidden;
   }
   .viz-pre {
-    flex: 0 1 8ch;
     min-width: 0;
     height: 4ch;
     overflow: hidden;
@@ -319,12 +318,19 @@
   #viz-r { color: var(--violet); }
 
   /* ---------- queue / lyrics ---------- */
-  .qrow { display: flex; gap: 1ch; padding: 0 1ch; border-left: 1ch solid var(--border); }
-  .qrow.next { border-left: 1ch solid var(--accent); background-color: #0f1a24; }
+  /* Grid rows give the queue true column alignment across rows: the index,
+     title and artist tracks stay lined up no matter how long each title is. */
+  .qrow {
+    display: grid;
+    grid-template-columns: 3ch minmax(0, 1fr) minmax(0, 12ch);
+    gap: 1ch;
+    padding: 0 1ch;
+    border-left: 1ch solid var(--border);
+  }
+  .qrow.next { border-left-color: var(--accent); background-color: #0f1a24; }
   .qrow.next .qtitle { color: var(--accent); }
-  .qidx { width: 3ch; flex-shrink: 0; color: var(--text-muted); text-align: right; }
+  .qidx { color: var(--text-muted); text-align: right; }
   .qtitle {
-    flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
     white-space: nowrap;
@@ -332,7 +338,6 @@
     color: var(--text-body);
   }
   .qartist {
-    flex: 0 1 12ch;
     min-width: 0;
     overflow: hidden;
     white-space: nowrap;
@@ -373,15 +378,24 @@
     overflow-y: auto;
   }
 
-  .row { display: flex; gap: 2ch; padding: 0 1ch; }
+  /* Playlist rows share one grid template, so every column (index, title,
+     artist, tag, quality, duration) lines up across rows regardless of
+     content width. Hidden items at narrow widths shift every row the same
+     way (the classes are row-uniform), so auto-placement stays aligned;
+     the @media blocks below trim the template to match. */
+  .row {
+    display: grid;
+    grid-template-columns: 4ch minmax(4ch, 2fr) minmax(0, 1fr) minmax(0, 8ch) minmax(0, 8ch) auto;
+    gap: 1ch;
+    padding: 0 1ch;
+  }
   .row:nth-child(odd) { background-color: #0e1220; }
   .row:hover { background-color: #161c2c; }
   .row.active { background-color: var(--bg-accent-dim); border-radius: 1; }
-  .idx { width: 4ch; flex-shrink: 0; text-align: right; color: var(--text-muted); }
+  .idx { text-align: right; color: var(--text-muted); }
   .row.active .idx { color: var(--accent); }
   .ptitle {
-    flex: 1 1 auto;
-    min-width: 4ch;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -391,7 +405,6 @@
   .heart.off { color: var(--text-muted); }
   .heart:hover { color: var(--coral); }
   .partist {
-    flex: 2 1 20ch;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -399,21 +412,18 @@
     color: var(--text-dim);
   }
   .ptag {
-    flex: 0 1 10ch;
     min-width: 0;
     overflow: hidden;
     text-align: center;
     border-radius: 1;
   }
   .pq {
-    flex: 0 1 8ch;
     min-width: 0;
     overflow: hidden;
     text-align: center;
     color: var(--text-muted);
   }
   .pdur {
-    flex: 0 0 auto;
     min-width: 4ch;
     text-align: right;
     color: var(--text-muted);
@@ -437,25 +447,37 @@
      @media units are terminal cells (1ch = 1 column / 1 row).
      Core playback controls (.playbar) are NEVER hidden — only decorative
      content is progressively removed as the viewport shrinks. */
+  /* The library drawer is 30% of the viewport, so its rows run out of room
+     well before the main layout does: six columns only fit past ~150ch, so
+     below that the quality column is dropped (the tag column follows at the
+     narrower tiers). */
+  @media (max-width: 150ch) {
+    .pq { display: none; }
+    .row { grid-template-columns: 4ch minmax(4ch, 2fr) minmax(0, 1fr) minmax(0, 8ch) auto; }
+  }
+
   @media (max-width: 72ch) {
     .feed,
     .partist { display: none; }
+    .top { grid-template-columns: minmax(0, 1fr) auto auto; }
+    .row { grid-template-columns: 4ch minmax(4ch, 2fr) minmax(0, 8ch) auto; }
   }
 
   @media (max-width: 64ch) {
     .side { flex-basis: 24ch; min-width: 0; }
-    .pq { display: none; }
   }
 
   @media (max-width: 56ch) {
     .ptag { display: none; }
+    .row { grid-template-columns: 4ch minmax(4ch, 2fr) auto; }
   }
 
   @media (max-width: 48ch) {
     .clock { display: none; }
-    .playbar-row { flex-wrap: wrap; }
+    .top { grid-template-columns: minmax(0, 1fr) auto; }
+    /* Stack the dock rows instead of wrapping them. */
+    .playbar-row { grid-template-columns: minmax(0, 1fr); }
     .controls { flex-wrap: wrap; }
-    .playbar .vol { flex-basis: 100%; }
     .btn-main { flex: 1 1 auto; text-align: center; }
     #btn-repeat,
     #btn-shuffle { display: none; }
@@ -471,7 +493,7 @@
     #state-label,
     .heart,
     .idx { display: none; }
-    .row { gap: 1ch; }
+    .row { gap: 1ch; grid-template-columns: minmax(4ch, 1fr) auto; }
     .aux,
     .transport { display: none; }
   }
@@ -502,8 +524,7 @@
     .main-wrap { height: 2ch; }
     .plist { min-height: 1ch; }
     .card-head { margin-bottom: 0; }
-    .np-body { gap: 1ch; }
-    .art { min-width: 4ch; }
+    .np-body { gap: 1ch; grid-template-columns: minmax(4ch, 20%) minmax(0, 1fr); }
     .lib-head { margin-bottom: 0; }
   }
 

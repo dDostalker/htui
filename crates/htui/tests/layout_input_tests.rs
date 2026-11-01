@@ -1183,6 +1183,31 @@ fn range_pseudo_element_moz_thumb_color() {
 }
 
 #[test]
+fn range_unfilled_track_stays_neutral_with_accent_color() {
+    init();
+    let html = r#"<style>
+        input { accent-color: #43e5a0; }
+    </style>
+    <input type="range" min="0" max="4" step="1" value="2" width="9">"#;
+    let (_, tl) = render_rows(html);
+    let accent = crossterm::style::Color::Rgb {
+        r: 0x43,
+        g: 0xe5,
+        b: 0xa0,
+    };
+    assert_eq!(
+        tl.layout[0].fcolor,
+        Some(accent),
+        "the filled track takes accent-color"
+    );
+    assert_ne!(
+        tl.layout[8].fcolor,
+        Some(accent),
+        "the unfilled track stays neutral so filled and unfilled remain distinguishable"
+    );
+}
+
+#[test]
 fn range_pseudo_element_moz_progress_color() {
     init();
     let html = r#"<style>

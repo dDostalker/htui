@@ -325,6 +325,9 @@ impl<T: FromJs> FromJs for Vec<T> {
 /// inside a Boa [`Context`].
 type LazyProp = Box<dyn FnOnce(&mut Context) -> JsValue>;
 
+/// Accumulates `(key, value)` pairs and assembles them into one Boa object
+/// inside a [`Context`] — the [`IntoJs`] path for host functions returning
+/// structured data.
 pub struct JsObjectBuilder {
     props: Vec<(String, LazyProp)>,
 }

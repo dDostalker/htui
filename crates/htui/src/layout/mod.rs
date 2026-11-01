@@ -134,6 +134,10 @@ fn clipped_fragments<'a>(
     out
 }
 
+/// The visible text of the laid-out page, honoring the clip `lines`
+/// `(top, bottom, column_start)` triples: fragments are clipped per line,
+/// sorted into visual order and joined with newlines at block boundaries.
+/// This is what copy / selection reads back.
 pub fn extract_flow_text(
     arena: &NodeArena,
     boxes: &[LayoutBox],
@@ -161,6 +165,9 @@ pub fn extract_flow_text(
     out
 }
 
+/// Whether `user-select: none` applies at `start`: the node itself or the
+/// nearest ancestor declaring `user-select` decides (`auto` inherits).
+/// Selection walks skip such subtrees.
 pub fn user_select_is_none(arena: &NodeArena, start: NodeId) -> bool {
     let mut current = Some(start);
     while let Some(node_id) = current {

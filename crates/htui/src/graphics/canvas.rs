@@ -25,6 +25,12 @@ pub struct InputRenderState {
     pub selection: Option<(usize, usize)>,
 }
 
+/// The terminal canvas: a flat [`Block`] grid of `columns × rows` cells plus
+/// the cached layout / input state the incremental render methods need.
+///
+/// [`TermLayout::draw`] fills the grid from a styled DOM; `render` /
+/// `render_to_bytes` turn it into ANSI output, and `layout` is public so
+/// hosts and tests can inspect the painted cells directly.
 #[derive(Debug)]
 pub struct TermLayout {
     pub layout: Vec<Block>,

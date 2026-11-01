@@ -4193,3 +4193,245 @@ fn css_var_multiple_in_one_value() {
         "border shorthand has both vars substituted"
     );
 }
+
+// ============================================================
+// CSS Grid value parsing
+// ============================================================
+
+#[test]
+fn grid_line_parses_numbers_spans_and_area_names() {
+    use htui::html::css_parse::{GridLine, parse_grid_axis_shorthand};
+    assert_eq!(GridLine::parse("3"), Some(GridLine::Line(3)));
+    assert_eq!(GridLine::parse("-2"), Some(GridLine::Line(-2)));
+    assert_eq!(GridLine::parse("0"), None);
+    assert_eq!(GridLine::parse("span 2"), Some(GridLine::Span(2)));
+    assert_eq!(GridLine::parse("span"), None);
+    assert_eq!(GridLine::parse("auto"), Some(GridLine::Auto));
+    assert_eq!(
+        GridLine::parse("head"),
+        Some(GridLine::Name(Arc::from("head")))
+    );
+    assert_eq!(GridLine::parse("2ch"), None, "lengths are not grid lines");
+    // A bare custom-ident start copies into the omitted end line.
+    assert_eq!(
+        parse_grid_axis_shorthand("sidebar"),
+        Some((
+            GridLine::Name(Arc::from("sidebar")),
+            GridLine::Name(Arc::from("sidebar"))
+        ))
+    );
+    assert_eq!(
+        parse_grid_axis_shorthand("2"),
+        Some((GridLine::Line(2), GridLine::Auto))
+    );
+}
+
+#[test]
+fn grid_area_shorthand_copies_ident_starts_into_end_lines() {
+    use htui::html::css_parse::{GridLine, parse_grid_area};
+    let name = |s: &str| Some(GridLine::Name(Arc::from(s)));
+    let whole = parse_grid_area("head").expect("single name addresses the whole area");
+    assert_eq!(whole.row_start, name("head"));
+    assert_eq!(whole.column_start, name("head"));
+    assert_eq!(whole.row_end, name("head"));
+    assert_eq!(whole.column_end, name("head"));
+    let numeric = parse_grid_area("2 / 3").expect("numeric lines");
+    assert_eq!(numeric.row_start, Some(GridLine::Line(2)));
+    assert_eq!(numeric.column_start, Some(GridLine::Line(3)));
+    assert_eq!(numeric.row_end, Some(GridLine::Auto));
+    assert_eq!(numeric.column_end, Some(GridLine::Auto));
+}
+
+#[test]
+fn grid_template_areas_parses_a_rectangular_matrix() {
+    use htui::html::css_parse::{GridAreas, parse_grid_template_areas};
+    let areas = parse_grid_template_areas(r#""a . b" "a . b""#).expect("valid matrix");
+    assert_eq!(areas.row_count(), 2);
+    assert_eq!(areas.column_count(), 3);
+    assert_eq!(areas.cells[1][0].as_deref(), Some("a"));
+    assert_eq!(areas.cells[1][1], None, "a dot cell is null");
+    assert_eq!(areas.cells[1][2].as_deref(), Some("b"));
+    assert_eq!(
+        parse_grid_template_areas("none"),
+        Some(GridAreas { cells: Vec::new() })
+    );
+}
+
+#[test]
+fn grid_template_areas_rejects_ragged_or_non_rectangular_values() {
+    use htui::html::css_parse::parse_grid_template_areas;
+    assert!(
+        parse_grid_template_areas(r#""a a" "a""#).is_none(),
+        "rows must share one width"
+    );
+    assert!(
+        parse_grid_template_areas(r#""a b" "b a""#).is_none(),
+        "an L-shaped area is invalid"
+    );
+    assert!(parse_grid_template_areas("a b").is_none(), "unquoted cells");
+    assert!(parse_grid_template_areas("").is_none());
+}
+
+#[test]
+fn grid_track_parses_minmax_and_fit_content() {
+    use htui::html::css_parse::{GridTrack, Length, parse_grid_track_list};
+    let length_track = |s: &str| GridTrack::Length(Length::parse(s).expect("test lengths parse"));
+    assert_eq!(
+        GridTrack::parse("minmax(1ch, 3ch)"),
+        Some(GridTrack::MinMax {
+            min: Box::new(length_track("1ch")),
+            max: Box::new(length_track("3ch")),
+        })
+    );
+    assert_eq!(
+        GridTrack::parse("minmax(1fr, 2ch)"),
+        None,
+        "the min side of minmax is never flexible"
+    );
+    assert_eq!(
+        GridTrack::parse("minmax(minmax(1ch, 2ch), 3ch)"),
+        None,
+        "a breadth is never a nested function"
+    );
+    assert_eq!(
+        GridTrack::parse("FIT-CONTENT(2ch)"),
+        Some(GridTrack::MinMax {
+            min: Box::new(GridTrack::Auto),
+            max: Box::new(length_track("2ch")),
+        }),
+        "fit-content desugars to minmax(auto, length); function names are case-insensitive"
+    );
+    let fr_max = GridTrack::parse("minmax(auto, 1fr)").expect("a flexible max is valid");
+    assert!(fr_max.is_fr(), "a flexible max joins fr distribution");
+    let repeated = parse_grid_track_list("repeat(2, minmax(1ch, 3ch))").expect("repeat expands");
+    assert_eq!(repeated.len(), 2);
+    assert!(
+        repeated
+            .iter()
+            .all(|t| matches!(t, GridTrack::MinMax { .. }))
+    );
+}
+
+#[test]
+fn grid_track_parses_auto_fill_and_auto_fit_repeats() {
+    use htui::html::css_parse::{GridTrack, parse_grid_track_list};
+    let list = parse_grid_track_list("repeat(auto-fill, minmax(10ch, 1fr))").expect("auto-fill");
+    assert_eq!(list.len(), 1, "an auto-repeat stays one unresolved track");
+    assert!(
+        matches!(&list[0], GridTrack::AutoRepeat { fit: false, tracks } if tracks.len() == 1),
+        "auto-fill is recorded with its inner track list"
+    );
+    let fit =
+        parse_grid_track_list("repeat(AUTO-FIT, 3ch 1ch)").expect("auto-fit, case-insensitive");
+    assert!(matches!(&fit[0], GridTrack::AutoRepeat { fit: true, tracks } if tracks.len() == 2));
+    assert!(
+        parse_grid_track_list("repeat(auto-fill, repeat(auto-fill, 3ch))").is_none(),
+        "auto-repeats cannot nest"
+    );
+    assert!(
+        parse_grid_track_list("repeat(2, repeat(auto-fill, 3ch))").is_none(),
+        "auto-repeats cannot nest inside an integer repeat"
+    );
+    assert!(
+        parse_grid_track_list("repeat(auto-fill,)").is_none(),
+        "an empty track list is invalid"
+    );
+}
+
+#[test]
+fn grid_line_parses_named_spans() {
+    use htui::html::css_parse::GridLine;
+    assert_eq!(
+        GridLine::parse("span 2 head"),
+        Some(GridLine::SpanName {
+            span: 2,
+            name: Arc::from("head")
+        })
+    );
+    assert_eq!(
+        GridLine::parse("span head"),
+        Some(GridLine::SpanName {
+            span: 1,
+            name: Arc::from("head")
+        })
+    );
+    assert_eq!(GridLine::parse("span 2"), Some(GridLine::Span(2)));
+    assert_eq!(GridLine::parse("span 0"), None);
+    assert_eq!(GridLine::parse("span 2 3"), None, "two integers");
+    assert_eq!(GridLine::parse("span head tail"), None, "two idents");
+}
+
+#[test]
+fn grid_template_shorthand_expands_area_strings() {
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            .g { grid-template: "head head" 1fr "side main" 2ch / 2ch 1fr; }
+        </style><div class="g"></div>"#,
+    );
+    let div = find_first_by_tag(&arena, root, NodeType::Div);
+    assert_eq!(
+        arena[div]
+            .css_attr
+            .0
+            .get("grid-template-areas")
+            .map(|s| s.as_ref()),
+        Some(r#""head head" "side main""#)
+    );
+    assert_eq!(
+        arena[div]
+            .css_attr
+            .0
+            .get("grid-template-rows")
+            .map(|s| s.as_ref()),
+        Some("1fr 2ch"),
+        "each area row gets its size, defaulting to auto"
+    );
+    assert_eq!(
+        arena[div]
+            .css_attr
+            .0
+            .get("grid-template-columns")
+            .map(|s| s.as_ref()),
+        Some("2ch 1fr")
+    );
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            .p { grid-template: 2ch 1fr; }
+        </style><div class="p"></div>"#,
+    );
+    let div = find_first_by_tag(&arena, root, NodeType::Div);
+    assert!(
+        arena[div].css_attr.0.contains_key("grid-template"),
+        "the plain track-list form keeps the raw shorthand"
+    );
+    assert!(!arena[div].css_attr.0.contains_key("grid-template-areas"));
+}
+
+#[test]
+fn stylesheet_prelude_blocks_do_not_truncate_selectors() {
+    // Regression: the rule-prelude reader used to stop at the first `[…]`
+    // block (block content never advanced the position), silently dropping
+    // every rule whose selector carried an attribute selector — the page's
+    // `input[type="range"]` accent-color styling never applied. Argumented
+    // pseudo-classes (`:not(…)`) hit the same truncation.
+    let (root, arena) = parse_and_cascade(
+        r#"<style>
+            :root { --accent: #43e5a0; }
+            input[type="range"] { accent-color: var(--accent); }
+            p:not(.x) { color: #ff7a90; }
+        </style>
+        <input type="range"><p>one</p>"#,
+    );
+    let input = find_first_by_tag(&arena, root, NodeType::Input);
+    assert_eq!(
+        arena[input].css_attr.get_accent_color(),
+        parse_color_str("#43e5a0"),
+        "an attribute-selector rule applies, with var() substituted"
+    );
+    let p = find_first_by_tag(&arena, root, NodeType::P);
+    assert_eq!(
+        arena[p].css_attr.get_color(),
+        parse_color_str("#ff7a90"),
+        "an argumented pseudo-class rule applies"
+    );
+}

@@ -14,8 +14,8 @@ use super::{
     properties::CssAttr,
     selector::CssSelector,
     values::{
-        alignment_longhand_valid, expand_place_shorthand, is_alignment_longhand,
-        is_list_style_type_keyword, is_place_shorthand_name,
+        alignment_longhand_valid, expand_grid_template, expand_place_shorthand,
+        is_alignment_longhand, is_list_style_type_keyword, is_place_shorthand_name,
     },
 };
 
@@ -100,6 +100,9 @@ impl Default for CssRule {
 
 // Parser
 
+/// A CSS stylesheet parser: [`Parser::parse`] walks the input once and
+/// collects qualified rules, `@media` blocks and keyframes into a
+/// [`CssRule`] table. Parse errors are logged and skipped, never fatal.
 #[derive(Debug, Clone)]
 pub struct Parser {
     context: String,
@@ -181,11 +184,12 @@ impl<'i> QualifiedRuleParser<'i> for CssParseState {
         input: &mut CssParser<'i, 't>,
     ) -> std::result::Result<String, ParseError<'i, Self::Error>> {
         let start = input.position();
-        while !input.is_exhausted() {
-            if input.next_including_whitespace_and_comments().is_err() {
-                break;
-            }
-        }
+        // `parse_until_before` skips balanced `[…]` / `(…)` blocks as units so
+        // the slice covers the whole prelude text — a plain `next()` loop
+        // stops at the first block opening (block contents never advance the
+        // position), truncating selectors like `input[type="range"]`.
+        let _: std::result::Result<(), ParseError<()>> =
+            input.parse_until_before(Delimiter::CurlyBracketBlock, |_| Ok(()));
         let text = input.slice_from(start).trim().to_string();
         if text.is_empty() {
             return Err(input.new_error(BasicParseErrorKind::QualifiedRuleInvalid));
@@ -473,6 +477,10 @@ fn parse_declarations_into<'i, 't>(
                 Some(expand_list_style_shorthand(&cleaned))
             } else if name == "font" {
                 Some(expand_font_shorthand(&cleaned))
+            } else if name == "grid-template" {
+                // Only the areas form expands; a plain track-list shorthand
+                // (or `none`) keeps the raw-name path.
+                expand_grid_template(&cleaned).map(Some)
             } else {
                 None
             };
