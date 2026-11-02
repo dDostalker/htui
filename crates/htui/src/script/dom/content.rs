@@ -294,12 +294,12 @@ fn set_inner_html(
 ///
 /// Browser semantics: nodes dropped by an `innerHTML` write stay alive while
 /// a script holds a reference to them, and are collected once unreachable.
-/// The wrapper cache (`__htuiElements`, GC-rooted) is the conservative
-/// reachability oracle: a wrapper exists exactly when JS has touched the
-/// node, so a wrapped node — and its whole subtree, which stays attached to
-/// it like a detached browser node — is kept, while unwrapped subtrees are
-/// removed from the arena. Listeners imply a wrapper (they are installed on
-/// one), so no listener registry cleanup is needed here.
+/// The wrapper cache (`__htuiElements`) stores `WeakRef`s, so
+/// [`super::wrapper_is_cached`] reports true exactly while a wrapper is
+/// reachable from JS: a wrapped node — and its whole subtree, which stays
+/// attached to it like a detached browser node — is kept, while unwrapped
+/// subtrees are removed from the arena. Listeners imply a wrapper (they are
+/// installed on one), so no listener registry cleanup is needed here.
 fn sweep_replaced_subtrees(
     st: &mut ScriptState,
     roots: &[NodeId],
@@ -327,6 +327,9 @@ fn sweep_replaced_subtrees(
             st.arena.remove(id);
         }
     }
+    // Weak-cache maintenance: drop entries whose wrapper the page already
+    // dropped, so the registry tracks only live references.
+    super::purge_dead_wrappers(context)?;
     Ok(())
 }
 

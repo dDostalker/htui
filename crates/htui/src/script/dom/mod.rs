@@ -98,21 +98,77 @@ fn js_fn(context: &mut Context, native: NativeFunction) -> JsFunction {
     FunctionObjectBuilder::new(context.realm(), native).build()
 }
 
-/// Create (or return the cached) JS wrapper for any DOM node (`node_id`).
+/// Create (or return the live cached) JS wrapper for any DOM node (`node_id`).
 ///
-/// Wrappers are cached on the JS side (`globalThis.__htuiElements[nodeId]`) so
-/// `el === event.target` identity checks work; one builder serves every node
-/// kind (elements, text, comments, the document root, fragments).
+/// Wrappers are cached as `WeakRef`s in `globalThis.__htuiElements[nodeId]`:
+/// identity (`el === event.target`) holds while the page holds the wrapper,
+/// and once the page drops it the cache entry — with the wrapper — becomes
+/// collectible. This keeps the `innerHTML` sweep's reachability oracle
+/// ([`wrapper_is_cached`]) accurate instead of pinning every touched node
+/// (and its whole subtree) in the arena forever.
 pub(crate) fn node_wrapper(context: &mut Context, node_id: NodeId) -> JsResult<JsValue> {
     let key = node_id_to_f64(node_id);
     let registry = registry_elements(context)?;
     let cached = registry.get(key, context)?;
-    if !cached.is_undefined() {
-        return Ok(cached);
+    if let Some(live) = weak_cached_wrapper(context, &cached)? {
+        return Ok(live);
     }
     let wrapper = make_node_wrapper(context, node_id)?;
-    registry.set(key, wrapper.clone(), false, context)?;
+    cache_weak_wrapper(context, &registry, key, &wrapper)?;
     Ok(wrapper)
+}
+
+/// The live wrapper behind a wrapper-cache entry, or `None` when the entry is
+/// absent or its target has been collected.
+fn weak_cached_wrapper(context: &mut Context, entry: &JsValue) -> JsResult<Option<JsValue>> {
+    if entry.is_undefined() {
+        return Ok(None);
+    }
+    let Some(entry_obj) = entry.as_object() else {
+        return Ok(None);
+    };
+    let deref = entry_obj.get(js_string!("deref"), context)?;
+    let Some(deref_fn) = deref.as_callable() else {
+        return Ok(None);
+    };
+    let target = deref_fn.call(entry, &[], context)?;
+    if target.is_undefined() {
+        return Ok(None);
+    }
+    Ok(Some(target))
+}
+
+/// Store `wrapper` under `key` wrapped in a JS `WeakRef`.
+fn cache_weak_wrapper(
+    context: &mut Context,
+    registry: &JsObject,
+    key: f64,
+    wrapper: &JsValue,
+) -> JsResult<()> {
+    let ctor = context.intrinsics().constructors().weak_ref().constructor();
+    let weak = ctor.construct(&[wrapper.clone()], None, context)?;
+    registry.set(key, weak, false, context)?;
+    // The `WeakRef` constructor registers its target in the engine's
+    // kept-alive list (the spec's same-tick resurrection guard). Nothing in
+    // this engine relies on that edge, and leaving the wrapper pinned would
+    // defeat the weak cache, so flush the list right away.
+    context.clear_kept_objects();
+    Ok(())
+}
+
+/// Drop every wrapper-cache entry whose `WeakRef` target has been collected.
+///
+/// Called by the `innerHTML` sweep so the registry cannot grow without bound
+/// across repeated rewrites that wrap fresh nodes.
+pub(super) fn purge_dead_wrappers(context: &mut Context) -> JsResult<()> {
+    let registry = registry_elements(context)?;
+    for key in registry.own_property_keys(context)? {
+        let entry = registry.get(key.clone(), context)?;
+        if !entry.is_undefined() && weak_cached_wrapper(context, &entry)?.is_none() {
+            registry.delete_property_or_throw(key, context)?;
+        }
+    }
+    Ok(())
 }
 
 /// The JS-side element cache object.
@@ -130,15 +186,23 @@ fn registry_elements(context: &mut Context) -> JsResult<JsObject> {
     }
 }
 
-/// Whether a JS wrapper is cached for `node_id` in `__htuiElements`.
+/// Whether a live JS wrapper still exists for `node_id`.
 ///
-/// The cache is GC-rooted and written by every [`node_wrapper`] call, so
-/// this is the conservative "JS may still hold this node" oracle used by
-/// the `innerHTML` sweep (see `content::sweep_replaced_subtrees`).
+/// The cache stores `WeakRef`s (see [`node_wrapper`]), so this is the
+/// accurate "JS still holds this node" oracle used by the `innerHTML` sweep
+/// (see `content::sweep_replaced_subtrees`): a dead entry is deleted on
+/// check.
 pub(super) fn wrapper_is_cached(context: &mut Context, node_id: NodeId) -> JsResult<bool> {
     let key = node_id_to_f64(node_id);
-    let cached = registry_elements(context)?.get(key, context)?;
-    Ok(!cached.is_undefined())
+    let registry = registry_elements(context)?;
+    let cached = registry.get(key, context)?;
+    if weak_cached_wrapper(context, &cached)?.is_some() {
+        return Ok(true);
+    }
+    if !cached.is_undefined() {
+        registry.delete_property_or_throw(key, context)?;
+    }
+    Ok(false)
 }
 
 // ============================================================
