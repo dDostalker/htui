@@ -146,7 +146,7 @@ fn cache_weak_wrapper(
     wrapper: &JsValue,
 ) -> JsResult<()> {
     let ctor = context.intrinsics().constructors().weak_ref().constructor();
-    let weak = ctor.construct(&[wrapper.clone()], None, context)?;
+    let weak = ctor.construct(std::slice::from_ref(wrapper), None, context)?;
     registry.set(key, weak, false, context)?;
     // The `WeakRef` constructor registers its target in the engine's
     // kept-alive list (the spec's same-tick resurrection guard). Nothing in
