@@ -112,6 +112,15 @@ pub(super) fn native_replace_child(
         return Ok(JsValue::null());
     };
     let mut st = rc.borrow_mut();
+    // Browser `NotFoundError` semantics: the node to be replaced must be a
+    // child of this node (see `native_remove_child`).
+    if st.arena.get(old_child).and_then(|c| c.parent) != Some(parent_id) {
+        return Err(JsNativeError::error()
+            .with_message(
+                "Failed to execute 'replaceChild' on 'Node': The node to be replaced is not a child of this node.",
+            )
+            .into());
+    }
     reject_cycle(&st, parent_id, new_child, "replaceChild")?;
     // Detach `new_child` from its current parent (if any).
     let old_parent = st.arena.get(new_child).and_then(|c| c.parent);
@@ -230,6 +239,17 @@ pub(super) fn native_remove_child(
         return Ok(JsValue::undefined());
     };
     let mut st = rc.borrow_mut();
+    // Browser `NotFoundError` semantics: the child must actually be ours.
+    // Silently detaching a foreign node leaves it listed in its real
+    // parent's `children` while its `parent` is `None` — a tree invariant
+    // break that every parent-chain walk then trips over.
+    if st.arena.get(child_id).and_then(|c| c.parent) != Some(parent_id) {
+        return Err(JsNativeError::error()
+            .with_message(
+                "Failed to execute 'removeChild' on 'Node': The node to be removed is not a child of this node.",
+            )
+            .into());
+    }
     if let Some(child) = st.arena.get_mut(child_id) {
         child.parent = None;
     }
