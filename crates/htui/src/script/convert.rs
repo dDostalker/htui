@@ -297,9 +297,12 @@ impl<T: FromJs> FromJs for Vec<T> {
             .as_object()
             .ok_or_else(|| type_err("expected an array"))?;
         // Walk `length`, not "first undefined": an array holding an explicit
-        // `undefined` element must not truncate the conversion.
+        // `undefined` element must not truncate the conversion. Growth is
+        // amortized instead of pre-reserving `length` — any object can
+        // declare an arbitrary `length`, and `{length: 0xFFFFFFFF}` must not
+        // turn into a giant up-front allocation.
         let len = arr.get(js_string!("length"), ctx)?.to_u32(ctx)?;
-        let mut out = Vec::with_capacity(len as usize);
+        let mut out = Vec::new();
         for i in 0..len {
             let item = arr.get(i, ctx)?;
             out.push(T::from_js(&item, ctx)?);
