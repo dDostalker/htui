@@ -557,6 +557,17 @@ pub fn apply_message(
     }
 }
 
+/// Best-effort readable text from a caught panic payload.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic payload".to_string()
+    }
+}
+
 /// Run the page's JS engine with required initial session-level JS.
 ///
 /// Build the engine, run top-level scripts, then handle `ScriptMsg` requests,
@@ -635,65 +646,100 @@ pub fn run_script_thread(
         // wake). Real messages always get a reply — the input loop's key gate
         // correlates its verdict on them.
         let has_msg = msg.is_some();
-        let mut event = match msg {
-            Some(ScriptMsg::Quit) => break,
-            Some(msg) => {
-                let map = match hit_map.lock() {
-                    Ok(guard) => Arc::clone(&guard),
-                    Err(e) => {
-                        log::error!("Hit map lock poisoned: {}", e);
-                        Arc::new(HitMap::new())
-                    }
-                };
-                apply_message(&mut engine, &mut hover, &map, msg)
-            }
-            // No message arrived in time — a timer must be due.
-            None => ScriptEvent {
-                cmds: Vec::new(),
-                dirty: None,
-                hovered: hover.current().map(|r| r.node_id),
-                key_gate: None,
-                wheel_gate: None,
-            },
-        };
-
-        // Fire timers that came due while waiting / processing the message.
-        // Their callbacks may rewrite the DOM, so the dirty snapshot must
-        // merge whatever they produced after the message's own batch.
-        event.cmds.extend(engine.run_due_timers());
-
-        // Settle completed `fetch` loads and run the microtask queue. This
-        // must happen after timers so a timer callback that starts a fetch and
-        // the fetch's `.then` chain both drain in the same tick.
-        engine.poll_fetches();
-        // Flush render commands queued outside a dispatch (e.g. `el.focus()`
-        // from a top-level `<script>`): `dispatch` only drains the queue for
-        // its own calls, so without this a load-time command would wait for
-        // the first user event.
-        event.cmds.extend(engine.take_pending_cmds());
-        let extra_reload = engine.take_document_reload();
-        let extra = engine.take_dirty();
-        if !extra.is_empty() {
-            let snapshot = ScriptDirty {
-                arena: Arc::new(engine.arena()),
-                root_id: engine.root_id(),
-                dirty: extra,
-                document_css: extra_reload.then(|| engine.document_css()),
-            };
-            event.dirty = match event.dirty {
-                Some(mut d) => {
-                    d.dirty.nodes.extend(snapshot.dirty.nodes);
-                    // Later writes win per host (IndexMap keeps the first
-                    // insertion position, matching document order).
-                    d.dirty.injected_css.extend(snapshot.dirty.injected_css);
-                    d.document_css = d.document_css.or(snapshot.document_css);
-                    d.arena = snapshot.arena;
-                    d.root_id = snapshot.root_id;
-                    Some(d)
-                }
-                None => Some(snapshot),
-            };
+        if matches!(msg, Some(ScriptMsg::Quit)) {
+            break;
         }
+
+        // A panic while running page JS — a hostile value reaching a native,
+        // a broken timer callback, … — must not tear the session down: catch
+        // it, keep the engine alive for the next message, and reply to real
+        // messages with an empty batch so the input loop's key gate settles.
+        // RefCell guards and the GC recover on unwind; a poisoned engine
+        // degrades to per-call errors instead of silent channel death.
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut event = match msg {
+                Some(msg) => {
+                    let map = match hit_map.lock() {
+                        Ok(guard) => Arc::clone(&guard),
+                        Err(e) => {
+                            log::error!("Hit map lock poisoned: {}", e);
+                            Arc::new(HitMap::new())
+                        }
+                    };
+                    apply_message(&mut engine, &mut hover, &map, msg)
+                }
+                // No message arrived in time — a timer must be due.
+                None => ScriptEvent {
+                    cmds: Vec::new(),
+                    dirty: None,
+                    hovered: hover.current().map(|r| r.node_id),
+                    key_gate: None,
+                    wheel_gate: None,
+                },
+            };
+
+            // Fire timers that came due while waiting / processing the message.
+            // Their callbacks may rewrite the DOM, so the dirty snapshot must
+            // merge whatever they produced after the message's own batch.
+            event.cmds.extend(engine.run_due_timers());
+
+            // Settle completed `fetch` loads and run the microtask queue. This
+            // must happen after timers so a timer callback that starts a fetch and
+            // the fetch's `.then` chain both drain in the same tick.
+            engine.poll_fetches();
+            // Flush render commands queued outside a dispatch (e.g. `el.focus()`
+            // from a top-level `<script>`): `dispatch` only drains the queue for
+            // its own calls, so without this a load-time command would wait for
+            // the first user event.
+            event.cmds.extend(engine.take_pending_cmds());
+            let extra_reload = engine.take_document_reload();
+            let extra = engine.take_dirty();
+            if !extra.is_empty() {
+                let snapshot = ScriptDirty {
+                    arena: Arc::new(engine.arena()),
+                    root_id: engine.root_id(),
+                    dirty: extra,
+                    document_css: extra_reload.then(|| engine.document_css()),
+                };
+                event.dirty = match event.dirty {
+                    Some(mut d) => {
+                        d.dirty.nodes.extend(snapshot.dirty.nodes);
+                        // Later writes win per host (IndexMap keeps the first
+                        // insertion position, matching document order).
+                        d.dirty.injected_css.extend(snapshot.dirty.injected_css);
+                        d.document_css = d.document_css.or(snapshot.document_css);
+                        d.arena = snapshot.arena;
+                        d.root_id = snapshot.root_id;
+                        Some(d)
+                    }
+                    None => Some(snapshot),
+                };
+            }
+            event
+        }));
+        let event = match outcome {
+            Ok(event) => event,
+            Err(payload) => {
+                log::error!(
+                    "Script engine panicked, session keeps running: {}",
+                    panic_message(&payload)
+                );
+                if has_msg {
+                    let recovered = ScriptEvent {
+                        cmds: Vec::new(),
+                        dirty: None,
+                        hovered: hover.current().map(|r| r.node_id),
+                        key_gate: None,
+                        wheel_gate: None,
+                    };
+                    if tx.send(ScriptResponse::Event(recovered)).is_err() {
+                        log::debug!("Script response channel closed");
+                        break;
+                    }
+                }
+                continue;
+            }
+        };
 
         // A timeout wake that produced nothing (a timer fired without visible
         // effect, or a fetch settled nothing) stays silent: the empty event
