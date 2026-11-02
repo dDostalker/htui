@@ -920,9 +920,14 @@ pub fn wrapped_size(
         .iter()
         .enumerate()
         .map(|(idx, l)| {
-            let base = l.iter().map(|r| r.width_at(font)).sum::<usize>();
+            // Grapheme advances scale with `font-size`, which saturates on
+            // absurd CSS values — accumulate saturating.
+            let base = l
+                .iter()
+                .map(|r| r.width_at(font))
+                .fold(0usize, usize::saturating_add);
             let indent = if idx == 0 { first_line_indent } else { 0 };
-            base + indent
+            base.saturating_add(indent)
         })
         .max()
         .unwrap_or(0);

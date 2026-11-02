@@ -97,11 +97,17 @@ pub(super) fn distribute_main_axis(
         return (Vec::new(), 0);
     }
     let gaps = column_gap.saturating_mul(n.saturating_sub(1));
-    let total_basis: usize = line.iter().map(|p| p.basis).sum();
+    // Bases and margins flow in from CSS lengths, which saturate to
+    // `usize::MAX` on absurd values — accumulate saturating like every
+    // other arithmetic on them in this file.
+    let total_basis: usize = line
+        .iter()
+        .map(|p| p.basis)
+        .fold(0usize, usize::saturating_add);
     let total_margin: usize = line
         .iter()
         .map(|p| p.margin_main_before.saturating_add(p.margin_main_after))
-        .sum();
+        .fold(0usize, usize::saturating_add);
     let mut sizes: Vec<usize> = line.iter().map(|p| p.basis).collect();
 
     // An indefinite main axis (a `column` flex container with no explicit

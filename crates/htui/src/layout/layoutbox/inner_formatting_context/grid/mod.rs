@@ -313,11 +313,13 @@ fn layout_grid_container(
     let row_areas = track_areas(&rows, content_y, gap.row);
     let grid_width: usize = columns
         .iter()
-        .sum::<usize>()
+        .copied()
+        .fold(0usize, usize::saturating_add)
         .saturating_add(gap.column.saturating_mul(columns.len().saturating_sub(1)));
     let grid_height: usize = rows
         .iter()
-        .sum::<usize>()
+        .copied()
+        .fold(0usize, usize::saturating_add)
         .saturating_add(gap.row.saturating_mul(rows.len().saturating_sub(1)));
     let x_shift = track_alignment_offset(justify_content, content_width, grid_width);
     let y_shift = track_alignment_offset(
@@ -1062,8 +1064,13 @@ fn track_sizes(
     if let Some(available) = definite_size {
         // Maximize tracks: grow tracks toward their limits before the `fr`
         // pass claims the leftover space.
-        let mut free =
-            available.saturating_sub(sizes.iter().sum::<usize>().saturating_add(gap_total));
+        let mut free = available.saturating_sub(
+            sizes
+                .iter()
+                .copied()
+                .fold(0usize, usize::saturating_add)
+                .saturating_add(gap_total),
+        );
         while free > 0 {
             let growable: Vec<usize> = (0..count).filter(|&i| limits[i] > sizes[i]).collect();
             if growable.is_empty() {
@@ -1096,7 +1103,7 @@ fn track_sizes(
                 .enumerate()
                 .filter(|(index, _)| tracks[*index].fr_weight() == 0.0)
                 .map(|(_, size)| *size)
-                .sum();
+                .fold(0usize, usize::saturating_add);
             let mut leftover = available.saturating_sub(non_flexible.saturating_add(gap_total));
             let mut flexible: Vec<(usize, f32)> = (0..count)
                 .filter(|index| tracks[*index].fr_weight() > 0.0)
