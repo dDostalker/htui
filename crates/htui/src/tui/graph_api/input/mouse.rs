@@ -44,7 +44,6 @@ pub fn handle_click(
     }
     msgs.push(ScriptMsg::MouseDown { x, y });
     msgs.push(ScriptMsg::Click { x, y });
-    // Double click: a second click on the same cell inside the window emits
     // `DblClick` after the `Click` pair (browser order) and resets the
     // tracker (three rapid clicks = click + dblclick + click).
     let now = std::time::Instant::now();

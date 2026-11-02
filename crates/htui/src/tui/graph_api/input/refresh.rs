@@ -490,6 +490,15 @@ pub fn trigger_refresh(
                         state.pressed = Some((mouse.column, mouse.row));
                         let (x, y) = canvas_pos(state, mouse.column, mouse.row);
                         handle_mouse_down(state, hit_map, arena, x, y, button, msgs, &mut cmds);
+                        // Browser semantics: `mousedown` dispatches at press
+                        // time (hit-tested against the element under the
+                        // pointer), not deferred to the release-side click
+                        // path. Pages can therefore lock a drag target on
+                        // press and keep it locked even when the first drag
+                        // motion already leaves the element.
+                        if button == MouseButton::Left {
+                            msgs.push(ScriptMsg::MouseDown { x, y });
+                        }
                     }
                 }
                 MouseEventKind::Up(MouseButton::Left) => {
