@@ -160,25 +160,59 @@ fn apply_inline_style_at(arena: &mut NodeArena, node_id: NodeId, important: bool
 }
 
 // CSS custom property (variable) substitution:
+/// Total substituted output budget per property value, in bytes.
+///
+/// Nested `var()` chains fan out exponentially (every level may double the
+/// text), and with the depth cap at 16 a 1 MB leaf value would expand to
+/// ~65 GB. When the budget runs out the remaining references stay
+/// unsubstituted and the truncated value fails to parse downstream.
+const MAX_SUBSTITUTED_LEN: usize = 1 << 20;
+
+/// Charge `n` bytes against `budget`; `false` means the budget is exhausted.
+fn charge_budget(budget: &mut usize, n: usize) -> bool {
+    match budget.checked_sub(n) {
+        Some(rest) => {
+            *budget = rest;
+            true
+        }
+        None => {
+            *budget = 0;
+            false
+        }
+    }
+}
 /// Substitute `var(--name)` / `var(--name, fallback)` references in a CSS
 /// property value using the current custom-property scope.
 ///
 /// Called after the cascade resolves all declarations for a node, so the
 /// substitution sees the final cascaded value (matching the browser's
 /// computed-value timing). Recursion handles variables that reference other
-/// variables; a depth cap prevents runaway cycles.
-fn substitute_vars(input: &str, vars: &HashMap<String, String>, depth: usize) -> String {
+/// variables; a depth cap prevents runaway cycles and [`MAX_SUBSTITUTED_LEN`]
+/// bounds the total output of the exponential fan-out.
+fn substitute_vars(
+    input: &str,
+    vars: &HashMap<String, String>,
+    depth: usize,
+    budget: &mut usize,
+) -> String {
     const MAX_DEPTH: usize = 16;
     if depth > MAX_DEPTH || !input.contains("var(") {
+        charge_budget(budget, input.len());
         return input.to_string();
     }
     let mut result = String::with_capacity(input.len());
     let mut rest = input;
     while let Some(pos) = rest.find("var(") {
+        if !charge_budget(budget, pos) {
+            return result;
+        }
         result.push_str(&rest[..pos]);
         let after = &rest[pos + 4..]; // past `var(`
         let Some(close) = find_matching_paren(after) else {
             // Malformed — keep the text as-is and continue scanning.
+            if !charge_budget(budget, 4) {
+                return result;
+            }
             result.push_str("var(");
             rest = after;
             continue;
@@ -188,19 +222,24 @@ fn substitute_vars(input: &str, vars: &HashMap<String, String>, depth: usize) ->
 
         let (name, fallback) = split_var_args(inner);
         let name = name.trim();
-        if let Some(value) = vars.get(name) {
-            let resolved = substitute_vars(value, vars, depth + 1);
-            result.push_str(&resolved);
+        let resolved = if let Some(value) = vars.get(name) {
+            substitute_vars(value, vars, depth + 1, budget)
         } else if let Some(fb) = fallback {
-            let resolved = substitute_vars(fb, vars, depth + 1);
-            let trimmed = fb_style(&resolved);
-            result.push_str(&trimmed);
+            fb_style(&substitute_vars(fb, vars, depth + 1, budget))
         } else {
             // Unresolved variable with no fallback: the property becomes
             // "invalid at computed-value time" in browsers (treated as
             // `unset`). We substitute with an empty string so the
             // downstream parser silently ignores it.
+            String::new()
+        };
+        if !charge_budget(budget, resolved.len()) {
+            return result;
         }
+        result.push_str(&resolved);
+    }
+    if !charge_budget(budget, rest.len()) {
+        return result;
     }
     result.push_str(rest);
     result
@@ -266,7 +305,8 @@ fn resolve_custom_props(
     let entries: Vec<(String, String)> = vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     for (k, raw) in entries {
         if raw.contains("var(") {
-            let resolved = substitute_vars(&raw, &vars, 0);
+            let mut budget = MAX_SUBSTITUTED_LEN;
+            let resolved = substitute_vars(&raw, &vars, 0, &mut budget);
             vars.insert(k, resolved);
         }
     }
@@ -289,7 +329,8 @@ fn substitute_property_vars(
         if let Some(v) = css_attr.0.get_mut(&key)
             && v.contains("var(")
         {
-            let resolved = substitute_vars(v, vars, 0);
+            let mut budget = MAX_SUBSTITUTED_LEN;
+            let resolved = substitute_vars(v, vars, 0, &mut budget);
             *v = Arc::from(resolved.as_str());
         }
     }
