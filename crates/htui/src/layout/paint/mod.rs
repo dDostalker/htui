@@ -335,9 +335,7 @@ pub fn paint_layout_tree_region(
         scrollbars_visible: &term_layout.scrollbars_visible,
     };
     for b in boxes {
-        if intersect_rects(b.rect, region).is_some() {
-            paint_box(b, arena, &mut canvas, None, None);
-        }
+        paint_box(b, arena, &mut canvas, None, None);
     }
     fill_canvas_background(&mut canvas, boxes, arena, max_y);
 }
