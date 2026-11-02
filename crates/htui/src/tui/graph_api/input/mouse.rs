@@ -782,7 +782,6 @@ pub fn handle_mouse_move(
                         });
                     }
                     msgs.push(ScriptMsg::MouseMove { x, y });
-                    return;
                 }
                 let idx = if state.focused_is_textarea {
                     textarea_index_at(state, region.rect, x, y)

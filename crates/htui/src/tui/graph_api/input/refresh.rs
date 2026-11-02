@@ -543,6 +543,11 @@ pub fn trigger_refresh(
                             state.drop_stale_press();
                         }
                         let (x, y) = canvas_pos(state, mouse.column, mouse.row);
+                        if matches!(mouse.kind, MouseEventKind::Drag(_))
+                            && state.pressed.is_some()
+                        {
+                            msgs.push(ScriptMsg::MouseMove { x, y });
+                        }
                         handle_mouse_move(state, hit_map, arena, x, y, msgs, &mut cmds);
                     }
                 }
@@ -551,22 +556,9 @@ pub fn trigger_refresh(
         }
 
         Ok(Event::Resize(_, _new_rows)) => {
-            // A terminal resize on Windows can reset the console input mode
-            // (mouse capture off, keyboard line-buffered); re-apply it right
-            // away. The run loop also polls the size every iteration as a
-            // fallback for resize paths that emit no event.
             reapply_console_modes();
-            // A resize invalidates every canvas coordinate the input loop
-            // caches (a stuck press would kill hover / click, a stale
-            // selection or dropdown would paint wrong cells), and the hover
-            // target must be re-validated against the rebuilt hit map.
             state.invalidate_viewport(&mut cmds);
             state.request_resize_revalidation();
-            // The render thread re-lays-out against the new size and clamps
-            // its own scroll position; mirror the clamp here (to the last
-            // known ceiling) so the scroll sent with the redraw matches, and
-            // the run loop re-syncs to the freshly computed ceiling on the
-            // next iteration.
             state.clamp_scroll_to(max_scroll);
             cmds.push(RenderCmd::Redraw {
                 scroll_y: state.scroll_y,
