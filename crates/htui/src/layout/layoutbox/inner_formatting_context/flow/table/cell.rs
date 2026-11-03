@@ -7,7 +7,7 @@ use crate::{
     layout::{
         BoxConstraint, Cursor, InlineRun, LayoutBox, LayoutContext, PaintStyle, Rect,
         inner_formatting_context::flow::layout_children,
-        layoutbox::{collect_runs, wrap_runs},
+        layoutbox::{collect_runs, translate_subtree, wrap_runs},
     },
     tdom::node::{NodeArena, NodeId, NodeType, effective_font_size_cells},
 };
@@ -21,12 +21,32 @@ pub struct CellInfo {
     pub is_header: bool,
 }
 
+/// The reusable result of measuring one table cell.
+pub struct MeasuredCell {
+    /// The border-box height needed by the tallest cell in a row.
+    pub height: usize,
+    /// Inline runs, already wrapped at the cell's content width.
+    pub wrapped_lines: Vec<Vec<InlineRun>>,
+    /// Block / replaced child boxes laid out at a scratch origin. `layout_cell`
+    /// translates this subtree to the cell's final content origin.
+    pub children: Vec<LayoutBox>,
+}
+
+impl Default for MeasuredCell {
+    fn default() -> Self {
+        Self {
+            height: 1,
+            wrapped_lines: Vec::new(),
+            children: Vec::new(),
+        }
+    }
+}
+
 /// Measure one cell at its column width: returns the row height the cell
-/// needs plus its wrapped inline runs. Called once per cell by
-/// `layout_table`'s row-height pass; `layout_cell` reuses the runs, so the
-/// collect + wrap pipeline runs exactly once per cell per layout pass
-/// (identical inputs — same arena, same column width — would produce the
-/// same lines a second time).
+/// needs plus its reusable layout artifacts. Called once per cell by
+/// `layout_table`'s row-height pass; `layout_cell` reuses both the wrapped
+/// runs and the laid-out block-child subtree, so identical inputs — same
+/// arena and column width — are never laid out twice.
 ///
 /// The height is the taller of the wrapped inline-text height (each visual
 /// line takes `font_size_cells` rows) and the laid-out height of the cell's
@@ -46,7 +66,7 @@ pub fn measure_cell(
     col_width: usize,
     is_header: bool,
     context: LayoutContext,
-) -> (usize, Vec<Vec<InlineRun>>) {
+) -> MeasuredCell {
     let node = &arena[cell_id];
     let own_font_size_cells =
         effective_font_size_cells(arena, cell_id, context.font, context.viewport);
@@ -110,12 +130,12 @@ pub fn measure_cell(
     // height. Measure them with a scratch cursor against the same content
     // width the real cell layout uses. Detached (absolute / fixed) children
     // claim no flow space and are excluded, exactly like the block layout.
-    let block_extent = {
+    let children = {
         let mut scratch = Cursor {
             y: 0,
             prev_bottom_margin: 0,
         };
-        let children = layout_children(
+        layout_children(
             arena,
             &node.children,
             BoxConstraint {
@@ -124,20 +144,20 @@ pub fn measure_cell(
             },
             &mut scratch,
             child_context,
-        );
-        children
-            .iter()
-            .filter(|b| {
-                !matches!(
-                    b.positioning.position,
-                    crate::html::css_parse::Position::Absolute
-                        | crate::html::css_parse::Position::Fixed
-                )
-            })
-            .map(|b| b.rect.y.saturating_add(b.rect.height))
-            .max()
-            .unwrap_or(0)
+        )
     };
+    let block_extent = children
+        .iter()
+        .filter(|b| {
+            !matches!(
+                b.positioning.position,
+                crate::html::css_parse::Position::Absolute
+                    | crate::html::css_parse::Position::Fixed
+            )
+        })
+        .map(|b| b.rect.y.saturating_add(b.rect.height))
+        .max()
+        .unwrap_or(0);
 
     let height = inline_rows
         .max(block_extent)
@@ -146,15 +166,18 @@ pub fn measure_cell(
         .saturating_add(cell_edges.border.bottom.thickness())
         .saturating_add(cell_edges.padding.bottom)
         .max(1);
-    (height, wrapped_lines)
+    MeasuredCell {
+        height,
+        wrapped_lines,
+        children,
+    }
 }
 
 /// Build a single cell's [`LayoutBox`] at the given `rect`.
-/// Build a single cell's [`LayoutBox`] at the given `rect`.
 ///
-/// `wrapped_lines` comes from [`measure_cell`] (same cell, same column
-/// width, same layout pass) — re-collecting and re-wrapping here would
-/// produce identical lines a second time.
+/// `wrapped_lines` and `children` come from [`measure_cell`] (same cell,
+/// same column width, same layout pass). The child boxes were measured at a
+/// scratch origin and are translated here; no subtree is laid out twice.
 pub fn layout_cell(
     arena: &NodeArena,
     cell_id: NodeId,
@@ -162,6 +185,7 @@ pub fn layout_cell(
     is_header: bool,
     context: LayoutContext,
     wrapped_lines: Vec<Vec<InlineRun>>,
+    mut children: Vec<LayoutBox>,
     hide_if_empty: bool,
 ) -> LayoutBox {
     let node = &arena[cell_id];
@@ -214,25 +238,11 @@ pub fn layout_cell(
 
     let inner_content_x = rect.x + cell_edges.border.left.thickness() + cell_edges.padding.left;
     let inner_content_y = rect.y + cell_edges.border.top.thickness() + cell_edges.padding.top;
-    let inner_content_width = rect
-        .width
-        .saturating_sub(cell_edges.inner_horizontal())
-        .max(1);
-    let mut child_cursor = Cursor {
-        y: inner_content_y,
-        prev_bottom_margin: 0,
-    };
-    let child_containing = BoxConstraint {
-        x: inner_content_x,
-        width: inner_content_width,
-    };
-    let children = layout_children(
-        arena,
-        &node.children,
-        child_containing,
-        &mut child_cursor,
-        child_context,
-    );
+    // `measure_cell` laid out at x/y zero with the same content width. Shift
+    // the retained forest instead of laying out the same block subtree again.
+    for child in &mut children {
+        translate_subtree(child, inner_content_x as i64, inner_content_y as i64);
+    }
 
     let paint_style = PaintStyle {
         box_edges: cell_edges,

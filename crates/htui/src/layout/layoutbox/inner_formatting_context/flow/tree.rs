@@ -20,6 +20,7 @@ use crate::{
         layoutbox::{
             GeneratedBox, GeneratedBoxKind, flatten_contents_children, generate_node,
             layout_generated_box, layout_generated_tree, resolve_positioned_rects,
+            translate_subtree,
         },
     },
     tdom::node::{Node, NodeArena, NodeId, NodeType, is_collapsible_whitespace},
@@ -262,11 +263,6 @@ pub fn layout_children(
 /// space at the start of a wrapped line is removed — the browser's line
 /// leading-space rule.
 ///
-/// Two passes: the first measures each item's border-box size by laying it
-/// out against a scratch cursor (an `inline-block` with a declared `width`
-/// reports it; a block child of the document would otherwise claim the full
-/// containing width), the second places every item at its final rect via
-/// `pre_allocated_rect` so the box tree carries absolute coordinates.
 fn layout_inline_row(
     arena: &NodeArena,
     items: &[InlineRowItem],
@@ -274,19 +270,7 @@ fn layout_inline_row(
     cursor: &mut Cursor,
     context: LayoutContext,
 ) -> Vec<LayoutBox> {
-    // Pass 1: measure widths / heights / horizontal margins. One slot per
-    // item (an item whose box generation or geometry dispatch fails — e.g.
-    // `display: inline-grid`, unimplemented — stays `None`): the placement
-    // pass below indexes by the *items* position, so a compacted push-only
-    // vec would hand every later sibling the previous item's measurements.
-    struct Measured {
-        width: usize,
-        height: usize,
-        margin_before: usize,
-        margin_after: usize,
-        leading_space: usize,
-    }
-    let mut measured: Vec<Option<Measured>> = items.iter().map(|_| None).collect();
+    let mut measured: Vec<Option<LayoutBox>> = items.iter().map(|_| None).collect();
     for (idx, item) in items.iter().enumerate() {
         let Some(generated) = generate_node(arena, item.id) else {
             continue;
@@ -295,86 +279,68 @@ fn layout_inline_row(
             y: 0,
             prev_bottom_margin: 0,
         };
-        if let Some(b) =
+        if let Some(mut b) =
             layout_generated_box(arena, &generated, containing, &mut scratch, context, None)
         {
-            let edges = &b.paint_style.box_edges;
-            measured[idx] = Some(Measured {
-                width: b.rect.width,
-                height: b.rect.height,
-                margin_before: edges.margin.left.max(0) as usize,
-                margin_after: edges.margin.right.max(0) as usize,
-                leading_space: item.leading_space,
-            });
+            // Measurement starts at a scratch vertical origin. Only the final
+            // translation differs from placement, so retain the whole subtree.
+            let dy = -(b.rect.y as i64);
+            translate_subtree(&mut b, 0, dy);
+            measured[idx] = Some(b);
         }
     }
     let max_h = measured
         .iter()
-        .filter_map(|m| m.as_ref().map(|m| m.height))
+        .filter_map(|m| m.as_ref().map(|m| m.rect.height))
         .max()
         .unwrap_or(1);
     let max_x = containing.x.saturating_add(containing.width);
 
-    // Pass 2: place left-to-right, wrapping when the next item (with its
-    // leading space and margin) would overflow the line.
+    // Translate a measured subtree to its absolute border-box position. Width
+    // is unchanged because both passes use the same containing width.
+    let place = |mut b: LayoutBox, start: usize, y: usize| {
+        let dx = start as i64 - b.rect.x as i64;
+        let dy = y as i64 - b.rect.y as i64;
+        translate_subtree(&mut b, dx, dy);
+        b
+    };
+
+    // Place left-to-right, wrapping when the next item (with its leading
+    // space and margin) would overflow the line.
     let mut x = containing.x;
     let mut y = cursor.y;
     let mut out: Vec<LayoutBox> = Vec::new();
     for (idx, item) in items.iter().enumerate() {
-        let Some(Some(m)) = measured.get(idx) else {
+        let Some(Some(m)) = measured.get_mut(idx).map(|m| m.take()) else {
             continue;
         };
         // A space at the start of a line is removed (browser collapsing
         // rule), so it only applies when the line already has content.
-        let space = if x > containing.x { m.leading_space } else { 0 };
-        let start = x.saturating_add(space).saturating_add(m.margin_before);
+        let space = if x > containing.x {
+            item.leading_space
+        } else {
+            0
+        };
+        let margin_before = m.paint_style.box_edges.margin.left.max(0) as usize;
+        let margin_after = m.paint_style.box_edges.margin.right.max(0) as usize;
+        let width = m.rect.width;
+        let start = x.saturating_add(space).saturating_add(margin_before);
         // The trailing margin may overflow the line without forcing a wrap
         // (the box itself fits), so only the box + leading space + leading
         // margin count.
-        if start > containing.x && start.saturating_add(m.width) > max_x {
+        if start > containing.x && start.saturating_add(m.rect.width) > max_x {
             x = containing.x;
             y = y.saturating_add(max_h);
             // Re-anchored at the line start: the separating space collapses
             // away there.
-            let start = x.saturating_add(m.margin_before);
-            let rect = Rect::new(start, y, m.width.max(1), m.height.max(1));
-            let Some(generated) = generate_node(arena, item.id) else {
-                continue;
-            };
-            if let Some(b) = layout_generated_box(
-                arena,
-                &generated,
-                containing,
-                &mut Cursor {
-                    y,
-                    prev_bottom_margin: 0,
-                },
-                context,
-                Some(rect),
-            ) {
-                out.push(b);
-            }
-            x = start.saturating_add(m.width).saturating_add(m.margin_after);
+            let start = x.saturating_add(margin_before);
+            out.push(place(m, start, y));
+            x = start.saturating_add(width).saturating_add(margin_after);
             continue;
         }
-        let rect = Rect::new(start, y, m.width.max(1), m.height.max(1));
-        let Some(generated) = generate_node(arena, item.id) else {
-            continue;
-        };
-        if let Some(b) = layout_generated_box(
-            arena,
-            &generated,
-            containing,
-            &mut Cursor {
-                y,
-                prev_bottom_margin: 0,
-            },
-            context,
-            Some(rect),
-        ) {
-            out.push(b);
-        }
-        x = start.saturating_add(m.width).saturating_add(m.margin_after);
+        let start = x.saturating_add(space).saturating_add(margin_before);
+        out.push(place(m, start, y));
+        x = start.saturating_add(width).saturating_add(margin_after);
     }
     cursor.y = y.saturating_add(max_h);
     out

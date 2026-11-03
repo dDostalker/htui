@@ -11,7 +11,7 @@ use crate::{
 };
 use std::collections::HashMap;
 
-use super::cell::{CellInfo, layout_cell, measure_cell};
+use super::cell::{CellInfo, MeasuredCell, layout_cell, measure_cell};
 use super::measure::{collect_cells, collect_rows, compute_column_widths, fixed_column_widths};
 
 /// Build a [`LayoutBox`] for a `<table>` element.
@@ -87,23 +87,24 @@ pub fn layout_table(
     // clamped to the available width, so at narrow terminal widths a
     // cell's text wraps to several lines and the row must grow to keep
     // those lines above the table's bottom border. The measurement also
-    // produces each cell's wrapped runs, which `layout_cell` reuses — the
-    // collect + wrap pipeline runs exactly once per cell per layout pass.
-    let mut cell_runs: HashMap<NodeId, Vec<Vec<InlineRun>>> = HashMap::new();
+    // produces each cell's wrapped runs and block-child boxes, both of which
+    // `layout_cell` reuses after translation to the final cell origin.
+    let mut cell_measurements: HashMap<NodeId, MeasuredCell> = HashMap::new();
     let row_heights: Vec<usize> = row_cells
         .iter()
         .map(|row| {
             row.iter()
                 .enumerate()
                 .map(|(col_idx, cell)| {
-                    let (height, runs) = measure_cell(
+                    let measured = measure_cell(
                         arena,
                         cell.node_id,
                         column_widths[col_idx],
                         cell.is_header,
                         child_context,
                     );
-                    cell_runs.insert(cell.node_id, runs);
+                    let height = measured.height;
+                    cell_measurements.insert(cell.node_id, measured);
                     height
                 })
                 .max()
@@ -202,7 +203,12 @@ pub fn layout_table(
         for (col_idx, cell) in row.iter().enumerate() {
             let col_w = column_widths[col_idx];
             let cell_rect = Rect::new(current_x, current_y, col_w, row_height);
-            let wrapped_lines = cell_runs.remove(&cell.node_id).unwrap_or_default();
+            let measured = cell_measurements.remove(&cell.node_id).unwrap_or_default();
+            let MeasuredCell {
+                height: _,
+                wrapped_lines,
+                children,
+            } = measured;
             let cell_box = layout_cell(
                 arena,
                 cell.node_id,
@@ -210,6 +216,7 @@ pub fn layout_table(
                 cell.is_header,
                 child_context,
                 wrapped_lines,
+                children,
                 hide_empty_cells,
             );
             table_children.push(cell_box);

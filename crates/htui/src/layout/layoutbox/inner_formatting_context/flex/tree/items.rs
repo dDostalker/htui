@@ -239,15 +239,10 @@ pub(super) fn layout_flex_items(
         };
 
         // 3e. Per-line placement, factored so the line's cross size can be
-        // measured first and the line re-placed at the final size. An item's
-        // content can wrap taller than the natural max-content measure
-        // (e.g. `812 MB/s` in a narrow card), so the first pass measures the
-        // real line extent; the second pass stretches every `align-items:
-        // stretch` item to it — matching a browser where the line's cross
         // size is the largest item's, and the items fill it evenly.
         let line_origin = current_cross;
-        let place_line = |line_cross: usize| -> (Vec<LayoutBox>, usize, usize) {
-            let mut boxes: Vec<LayoutBox> = Vec::with_capacity(line_preps.len());
+        let place_line = |line_cross: usize| -> (Vec<Option<LayoutBox>>, usize, usize) {
+            let mut boxes: Vec<Option<LayoutBox>> = vec![None; line_preps.len()];
             let mut line_bottom: usize = line_origin.saturating_add(line_cross);
             let mut cursor_main: usize = match direction.is_row() {
                 true => content.x,
@@ -402,7 +397,7 @@ pub(super) fn layout_flex_items(
                             .saturating_add(child_box.rect.height)
                             .saturating_sub(cursor_main);
                     }
-                    boxes.push(child_box);
+                    boxes[prep_idx] = Some(child_box);
                 } else if let FlexItemSource::Node(item_id) = &prep.source {
                     log::warn!(
                         "No layout handler for flex item {:?}",
@@ -439,12 +434,9 @@ pub(super) fn layout_flex_items(
             (boxes, extent, placed_main)
         };
 
-        // Measurement pass at the tentative (natural) cross size, then a
-        // placement pass at the final size when items wrapped taller. The
-        // re-layout only happens when the final line cross differs.
-        let (first_boxes, first_extent, first_placed_main) = place_line(line_cross);
+        let (first_slots, first_extent, first_placed_main) = place_line(line_cross);
         // For `row` direction the cross axis is vertical, so wrapped content
-        // can grow the line and the re-place stretches `align-items: stretch`
+        // can grow the line and the adjustment updates `align-items: stretch`
         // items to the real height. For `column` direction the cross axis is
         // the container's fixed content width: `first_extent` here is the
         // line's *main-axis* (height) extent, so using it as the cross size
@@ -456,12 +448,27 @@ pub(super) fn layout_flex_items(
             true => first_extent.max(line_cross),
             false => line_cross,
         };
-        let (line_boxes, actual_extent, placed_main) = if final_line_cross > line_cross {
-            place_line(final_line_cross)
+        let final_slots = if final_line_cross > line_cross {
+            let env = GrownRowLineEnv {
+                arena,
+                container_node_id,
+                content,
+                context,
+                align_items,
+            };
+            let geometry = GrownRowLineGeometry {
+                old_line_cross: line_cross,
+                new_line_cross: final_line_cross,
+                line_origin,
+            };
+            adjust_grown_row_line_slots(&env, &line_preps, first_slots, &geometry)
         } else {
-            (first_boxes, first_extent, first_placed_main)
+            first_slots
         };
-        let line_box_count = line_boxes.len();
+        let actual_extent = first_extent;
+        let placed_main = first_placed_main;
+        let line_box_count = final_slots.iter().filter(|slot| slot.is_some()).count();
+        let line_boxes = final_slots.into_iter().flatten().collect::<Vec<_>>();
         placed.extend(line_boxes);
 
         // The container height is the line's main-axis extent in column
@@ -605,6 +612,121 @@ pub(super) fn layout_flex_items(
     };
 
     (placed, total_height)
+}
+
+/// Reuse the first-pass row layout after the line grows vertically.
+///
+/// Main-axis geometry is unchanged. Items whose cross size is unchanged move
+/// rigidly to their final cross-axis alignment. A stretch item is reused when
+/// its first-pass content already reached the final height; otherwise only
+/// that item is laid out again at the larger cross size. This avoids a second
+/// complete layout of every item merely because one item established the
+/// taller line.
+/// Environment shared by every item while reusing a grown row's first pass.
+struct GrownRowLineEnv<'a> {
+    arena: &'a NodeArena,
+    container_node_id: NodeId,
+    content: BoxConstraint,
+    context: LayoutContext<'a>,
+    align_items: AlignItems,
+}
+
+/// Old / new cross geometry for one grown row.
+struct GrownRowLineGeometry {
+    old_line_cross: usize,
+    new_line_cross: usize,
+    line_origin: usize,
+}
+
+fn adjust_grown_row_line_slots(
+    env: &GrownRowLineEnv<'_>,
+    line_preps: &[&FlexItemPrep],
+    mut slots: Vec<Option<LayoutBox>>,
+    geometry: &GrownRowLineGeometry,
+) -> Vec<Option<LayoutBox>> {
+    let GrownRowLineGeometry {
+        old_line_cross,
+        new_line_cross,
+        line_origin,
+    } = *geometry;
+    for (prep, slot) in line_preps.iter().zip(&mut slots) {
+        let Some(mut child) = slot.take() else {
+            continue;
+        };
+        let natural_cross = natural_cross_axis_size_for_prep(prep, FlexDirection::Row);
+        let margins = (prep.margin_cross_before, prep.margin_cross_after);
+        let old_cross = resolve_item_cross_size(
+            prep.align_self,
+            old_line_cross,
+            natural_cross,
+            margins,
+            prep.css_cross,
+        );
+        let new_cross = resolve_item_cross_size(
+            prep.align_self,
+            new_line_cross,
+            natural_cross,
+            margins,
+            prep.css_cross,
+        );
+
+        if new_cross == old_cross {
+            // Cross alignment depends on the line size only for non-stretch,
+            // non-baseline values. Baseline y is already anchored to the
+            // shared baseline, and stretch starts at the line origin.
+            let align = effective_align(prep.align_self, env.align_items);
+            if !matches!(align, AlignItems::Stretch | AlignItems::Baseline) {
+                let margin_box = old_cross
+                    .saturating_add(prep.margin_cross_before)
+                    .saturating_add(prep.margin_cross_after);
+                let old_y = align_on_cross_axis(line_origin, old_line_cross, margin_box, align)
+                    .saturating_add(prep.margin_cross_before);
+                let new_y = align_on_cross_axis(line_origin, new_line_cross, margin_box, align)
+                    .saturating_add(prep.margin_cross_before);
+                translate_subtree(&mut child, 0, new_y as i64 - old_y as i64);
+            }
+            *slot = Some(child);
+        } else {
+            // Cross size changed only for a stretch item. If the first pass
+            // already overflowed to the final height, keep that exact subtree.
+            // Otherwise re-run only this item at the newly allocated rect;
+            // unchanged siblings continue to reuse their first-pass result.
+            let item_rect = Rect::new(
+                child.rect.x,
+                line_origin.saturating_add(prep.margin_cross_before),
+                child.rect.width.max(1),
+                new_cross.max(1),
+            );
+            if child.rect == item_rect {
+                *slot = Some(child);
+                continue;
+            }
+            *slot = match &prep.source {
+                FlexItemSource::Node(item_id) => {
+                    crate::layout::inner_formatting_context::flow::dispatch(
+                        env.arena,
+                        *item_id,
+                        BoxConstraint {
+                            x: item_rect.x,
+                            width: env.content.width,
+                        },
+                        &mut Cursor {
+                            y: item_rect.y,
+                            prev_bottom_margin: 0,
+                        },
+                        env.context,
+                        Some(item_rect),
+                    )
+                }
+                FlexItemSource::AnonymousText(text) => Some(layout_anonymous_text(
+                    text,
+                    item_rect,
+                    env.container_node_id,
+                )),
+            };
+        }
+    }
+    slots
 }
 
 /// Lay out an anonymous text flex item: wrap its runs at the allocated width
