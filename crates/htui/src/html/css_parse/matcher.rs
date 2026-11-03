@@ -14,19 +14,24 @@ impl PseudoClass {
             PseudoClass::Hover => state
                 .hovered
                 .is_some_and(|h| is_hovered_or_ancestor(arena, node_id, h)),
-            PseudoClass::Focus => state.focused == Some(node_id),
-            PseudoClass::FocusVisible => state.focused == Some(node_id),
+            PseudoClass::Focus | PseudoClass::FocusVisible => state.focused == Some(node_id),
+            PseudoClass::FocusWithin => state
+                .focused
+                .is_some_and(|focused| is_hovered_or_ancestor(arena, node_id, focused)),
+            PseudoClass::Active => state.active == Some(node_id),
         }
     }
 
     /// The nodes whose painted output can change when this pseudo-class's
     /// state target moves to `target`: the target plus (for `:hover`) every
-    /// ancestor that `:hover` rules can match. `:focus` is exact — only the
-    /// focused element's own boxes can be restyled.
+    /// ancestor that `:hover` rules can match. `:focus` is exact; `
+    /// :focus-within` includes the focused element's ancestor chain.
     pub fn affected_candidates(&self, arena: &NodeArena, target: Option<NodeId>) -> Vec<NodeId> {
         match self {
-            PseudoClass::Hover => ancestor_chain(arena, target),
-            PseudoClass::Focus | PseudoClass::FocusVisible => target.into_iter().collect(),
+            PseudoClass::Hover | PseudoClass::FocusWithin => ancestor_chain(arena, target),
+            PseudoClass::Focus | PseudoClass::FocusVisible | PseudoClass::Active => {
+                target.into_iter().collect()
+            }
         }
     }
 
@@ -39,8 +44,14 @@ impl PseudoClass {
                 hovered: target,
                 ..Default::default()
             },
-            PseudoClass::Focus | PseudoClass::FocusVisible => DynamicState {
-                focused: target,
+            PseudoClass::Focus | PseudoClass::FocusVisible | PseudoClass::FocusWithin => {
+                DynamicState {
+                    focused: target,
+                    ..Default::default()
+                }
+            }
+            PseudoClass::Active => DynamicState {
+                active: target,
                 ..Default::default()
             },
         }

@@ -292,6 +292,11 @@ pub fn handle_mouse_up(
     let range_drag = state.drag_selecting && state.field_drag_started && state.focused_is_range;
     let scroll_drag = state.scroll_drag.take();
     state.scroll_drag_x = None;
+    // Clear `:active` before every early return: release ends the press even
+    // for non-primary buttons and for gestures that do not dispatch a click.
+    if state.active_target.take().is_some() {
+        cmds.push(RenderCmd::Active { node_id: None });
+    }
     let pressed = state.pressed.take();
     let press_target = state.pressed_target.take();
     let press_origin = state.press_screen.take();
@@ -460,6 +465,8 @@ pub fn handle_mouse_down(
     cmds: &mut Vec<RenderCmd>,
 ) {
     let clicked = hit_map.hit_test(x, y);
+    // A new gesture never inherits the previous press's `:active` target.
+    state.active_target = None;
     // Record the stable press origin once: drag thresholds and click-vs-drag
     // decisions must use the original pointer cell, not an intermediate drag
     // position. The target starts clear so swallowed presses cannot click.
@@ -560,6 +567,14 @@ pub fn handle_mouse_down(
     // over the field itself.
     let click_node = resolve_click_node(arena, clicked.map(|r| r.node_id));
     state.pressed_target = click_node;
+    // Only the primary button activates, and only after scrollbar / dropdown /
+    // disabled-control special cases have had a chance to claim the press.
+    if button == MouseButton::Left {
+        state.active_target = click_node;
+        cmds.push(RenderCmd::Active {
+            node_id: click_node,
+        });
+    }
     let direct_field_hit = clicked.is_some_and(|r| click_node == Some(r.node_id));
     let clicked_input = click_node.is_some_and(|id| is_text_field(arena, id));
     match button {

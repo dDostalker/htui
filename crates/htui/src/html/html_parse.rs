@@ -295,11 +295,12 @@ fn convert_one_child(
                 }
                 None => {
                     let lower_tag = tag.to_ascii_lowercase();
-                    if NodeType::is_custom_element_name(&lower_tag) {
-                        // Custom elements are unknown to the built-in HTML tag
-                        // table but are real elements in browsers. Reuse Span
-                        // inline layout semantics and retain the source tag in
-                        // `Node::data` so CSS/DOM can still target it.
+                    if NodeType::is_unknown_tag_name(&lower_tag) {
+                        // Unknown tags (custom elements, SVG, and legacy tags)
+                        // are real elements in browsers. Reuse Span inline
+                        // layout semantics and retain the source tag in
+                        // `Node::data` so CSS/DOM can still target them.
+                        // htui intentionally does not draw SVG geometry.
                         let child_id = arena.insert(Node::custom_element(&lower_tag));
                         {
                             let ar = attrs.borrow();

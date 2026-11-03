@@ -573,6 +573,19 @@ impl NodeType {
     /// custom tags are represented as inline `Span` nodes with their source
     /// tag kept in `Node::data`; this avoids inventing one enum variant per
     /// page-defined element.
+    /// Whether `tag` is a CSS/HTML type-selector name htui may preserve as
+    /// an unknown element. This is intentionally broader than the custom
+    /// element rule: SVG and legacy tags are also real DOM elements, even when
+    /// htui cannot draw their native visual result.
+    pub fn is_unknown_tag_name(tag: &str) -> bool {
+        let mut chars = tag.chars();
+        match chars.next() {
+            Some(first) if first.is_ascii_alphabetic() => {}
+            _ => return false,
+        }
+        chars.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    }
+
     pub fn is_custom_element_name(tag: &str) -> bool {
         let mut chars = tag.chars();
         match chars.next() {

@@ -249,12 +249,12 @@ pub(super) fn native_create_element(
         return Ok(JsValue::null());
     };
     let mut st = rc.borrow_mut();
-    // Unknown names with valid custom-element syntax keep their tag; other
-    // unknown names remain the historical Div fallback for script-created
+    // Unknown names with valid HTML/CSS identifier syntax keep their tag;
+    // other unknown names remain the historical Div fallback for script-created
     // HTMLUnknownElement approximations.
     let node_id = if let Some(node_type) = crate::html::html_parse::tag_name_to_node_type(&tag) {
         st.arena.insert(Node::from(node_type))
-    } else if NodeType::is_custom_element_name(&tag) {
+    } else if NodeType::is_unknown_tag_name(&tag) {
         st.arena.insert(Node::custom_element(&tag))
     } else {
         st.arena.insert(Node::from(NodeType::Div))

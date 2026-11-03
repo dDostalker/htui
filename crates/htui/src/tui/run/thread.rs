@@ -281,6 +281,10 @@ pub(super) fn render_thread(
                         }
                     }
 
+                    RenderCmd::Active { node_id } => {
+                        apply_active(&mut state, &mut out, node_id);
+                    }
+
                     // Select dropdown commands share one handler so the pending pass
                     // can also run them (see `DrainedBatch::drain_selects`).
                     RenderCmd::SelectOpen { .. }
@@ -348,6 +352,9 @@ pub(super) fn render_thread(
         if let Some(RenderCmd::Focus { node_id }) = batch.take_focus() {
             apply_focus(&mut state, &mut out, node_id);
         }
+        if let Some(RenderCmd::Active { node_id }) = batch.take_active() {
+            apply_active(&mut state, &mut out, node_id);
+        }
     }
 }
 
@@ -390,7 +397,28 @@ fn apply_focus(
         state.repaint_dynamic(out, PseudoClass::FocusVisible, prev, node_id);
         repainted = true;
     }
+    if state
+        .pseudo_rules
+        .contains_pseudo(PseudoClass::FocusWithin)
+    {
+        state.repaint_dynamic(out, PseudoClass::FocusWithin, prev, node_id);
+        repainted = true;
+    }
     repainted
+}
+
+/// Update the terminal :active target and repaint when the stylesheet uses it.
+fn apply_active(
+    state: &mut RenderState,
+    out: &mut BufWriter<std::io::Stdout>,
+    node_id: Option<NodeId>,
+) -> bool {
+    let prev = std::mem::replace(&mut state.dynamic.active, node_id);
+    if !state.pseudo_rules.contains_pseudo(PseudoClass::Active) {
+        return false;
+    }
+    state.repaint_dynamic(out, PseudoClass::Active, prev, node_id);
+    true
 }
 
 /// Worker of the dedicated hit-test thread.
@@ -450,6 +478,7 @@ pub(super) fn fold_script_event(
                 dynamic: DynamicState {
                     hovered: ev.hovered,
                     focused: state.focused_input,
+                    active: state.active_target,
                     viewport,
                 },
                 dirty: d.dirty,

@@ -117,6 +117,10 @@ pub struct InputState {
     /// Whether the active press resolved to an actionable click target.
     /// Disabled controls and scrollbar/dropdown-only presses leave it clear.
     pressed_target: Option<NodeId>,
+    /// The element currently styled with the terminal `:active` press state.
+    /// This is an approximation: terminals expose press/release, not separate
+    /// native mouse-button transition timing.
+    pub active_target: Option<NodeId>,
     /// Native scrollbar thumb currently dragged: owning node + grab offset.
     /// The axis flag selects the vertical track or the bottom horizontal one.
     pub scroll_drag: Option<(NodeId, u32)>,
@@ -217,6 +221,7 @@ impl InputState {
             drag_origin: None,
             field_drag_started: false,
             pressed_target: None,
+            active_target: None,
             scroll_drag: None,
             scroll_drag_x: None,
             last_mouse: None,
@@ -349,6 +354,7 @@ impl InputState {
         self.drag_origin = None;
         self.field_drag_started = false;
         self.pressed_target = None;
+        self.active_target = None;
         self.scroll_drag = None;
     }
 

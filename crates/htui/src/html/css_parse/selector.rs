@@ -142,8 +142,11 @@ pub struct DynamicState {
     /// The node currently under the pointer (`:hover` matches it and its
     /// ancestors).
     pub hovered: Option<NodeId>,
-    /// The focused text field (`:focus` matches it exactly).
+    /// The focused text field (`:focus` matches it exactly; `
+    /// :focus-within` also matches its ancestors).
     pub focused: Option<NodeId>,
+    /// The element currently being pressed by the primary button (`:active`).
+    pub active: Option<NodeId>,
     /// Terminal viewport (columns × rows in cells) for `@media` conditions.
     pub viewport: Viewport,
 }
@@ -163,6 +166,8 @@ impl PseudoClassSet {
     pub const FOCUS: Self = Self(1 << 1);
     /// `:focus-visible` rules present.
     pub const FOCUS_VISIBLE: Self = Self(1 << 2);
+    /// `:focus-within` rules present.
+    pub const FOCUS_WITHIN: Self = Self(1 << 3);
 
     /// Whether `pseudo` is a member of the set.
     pub fn contains_pseudo(&self, pseudo: PseudoClass) -> bool {
@@ -233,6 +238,9 @@ pub enum PseudoClass {
     /// modality, so it currently follows `:focus` for the focused text
     /// control.
     FocusVisible,
+    /// `:focus-within` — matches an element that contains the focused element
+    /// (or is itself focused).
+    FocusWithin,
 }
 
 impl PseudoClass {
@@ -242,6 +250,7 @@ impl PseudoClass {
             PseudoClass::Hover => PseudoClassSet::HOVER,
             PseudoClass::Focus => PseudoClassSet::FOCUS,
             PseudoClass::FocusVisible => PseudoClassSet::FOCUS_VISIBLE,
+            PseudoClass::FocusWithin => PseudoClassSet::FOCUS_WITHIN,
         }
     }
 }
@@ -741,6 +750,12 @@ fn parse_compound_inner(
                         }
                         out.push(Selector::PseudoClass(PseudoClass::FocusVisible));
                     }
+                    "focus-within" => {
+                        if i < chars.len() && chars[i] == '(' {
+                            return Err(SelectorError::FocusTakesNoArguments);
+                        }
+                        out.push(Selector::PseudoClass(PseudoClass::FocusWithin));
+                    }
                     "nth-child" | "nth-last-child" => {
                         let from_last = name.eq_ignore_ascii_case("nth-last-child");
                         if i >= chars.len() || chars[i] != '(' {
@@ -911,7 +926,10 @@ fn parse_compound_inner(
                     out.push(Selector::Tag(node_type));
                 } else {
                     let lower = tag.to_ascii_lowercase();
-                    if NodeType::is_custom_element_name(&lower) {
+                    if NodeType::is_unknown_tag_name(&lower) {
+                        // Unknown/SVG tags remain valid type selectors for DOM
+                        // addressing. Rendering stays governed by the reused
+                        // inline element semantics; no vector output is done.
                         out.push(Selector::TagName(lower));
                     } else {
                         return Err(SelectorError::UnsupportedTag(tag));

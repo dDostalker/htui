@@ -150,9 +150,12 @@ impl Node {
         }
     }
 
-    /// Create an inline node for a browser custom element (`<my-widget>`).
-    /// Unknown custom tags reuse the `Span` layout/display semantics; their
-    /// lowercase tag is kept in `data` and exposed by `Node::tag_name`.
+    /// Create an inline node for an unknown browser element.
+    ///
+    /// This covers custom elements (`<my-widget>`) as well as legacy/SVG
+    /// tags htui does not render natively. Unknown tags reuse the `Span`
+    /// layout/display semantics; their lowercase tag is kept in `data` and
+    /// exposed by `Node::tag_name` for DOM/CSS addressing.
     pub fn custom_element(tag: &str) -> Node {
         Node {
             node_type: NodeType::Span,
@@ -212,11 +215,11 @@ impl Node {
         }
     }
 
-    /// Lowercase HTML tag name for an element, preserving custom-element
+    /// Lowercase HTML tag name for an element, preserving unknown-element
     /// names stored in `data`. Returns `None` for document-structure and
     /// text/comment nodes.
     pub fn tag_name(&self) -> Option<String> {
-        if self.is_custom_element() {
+        if self.is_unknown_element() {
             return self.data.clone();
         }
         self.node_type.tag_name().map(str::to_string)
@@ -225,11 +228,21 @@ impl Node {
     /// Whether this node represents an unknown browser custom element rather
     /// than an ordinary `<span>`.
     pub fn is_custom_element(&self) -> bool {
-        self.node_type == NodeType::Span
+        self.is_unknown_element()
             && self
                 .data
                 .as_deref()
                 .is_some_and(|tag| NodeType::is_custom_element_name(tag))
+    }
+
+    /// Whether this node is an unknown source tag (including SVG/legacy tags)
+    /// stored as an inline `Span` for DOM/CSS addressing.
+    pub fn is_unknown_element(&self) -> bool {
+        self.node_type == NodeType::Span
+            && self
+                .data
+                .as_deref()
+                .is_some_and(|tag| NodeType::is_unknown_tag_name(tag))
     }
 
     /// DOM `nodeType` constant (the spec's `ELEMENT_NODE`…`DOCUMENT_FRAGMENT_NODE`

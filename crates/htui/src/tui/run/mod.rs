@@ -909,6 +909,7 @@ fn run_inner(
                         dynamic: DynamicState {
                             hovered,
                             focused: state.focused_input,
+                            active: state.active_target,
                             viewport: Viewport::new(columns as usize, rows as usize, 1.0),
                         },
                         dirty: DirtyInfo::default(),

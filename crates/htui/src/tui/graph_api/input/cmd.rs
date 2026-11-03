@@ -111,6 +111,12 @@ pub enum RenderCmd {
     Focus {
         node_id: Option<NodeId>,
     },
+
+    /// Re-style the cached document for the terminal `:active` approximation.
+    /// Mouse-down sets `Some(target)`; any mouse-up clears it.
+    Active {
+        node_id: Option<NodeId>,
+    },
     /// Repaint one `<input>` field with fresh edit state (value / caret /
     /// focus). The layout is unchanged — the field's rectangle is fixed — so
     /// only that rectangle is repainted.
@@ -220,6 +226,14 @@ impl RenderCmd {
             dynamic.focused = focused;
         }
     }
+
+    /// Merge a deferred `:active` delta into a pending same-document arena
+    /// snapshot (see RenderCmd::Active).
+    pub fn refresh_dynamic_active(&mut self, active: Option<NodeId>) {
+        if let RenderCmd::RenderArena { dynamic, .. } = self {
+            dynamic.active = active;
+        }
+    }
 }
 
 /// Merge a later same-document dirty set into a pending document snapshot.
@@ -276,6 +290,7 @@ pub struct DrainedBatch {
     text_selection: Option<RenderCmd>,
     hover: Option<RenderCmd>,
     focus: Option<RenderCmd>,
+    active: Option<RenderCmd>,
     snapshot: Option<RenderCmd>,
     quit: bool,
 }
@@ -325,6 +340,22 @@ impl DrainedBatch {
                 // No snapshot pending (or the quit flag is already latched and
                 // the snapshot is the quit): the hover repaint itself becomes
                 // the batch's snapshot.
+                _ if !self.quit => self.snapshot = Some(other),
+                _ => {}
+            },
+            other @ RenderCmd::Active { .. } => match self.snapshot.as_ref() {
+                // Keep press state in the same full cascade as a JS mutation.
+                Some(RenderCmd::RenderArena { .. }) => {
+                    if let RenderCmd::Active { node_id } = other {
+                        if let Some(snapshot) = self.snapshot.as_mut() {
+                            snapshot.refresh_dynamic_active(node_id);
+                        }
+                    }
+                }
+                Some(RenderCmd::Redraw { .. } | RenderCmd::Rerender { .. }) => {
+                    self.active = Some(other);
+                }
+                Some(RenderCmd::RenderDocument { .. }) => {}
                 _ if !self.quit => self.snapshot = Some(other),
                 _ => {}
             },
@@ -475,5 +506,10 @@ impl DrainedBatch {
     /// Take the deferred `Focus` (re-applied after the snapshot render).
     pub fn take_focus(&mut self) -> Option<RenderCmd> {
         self.focus.take()
+    }
+
+    /// Take the deferred terminal `:active` press-state update.
+    pub fn take_active(&mut self) -> Option<RenderCmd> {
+        self.active.take()
     }
 }

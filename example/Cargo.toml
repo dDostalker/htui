@@ -11,6 +11,7 @@ publish = false
 
 [dependencies]
 htui = { path = "../crates/htui" }
+log = "0.4"
 
 # The engine's layout / paint / diff path is on the frame critical path; an
 # unoptimized build animates at a fraction of the terminal's frame budget.
