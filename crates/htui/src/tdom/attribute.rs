@@ -24,8 +24,9 @@ impl Node {
     /// `true` iff `class` contains the given token (used by CSS `.class`
     /// selectors).
     pub fn has_class(&self, name: &str) -> bool {
-        self.get_class()
-            .is_some_and(|classes| classes.iter().any(|c| c == name))
+        self.attributes
+            .get("class")
+            .is_some_and(|classes| classes.split_whitespace().any(|token| token == name))
     }
 
     /// Look up the `src` attribute (used by `<img>`).

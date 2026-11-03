@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use indexmap::IndexMap;
 
+use crate::html::css_parse::properties::CssAttr;
 use crate::tdom::node::{Node, NodeArena, NodeId, NodeType};
 
 use super::{
@@ -148,14 +149,10 @@ fn add_prefixed(
 /// subset when `important` is true the per-node form of the cascade's
 /// inline passes (inline normal beats stylesheet normal, inline `!important`
 /// beats everything).
-fn apply_inline_style_at(arena: &mut NodeArena, node_id: NodeId, important: bool) {
-    let Some(style) = arena[node_id].attributes.get("style").cloned() else {
-        return;
-    };
-    let (normal, imp) = parse_declaration_splits(&style);
-    let subset = if important { imp } else { normal };
+fn apply_inline_style(css_attr: &mut CssAttr, parsed: &(CssAttr, CssAttr), important: bool) {
+    let subset = if important { &parsed.1 } else { &parsed.0 };
     if !subset.0.is_empty() {
-        arena[node_id].css_attr.add(&subset);
+        css_attr.add(subset);
     }
 }
 
@@ -404,8 +401,15 @@ pub fn css_into_node_with_state(
                 }
             }
         }
+        let inline_style = arena[node_id]
+            .attributes
+            .get("style")
+            .map(String::as_str)
+            .map(parse_declaration_splits);
         // 2. Inline `style` attributes, normal declarations.
-        apply_inline_style_at(arena, node_id, false);
+        if let Some(parsed) = &inline_style {
+            apply_inline_style(&mut arena[node_id].css_attr, parsed, false);
+        }
         // 3. Author stylesheet, `!important` declarations.
         for &rule in &candidates {
             let entry = &css.0[rule as usize];
@@ -421,7 +425,9 @@ pub fn css_into_node_with_state(
             }
         }
         // 4. Inline `style` attributes, `!important` declarations (highest).
-        apply_inline_style_at(arena, node_id, true);
+        if let Some(parsed) = &inline_style {
+            apply_inline_style(&mut arena[node_id].css_attr, parsed, true);
+        }
 
         // 5. CSS custom properties (variables): merge the node's own
         // `--name: value` declarations with the parent scope, then

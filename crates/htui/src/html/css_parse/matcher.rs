@@ -170,16 +170,20 @@ fn nth_of_type_matches(arena: &NodeArena, node_id: NodeId, expr: NthExpr, from_e
     };
     let node_type = node.node_type;
     let parent = &arena[parent_id];
-    let typed: Vec<NodeId> = parent
-        .children
-        .iter()
-        .copied()
-        .filter(|&c| arena.get(c).is_some_and(|n| n.node_type == node_type))
-        .collect();
-    let Some(pos) = typed.iter().position(|&c| c == node_id) else {
+    let mut position = None;
+    let mut typed_count = 0usize;
+    for &child in &parent.children {
+        if arena.get(child).is_some_and(|n| n.node_type == node_type) {
+            if child == node_id {
+                position = Some(typed_count);
+            }
+            typed_count += 1;
+        }
+    }
+    let Some(pos) = position else {
         return false;
     };
-    let index = if from_end { typed.len() - pos } else { pos + 1 };
+    let index = if from_end { typed_count - pos } else { pos + 1 };
     expr.matches(index)
 }
 
@@ -407,18 +411,27 @@ fn match_combinators(
             _ => false,
         },
         Combinator::SubsequentSibling => {
-            let mut cur = prev_sibling_id(arena, node_id);
-            while let Some(sid) = cur {
+            let Some(siblings) = sibling_ids_before(arena, node_id) else {
+                return false;
+            };
+            for &sid in siblings.iter().rev() {
                 if matches_compound(arena, sid, target, state)
                     && match_combinators(arena, sid, compounds, combinators, idx - 1, state)
                 {
                     return true;
                 }
-                cur = prev_sibling_id(arena, sid);
             }
             false
         }
     }
+}
+
+fn sibling_ids_before(arena: &NodeArena, node_id: NodeId) -> Option<&[NodeId]> {
+    let node = arena.get(node_id)?;
+    let parent_id = node.parent?;
+    let parent = arena.get(parent_id)?;
+    let pos = parent.children.iter().position(|&cid| cid == node_id)?;
+    Some(&parent.children[..pos])
 }
 
 fn prev_sibling_id(arena: &NodeArena, node_id: NodeId) -> Option<NodeId> {
