@@ -1541,6 +1541,65 @@ fn viewport_getters_and_match_media_follow_the_shared_ui_state() {
 }
 
 #[test]
+fn create_element_keeps_valid_custom_tags() {
+    let html = r#"<body><div id="out">init</div><script>
+      window.addEventListener('resize', function () {
+        let el = document.createElement('tab-navr');
+        document.getElementById('out').textContent = 'tag:' + el.tagName;
+      });
+    </script></body>"#;
+    let (tx, out_rx, handle) = spawn_script_with_ui(
+        html,
+        EventBindings::default(),
+        empty_hit_map(),
+        Arc::new(SharedUiState::default()),
+    );
+    match out_rx.recv().expect("ready must arrive") {
+        ScriptResponse::Ready { .. } => {}
+        other => panic!("expected Ready, got {other:?}"),
+    }
+
+    tx.send(ScriptMsg::Resize).expect("send resize");
+    let ev = recv_event(&out_rx);
+    let d = ev.dirty.expect("resize listener wrote the output node");
+    assert_eq!(dirty_text(&d.arena, "out"), "tag:TAB-NAVR");
+
+    tx.send(ScriptMsg::Quit).expect("send quit");
+    handle.join().expect("script thread must exit cleanly");
+}
+
+#[test]
+fn match_media_uses_shared_browser_zoom() {
+    let ui = Arc::new(SharedUiState::default());
+    ui.cols.store(80, Ordering::Relaxed);
+    ui.rows.store(24, Ordering::Relaxed);
+    ui.zoom_hundredths.store(200, Ordering::Relaxed);
+    let html = r#"<body><div id="out">init</div><script>
+      let mql = window.matchMedia('(max-width: 40ch)');
+      window.addEventListener('resize', function () {
+        document.getElementById('out').textContent = 'matches:' + mql.matches;
+      });
+    </script></body>"#;
+    let _ = env_logger::builder().is_test(true).try_init();
+    let (tx, out_rx, handle) =
+        spawn_script_with_ui(html, EventBindings::default(), empty_hit_map(), ui.clone());
+    match out_rx.recv().expect("ready must arrive") {
+        ScriptResponse::Ready { .. } => {}
+        other => panic!("expected Ready, got {other:?}"),
+    }
+
+    // A physical 80-cell viewport is an effective 40-cell viewport at zoom 2,
+    // so this boundary query matches. Without the shared zoom it would miss.
+    tx.send(ScriptMsg::Resize).expect("send resize");
+    let ev = recv_event(&out_rx);
+    let d = ev.dirty.expect("resize listener wrote the output node");
+    assert_eq!(dirty_text(&d.arena, "out"), "matches:true");
+
+    tx.send(ScriptMsg::Quit).expect("send quit");
+    handle.join().expect("script thread must exit cleanly");
+}
+
+#[test]
 fn scroll_to_pushes_scroll_markers() {
     let ui = Arc::new(SharedUiState::default());
     ui.scroll_y.store(10, Ordering::Relaxed);

@@ -111,6 +111,13 @@ pub fn generate_node(arena: &NodeArena, node_id: NodeId) -> Option<GeneratedBox>
         return None;
     }
 
+    // SVG has no terminal vector primitive. Keep the subtree in the DOM/CSS
+    // tree, but do not generate boxes for it (or its descendants); this avoids
+    // treating drawing instructions as text while remaining addressable.
+    if node.is_unknown_element() && node.data.as_deref() == Some("svg") {
+        return None;
+    }
+
     if matches!(node.node_type, NodeType::Text) {
         return Some(GeneratedBox {
             node_id,

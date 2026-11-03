@@ -76,8 +76,8 @@ pub(super) fn native_get_tag_name(
     let name = st
         .arena
         .get(node_id)
-        .and_then(|n| n.node_type.tag_name())
-        .map(str::to_uppercase)
+        .and_then(|n| n.tag_name())
+        .map(|tag| tag.to_uppercase())
         .unwrap_or_default();
     Ok(js_string!(name).into())
 }
@@ -660,7 +660,7 @@ pub(super) fn native_get_elements_by_tag_name(
     let st = rc.borrow();
     let wildcard = name == "*";
     let ids = collect_elements(&st.arena, scope, &|n| {
-        wildcard || n.node_type.tag_name().is_some_and(|t| t == name)
+        wildcard || n.tag_name().is_some_and(|tag| tag == name)
     });
     drop(st);
     ids_to_array(context, ids)
@@ -774,12 +774,7 @@ pub(super) fn native_get_local_name(
 ) -> JsResult<JsValue> {
     let node_id = this_node_id(this, context)?;
     let name = with_state()
-        .and_then(|rc| {
-            rc.borrow()
-                .arena
-                .get(node_id)
-                .and_then(|n| n.node_type.tag_name().map(str::to_string))
-        })
+        .and_then(|rc| rc.borrow().arena.get(node_id).and_then(|n| n.tag_name()))
         .unwrap_or_default();
     Ok(js_string!(name.as_str()).into())
 }

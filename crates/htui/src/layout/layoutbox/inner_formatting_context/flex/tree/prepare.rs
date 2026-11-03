@@ -447,6 +447,20 @@ pub(crate) fn natural_grid_item_size(
     (natural.width, natural.height)
 }
 
+/// Intrinsic border-box width of a node, exposed for inline-block
+/// shrink-to-fit sizing.
+///
+/// Unlike block layout, an `inline-block` with `width: auto` is sized by its
+/// max-content geometry before the containing-block clamp is applied.
+pub(crate) fn natural_intrinsic_width(
+    arena: &NodeArena,
+    node_id: NodeId,
+    context: LayoutContext,
+    containing_width: Option<usize>,
+) -> usize {
+    natural_intrinsic_size(arena, node_id, context, containing_width).width
+}
+
 fn natural_intrinsic_size(
     arena: &NodeArena,
     node_id: NodeId,

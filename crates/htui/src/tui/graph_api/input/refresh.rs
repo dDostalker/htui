@@ -552,8 +552,7 @@ pub fn trigger_refresh(
                             state.drop_stale_press();
                         }
                         let (x, y) = canvas_pos(state, mouse.column, mouse.row);
-                        if matches!(mouse.kind, MouseEventKind::Drag(_))
-                            && state.pressed.is_some()
+                        if matches!(mouse.kind, MouseEventKind::Drag(_)) && state.pressed.is_some()
                         {
                             msgs.push(ScriptMsg::MouseMove { x, y });
                         }

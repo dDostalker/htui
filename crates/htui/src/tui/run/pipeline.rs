@@ -90,11 +90,8 @@ fn extract_title(arena: &NodeArena, root_id: NodeId) -> Option<String> {
 /// The terminal viewport in cells for `@media` matching: the physical grid
 /// (zoom deliberately not folded in — a resize is the real media-triggering
 /// event, and the cell grid is what "window size" means on a terminal).
-pub(super) fn viewport_of(map: &TermMap) -> Viewport {
-    Viewport {
-        cols: map.columns as usize,
-        rows: map.rows as usize,
-    }
+pub(super) fn viewport_of(map: &TermMap, zoom: f32) -> Viewport {
+    Viewport::new(map.columns as usize, map.rows as usize, zoom)
 }
 
 /// Current terminal size, or `None` (logged) when the console query fails.
@@ -152,7 +149,7 @@ impl RenderState {
         zoom: f32,
     ) {
         let (root_id, arena) =
-            cascade_document(&self.document, &self.css_rules, viewport_of(term_map));
+            cascade_document(&self.document, &self.css_rules, viewport_of(term_map, zoom));
         self.layout_and_paint(
             out,
             geo_tx,
@@ -191,7 +188,11 @@ impl RenderState {
         // terminal resize, when the buffer size must change. A resize also
         // invalidates every cached pixel, so it forces the full-repaint path.
         let size_changed = match self.term_layout.as_ref() {
-            Some(tl) => tl.columns != term_map.columns || tl.rows != term_map.rows,
+            Some(tl) => {
+                tl.columns != term_map.columns
+                    || tl.rows != term_map.rows
+                    || (tl.zoom - zoom).abs() > f32::EPSILON
+            }
             None => true,
         };
         if size_changed {
@@ -395,7 +396,7 @@ impl RenderState {
         }
         // The cascade re-evaluates `@media` against the current viewport (the
         // stored dynamic state may predate a resize).
-        self.dynamic.viewport = viewport_of(term_map);
+        self.dynamic.viewport = viewport_of(term_map, zoom);
         let mut owned = Arc::try_unwrap(arena).unwrap_or_else(|shared| (*shared).clone());
         reset_css_attr(&mut owned, root_id);
         css_into_node_with_state(&mut owned, root_id, &self.css_rules, &self.dynamic);
@@ -555,10 +556,7 @@ impl RenderState {
         let new = in_geo(new);
         // Keep the `@media` viewport in sync with the canvas (identical unless
         // a resize landed between layouts).
-        self.dynamic.viewport = Viewport {
-            cols: tl.columns as usize,
-            rows: tl.rows as usize,
-        };
+        self.dynamic.viewport = Viewport::new(tl.columns as usize, tl.rows as usize, tl.zoom);
         let mut arena = (*geo.arena).clone();
         reset_css_attr(&mut arena, geo.root_id);
         css_into_node_with_state(&mut arena, geo.root_id, &self.css_rules, &self.dynamic);
@@ -719,7 +717,7 @@ impl RenderState {
             root_id,
             &self.css_rules,
             &DynamicState {
-                viewport: viewport_of(term_map),
+                viewport: viewport_of(term_map, zoom),
                 ..Default::default()
             },
         );

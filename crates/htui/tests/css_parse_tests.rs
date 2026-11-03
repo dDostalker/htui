@@ -31,10 +31,7 @@ fn font_ctx(font_size_cells: usize, root_font_size_cells: usize) -> FontContext 
 }
 
 fn viewport() -> Viewport {
-    Viewport {
-        cols: DEFAULT_VIEWPORT_COLS,
-        rows: DEFAULT_VIEWPORT_ROWS,
-    }
+    Viewport::new(DEFAULT_VIEWPORT_COLS, DEFAULT_VIEWPORT_ROWS, 1.0)
 }
 
 fn length_ctx(containing: usize, font: FontContext) -> LengthContext {
@@ -444,13 +441,46 @@ fn test_e_type_selector_covers_every_element_tag() {
 }
 
 #[test]
-fn test_e_type_selector_rejects_unknown_tag() {
-    // Unknown tags must still fail to parse (the rule is dropped), never
-    // silently matching nothing.
+fn test_custom_element_type_selector_matches() {
     init();
-    assert!("madeup".parse::<CssSelector>().is_err());
-    // `strong` is a supported element today; use a genuinely unknown tag.
-    assert!("div blink".parse::<CssSelector>().is_err());
+    let mut parser = html_parse::Parser::new(
+        r#"<div><tab-navr class="tab">Selected</tab-navr><span>plain</span></div>"#,
+    );
+    let (root, arena, _css) = parser.parse();
+
+    // Walk the small fixture to find the custom node rather than assuming a
+    // document position after parser flattening.
+    let mut custom = None;
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        if arena[id].tag_name().as_deref() == Some("tab-navr") {
+            custom = Some(id);
+            break;
+        }
+        stack.extend(arena[id].children.iter().rev().copied());
+    }
+    let custom = custom.expect("custom element must remain a real DOM node");
+
+    let sel: CssSelector = "tab-navr".parse().unwrap();
+    assert!(selector_chain_matches(&arena, custom, &sel));
+    assert_eq!(arena[custom].node_name(), "TAB-NAVR");
+
+    // A known `span` selector must not accidentally match the custom node
+    // merely because custom elements reuse `Span` layout semantics.
+    let span_sel: CssSelector = "span".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, custom, &span_sel));
+}
+
+#[test]
+fn test_e_type_selector_preserves_unknown_tags_and_rejects_bad_idents() {
+    // Unknown source tags (including SVG/legacy tags) are real DOM elements;
+    // valid type-selector names stay addressable even without native rendering.
+    init();
+    assert!("madeup".parse::<CssSelector>().is_ok());
+    assert!("blink".parse::<CssSelector>().is_ok());
+    assert!("svg path".parse::<CssSelector>().is_ok());
+    // Names outside the HTML/CSS identifier subset still fail to parse.
+    assert!("div 1bad".parse::<CssSelector>().is_err());
 }
 
 #[test]
@@ -3107,15 +3137,163 @@ fn test_not_pseudo_class_matches() {
 }
 
 #[test]
+fn test_not_complex_selector_argument_matches() {
+    init();
+    let mut arena = NodeArena::default();
+    let mut special_node = Node::from(NodeType::Div);
+    special_node
+        .attributes
+        .insert("class".to_string(), "sa_uc".to_string());
+    let special = arena.insert(special_node);
+    let excluded = arena.insert(Node::from(NodeType::H2));
+    Node::append_child(&mut arena, special, excluded);
+
+    let parent = arena.insert(Node::from(NodeType::Div));
+    let included = arena.insert(Node::from(NodeType::H2));
+    Node::append_child(&mut arena, parent, included);
+
+    let sel: CssSelector = "h2:not(.sa_uc h2)".parse().unwrap();
+    assert!(
+        selector_chain_matches(&arena, included, &sel),
+        "an ordinary h2 is not inside an .sa_uc h2 chain"
+    );
+    assert!(
+        !selector_chain_matches(&arena, excluded, &sel),
+        "an h2 inside .sa_uc must be excluded by the complex argument"
+    );
+}
+
+#[test]
+fn test_is_and_where_selector_lists_match() {
+    init();
+    let mut arena = NodeArena::default();
+    let mut section_node = Node::from(NodeType::Section);
+    section_node
+        .attributes
+        .insert("class".to_string(), "zi_rich_horizon".to_string());
+    let section = arena.insert(section_node);
+    let mut rich = Node::from(NodeType::Span);
+    rich.attributes
+        .insert("class".to_string(), "sa_zi_text".to_string());
+    let rich = arena.insert(rich);
+    Node::append_child(&mut arena, section, rich);
+
+    let mut plain = Node::from(NodeType::Span);
+    plain
+        .attributes
+        .insert("class".to_string(), "b_entitytxt".to_string());
+    let plain = arena.insert(plain);
+    Node::append_child(&mut arena, section, plain);
+
+    let other = arena.insert(Node::from(NodeType::Span));
+    Node::append_child(&mut arena, section, other);
+
+    let ancestor = arena.insert(Node::from(NodeType::Div));
+    let mut card = Node::from(NodeType::H2);
+    card.attributes
+        .insert("id".to_string(), "target".to_string());
+    let card = arena.insert(card);
+    Node::append_child(&mut arena, ancestor, card);
+
+    let compound: CssSelector = ".zi_rich_horizon :is(.sa_zi_text,.b_entitytxt)"
+        .parse()
+        .unwrap();
+    assert!(selector_chain_matches(&arena, rich, &compound));
+    assert!(selector_chain_matches(&arena, plain, &compound));
+    assert!(!selector_chain_matches(&arena, other, &compound));
+
+    // `:is()` arguments may themselves contain complex selector chains.
+    let complex: CssSelector = "h2:is(.missing .x, #target)".parse().unwrap();
+    assert!(selector_chain_matches(&arena, card, &complex));
+    assert!(!selector_chain_matches(&arena, rich, &complex));
+
+    // `:where()` has `:is()` matching semantics, including complex args.
+    let where_sel: CssSelector = ":where(#target, section .missing)".parse().unwrap();
+    assert!(selector_chain_matches(&arena, card, &where_sel));
+    assert!(!selector_chain_matches(&arena, rich, &where_sel));
+}
+
+#[test]
+fn test_is_and_where_specificity() {
+    init();
+    let is_sel: CssSelector = "a:is(#target, .card)".parse().unwrap();
+    let where_sel: CssSelector = "a:where(#target, .card)".parse().unwrap();
+    assert_eq!(is_sel.specificity(), (1, 0, 1));
+    assert_eq!(where_sel.specificity(), (0, 0, 1));
+
+    assert!(":is".parse::<CssSelector>().is_err());
+    assert!(":is()".parse::<CssSelector>().is_err());
+    assert!(":where".parse::<CssSelector>().is_err());
+    assert!(":where()".parse::<CssSelector>().is_err());
+    let deep = format!("{}{}", ":is(".repeat(32), ")".repeat(32));
+    assert!(deep.parse::<CssSelector>().is_err());
+}
+
+#[test]
+fn test_has_relative_selectors_match() {
+    init();
+    let mut arena = NodeArena::default();
+    let mut card_node = Node::from(NodeType::Div);
+    card_node
+        .attributes
+        .insert("class".to_string(), "card".to_string());
+    let card = arena.insert(card_node);
+    let mut title_node = Node::from(NodeType::H2);
+    title_node
+        .attributes
+        .insert("class".to_string(), "title".to_string());
+    let title = arena.insert(title_node);
+    Node::append_child(&mut arena, card, title);
+    let footer = arena.insert(Node::from(NodeType::Footer));
+    Node::append_child(&mut arena, card, footer);
+    let tag = arena.insert(Node::from(NodeType::Span));
+    Node::append_child(&mut arena, footer, tag);
+
+    let descendant: CssSelector = ".card:has(.title)".parse().unwrap();
+    assert!(selector_chain_matches(&arena, card, &descendant));
+    assert!(!selector_chain_matches(&arena, title, &descendant));
+
+    let child: CssSelector = ".card:has(>h2)".parse().unwrap();
+    assert!(selector_chain_matches(&arena, card, &child));
+    let grandchild_only: CssSelector = ".card:has(>span)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, card, &grandchild_only));
+
+    let complex: CssSelector = ".card:has(>footer .title)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena, card, &complex));
+    let complex_ok: CssSelector = ".card:has(>footer span)".parse().unwrap();
+    assert!(selector_chain_matches(&arena, card, &complex_ok));
+
+    // Sibling anchors use the candidate as the starting edge.
+    let mut arena2 = NodeArena::default();
+    let parent = arena2.insert(Node::from(NodeType::Div));
+    let h1 = arena2.insert(Node::from(NodeType::H1));
+    let div = arena2.insert(Node::from(NodeType::Div));
+    let p = arena2.insert(Node::from(NodeType::P));
+    Node::append_child(&mut arena2, parent, h1);
+    Node::append_child(&mut arena2, parent, div);
+    Node::append_child(&mut arena2, parent, p);
+
+    let next: CssSelector = "h1:has(+p)".parse().unwrap();
+    assert!(!selector_chain_matches(&arena2, h1, &next));
+    let subsequent: CssSelector = "h1:has(~p)".parse().unwrap();
+    assert!(selector_chain_matches(&arena2, h1, &subsequent));
+
+    let has_sel: CssSelector = ".card:has(#tag)".parse().unwrap();
+    assert_eq!(has_sel.specificity(), (1, 1, 0));
+    assert!(":has".parse::<CssSelector>().is_err());
+    assert!(":has()".parse::<CssSelector>().is_err());
+    assert!(":has(>)".parse::<CssSelector>().is_err());
+    let deep = format!("{}{}", ":has(".repeat(32), ")".repeat(32));
+    assert!(deep.parse::<CssSelector>().is_err());
+}
+
+#[test]
 fn test_not_pseudo_class_parse_errors() {
     init();
     // Missing parens / missing close paren / empty argument.
     assert!(":not".parse::<CssSelector>().is_err());
     assert!(":not(".parse::<CssSelector>().is_err());
     assert!(":not()".parse::<CssSelector>().is_err());
-    // Combinators inside `:not` are out of the supported subset — the tag
-    // parse of "p div" fails rather than silently matching wrong.
-    assert!(":not(p div)".parse::<CssSelector>().is_err());
     // Pathologically deep nesting is rejected instead of recursing.
     let deep = format!("{}{}", ":not(".repeat(32), ")".repeat(32));
     assert!(deep.parse::<CssSelector>().is_err());
@@ -3682,11 +3860,11 @@ fn test_media_query_matches_features_and_or() {
         ..Default::default()
     }]);
     assert!(
-        list.matches(&Viewport { cols: 70, rows: 24 }),
+        list.matches(&Viewport::new(70, 24, 1.0)),
         "boundary is inclusive"
     );
-    assert!(list.matches(&Viewport { cols: 40, rows: 24 }));
-    assert!(!list.matches(&Viewport { cols: 71, rows: 24 }));
+    assert!(list.matches(&Viewport::new(40, 24, 1.0)));
+    assert!(!list.matches(&Viewport::new(71, 24, 1.0)));
 
     // Two features in one query AND together.
     let both = MediaQueryList(vec![MediaQuery {
@@ -3694,9 +3872,9 @@ fn test_media_query_matches_features_and_or() {
         min_width: Some(40.0),
         ..Default::default()
     }]);
-    assert!(both.matches(&Viewport { cols: 60, rows: 24 }));
-    assert!(!both.matches(&Viewport { cols: 39, rows: 24 }));
-    assert!(!both.matches(&Viewport { cols: 80, rows: 24 }));
+    assert!(both.matches(&Viewport::new(60, 24, 1.0)));
+    assert!(!both.matches(&Viewport::new(39, 24, 1.0)));
+    assert!(!both.matches(&Viewport::new(80, 24, 1.0)));
 
     // Comma-separated queries OR together.
     let or = MediaQueryList(vec![
@@ -3709,18 +3887,15 @@ fn test_media_query_matches_features_and_or() {
             ..Default::default()
         },
     ]);
-    assert!(or.matches(&Viewport { cols: 39, rows: 24 }), "first query");
-    assert!(or.matches(&Viewport { cols: 80, rows: 9 }), "second query");
-    assert!(
-        !or.matches(&Viewport { cols: 80, rows: 24 }),
-        "neither query"
-    );
+    assert!(or.matches(&Viewport::new(39, 24, 1.0)), "first query");
+    assert!(or.matches(&Viewport::new(80, 9, 1.0)), "second query");
+    assert!(!or.matches(&Viewport::new(80, 24, 1.0)), "neither query");
 
     // An empty list never matches.
-    assert!(!MediaQueryList(vec![]).matches(&Viewport { cols: 80, rows: 24 }));
+    assert!(!MediaQueryList(vec![]).matches(&Viewport::new(80, 24, 1.0)));
 
     // The 0x0 "no viewport known" default never matches a size condition.
-    assert!(!list.matches(&Viewport { cols: 0, rows: 0 }));
+    assert!(!list.matches(&Viewport::new(0, 0, 1.0)));
 }
 
 #[test]
@@ -3730,37 +3905,28 @@ fn test_media_at_rule_parses_conditional_entries() {
     let media = media_queries("@media (max-width: 70ch) { .side { display: none; } }");
     assert_eq!(media.len(), 1);
     let list = media[0].as_ref().expect("condition attached");
-    assert!(list.matches(&Viewport { cols: 60, rows: 24 }));
-    assert!(!list.matches(&Viewport { cols: 80, rows: 24 }));
+    assert!(list.matches(&Viewport::new(60, 24, 1.0)));
+    assert!(!list.matches(&Viewport::new(80, 24, 1.0)));
 
     // Unconditional rules carry no condition.
     let mixed = media_queries("p { color: red; } @media (max-height: 14) { .x { color: blue; } }");
     assert_eq!(mixed.len(), 2);
     assert!(mixed[0].is_none());
     let list = mixed[1].as_ref().expect("media condition");
-    assert!(list.matches(&Viewport { cols: 80, rows: 10 }));
-    assert!(!list.matches(&Viewport { cols: 80, rows: 24 }));
+    assert!(list.matches(&Viewport::new(80, 10, 1.0)));
+    assert!(!list.matches(&Viewport::new(80, 24, 1.0)));
 
     // `and` between features, comma OR between queries.
     let list = media_queries(
         "@media (max-width: 40) and (min-height: 20), (min-width: 100) { .x { color: red; } }",
     );
     let list = list[0].as_ref().expect("condition attached");
+    assert!(list.matches(&Viewport::new(30, 24, 1.0)), "first query");
     assert!(
-        list.matches(&Viewport { cols: 30, rows: 24 }),
-        "first query"
-    );
-    assert!(
-        !list.matches(&Viewport { cols: 30, rows: 10 }),
+        !list.matches(&Viewport::new(30, 10, 1.0)),
         "height too small"
     );
-    assert!(
-        list.matches(&Viewport {
-            cols: 120,
-            rows: 24
-        }),
-        "second query"
-    );
+    assert!(list.matches(&Viewport::new(120, 24, 1.0)), "second query");
 }
 
 #[test]
@@ -3782,7 +3948,7 @@ fn test_media_cascade_by_viewport() {
         root,
         &rules,
         &DynamicState {
-            viewport: Viewport { cols: 80, rows: 24 },
+            viewport: Viewport::new(80, 24, 1.0),
             ..Default::default()
         },
     );
@@ -3802,7 +3968,7 @@ fn test_media_cascade_by_viewport() {
         root,
         &rules,
         &DynamicState {
-            viewport: Viewport { cols: 40, rows: 24 },
+            viewport: Viewport::new(40, 24, 1.0),
             ..Default::default()
         },
     );
@@ -3819,7 +3985,7 @@ fn test_media_cascade_by_viewport() {
         root,
         &rules,
         &DynamicState {
-            viewport: Viewport { cols: 80, rows: 24 },
+            viewport: Viewport::new(80, 24, 1.0),
             ..Default::default()
         },
     );
@@ -3857,7 +4023,7 @@ fn test_media_unsupported_query_drops_the_block() {
     let media = media_queries("@media (max-width: 5em) { .side { display: none; } }");
     assert_eq!(media.len(), 1);
     let list = media[0].as_ref().expect("condition attached");
-    assert!(!list.matches(&Viewport { cols: 1, rows: 1 }));
+    assert!(!list.matches(&Viewport::new(1, 1, 1.0)));
 
     // An unknown feature also drops its query; the other comma alternative
     // still works.
@@ -3865,36 +4031,36 @@ fn test_media_unsupported_query_drops_the_block() {
         media_queries("@media (hover: hover), (max-width: 40) { .side { display: none; } }");
     assert_eq!(media.len(), 1);
     let list = media[0].as_ref().expect("condition attached");
-    assert!(list.matches(&Viewport { cols: 30, rows: 24 }));
-    assert!(!list.matches(&Viewport { cols: 80, rows: 24 }));
+    assert!(list.matches(&Viewport::new(30, 24, 1.0)));
+    assert!(!list.matches(&Viewport::new(80, 24, 1.0)));
 
     // `orientation` is supported: landscape (cols >= rows) and portrait.
     let media = media_queries("@media (orientation: landscape) { .side { display: none; } }");
     let list = media[0].as_ref().expect("condition attached");
-    assert!(list.matches(&Viewport { cols: 80, rows: 24 }));
-    assert!(!list.matches(&Viewport { cols: 30, rows: 40 }), "portrait");
+    assert!(list.matches(&Viewport::new(80, 24, 1.0)));
+    assert!(!list.matches(&Viewport::new(30, 40, 1.0)), "portrait");
     let media = media_queries("@media (orientation: portrait) { .side { display: none; } }");
     let list = media[0].as_ref().expect("condition attached");
-    assert!(list.matches(&Viewport { cols: 30, rows: 40 }));
+    assert!(list.matches(&Viewport::new(30, 40, 1.0)));
 
     // Media types: `screen` / `all` match, `print` never does.
     let media = media_queries("@media screen and (max-width: 40) { .side { display: none; } }");
     let list = media[0].as_ref().expect("condition attached");
-    assert!(list.matches(&Viewport { cols: 30, rows: 24 }));
-    assert!(!list.matches(&Viewport { cols: 80, rows: 24 }));
+    assert!(list.matches(&Viewport::new(30, 24, 1.0)));
+    assert!(!list.matches(&Viewport::new(80, 24, 1.0)));
     let media = media_queries("@media print { .side { display: none; } }");
     let list = media[0].as_ref().expect("condition attached");
-    assert!(!list.matches(&Viewport { cols: 30, rows: 24 }));
+    assert!(!list.matches(&Viewport::new(30, 24, 1.0)));
 
     // `not` inverts the whole query; `only` is an ignored legacy prefix.
     let media = media_queries("@media not (max-width: 40) { .side { display: none; } }");
     let list = media[0].as_ref().expect("condition attached");
-    assert!(!list.matches(&Viewport { cols: 30, rows: 24 }));
-    assert!(list.matches(&Viewport { cols: 80, rows: 24 }));
+    assert!(!list.matches(&Viewport::new(30, 24, 1.0)));
+    assert!(list.matches(&Viewport::new(80, 24, 1.0)));
     let media =
         media_queries("@media only screen and (max-width: 40) { .side { display: none; } }");
     let list = media[0].as_ref().expect("condition attached");
-    assert!(list.matches(&Viewport { cols: 30, rows: 24 }));
+    assert!(list.matches(&Viewport::new(30, 24, 1.0)));
 
     // An empty prelude drops the whole block (no rules at all). A query that
     // cannot parse (missing value) leaves the rule in place but its empty
@@ -3907,7 +4073,7 @@ fn test_media_unsupported_query_drops_the_block() {
         !media[0]
             .as_ref()
             .expect("condition attached")
-            .matches(&Viewport { cols: 1, rows: 1 })
+            .matches(&Viewport::new(1, 1, 1.0))
     );
 }
 

@@ -211,15 +211,19 @@ fn stick(b: &mut LayoutBox, viewport: Rect) {
     let min_y = (viewport.y as i64 + top_inset as i64).max(0) as usize;
     let max_y = (viewport.y as i64 + viewport.height as i64 - bottom_inset as i64 - h as i64).max(0)
         as usize;
-    let target_y = if max_y < min_y {
-        // The box is taller than the available viewport — anchor at the top.
-        min_y
-    } else if flow_y < min_y {
-        min_y
-    } else if flow_y > max_y {
-        max_y
-    } else {
-        flow_y
+    // Inset axes decide the sticky axis independently. A `top`-only box may
+    // start below the viewport; it only moves once scrolling would put it
+    // above the inset. Likewise `bottom` sticks only when its natural slot is
+    // below the bottom inset. In particular, a tall `top`-sticky box is not
+    // dragged to the top of an initially lower viewport.
+    let target_y = match (
+        b.positioning.inset.top.is_some(),
+        b.positioning.inset.bottom.is_some(),
+    ) {
+        (true, false) => flow_y.max(min_y),
+        (false, true) => flow_y.min(max_y),
+        (true, true) => flow_y.max(min_y).min(max_y),
+        (false, false) => flow_y,
     };
     // Translate from the *current* rect (which may already be pinned to a
     // previous scroll) to the target — the recorded flow row is only the

@@ -485,6 +485,7 @@ name = "example"
 version = "0.1.0"
 dependencies = [
  "htui",
+ "log",
 ]
 
 [[package]]
