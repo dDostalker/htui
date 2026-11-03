@@ -44,7 +44,7 @@ pub use layoutbox::{
 };
 
 /// Context propagated by the layout phase.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutContext<'a> {
     pub font: FontContext,
     pub viewport: Viewport,

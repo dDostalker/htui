@@ -55,12 +55,8 @@ impl MediaQueryList {
     /// terminal is at least one cell in each axis — and size conditions never
     /// match it, so unconditional styling is unaffected by its presence.
     pub fn matches(&self, viewport: &Viewport) -> bool {
-        viewport.cols > 0
-            && viewport.rows > 0
-            && self
-                .0
-                .iter()
-                .any(|q| q.matches(viewport.cols as f32, viewport.rows as f32))
+        let (cols, rows) = viewport.media_size();
+        viewport.cols > 0 && viewport.rows > 0 && self.0.iter().any(|q| q.matches(cols, rows))
     }
 }
 

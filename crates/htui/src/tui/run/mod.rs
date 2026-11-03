@@ -489,6 +489,9 @@ fn run_inner(
         ui_state.cols.store(u32::from(columns), Ordering::Relaxed);
         ui_state.rows.store(u32::from(rows), Ordering::Relaxed);
         ui_state.scroll_y.store(state.scroll_y, Ordering::Relaxed);
+        ui_state
+            .zoom_hundredths
+            .store((state.zoom * 100.0).round() as u32, Ordering::Relaxed);
         ui_state.set_focused(state.focused_input);
         // The page scroll offset changed since the previous iteration (wheel,
         // keys, animation tick, `scrollTo`): notify the script thread so
@@ -660,10 +663,7 @@ fn run_inner(
                             &mut state,
                             &mut cmds,
                             &mut hovered,
-                            Viewport {
-                                cols: columns as usize,
-                                rows: rows as usize,
-                            },
+                            Viewport::new(columns as usize, rows as usize, 1.0),
                             ev,
                         );
                         moves_in_flight = moves_in_flight.saturating_sub(1);
@@ -840,10 +840,7 @@ fn run_inner(
                         &mut state,
                         &mut cmds,
                         &mut hovered,
-                        Viewport {
-                            cols: columns as usize,
-                            rows: rows as usize,
-                        },
+                        Viewport::new(columns as usize, rows as usize, 1.0),
                         ev,
                     );
                     moves_in_flight = moves_in_flight.saturating_sub(1);
@@ -912,10 +909,7 @@ fn run_inner(
                         dynamic: DynamicState {
                             hovered,
                             focused: state.focused_input,
-                            viewport: Viewport {
-                                cols: columns as usize,
-                                rows: rows as usize,
-                            },
+                            viewport: Viewport::new(columns as usize, rows as usize, 1.0),
                         },
                         dirty: DirtyInfo::default(),
                     },

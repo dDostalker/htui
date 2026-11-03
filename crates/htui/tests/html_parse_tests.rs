@@ -31,6 +31,28 @@ fn test_tag_map() {
 }
 
 #[test]
+fn test_parse_custom_element_keeps_node_and_tag() {
+    init();
+    let (root, arena, _) = Parser::new(r#"<tab-navr class="active"><b>tab</b></tab-navr>"#).parse();
+    let html_id = arena[root].children[0];
+    let body_id = arena[html_id]
+        .children
+        .iter()
+        .copied()
+        .find(|&id| arena[id].node_type == NodeType::Body)
+        .expect("flow content must land in <body>");
+    let custom = arena[body_id].children[0];
+    assert_eq!(arena[custom].tag_name().as_deref(), Some("tab-navr"));
+    assert_eq!(arena[custom].node_name(), "TAB-NAVR");
+    assert_eq!(
+        arena[custom].attributes.get("class").map(String::as_str),
+        Some("active")
+    );
+    assert_eq!(arena[custom].children.len(), 1);
+    assert_eq!(arena[arena[custom].children[0]].node_type, NodeType::B);
+}
+
+#[test]
 fn test_tag_map_metadata() {
     init();
     assert_eq!(

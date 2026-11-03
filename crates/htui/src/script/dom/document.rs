@@ -242,13 +242,23 @@ pub(super) fn native_create_element(
         .first()
         .map(|v| v.to_string(context).map(|s| s.to_std_string_lossy()))
         .transpose()?;
-    let tag = tag.unwrap_or_else(|| "div".to_string());
-    let node_type = crate::html::html_parse::tag_name_to_node_type(&tag).unwrap_or(NodeType::Div);
+    let tag = tag
+        .unwrap_or_else(|| "div".to_string())
+        .to_ascii_lowercase();
     let Some(rc) = with_state() else {
         return Ok(JsValue::null());
     };
     let mut st = rc.borrow_mut();
-    let node_id = st.arena.insert(Node::from(node_type));
+    // Unknown names with valid custom-element syntax keep their tag; other
+    // unknown names remain the historical Div fallback for script-created
+    // HTMLUnknownElement approximations.
+    let node_id = if let Some(node_type) = crate::html::html_parse::tag_name_to_node_type(&tag) {
+        st.arena.insert(Node::from(node_type))
+    } else if NodeType::is_custom_element_name(&tag) {
+        st.arena.insert(Node::custom_element(&tag))
+    } else {
+        st.arena.insert(Node::from(NodeType::Div))
+    };
     // Not attached to the document yet.
     drop(st);
     node_wrapper(context, node_id)

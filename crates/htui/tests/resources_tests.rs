@@ -232,10 +232,66 @@ fn resolve_url_joins_relative_paths_against_base() {
 }
 
 #[test]
+fn data_urls_decode_base64_and_percent_payloads() {
+    init();
+    let reg = ResourceRegistry::new();
+
+    // "ok" in base64; proves saved-page image sources can be self-contained.
+    let base64 = reg
+        .load("data:image/png;base64,b2s=")
+        .expect("base64 data URL");
+    assert_eq!(&*base64, b"ok");
+
+    // Percent escaping is common in inline SVG CSS backgrounds.
+    let escaped = reg
+        .load("data:image/svg+xml,%7Bok%7D")
+        .expect("escaped data URL");
+    assert_eq!(&*escaped, b"{ok}");
+
+    let bad = reg
+        .load("data:image/png;base64,not!valid")
+        .expect_err("invalid base64 must error");
+    assert!(
+        bad.to_string().contains("invalid data URL"),
+        "error should identify a bad data URL, got {bad}"
+    );
+}
+
+#[test]
+fn resolve_url_keeps_data_urls_untouched() {
+    let url = "data:image/png;base64,b2s=";
+    assert_eq!(
+        htui::resources::resolve_url(Some("mem://dir/"), url),
+        url,
+        "data URLs are already absolute and self-contained"
+    );
+}
+
+#[test]
 fn resolve_url_root_relative_resolves_to_mem_root() {
     assert_eq!(
         htui::resources::resolve_url(Some("mem://dir/"), "/root.png"),
         "mem://root.png",
         "root-relative reference ignores the base directory"
+    );
+}
+
+#[test]
+fn data_url_base64_ignores_line_wrap_whitespace() {
+    init();
+    let reg = ResourceRegistry::new();
+    let wrapped = reg
+        .load("data:image/png;base64,\nb2\ns=\n")
+        .expect("RFC 2397 payloads may contain linear whitespace");
+    assert_eq!(&*wrapped, b"ok");
+}
+
+#[test]
+fn resolve_url_does_not_panic_on_multibyte_paths() {
+    let url = "中文.png";
+    assert_eq!(
+        htui::resources::resolve_url(None, url),
+        "mem://中文.png",
+        "a multibyte path is a normal bare mem:// key"
     );
 }

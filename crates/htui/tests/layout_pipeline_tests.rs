@@ -51,6 +51,7 @@ fn overflow_y_creates_a_native_scrollbar_and_translates_content() {
         &mut cursor,
         map.columns as usize,
         map.rows as usize,
+        1.0,
         &offsets,
         &std::collections::HashMap::new(),
     );
@@ -263,6 +264,7 @@ fn overflow_x_creates_a_bottom_scrollbar_and_translates_content() {
         &mut cursor,
         map.columns as usize,
         map.rows as usize,
+        1.0,
         &offsets,
         &x_offsets,
     );

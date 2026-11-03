@@ -61,6 +61,8 @@ pub enum ResourceError {
     /// that scope must wrap its work in [`with_registry`].
     #[error("no resource registry installed on this thread")]
     NoRegistry,
+    #[error("invalid data URL: {reason}")]
+    InvalidDataUrl { reason: String },
 }
 
 /// A `mem://` byte registry — one per [`Session`](crate::session::Session).
@@ -117,8 +119,12 @@ impl ResourceRegistry {
     }
 
     /// Load the bytes registered under `path`. The `mem://` prefix is
-    /// optional.
+    /// optional. Self-contained `data:` URLs are decoded directly and do not
+    /// require a registry entry.
     pub fn load(&self, path: &str) -> Result<Arc<Vec<u8>>, ResourceError> {
+        if path.as_bytes().starts_with(b"data:") {
+            return decode_data_url(path);
+        }
         let key = normalize(path);
         self.map
             .lock()
@@ -274,7 +280,8 @@ fn normalize(path: &str) -> String {
 ///   needed), matching the pre-`<base>` behaviour.
 pub fn resolve_url(base_href: Option<&str>, url: &str) -> String {
     // Already-absolute URLs (mem:// or any external scheme) pass through.
-    if url.contains("://") {
+    // `data:` is also self-contained, even though it does not use `://`.
+    if url.contains("://") || url.as_bytes().starts_with(b"data:") {
         return url.to_string();
     }
     let Some(base) = base_href.filter(|b| !b.trim().is_empty()) else {
@@ -285,6 +292,90 @@ pub fn resolve_url(base_href: Option<&str>, url: &str) -> String {
     }
     let base = normalize(base);
     format!("{}/{url}", base.trim_end_matches('/'))
+}
+
+/// Decode a RFC 2397 `data:[mediatype][;base64],payload` URL.
+///
+/// Both base64 and percent-encoded payloads are supported. CSS and SVG data
+/// URLs commonly use percent escaping, while saved-page `<img>` elements
+/// typically use base64. The mediatype is intentionally not returned: image
+/// decoding and SVG detection inspect the decoded bytes themselves.
+fn decode_data_url(url: &str) -> Result<Arc<Vec<u8>>, ResourceError> {
+    let Some((metadata, payload)) = url.split_once(',') else {
+        return Err(ResourceError::InvalidDataUrl {
+            reason: "missing comma before payload".to_string(),
+        });
+    };
+    let metadata = &metadata[5..]; // skip "data:"
+    let is_base64 = metadata
+        .rsplit(';')
+        .next()
+        .is_some_and(|suffix| suffix.eq_ignore_ascii_case("base64"));
+    if is_base64 {
+        let mut pad = 0;
+        let mut value = 0u32;
+        let mut bits = 0;
+        let mut encoded_len = 0usize;
+        let mut out = Vec::with_capacity(payload.len() / 4 * 3 + 3);
+        for byte in payload.bytes() {
+            if !byte.is_ascii_whitespace() {
+                encoded_len += 1;
+            }
+            let digit = match byte {
+                b'A'..=b'Z' => byte - b'A',
+                b'a'..=b'z' => byte - b'a' + 26,
+                b'0'..=b'9' => byte - b'0' + 52,
+                b'+' => 62,
+                b'/' => 63,
+                b'=' => {
+                    pad += 1;
+                    continue;
+                }
+                b' ' | b'\t' | b'\r' | b'\n' => continue,
+                _ => {
+                    return Err(ResourceError::InvalidDataUrl {
+                        reason: "invalid base64 character".to_string(),
+                    });
+                }
+            };
+            value = (value << 6) | u32::from(digit);
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                out.push(((value >> bits) & 0xff) as u8);
+            }
+        }
+        if pad > 2 || encoded_len % 4 != 0 {
+            return Err(ResourceError::InvalidDataUrl {
+                reason: "invalid base64 length or padding".to_string(),
+            });
+        }
+        return Ok(Arc::new(out));
+    }
+
+    let mut out = Vec::with_capacity(payload.len());
+    let mut bytes = payload.bytes();
+    while let Some(byte) = bytes.next() {
+        match byte {
+            b'%' => {
+                let hi = bytes.next().and_then(|b| (b as char).to_digit(16));
+                let lo = bytes.next().and_then(|b| (b as char).to_digit(16));
+                let Some(hi) = hi else {
+                    return Err(ResourceError::InvalidDataUrl {
+                        reason: "truncated percent escape".to_string(),
+                    });
+                };
+                let Some(lo) = lo else {
+                    return Err(ResourceError::InvalidDataUrl {
+                        reason: "truncated percent escape".to_string(),
+                    });
+                };
+                out.push((hi * 16 + lo) as u8);
+            }
+            other => out.push(other),
+        }
+    }
+    Ok(Arc::new(out))
 }
 
 #[cfg(all(test, debug_assertions))]

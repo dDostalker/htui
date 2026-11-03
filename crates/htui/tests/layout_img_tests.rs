@@ -66,7 +66,7 @@ fn layout_img_clamps_cols_to_containing_width() {
         &mut cursor,
         LayoutContext {
             font: htui::html::css_parse::FontContext::root(),
-            viewport: Viewport { cols: 80, rows: 24 },
+            viewport: Viewport::new(80, 24, 1.0),
             scroll_offsets: &htui::layout::NO_SCROLL_OFFSETS,
             scroll_x_offsets: &htui::layout::NO_SCROLL_OFFSETS,
         },
@@ -119,7 +119,7 @@ fn layout_img_unclamped_when_img_fits() {
         &mut cursor,
         LayoutContext {
             font: htui::html::css_parse::FontContext::root(),
-            viewport: Viewport { cols: 80, rows: 24 },
+            viewport: Viewport::new(80, 24, 1.0),
             scroll_offsets: &htui::layout::NO_SCROLL_OFFSETS,
             scroll_x_offsets: &htui::layout::NO_SCROLL_OFFSETS,
         },
@@ -367,7 +367,7 @@ fn layout_img_default_size_preserves_intrinsic_aspect_ratio() {
             &mut cursor,
             LayoutContext {
                 font: htui::html::css_parse::FontContext::root(),
-                viewport: Viewport { cols: 80, rows: 24 },
+                viewport: Viewport::new(80, 24, 1.0),
                 scroll_offsets: &htui::layout::NO_SCROLL_OFFSETS,
                 scroll_x_offsets: &htui::layout::NO_SCROLL_OFFSETS,
             },
@@ -549,7 +549,7 @@ fn svg_intrinsic_aspect_ratio_drives_default_layout() {
             &mut cursor,
             LayoutContext {
                 font: htui::html::css_parse::FontContext::root(),
-                viewport: Viewport { cols: 80, rows: 24 },
+                viewport: Viewport::new(80, 24, 1.0),
                 scroll_offsets: &htui::layout::NO_SCROLL_OFFSETS,
                 scroll_x_offsets: &htui::layout::NO_SCROLL_OFFSETS,
             },
@@ -642,7 +642,7 @@ fn layout_img_respects_margin_and_left_aligns() {
         &mut cursor,
         LayoutContext {
             font: htui::html::css_parse::FontContext::root(),
-            viewport: Viewport { cols: 80, rows: 24 },
+            viewport: Viewport::new(80, 24, 1.0),
             scroll_offsets: &htui::layout::NO_SCROLL_OFFSETS,
             scroll_x_offsets: &htui::layout::NO_SCROLL_OFFSETS,
         },

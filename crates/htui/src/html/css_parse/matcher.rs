@@ -15,6 +15,7 @@ impl PseudoClass {
                 .hovered
                 .is_some_and(|h| is_hovered_or_ancestor(arena, node_id, h)),
             PseudoClass::Focus => state.focused == Some(node_id),
+            PseudoClass::FocusVisible => state.focused == Some(node_id),
         }
     }
 
@@ -25,7 +26,7 @@ impl PseudoClass {
     pub fn affected_candidates(&self, arena: &NodeArena, target: Option<NodeId>) -> Vec<NodeId> {
         match self {
             PseudoClass::Hover => ancestor_chain(arena, target),
-            PseudoClass::Focus => target.into_iter().collect(),
+            PseudoClass::Focus | PseudoClass::FocusVisible => target.into_iter().collect(),
         }
     }
 
@@ -38,7 +39,7 @@ impl PseudoClass {
                 hovered: target,
                 ..Default::default()
             },
-            PseudoClass::Focus => DynamicState {
+            PseudoClass::Focus | PseudoClass::FocusVisible => DynamicState {
                 focused: target,
                 ..Default::default()
             },
@@ -76,7 +77,10 @@ fn matches_css(arena: &NodeArena, node_id: NodeId, sel: &Selector, state: &Dynam
                 | NodeType::Text
                 | NodeType::Comment
         ),
-        Selector::Tag(nt) => node.node_type == *nt,
+        Selector::Tag(nt) => {
+            node.node_type == *nt && !(node.is_custom_element() && *nt == NodeType::Span)
+        }
+        Selector::TagName(name) => node.tag_name().is_some_and(|tag| tag == name.as_str()),
         Selector::Class(name) => node.has_class(name),
         Selector::Id(id) => node
             .get_id()
@@ -88,9 +92,13 @@ fn matches_css(arena: &NodeArena, node_id: NodeId, sel: &Selector, state: &Dynam
         Selector::NthLastOfType(expr) => nth_of_type_matches(arena, node_id, *expr, true),
         Selector::Root => is_root_element(arena, node_id),
         Selector::Empty => is_empty_element(arena, node_id),
-        Selector::Not(compounds) => !compounds
+        Selector::Not(selectors) => !selectors
             .iter()
-            .any(|c| matches_compound(arena, node_id, c, state)),
+            .any(|selector| selector_chain_matches_with_state(arena, node_id, selector, state)),
+        Selector::Is(selectors) | Selector::Where(selectors) => selectors
+            .iter()
+            .any(|selector| selector_chain_matches_with_state(arena, node_id, selector, state)),
+        Selector::Has(arguments) => has_matches(arena, node_id, arguments, state),
         Selector::Checked => checked_matches(arena, node_id),
         Selector::Enabled => enabled_matches(arena, node_id),
         Selector::Disabled => disabled_matches(arena, node_id),
@@ -298,6 +306,111 @@ fn is_form_control(node_type: NodeType) -> bool {
             | NodeType::HtmlOption
             | NodeType::Fieldset
     )
+}
+
+/// A `:has()` argument matches when one of its anchored candidates satisfies
+/// the wrapped complex selector. For example, `:has(> footer .tag)` anchors at
+/// a child `footer` and then requires a descendant `.tag` below that footer.
+fn has_matches(
+    arena: &NodeArena,
+    candidate: NodeId,
+    arguments: &[super::selector::RelativeSelector],
+    state: &DynamicState,
+) -> bool {
+    arguments.iter().any(|argument| {
+        let compounds = &argument.selector.compounds;
+        if compounds.is_empty() {
+            return false;
+        }
+        relative_anchor_ids(arena, candidate, argument.anchor)
+            .into_iter()
+            .any(|anchor| {
+                matches_compound(arena, anchor, &compounds[0], state)
+                    && has_forward_matches(
+                        arena,
+                        anchor,
+                        compounds,
+                        &argument.selector.combinators,
+                        0,
+                        state,
+                    )
+            })
+    })
+}
+
+/// Match the remainder of a `:has()` argument left-to-right after its first
+/// compound has already been found. `:has(> footer .tag)` first anchors at a
+/// child `footer`, then this function looks below it for `.tag`.
+fn has_forward_matches(
+    arena: &NodeArena,
+    current: NodeId,
+    compounds: &[CompoundSelector],
+    combinators: &[Combinator],
+    idx: usize,
+    state: &DynamicState,
+) -> bool {
+    if idx == combinators.len() {
+        return true;
+    }
+    let combinator = combinators[idx];
+    let target = &compounds[idx + 1];
+    let candidates = match combinator {
+        Combinator::Descendant => relative_anchor_ids(arena, current, Combinator::Descendant),
+        Combinator::Child => relative_anchor_ids(arena, current, Combinator::Child),
+        Combinator::NextSibling => next_sibling_id(arena, current).into_iter().collect(),
+        Combinator::SubsequentSibling => sibling_ids_after(arena, current).unwrap_or_default(),
+    };
+    candidates.into_iter().any(|next| {
+        matches_compound(arena, next, target, state)
+            && has_forward_matches(arena, next, compounds, combinators, idx + 1, state)
+    })
+}
+
+/// Element siblings after `node_id` in document order.
+fn sibling_ids_after(arena: &NodeArena, node_id: NodeId) -> Option<Vec<NodeId>> {
+    let node = arena.get(node_id)?;
+    let parent_id = node.parent?;
+    let parent = arena.get(parent_id)?;
+    let pos = parent.children.iter().position(|&cid| cid == node_id)?;
+    Some(parent.children[pos + 1..].to_vec())
+}
+
+fn next_sibling_id(arena: &NodeArena, node_id: NodeId) -> Option<NodeId> {
+    let node = arena.get(node_id)?;
+    let parent_id = node.parent?;
+    let parent = arena.get(parent_id)?;
+    let pos = parent.children.iter().position(|&cid| cid == node_id)?;
+    parent.children.get(pos + 1).copied()
+}
+
+/// Return the elements that can serve as anchors for a relative `:has()`
+/// selector. Specific tags/compound predicates later reject non-element ids,
+/// so this traversal can simply follow the DOM child/sibling structure.
+fn relative_anchor_ids(arena: &NodeArena, candidate: NodeId, anchor: Combinator) -> Vec<NodeId> {
+    match anchor {
+        Combinator::Descendant => {
+            let mut out = Vec::new();
+            let mut stack = arena
+                .get(candidate)
+                .map(|node| node.children.clone())
+                .unwrap_or_default();
+            while let Some(id) = stack.pop() {
+                if let Some(node) = arena.get(id) {
+                    out.push(id);
+                    stack.extend(node.children.iter().rev().copied());
+                }
+            }
+            out
+        }
+        Combinator::Child => arena
+            .get(candidate)
+            .map(|node| node.children.clone())
+            .unwrap_or_default(),
+        // In a normal selector, `+` / `~` point at preceding siblings, but
+        // as `:has()` anchors they describe siblings **after** the candidate.
+        Combinator::NextSibling => next_sibling_id(arena, candidate).into_iter().collect(),
+        Combinator::SubsequentSibling => sibling_ids_after(arena, candidate).unwrap_or_default(),
+    }
 }
 
 /// Check whether a node matches a CSS selector chain, with no `:hover`

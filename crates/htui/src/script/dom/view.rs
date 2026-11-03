@@ -19,7 +19,7 @@ use crate::layout::Rect;
 use crate::tdom::node::NodeId;
 use crate::tui::graph_api::{RenderCmd, ScrollIntoViewBlock, ScrollTarget};
 
-use super::super::{selection_text, with_focused, with_hit_map, with_ui};
+use super::super::{selection_text, with_focused, with_hit_map, with_ui, with_ui_zoom};
 use super::{js_fn, this_node_id};
 
 /// Registry key holding the window-level listeners.
@@ -524,11 +524,9 @@ pub(crate) fn native_selection_to_string(
 /// Evaluate a media query string against the current viewport. An empty or
 /// unparseable query matches nothing (the CSS unknown-query rule).
 fn matches_now(query: &str) -> bool {
+    let zoom = with_ui_zoom().unwrap_or(1.0);
     let (cols, rows, _) = ui();
-    let viewport = Viewport {
-        cols: cols as usize,
-        rows: rows as usize,
-    };
+    let viewport = Viewport::new(cols as usize, rows as usize, zoom);
     parse_media_query_list(query).is_none_or(|list| list.matches(&viewport))
 }
 

@@ -48,6 +48,7 @@ pub fn layout_tree(
         cursor,
         viewport_cols,
         viewport_rows,
+        1.0,
         &scroll_offsets,
         &NO_X,
     )
@@ -64,6 +65,7 @@ pub fn layout_tree_with_scroll_offsets(
     cursor: &mut Cursor,
     viewport_cols: usize,
     viewport_rows: usize,
+    zoom: f32,
     scroll_offsets: &HashMap<NodeId, u32>,
     scroll_x_offsets: &HashMap<NodeId, u32>,
 ) -> Vec<LayoutBox> {
@@ -82,11 +84,8 @@ pub fn layout_tree_with_scroll_offsets(
         containing,
         cursor,
         LayoutContext {
-            font: FontContext::root(),
-            viewport: Viewport {
-                cols: viewport_cols,
-                rows: viewport_rows,
-            },
+            font: FontContext::root_with_zoom(zoom),
+            viewport: Viewport::new(viewport_cols, viewport_rows, zoom),
             scroll_offsets,
             scroll_x_offsets,
         },

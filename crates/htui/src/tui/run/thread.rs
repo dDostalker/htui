@@ -378,11 +378,19 @@ fn apply_focus(
     node_id: Option<NodeId>,
 ) -> bool {
     let prev = std::mem::replace(&mut state.dynamic.focused, node_id);
-    if !state.pseudo_rules.contains_pseudo(PseudoClass::Focus) {
-        return false;
+    let mut repainted = false;
+    if state.pseudo_rules.contains_pseudo(PseudoClass::Focus) {
+        state.repaint_dynamic(out, PseudoClass::Focus, prev, node_id);
+        repainted = true;
     }
-    state.repaint_dynamic(out, PseudoClass::Focus, prev, node_id);
-    true
+    if state
+        .pseudo_rules
+        .contains_pseudo(PseudoClass::FocusVisible)
+    {
+        state.repaint_dynamic(out, PseudoClass::FocusVisible, prev, node_id);
+        repainted = true;
+    }
+    repainted
 }
 
 /// Worker of the dedicated hit-test thread.

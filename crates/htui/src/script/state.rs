@@ -132,6 +132,8 @@ pub struct SharedUiState {
     pub cols: AtomicU32,
     pub rows: AtomicU32,
     pub scroll_y: AtomicU32,
+    /// Browser zoom in hundredths (100 = 1.0), shared for live `matchMedia`.
+    pub zoom_hundredths: AtomicU32,
     /// Focused field's `NodeId` opaque bits (slotmap `KeyData::as_ffi`);
     /// `0` when nothing is focused. `document.activeElement` reads it.
     pub focused: AtomicU64,
@@ -150,6 +152,16 @@ impl SharedUiState {
             self.rows.load(Ordering::Relaxed),
             self.scroll_y.load(Ordering::Relaxed),
         )
+    }
+
+    /// Snapshot the current browser zoom factor (1.0 for unset/invalid data).
+    pub fn load_zoom(&self) -> f32 {
+        let hundredths = self.zoom_hundredths.load(Ordering::Relaxed);
+        if hundredths == 0 {
+            1.0
+        } else {
+            hundredths as f32 / 100.0
+        }
     }
 
     /// Publish the focused field (`None` clears it); read by
@@ -176,6 +188,11 @@ pub(crate) fn set_ui_state(ui: std::sync::Arc<SharedUiState>) {
 /// loop is attached (a bare `ScriptEngine::new` in tests).
 pub(crate) fn with_ui() -> Option<(u32, u32, u32)> {
     UI_STATE.with(|cell| cell.borrow().as_ref().map(|ui| ui.load()))
+}
+
+/// The shared browser zoom factor for `matchMedia` (1.0 without a UI loop).
+pub(crate) fn with_ui_zoom() -> Option<f32> {
+    UI_STATE.with(|cell| cell.borrow().as_ref().map(|ui| ui.load_zoom()))
 }
 
 /// The focused-field node id bits from the shared UI state (0 = none).

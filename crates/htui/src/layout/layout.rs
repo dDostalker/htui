@@ -164,6 +164,7 @@ impl TermLayout {
             &mut cursor,
             term_map.columns as usize,
             term_map.rows as usize,
+            self.zoom,
             &self.scroll_offsets,
             &self.scroll_x_offsets,
         );

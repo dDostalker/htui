@@ -51,6 +51,18 @@ pub enum SelectorError {
     /// `:not(...)` is missing the closing `)`.
     #[error(":not(...) missing ')'")]
     NotMissingCloseParen,
+    /// `:is` / `:where` is missing its `(...)` argument list.
+    #[error(":{0} requires `(...)`")]
+    LogicalRequiresParens(String),
+    /// `:is(...)` / `:where(...)` is missing the closing `)`.
+    #[error(":{0}(...) missing ')'")]
+    LogicalMissingCloseParen(String),
+    /// `:has` is missing its `(...)` argument list.
+    #[error(":has requires `(...)`")]
+    HasRequiresParens,
+    /// `:has(...)` is missing the closing `)`.
+    #[error(":has(...) missing ')'")]
+    HasMissingCloseParen,
     /// `:not(...)` arguments nest deeper than the supported limit.
     #[error(":not(...) nesting too deep")]
     NotNestedTooDeep,
@@ -125,7 +137,7 @@ impl NthExpr {
 /// `viewport` carries the terminal cell grid for `@media` matching. The
 /// default (`0x0`) matches no size condition — unconditional rules are
 /// unaffected — so callers that never cascade a real viewport keep working.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct DynamicState {
     /// The node currently under the pointer (`:hover` matches it and its
     /// ancestors).
@@ -149,6 +161,8 @@ impl PseudoClassSet {
     pub const HOVER: Self = Self(1 << 0);
     /// `:focus` rules present.
     pub const FOCUS: Self = Self(1 << 1);
+    /// `:focus-visible` rules present.
+    pub const FOCUS_VISIBLE: Self = Self(1 << 2);
 
     /// Whether `pseudo` is a member of the set.
     pub fn contains_pseudo(&self, pseudo: PseudoClass) -> bool {
@@ -160,18 +174,49 @@ impl PseudoClassSet {
         Self(self.0 | other.0)
     }
 
-    /// The pseudo-classes appearing anywhere in a selector chain.
+    /// The pseudo-classes appearing anywhere in a selector chain, including
+    /// arguments nested inside `:not`, `:is`, `:where`, and `:has`.
     pub fn from_selector(sel: &CssSelector) -> Self {
         let mut set = Self::EMPTY;
         for compound in &sel.compounds {
             for s in compound {
-                if let Selector::PseudoClass(p) = s {
-                    set = set.union(p.as_flag());
-                }
+                set = set.union(selector_pseudo_set(s));
             }
         }
         set
     }
+}
+
+/// Collect dynamic pseudo-class flags from one simple selector, recursing
+/// through the logical-selector wrappers so `:has(:focus-visible)` is still
+/// detected before runtime repaints.
+fn selector_pseudo_set(selector: &Selector) -> PseudoClassSet {
+    match selector {
+        Selector::PseudoClass(pseudo) => pseudo.as_flag(),
+        Selector::Not(selectors) | Selector::Is(selectors) | Selector::Where(selectors) => {
+            selectors.iter().fold(PseudoClassSet::EMPTY, |set, arg| {
+                set.union(css_selector_pseudo_set(arg))
+            })
+        }
+        Selector::Has(arguments) => arguments
+            .iter()
+            .fold(PseudoClassSet::EMPTY, |set, argument| {
+                set.union(css_selector_pseudo_set(&argument.selector))
+            }),
+        _ => PseudoClassSet::EMPTY,
+    }
+}
+
+/// Collect flags from an entire complex selector chain.
+fn css_selector_pseudo_set(selector: &CssSelector) -> PseudoClassSet {
+    selector
+        .compounds
+        .iter()
+        .fold(PseudoClassSet::EMPTY, |set, compound| {
+            compound
+                .iter()
+                .fold(set, |set, simple| set.union(selector_pseudo_set(simple)))
+        })
 }
 
 /// Dynamic pseudo-classes supported by the selector parser.
@@ -184,6 +229,10 @@ pub enum PseudoClass {
     /// (the session's focused text field). Unlike `:hover`, it matches the
     /// focused element itself, not its ancestors (`:focus-within` would).
     Focus,
+    /// `:focus-visible` — terminal focus has no separate keyboard/pointer
+    /// modality, so it currently follows `:focus` for the focused text
+    /// control.
+    FocusVisible,
 }
 
 impl PseudoClass {
@@ -192,6 +241,7 @@ impl PseudoClass {
         match self {
             PseudoClass::Hover => PseudoClassSet::HOVER,
             PseudoClass::Focus => PseudoClassSet::FOCUS,
+            PseudoClass::FocusVisible => PseudoClassSet::FOCUS_VISIBLE,
         }
     }
 }
@@ -271,6 +321,10 @@ pub enum Selector {
     /// comment or document nodes). Contributes nothing to specificity.
     Universal,
     Tag(NodeType),
+    /// A custom-element type selector (`tab-navr`). HTML custom tags are not
+    /// part of the engine's built-in `NodeType` table, so they retain their
+    /// own lowercase name and are matched through `Node::tag_name`.
+    TagName(String),
     Class(String),
     Id(String),
     /// `:nth-child(<expr>)` — match when the element is the n-th child of its
@@ -293,10 +347,20 @@ pub enum Selector {
     /// children always do, text children do when their data is non-empty
     /// (whitespace counts), comments never do (CSS Selectors semantics).
     Empty,
-    /// `:not(<compound list>)` — matches when **none** of the argument
-    /// compound selectors match. Arguments are comma-separated compounds
-    /// without combinators (the common L3/L4 subset).
-    Not(Vec<CompoundSelector>),
+    /// `:not(<selector list>)` — matches when **none** of the argument
+    /// selector chains match. Arguments are comma-separated complex selectors
+    /// (Level 4), so `.a:not(.b .c)` can express ancestor exclusions.
+    Not(Vec<CssSelector>),
+    /// `:is(<selector list>)` — matches when any argument selector chain
+    /// matches. Arguments use the same Level 4 complex-selector syntax as
+    /// `:not()`; specificity is that of the most specific argument.
+    Is(Vec<CssSelector>),
+    /// `:where(<selector list>)` — the zero-specificity form of `:is()`.
+    Where(Vec<CssSelector>),
+    /// `:has(<relative selector list>)` — relational matching. Each argument
+    /// is anchored to the candidate by a descendant/child/sibling combinator.
+    /// The wrapped complex selector is evaluated at the anchor element.
+    Has(Vec<RelativeSelector>),
     /// `:checked` — a checked `<input type=checkbox|radio>` (the `checked`
     /// attribute the engine toggles on click) or a `<option selected>`.
     Checked,
@@ -334,6 +398,19 @@ pub enum Combinator {
 /// element (`div.card#main`), no combinators inside.
 pub type CompoundSelector = Vec<Selector>;
 
+/// One argument of `:has()`: the combinator that anchors an element relative
+/// to the candidate, plus the complex selector that must match that element.
+///
+/// `:has(.title)` uses `Descendant` (CSS supplies this default); `:has(> h2)`,
+/// `:has(+ p)`, and `:has(~ p)` use the explicit anchors.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RelativeSelector {
+    /// The CSS relative-selector combinator leading the argument.
+    pub anchor: Combinator,
+    /// The remaining complex selector evaluated at the anchor element.
+    pub selector: CssSelector,
+}
+
 /// A complex selector: compounds joined by combinators, read left to right
 /// (`ancestor > child + next`). Matches when the last compound matches the
 /// candidate and every combinator chain holds; specificity is the sum over
@@ -352,62 +429,73 @@ pub struct CssSelector {
 impl FromStr for CssSelector {
     type Err = SelectorError;
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        let s = s.trim();
-        if s.is_empty() {
-            return Err(SelectorError::EmptySelector);
-        }
-        // Split the selector chain into segments and the combinator that
-        // introduces each segment. Whitespace is a descendant combinator; `>`,
-        // `+`, `~` are explicit combinators. Empty segments (e.g. from `>` at
-        // the start) are dropped — they're a parse error handled by the empty
-        // check at the bottom.
-        let (segments, combinators) = split_by_combinators(s);
-        if segments.is_empty() {
-            return Err(SelectorError::EmptySelector);
-        }
-        // A trailing `::before` / `::after` pseudo-element (inside the last
-        // segment) is lifted off the chain: the chain itself matches the
-        // origin element and the pseudo-element rides along as a flag.
-        // Only `::before` / `::after` are recognized, including their
-        // single-colon CSS compatibility spellings; other `::` names remain
-        // unsupported pseudo-class errors.
-        let mut pseudo_element = None;
-        let mut segments: Vec<String> = segments.iter().map(|s| s.to_string()).collect();
-        if let Some(last) = segments.last_mut()
-            && let Some((trimmed, element)) = strip_pseudo_element(last)
-        {
-            pseudo_element = Some(element);
-            if trimmed.trim().is_empty() {
-                // The pseudo-element was the entire segment — a bare
-                // `::before` has no origin to match.
-                return Err(SelectorError::UnsupportedPseudoClass(match element {
-                    PseudoElement::Before => "::before".to_string(),
-                    PseudoElement::After => "::after".to_string(),
-                    PseudoElement::SliderThumb => "::slider-thumb".to_string(),
-                    PseudoElement::SliderTrack => "::slider-track".to_string(),
-                    PseudoElement::SliderProgress => "::slider-progress".to_string(),
-                }));
-            }
-            *last = trimmed.trim().to_string();
-        }
-        let mut compounds = Vec::with_capacity(segments.len());
-        for seg in &segments {
-            // A segment is one compound selector whose parts all apply to the
-            // same element. The split is parenthesis-aware so whitespace
-            // inside a function argument (`:nth-child(2n + 1)`,
-            // `:not(p, div)`) never splits the pseudo-class in half.
-            let mut compound = CompoundSelector::new();
-            for part in split_top_level_whitespace(seg) {
-                compound.extend(parse_compound(part)?);
-            }
-            compounds.push(compound);
-        }
-        Ok(CssSelector {
-            compounds,
-            combinators,
-            pseudo_element,
-        })
+        parse_complex_selector_inner(s, 0)
     }
+}
+
+/// Parse a complex selector while tracking the `:not(...)` recursion depth.
+///
+/// [`FromStr`] is the public depth-0 entry point; `:not` arguments call this
+/// helper directly so nested negations continue to share the parser limit.
+fn parse_complex_selector_inner(
+    s: &str,
+    not_depth: usize,
+) -> std::result::Result<CssSelector, SelectorError> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err(SelectorError::EmptySelector);
+    }
+    // Split the selector chain into segments and the combinator that
+    // introduces each segment. Whitespace is a descendant combinator; `>`,
+    // `+`, `~` are explicit combinators. Empty segments (e.g. from `>` at
+    // the start) are dropped — they're a parse error handled by the empty
+    // check at the bottom.
+    let (segments, combinators) = split_by_combinators(s);
+    if segments.is_empty() {
+        return Err(SelectorError::EmptySelector);
+    }
+    // A trailing `::before` / `::after` pseudo-element (inside the last
+    // segment) is lifted off the chain: the chain itself matches the
+    // origin element and the pseudo-element rides along as a flag.
+    // Only `::before` / `::after` are recognized, including their
+    // single-colon CSS compatibility spellings; other `::` names remain
+    // unsupported pseudo-class errors.
+    let mut pseudo_element = None;
+    let mut segments: Vec<String> = segments.iter().map(|s| s.to_string()).collect();
+    if let Some(last) = segments.last_mut()
+        && let Some((trimmed, element)) = strip_pseudo_element(last)
+    {
+        pseudo_element = Some(element);
+        if trimmed.trim().is_empty() {
+            // The pseudo-element was the entire segment — a bare
+            // `::before` has no origin to match.
+            return Err(SelectorError::UnsupportedPseudoClass(match element {
+                PseudoElement::Before => "::before".to_string(),
+                PseudoElement::After => "::after".to_string(),
+                PseudoElement::SliderThumb => "::slider-thumb".to_string(),
+                PseudoElement::SliderTrack => "::slider-track".to_string(),
+                PseudoElement::SliderProgress => "::slider-progress".to_string(),
+            }));
+        }
+        *last = trimmed.trim().to_string();
+    }
+    let mut compounds = Vec::with_capacity(segments.len());
+    for seg in &segments {
+        // A segment is one compound selector whose parts all apply to the
+        // same element. The split is parenthesis-aware so whitespace
+        // inside a function argument (`:nth-child(2n + 1)`,
+        // `:not(p, div)`) never splits the pseudo-class in half.
+        let mut compound = CompoundSelector::new();
+        for part in split_top_level_whitespace(seg) {
+            compound.extend(parse_compound_inner(part, not_depth)?);
+        }
+        compounds.push(compound);
+    }
+    Ok(CssSelector {
+        compounds,
+        combinators,
+        pseudo_element,
+    })
 }
 
 /// The pseudo-elements the engine recognises (CSS `::before` / `::after`
@@ -566,10 +654,6 @@ fn split_by_combinators(s: &str) -> (Vec<&str>, Vec<Combinator>) {
     (segments, combinators)
 }
 
-fn parse_compound(s: &str) -> std::result::Result<CompoundSelector, SelectorError> {
-    parse_compound_inner(s, 0)
-}
-
 /// Max supported `:not(...)` nesting depth. Real stylesheets never come close;
 /// the cap stops pathological CSS from recursing the parser to stack
 /// exhaustion.
@@ -650,6 +734,12 @@ fn parse_compound_inner(
                             return Err(SelectorError::FocusTakesNoArguments);
                         }
                         out.push(Selector::PseudoClass(PseudoClass::Focus));
+                    }
+                    "focus-visible" => {
+                        if i < chars.len() && chars[i] == '(' {
+                            return Err(SelectorError::FocusTakesNoArguments);
+                        }
+                        out.push(Selector::PseudoClass(PseudoClass::FocusVisible));
                     }
                     "nth-child" | "nth-last-child" => {
                         let from_last = name.eq_ignore_ascii_case("nth-last-child");
@@ -748,7 +838,45 @@ fn parse_compound_inner(
                         if not_depth >= NOT_MAX_NESTING {
                             return Err(SelectorError::NotNestedTooDeep);
                         }
-                        out.push(Selector::Not(parse_not_args(&arg, not_depth + 1)?));
+                        out.push(Selector::Not(parse_selector_list_args(
+                            &arg,
+                            not_depth + 1,
+                        )?));
+                    }
+                    "is" | "where" => {
+                        let logical_name = name.to_ascii_lowercase();
+                        if i >= chars.len() || chars[i] != '(' {
+                            return Err(SelectorError::LogicalRequiresParens(logical_name));
+                        }
+                        let Some(arg) = capture_balanced_arg(&chars, &mut i) else {
+                            return Err(SelectorError::LogicalMissingCloseParen(logical_name));
+                        };
+                        // `:is` and `:where` may contain `:not` and each other.
+                        // Share the existing logical-nesting cap so pathological
+                        // CSS cannot recurse the parser indefinitely.
+                        if not_depth >= NOT_MAX_NESTING {
+                            return Err(SelectorError::NotNestedTooDeep);
+                        }
+                        let selectors = parse_selector_list_args(&arg, not_depth + 1)?;
+                        out.push(if logical_name == "is" {
+                            Selector::Is(selectors)
+                        } else {
+                            Selector::Where(selectors)
+                        });
+                    }
+                    "has" => {
+                        if i >= chars.len() || chars[i] != '(' {
+                            return Err(SelectorError::HasRequiresParens);
+                        }
+                        let Some(arg) = capture_balanced_arg(&chars, &mut i) else {
+                            return Err(SelectorError::HasMissingCloseParen);
+                        };
+                        // A `:has` argument can contain `:not`, `:is`, or
+                        // another `:has`; share the logical recursion cap.
+                        if not_depth >= NOT_MAX_NESTING {
+                            return Err(SelectorError::NotNestedTooDeep);
+                        }
+                        out.push(Selector::Has(parse_has_args(&arg, not_depth + 1)?));
                     }
                     _ => return Err(SelectorError::UnsupportedPseudoClass(name)),
                 }
@@ -779,8 +907,15 @@ fn parse_compound_inner(
                 }
                 if tag == "*" {
                     out.push(Selector::Universal);
+                } else if let Ok(node_type) = tag_str_to_node_type(&tag) {
+                    out.push(Selector::Tag(node_type));
                 } else {
-                    out.push(Selector::Tag(tag_str_to_node_type(&tag)?));
+                    let lower = tag.to_ascii_lowercase();
+                    if NodeType::is_custom_element_name(&lower) {
+                        out.push(Selector::TagName(lower));
+                    } else {
+                        return Err(SelectorError::UnsupportedTag(tag));
+                    }
                 }
             }
         }
@@ -881,17 +1016,29 @@ fn compound_specificity(compound: &[Selector]) -> (u32, u32, u32) {
             | Selector::Enabled
             | Selector::Disabled
             | Selector::Lang(_) => spec.1 += 1,
-            Selector::Not(compounds) => {
-                let arg = compounds
+            Selector::Not(selectors) | Selector::Is(selectors) => {
+                let arg = selectors
                     .iter()
-                    .map(|c| compound_specificity(c))
+                    .map(|selector| selector.specificity())
                     .max()
                     .unwrap_or((0, 0, 0));
                 spec.0 += arg.0;
                 spec.1 += arg.1;
                 spec.2 += arg.2;
             }
-            Selector::Tag(_) => spec.2 += 1,
+            // `:where()` deliberately contributes no specificity.
+            Selector::Where(_) => {}
+            Selector::Has(arguments) => {
+                let arg = arguments
+                    .iter()
+                    .map(|argument| argument.selector.specificity())
+                    .max()
+                    .unwrap_or((0, 0, 0));
+                spec.0 += arg.0;
+                spec.1 += arg.1;
+                spec.2 += arg.2;
+            }
+            Selector::Tag(_) | Selector::TagName(_) => spec.2 += 1,
         }
     }
     spec
@@ -933,20 +1080,64 @@ fn capture_balanced_arg(chars: &[char], i: &mut usize) -> Option<String> {
     None
 }
 
-/// Parse the argument of `:not(...)`: a comma-separated list of compound
-/// selectors without combinators (the common L3/L4 subset). Combinators
-/// inside an argument fail with the argument's own parse error.
-fn parse_not_args(
+/// Parse the argument of `:has(...)`: a comma-separated list of relative
+/// selectors. A missing leading combinator means descendant; `>`, `+`, and
+/// `~` are removed and retained as the argument's anchor.
+fn parse_has_args(
     arg: &str,
-    not_depth: usize,
-) -> std::result::Result<Vec<CompoundSelector>, SelectorError> {
+    logical_depth: usize,
+) -> std::result::Result<Vec<RelativeSelector>, SelectorError> {
     let parts = split_top_level_commas(arg);
     if parts.is_empty() {
         return Err(SelectorError::EmptyCompound);
     }
     parts
         .into_iter()
-        .map(|part| parse_compound_inner(part, not_depth))
+        .map(|part| parse_relative_selector(part, logical_depth))
+        .collect()
+}
+
+/// Parse one relative selector argument after the leading combinator has not
+/// yet been removed. The wrapped complex selector shares the logical depth cap.
+fn parse_relative_selector(
+    arg: &str,
+    logical_depth: usize,
+) -> std::result::Result<RelativeSelector, SelectorError> {
+    let arg = arg.trim();
+    let (anchor, selector) = if let Some(rest) = arg.strip_prefix('>') {
+        (Combinator::Child, rest)
+    } else if let Some(rest) = arg.strip_prefix('+') {
+        (Combinator::NextSibling, rest)
+    } else if let Some(rest) = arg.strip_prefix('~') {
+        (Combinator::SubsequentSibling, rest)
+    } else {
+        (Combinator::Descendant, arg)
+    };
+    let selector = selector.trim();
+    if selector.is_empty() {
+        return Err(SelectorError::EmptyCompound);
+    }
+    Ok(RelativeSelector {
+        anchor,
+        selector: parse_complex_selector_inner(selector, logical_depth)?,
+    })
+}
+
+/// Parse the argument of `:not(...)`, `:is(...)`, or `:where(...)`: a
+/// comma-separated list of complex selectors (CSS Selectors Level 4). The
+/// inherited `not_depth` keeps every logical-selector nesting chain under the
+/// shared recursion limit.
+fn parse_selector_list_args(
+    arg: &str,
+    not_depth: usize,
+) -> std::result::Result<Vec<CssSelector>, SelectorError> {
+    let parts = split_top_level_commas(arg);
+    if parts.is_empty() {
+        return Err(SelectorError::EmptyCompound);
+    }
+    parts
+        .into_iter()
+        .map(|part| parse_complex_selector_inner(part, not_depth))
         .collect()
 }
 

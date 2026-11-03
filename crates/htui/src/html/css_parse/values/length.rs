@@ -507,10 +507,48 @@ pub struct FontContext {
 ///
 /// The default (`0x0`) stands for "no viewport known" — size conditions never
 /// match it, so unconditional styling is unaffected.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Viewport {
     pub cols: usize,
     pub rows: usize,
+    /// Browser zoom factor applied to the CSS px/cell conversion.
+    ///
+    /// `cols` / `rows` remain the physical terminal grid; zoomed layout keeps
+    /// that grid as its output coordinate space while shrinking the number of
+    /// physical cells occupied by each CSS px. A value of 1.0 restores the
+    /// default 8 CSS px per cell mapping.
+    pub zoom: f32,
+}
+
+impl Viewport {
+    /// Create a physical-cell viewport at the supplied zoom factor.
+    pub fn new(cols: usize, rows: usize, zoom: f32) -> Self {
+        Self {
+            cols,
+            rows,
+            zoom: if zoom.is_finite() && zoom > 0.0 {
+                zoom
+            } else {
+                1.0
+            },
+        }
+    }
+
+    /// Multiplier converting a zoom-neutral terminal cell into physical cells.
+    pub fn css_cell_scale(&self) -> f32 {
+        self.zoom
+    }
+
+    /// The viewport measured in zoom-dependent cell units for `@media`.
+    pub fn media_size(&self) -> (f32, f32) {
+        (self.cols as f32 / self.zoom, self.rows as f32 / self.zoom)
+    }
+}
+
+impl Default for Viewport {
+    fn default() -> Self {
+        Self::new(0, 0, 1.0)
+    }
 }
 
 /// Inputs required to resolve one CSS length into terminal cells.
@@ -520,7 +558,7 @@ pub struct Viewport {
 /// matter which CSS property it appears in. `containing` is the
 /// containing-block width in cells (used by `Pct`); `font` supplies the
 /// em / rem base sizes; `viewport` supplies the `vw` / `vh` anchor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LengthContext {
     pub containing: usize,
     pub font: FontContext,
@@ -530,9 +568,23 @@ pub struct LengthContext {
 impl FontContext {
     /// Create the root font context (1-cell font, 1-cell root font).
     pub fn root() -> Self {
+        Self::root_with_zoom(1.0)
+    }
+
+    /// Create the root font context at a browser zoom factor.
+    ///
+    /// Terminal fonts are integral cell counts. We keep the natural cell at
+    /// 1.0, grow it once the scaled CSS default rounds upward, and never
+    /// collapse below one physical cell at reduced zoom.
+    pub fn root_with_zoom(zoom: f32) -> Self {
+        let cells = if zoom.is_finite() && zoom > 0.0 {
+            zoom.round().max(1.0) as usize
+        } else {
+            1
+        };
         Self {
-            font_size_cells: 1,
-            root_font_size_cells: 1,
+            font_size_cells: cells,
+            root_font_size_cells: cells,
         }
     }
 
@@ -551,7 +603,7 @@ impl FontContext {
 /// accept is normalised to an integer column count by [`Length::resolve`]
 /// through a single conversion layer: absolute lengths (`px`, bare
 /// numbers, `em`, `rem`) first become CSS px, then divide by
-/// [`PX_PER_CELL`] (8px per cell); `ch` stays cell-aligned by definition
+/// [`PX_PER_CELL`] (8px per cell at zoom 1); `ch` stays cell-aligned at zoom 1 and scales with browser zoom
 /// (one cell per `0` glyph); percentages and viewport units keep their
 /// relative semantics. The whole pipeline is anchored on this one
 /// function, so every length-bearing property (width / height / padding /
@@ -559,7 +611,7 @@ impl FontContext {
 ///
 /// Accepted forms:
 /// - `auto` [`Length::Auto`] (caller decides what to fill)
-/// - `40px`, bare `40` [`Length::Px`] ( `PX_PER_CELL` at resolve)
+/// - `40px`, bare `40` [`Length::Px`] (`PX_PER_CELL`, then browser zoom)
 /// - `50%` [`Length::Pct`] (raw 0 00, divided at resolve)
 /// - `2em`, `1.5em` [`Length::Em`]
 /// - `2rem`, `1.5rem` [`Length::Rem`]
@@ -665,7 +717,7 @@ impl Term {
     /// Resolve this term to a signed cell count under `context`.
     fn cells(self, context: LengthContext) -> f32 {
         match self.unit {
-            MathUnit::Px => self.n / PX_PER_CELL,
+            MathUnit::Px => self.n / PX_PER_CELL * context.viewport.zoom,
             MathUnit::Pct => self.n * context.containing as f32 / 100.0,
             MathUnit::Em => self.n * context.font.font_size_cells as f32,
             MathUnit::Rem => self.n * context.font.root_font_size_cells as f32,
@@ -738,13 +790,13 @@ impl Length {
     pub fn resolve_signed(&self, context: LengthContext) -> isize {
         match self {
             Length::Auto => context.containing as isize,
-            &Length::Px(px) => (px / PX_PER_CELL).round() as isize,
+            &Length::Px(px) => (px / PX_PER_CELL * context.viewport.zoom).round() as isize,
             &Length::Pct(p) => (context.containing as f32 * p / 100.0).round() as isize,
             &Length::Em(n) => (n * context.font.font_size_cells as f32).round() as isize,
             &Length::Rem(n) => (n * context.font.root_font_size_cells as f32).round() as isize,
             // `ch` is font-size-independent by definition: one cell per `0`
             // glyph, so the raw multiplier is the cell count.
-            &Length::Ch(n) => n.round() as isize,
+            &Length::Ch(n) => (n * context.viewport.zoom).round() as isize,
             &Length::Vw(n) => (n * context.viewport.cols as f32 / 100.0).round() as isize,
             &Length::Vh(n) => (n * context.viewport.rows as f32 / 100.0).round() as isize,
             Length::Math(func) => func.eval(context).round() as isize,
@@ -866,7 +918,7 @@ impl Length {
     /// a change to the per-cell px ratio needs exactly one edit point.
     ///
     /// - `Auto` `containing` (fill the container)
-    /// - `Px(n)` round(n / PX_PER_CELL)
+    /// - `Px(n)` round(n / PX_PER_CELL * viewport.zoom)
     /// - `Pct(p)` round(containing * p / 100), min 1
     /// - `Em(n)` round(n * context.font.font_size_cells), clamped at 0
     /// - `Rem(n)` round(n * context.font.root_font_size_cells), clamped at 0
@@ -890,7 +942,7 @@ impl Length {
     pub fn resolve(&self, context: LengthContext) -> usize {
         match self {
             Length::Auto => context.containing,
-            &Length::Px(px) => (px / PX_PER_CELL).round().max(0.0) as usize,
+            &Length::Px(px) => (px / PX_PER_CELL * context.viewport.zoom).round().max(0.0) as usize,
             &Length::Pct(p) => {
                 let raw = (context.containing as f32 * p / 100.0).round();
                 (raw as usize).max(1)
@@ -899,9 +951,9 @@ impl Length {
             &Length::Rem(n) => (n * context.font.root_font_size_cells as f32)
                 .round()
                 .max(0.0) as usize,
-            // `ch` is font-size-independent by definition: one cell per `0`
-            // glyph, so the raw multiplier is the cell count.
-            &Length::Ch(n) => n.round().max(0.0) as usize,
+            // `ch` anchors to the zoom-neutral terminal cell: zoom multiplies the
+            // physical cell count just like px.
+            &Length::Ch(n) => (n * context.viewport.zoom).round().max(0.0) as usize,
             &Length::Vw(n) => {
                 let raw = (n * context.viewport.cols as f32 / 100.0).round();
                 (raw as usize).max(1)

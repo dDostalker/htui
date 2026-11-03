@@ -22,6 +22,8 @@ pub(crate) struct CascadeIndex {
     rank: Vec<u32>,
     /// Rules whose rightmost compound contains a tag selector, keyed by tag.
     by_tag: HashMap<NodeType, Vec<u32>>,
+    /// Rules keyed by a custom-element type selector (`my-widget`).
+    by_custom_tag: HashMap<String, Vec<u32>>,
     /// Rules whose rightmost compound contains a class selector, keyed by
     /// class token.
     by_class: HashMap<String, Vec<u32>>,
@@ -51,6 +53,7 @@ impl CascadeIndex {
         }
 
         let mut by_tag: HashMap<NodeType, Vec<u32>> = HashMap::new();
+        let mut by_custom_tag: HashMap<String, Vec<u32>> = HashMap::new();
         let mut by_class: HashMap<String, Vec<u32>> = HashMap::new();
         let mut by_id: HashMap<String, Vec<u32>> = HashMap::new();
         let mut wildcard: Vec<u32> = Vec::new();
@@ -65,6 +68,10 @@ impl CascadeIndex {
                 match part {
                     Selector::Tag(tag) => {
                         by_tag.entry(*tag).or_default().push(rule);
+                        keyed = true;
+                    }
+                    Selector::TagName(tag) => {
+                        by_custom_tag.entry(tag.clone()).or_default().push(rule);
                         keyed = true;
                     }
                     Selector::Class(class) => {
@@ -87,6 +94,7 @@ impl CascadeIndex {
         CascadeIndex {
             rank,
             by_tag,
+            by_custom_tag,
             by_class,
             by_id,
             wildcard,
@@ -113,6 +121,9 @@ impl CascadeIndex {
         };
         push_bucket(&self.wildcard);
         push_bucket(self.by_tag.get(&node.node_type).unwrap_or(&empty));
+        if let Some(tag) = node.tag_name() {
+            push_bucket(self.by_custom_tag.get(&tag).unwrap_or(&empty));
+        }
         if let Some(classes) = node.attributes.get("class") {
             for class in classes.split_whitespace() {
                 push_bucket(self.by_class.get(class).unwrap_or(&empty));
@@ -462,7 +473,7 @@ pub fn css_into_node_with_hover(
         &DynamicState {
             hovered,
             focused: None,
-            viewport: Viewport { cols: 0, rows: 0 },
+            viewport: Viewport::new(0, 0, 1.0),
         },
     );
 }

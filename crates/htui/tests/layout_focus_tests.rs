@@ -362,11 +362,49 @@ fn focus_pseudo_class_matches_only_the_element_itself() {
 }
 
 #[test]
+fn focus_visible_follows_terminal_focus_state() {
+    let mut parser =
+        html_parse::Parser::new(r#"<div id="wrap"><input id="a"><input id="b"></div>"#);
+    let (root_id, mut arena, _embedded) = parser.parse();
+    let rules = css_parse::Parser::new("input:focus-visible { color: red; }").parse();
+    let a = find_node_by_id(&arena, "a");
+    let b = find_node_by_id(&arena, "b");
+    css_parse::css_into_node_with_state(
+        &mut arena,
+        root_id,
+        &rules,
+        &css_parse::DynamicState::default(),
+    );
+    assert_eq!(arena[a].css_attr.get_color(), None);
+    assert_eq!(arena[b].css_attr.get_color(), None);
+
+    css_parse::reset_css_attr(&mut arena, root_id);
+    css_parse::css_into_node_with_state(
+        &mut arena,
+        root_id,
+        &rules,
+        &css_parse::DynamicState {
+            focused: Some(a),
+            ..Default::default()
+        },
+    );
+    assert!(
+        arena[a].css_attr.get_color().is_some(),
+        "terminal :focus-visible follows the focused control"
+    );
+    assert_eq!(arena[b].css_attr.get_color(), None);
+}
+
+#[test]
 fn focus_pseudo_class_rejects_arguments() {
     let err: Result<css_parse::CssSelector, _> = "input:focus()".parse();
     assert!(err.is_err(), ":focus takes no arguments");
     let ok: Result<css_parse::CssSelector, _> = "input:focus".parse();
     assert!(ok.is_ok());
+    let visible_err: Result<css_parse::CssSelector, _> = "input:focus-visible()".parse();
+    assert!(visible_err.is_err(), ":focus-visible takes no arguments");
+    let visible_ok: Result<css_parse::CssSelector, _> = "input:focus-visible".parse();
+    assert!(visible_ok.is_ok());
 }
 
 // ============================================================

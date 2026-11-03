@@ -567,4 +567,21 @@ impl NodeType {
             .copied()
             .find(|nt| nt.tag_name() == Some(t.as_str()))
     }
+
+    /// Whether `tag` follows the custom-element shape used by browsers
+    /// (a valid HTML identifier containing at least one hyphen). Unknown
+    /// custom tags are represented as inline `Span` nodes with their source
+    /// tag kept in `Node::data`; this avoids inventing one enum variant per
+    /// page-defined element.
+    pub fn is_custom_element_name(tag: &str) -> bool {
+        let mut chars = tag.chars();
+        match chars.next() {
+            Some(first) if first.is_ascii_alphabetic() => {}
+            _ => return false,
+        }
+        if !chars.all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return false;
+        }
+        tag.contains('-')
+    }
 }

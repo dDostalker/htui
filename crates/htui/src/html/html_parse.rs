@@ -294,15 +294,37 @@ fn convert_one_child(
                     }
                 }
                 None => {
-                    warn!("不支持标签 <{}>，压平", tag);
-                    convert_children_with_mode(
-                        child_handle,
-                        parent_id,
-                        arena,
-                        css_sources,
-                        scripts,
-                        mode,
-                    );
+                    let lower_tag = tag.to_ascii_lowercase();
+                    if NodeType::is_custom_element_name(&lower_tag) {
+                        // Custom elements are unknown to the built-in HTML tag
+                        // table but are real elements in browsers. Reuse Span
+                        // inline layout semantics and retain the source tag in
+                        // `Node::data` so CSS/DOM can still target it.
+                        let child_id = arena.insert(Node::custom_element(&lower_tag));
+                        {
+                            let ar = attrs.borrow();
+                            arena[child_id].attributes = convert_attributes(&ar);
+                        }
+                        Node::append_child(arena, parent_id, child_id);
+                        convert_children_with_mode(
+                            child_handle,
+                            child_id,
+                            arena,
+                            css_sources,
+                            scripts,
+                            mode,
+                        );
+                    } else {
+                        warn!("不支持标签 <{}>，压平", tag);
+                        convert_children_with_mode(
+                            child_handle,
+                            parent_id,
+                            arena,
+                            css_sources,
+                            scripts,
+                            mode,
+                        );
+                    }
                 }
             }
         }
@@ -346,9 +368,9 @@ pub fn parse_fragment_into(
 ) {
     let context_tag = arena
         .get(parent_id)
-        .and_then(|n| n.node_type.tag_name())
-        .unwrap_or("div");
-    let ctx = QualName::new(None, ns!(html), LocalName::from(context_tag));
+        .and_then(|n| n.tag_name())
+        .unwrap_or_else(|| "div".to_string());
+    let ctx = QualName::new(None, ns!(html), LocalName::from(context_tag.as_str()));
     let dom = html5ever::parse_fragment(RcDom::default(), ParseOpts::default(), ctx, Vec::new())
         .one(html);
 
@@ -475,13 +497,13 @@ fn serialize_node(arena: &NodeArena, node_id: NodeId, out: &mut String) {
             }
         }
         _ => {
-            let Some(tag) = node.node_type.tag_name() else {
+            let Some(tag) = node.tag_name() else {
                 return;
             };
             // Attributes serialize in insertion order (source order), which
             // the fragment parser preserves via `IndexMap`.
             out.push('<');
-            out.push_str(tag);
+            out.push_str(&tag);
             for (k, v) in &node.attributes {
                 out.push(' ');
                 out.push_str(k);
@@ -497,7 +519,7 @@ fn serialize_node(arena: &NodeArena, node_id: NodeId, out: &mut String) {
                 serialize_node(arena, child, out);
             }
             out.push_str("</");
-            out.push_str(tag);
+            out.push_str(&tag);
             out.push('>');
         }
     }

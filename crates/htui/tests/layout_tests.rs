@@ -1078,7 +1078,7 @@ fn example_spectrum_stays_inside_sidebar_scroll_area() {
             root_id,
             &rules,
             &css_parse::DynamicState {
-                viewport: css_parse::Viewport { cols, rows },
+                viewport: css_parse::Viewport::new(cols, rows, 1.0),
                 ..Default::default()
             },
         );
