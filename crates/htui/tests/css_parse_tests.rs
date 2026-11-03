@@ -472,13 +472,15 @@ fn test_custom_element_type_selector_matches() {
 }
 
 #[test]
-fn test_e_type_selector_rejects_unknown_tag() {
-    // Unknown tags must still fail to parse (the rule is dropped), never
-    // silently matching nothing.
+fn test_e_type_selector_preserves_unknown_tags_and_rejects_bad_idents() {
+    // Unknown source tags (including SVG/legacy tags) are real DOM elements;
+    // valid type-selector names stay addressable even without native rendering.
     init();
-    assert!("madeup".parse::<CssSelector>().is_err());
-    // `strong` is a supported element today; use a genuinely unknown tag.
-    assert!("div blink".parse::<CssSelector>().is_err());
+    assert!("madeup".parse::<CssSelector>().is_ok());
+    assert!("blink".parse::<CssSelector>().is_ok());
+    assert!("svg path".parse::<CssSelector>().is_ok());
+    // Names outside the HTML/CSS identifier subset still fail to parse.
+    assert!("div 1bad".parse::<CssSelector>().is_err());
 }
 
 #[test]

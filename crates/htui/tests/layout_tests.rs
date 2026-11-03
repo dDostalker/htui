@@ -512,6 +512,24 @@ fn inline_block_boxes_flow_side_by_side() {
 }
 
 #[test]
+fn inline_block_auto_width_shrinks_to_fit() {
+    init();
+    // Without an explicit width, an `inline-block` measures its content
+    // instead of stretching to the containing block. The source whitespace
+    // collapses to one cell, so the siblings fit on the first row.
+    let html = r#"<div class="a">AA</div> <div class="b">BBB</div>"#;
+    let css = ".a, .b { display: inline-block; }";
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let idx_a = tl.layout.iter().position(|b| b.word == "A").unwrap();
+    let idx_b = tl.layout.iter().position(|b| b.word == "B").unwrap();
+    assert_eq!(idx_a / 80, 0);
+    assert_eq!(idx_b / 80, 0, "auto-width inline-blocks share one row");
+    assert_eq!(idx_b, idx_a + 3, "AA + collapsed space precedes BBB");
+}
+#[test]
 fn inline_row_skips_unlayouttable_item_without_shifting_siblings() {
     init();
     // An inline row containing a `display: inline-grid` item (grid geometry
@@ -1131,4 +1149,74 @@ fn example_spectrum_stays_inside_sidebar_scroll_area() {
             "{cols}x{rows}: spectrum must not paint outside the scroll area"
         );
     }
+}
+
+#[test]
+fn inline_level_descendants_across_inline_containers_share_a_row() {
+    init();
+    // CSS block-in-inline handling: `main` / `aside` are inline wrappers, but
+    // their `inline-block` descendants belong to the parent flow. A block
+    // child first flushes the line; the two remaining atomic boxes then share
+    // the next row instead of the second wrapper starting a new block.
+    let html = r#"
+        <div id="content">
+            <main>
+                <div id="tween">T</div>
+                <div id="results">R</div>
+            </main>
+            <aside>
+                <div id="context">S</div>
+            </aside>
+        </div>
+    "#;
+    let css = r#"
+        main, aside { display: inline; }
+        #tween { width: 10ch; height: 1ch; }
+        #results, #context { display: inline-block; width: 20ch; vertical-align: top; }
+    "#;
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+
+    let idx_t = tl.layout.iter().position(|b| b.word == "T").unwrap();
+    let idx_r = tl.layout.iter().position(|b| b.word == "R").unwrap();
+    let idx_s = tl.layout.iter().position(|b| b.word == "S").unwrap();
+    let cols = usize::from(COLS);
+    assert_eq!(idx_r / cols, idx_t / cols + 1, "block child flushes row");
+    assert_eq!(
+        idx_r / cols,
+        idx_s / cols,
+        "inline-level descendants stay side by side"
+    );
+    assert_eq!(
+        idx_s % cols,
+        idx_r % cols + 21,
+        "collapsed source whitespace separates atomic boxes"
+    );
+}
+
+#[test]
+fn tall_top_sticky_below_viewport_keeps_initial_flow_position() {
+    init();
+    // A `top`-sticky box does not jump upward merely because it is taller
+    // than the viewport. At scroll 0 its natural slot is still below the top
+    // inset, so it must wait there until scrolling brings it above the inset.
+    let html = r#"
+        <div style="height: 3ch">P</div>
+        <div class="card"><div class="sticky">S</div></div>
+    "#;
+    let css = r#"
+        .card { display: inline-block; width: 10ch; height: 30ch; }
+        .sticky { position: sticky; top: 1ch; height: 30ch; }
+    "#;
+    let (root_id, arena) = setup(html, css);
+    let term_map = mock_term_map();
+    let mut tl = TermLayout::new(&term_map, 1.0);
+    tl.draw(&arena, root_id, &term_map);
+    let cols = usize::from(COLS);
+    let p_idx = tl.layout.iter().position(|b| b.word == "P").unwrap();
+    let s_idx = tl.layout.iter().position(|b| b.word == "S").unwrap();
+    assert_eq!(p_idx / cols, 0);
+    assert_eq!(s_idx / cols, 3, "sticky child keeps its natural flow slot");
 }

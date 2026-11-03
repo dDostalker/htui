@@ -473,6 +473,7 @@ pub fn css_into_node_with_hover(
         &DynamicState {
             hovered,
             focused: None,
+            active: None,
             viewport: Viewport::new(0, 0, 1.0),
         },
     );

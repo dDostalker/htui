@@ -3377,3 +3377,54 @@ fn mouse_events_carry_client_and_page_coordinates() {
     assert_eq!(cx, px, "clientX = pageX (no horizontal scroll)");
     assert_eq!(cy, py, "clientY = pageY (no page scroll attached)");
 }
+
+#[test]
+fn mouse_press_and_release_update_active_target() {
+    let (engine, geo) = build_geometry(
+        r#"<div id="btn">click me</div><div id="other">other</div>"#,
+        EventBindings::default(),
+    );
+    let map = HitMap::build(&geo);
+    let btn = map.resolve_by_id("btn").expect("btn region");
+    let (x, y) = center(btn.rect);
+    let arena = engine.arena();
+    let mut state = InputState::new();
+    let mut msgs = Vec::new();
+    let mut cmds = Vec::new();
+
+    handle_mouse_down(
+        &mut state,
+        &map,
+        &arena,
+        x,
+        y,
+        MouseButton::Left,
+        &mut msgs,
+        &mut cmds,
+    );
+    assert_eq!(state.active_target, Some(btn.node_id));
+    assert!(
+        cmds.iter().any(|cmd| matches!(
+            cmd,
+            RenderCmd::Active { node_id: Some(id) } if *id == btn.node_id
+        )),
+        "mouse-down must publish the terminal :active state"
+    );
+
+    cmds.clear();
+    handle_mouse_up(
+        &mut state,
+        &map,
+        &arena,
+        (x as u16, y as u16),
+        MouseButton::Left,
+        &mut msgs,
+        &mut cmds,
+    );
+    assert_eq!(state.active_target, None);
+    assert!(
+        cmds.iter()
+            .any(|cmd| matches!(cmd, RenderCmd::Active { node_id: None })),
+        "mouse-up must clear the terminal :active state"
+    );
+}

@@ -397,10 +397,7 @@ fn apply_focus(
         state.repaint_dynamic(out, PseudoClass::FocusVisible, prev, node_id);
         repainted = true;
     }
-    if state
-        .pseudo_rules
-        .contains_pseudo(PseudoClass::FocusWithin)
-    {
+    if state.pseudo_rules.contains_pseudo(PseudoClass::FocusWithin) {
         state.repaint_dynamic(out, PseudoClass::FocusWithin, prev, node_id);
         repainted = true;
     }

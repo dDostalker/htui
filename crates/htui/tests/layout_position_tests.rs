@@ -516,8 +516,9 @@ fn sticky_repin_uses_recorded_flow_row() {
     let rows = term_map.rows as usize;
     let mut tl = TermLayout::new(&term_map, 1.0);
 
-    // First layout pins at scroll 0: the flow row (30) is recorded, and the
-    // box is clamped to the viewport bottom (row rows - 1).
+    // First layout pins at scroll 0: the flow row (30) is recorded. A
+    // `top`-sticky box below the viewport stays there; it is not dragged up
+    // merely to make it visible.
     let mut boxes = tl.layout_only(&arena, root_id, &term_map);
     let s_y = |b: &[htui::layout::LayoutBox]| -> usize {
         fn find(boxes: &[htui::layout::LayoutBox]) -> Option<usize> {
@@ -536,10 +537,14 @@ fn sticky_repin_uses_recorded_flow_row() {
         }
         find(b).unwrap()
     };
-    assert_eq!(s_y(&boxes), rows - 1, "clamped to the viewport bottom");
+    assert_eq!(
+        s_y(&boxes),
+        30,
+        "top-sticky below the viewport keeps its flow slot"
+    );
 
-    // Scroll down 10 rows: S returns to its document row (30) — inside the
-    // new viewport [10, 10 + rows), so no clamp applies.
+    // Scroll down 10 rows: the flow row is now inside the viewport and still
+    // below the top inset, so no clamp applies.
     let viewport = Rect::new(0, 10, cols, rows);
     pin_sticky_boxes(&mut boxes, viewport);
     assert_eq!(s_y(&boxes), 30, "S returns to its flow row once visible");

@@ -51,6 +51,36 @@ pub fn constrained_block_width(
     crate::html::css_parse::clamp_min_max(width, min_w, max_w).max(1)
 }
 
+/// Resolve an `inline-block`'s border-box width from its max-content
+/// measurement.
+///
+/// Browsers shrink an `inline-block` with `width: auto` to its content, but
+/// the resulting border-box still obeys the containing-block width and
+/// `min-width` / `max-width`. As elsewhere in this engine, declared CSS sizes
+/// and constraints use the historical border-box model; `box-sizing:
+/// content-box` converts them by adding horizontal padding + border.
+pub fn constrained_shrink_to_fit_width(
+    css_attr: &CssAttr,
+    intrinsic_width: usize,
+    containing_width: usize,
+    edges: BoxEdges,
+    font_ctx: FontContext,
+    viewport: Viewport,
+) -> usize {
+    let inner_h = edges.inner_horizontal();
+    let to_border = |w: usize| match css_attr.get_box_sizing() {
+        BoxSizing::BorderBox => w,
+        BoxSizing::ContentBox => w.saturating_add(inner_h),
+    };
+    let min_w = css_attr
+        .get_min_width(containing_width, font_ctx, viewport)
+        .map(to_border);
+    let max_w = css_attr
+        .get_max_width(containing_width, font_ctx, viewport)
+        .map(to_border);
+    let width = intrinsic_width.min(containing_width);
+    crate::html::css_parse::clamp_min_max(width, min_w, max_w).max(1)
+}
 /// Compute the left offset for a block-level element inside its containing
 /// block.
 ///

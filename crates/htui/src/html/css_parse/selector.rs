@@ -168,6 +168,8 @@ impl PseudoClassSet {
     pub const FOCUS_VISIBLE: Self = Self(1 << 2);
     /// `:focus-within` rules present.
     pub const FOCUS_WITHIN: Self = Self(1 << 3);
+    /// `:active` rules present.
+    pub const ACTIVE: Self = Self(1 << 4);
 
     /// Whether `pseudo` is a member of the set.
     pub fn contains_pseudo(&self, pseudo: PseudoClass) -> bool {
@@ -241,6 +243,8 @@ pub enum PseudoClass {
     /// `:focus-within` — matches an element that contains the focused element
     /// (or is itself focused).
     FocusWithin,
+    /// `:active` — terminal approximation for the primary-button press state.
+    Active,
 }
 
 impl PseudoClass {
@@ -251,6 +255,7 @@ impl PseudoClass {
             PseudoClass::Focus => PseudoClassSet::FOCUS,
             PseudoClass::FocusVisible => PseudoClassSet::FOCUS_VISIBLE,
             PseudoClass::FocusWithin => PseudoClassSet::FOCUS_WITHIN,
+            PseudoClass::Active => PseudoClassSet::ACTIVE,
         }
     }
 }
@@ -755,6 +760,12 @@ fn parse_compound_inner(
                             return Err(SelectorError::FocusTakesNoArguments);
                         }
                         out.push(Selector::PseudoClass(PseudoClass::FocusWithin));
+                    }
+                    "active" => {
+                        if i < chars.len() && chars[i] == '(' {
+                            return Err(SelectorError::HoverTakesNoArguments);
+                        }
+                        out.push(Selector::PseudoClass(PseudoClass::Active));
                     }
                     "nth-child" | "nth-last-child" => {
                         let from_last = name.eq_ignore_ascii_case("nth-last-child");

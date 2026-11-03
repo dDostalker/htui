@@ -14,8 +14,8 @@ use crate::{
         BoxSizing, ColumnFill, ColumnsResolved, OverflowWrap, Position, WhiteSpace, WordBreak,
     },
     layout::{
-        BoxConstraint, ColumnLayout, Cursor, InlineRun, LayoutBox, LayoutContext, PaintStyle, Rect,
-        ScrollbarLayout,
+        BoxConstraint, ColumnLayout, Cursor, InlineRun, LayoutBox, LayoutContext, OuterDisplay,
+        PaintStyle, Rect, ScrollbarLayout,
         inner_formatting_context::flow::layout_children,
         layoutbox::{collect_runs, translate_subtree, visible_children, wrap_runs},
     },
@@ -28,7 +28,8 @@ use crate::html::css_parse::resolve_line_height_cells;
 
 use super::geometry::{
     OuterGeometry, apply_horizontal_auto_margins, block_left, build_border_rect,
-    compute_outer_geometry, constrained_block_width, reserve_border_box,
+    compute_outer_geometry, constrained_block_width, constrained_shrink_to_fit_width,
+    reserve_border_box,
 };
 use super::options::LayoutBlockOptions;
 
@@ -113,13 +114,39 @@ pub fn layout_block(
             // larger wins).
             cursor.collapse_and_skip(edges.margin.top);
             let outer_y_top = cursor.y;
-            let block_width = constrained_block_width(
-                &node.css_attr,
-                available,
-                edges,
-                child_context.font,
-                child_context.viewport,
-            );
+            // Unlike a block-level box, an `inline-block` with `width: auto`
+            // is shrink-to-fit. Measure the subtree before allocating its
+            // border-box so siblings can share the same inline row.
+            let block_width = if matches!(
+                node.css_attr.outer_display(&node.node_type),
+                OuterDisplay::Inline { block: true }
+            ) && node
+                .css_attr
+                .get_width(available, child_context.font, child_context.viewport)
+                .is_none()
+            {
+                constrained_shrink_to_fit_width(
+                    &node.css_attr,
+                    crate::layout::inner_formatting_context::flex::natural_intrinsic_width(
+                        arena,
+                        node_id,
+                        child_context,
+                        Some(available),
+                    ),
+                    available,
+                    edges,
+                    child_context.font,
+                    child_context.viewport,
+                )
+            } else {
+                constrained_block_width(
+                    &node.css_attr,
+                    available,
+                    edges,
+                    child_context.font,
+                    child_context.viewport,
+                )
+            };
             let mut edges = edges;
             // Horizontal `margin: auto` distributes the containing block's
             // free space: two auto margins center the box, a single one

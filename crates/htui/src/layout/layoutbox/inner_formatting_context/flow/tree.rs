@@ -184,20 +184,21 @@ pub fn layout_children(
         // it participates in the inline row flow.
         match generated.outer_display {
             OuterDisplay::Inline { block: false } if generated.kind == GeneratedBoxKind::Normal => {
-                if !inline_row.is_empty() {
-                    boxes.extend(layout_inline_row(
-                        arena,
-                        &inline_row,
-                        containing,
-                        cursor,
-                        context,
-                    ));
-                    inline_row.clear();
-                }
-                pending_space = 0;
-                boxes.extend(layout_inline_container_descendants(
-                    arena, child_id, containing, cursor, context,
-                ));
+                // An inline container does not own a line box. Keep the
+                // caller's inline-row state open while traversing it so an
+                // `inline-block` ending one container can share a row with an
+                // `inline-block` starting the next one (`<main>...</main>
+                // <aside>...</aside>`).
+                layout_inline_container_descendants(
+                    arena,
+                    child_id,
+                    containing,
+                    cursor,
+                    context,
+                    &mut inline_row,
+                    &mut pending_space,
+                    &mut boxes,
+                );
             }
             OuterDisplay::Inline { block: true } if generated.kind == GeneratedBoxKind::Normal => {
                 inline_row.push(InlineRowItem {
@@ -223,16 +224,14 @@ pub fn layout_children(
                     ));
                     continue;
                 }
-                if !inline_row.is_empty() {
-                    boxes.extend(layout_inline_row(
-                        arena,
-                        &inline_row,
-                        containing,
-                        cursor,
-                        context,
-                    ));
-                    inline_row.clear();
-                }
+                flush_inline_row(
+                    arena,
+                    &mut inline_row,
+                    containing,
+                    cursor,
+                    context,
+                    &mut boxes,
+                );
                 pending_space = 0;
                 if let Some(b) =
                     layout_generated_box(arena, &generated, containing, cursor, context, None)
@@ -242,16 +241,32 @@ pub fn layout_children(
             }
         }
     }
+    flush_inline_row(
+        arena,
+        &mut inline_row,
+        containing,
+        cursor,
+        context,
+        &mut boxes,
+    );
+    boxes
+}
+
+/// Place any pending inline-level siblings and reset their shared row state.
+fn flush_inline_row(
+    arena: &NodeArena,
+    inline_row: &mut Vec<InlineRowItem>,
+    containing: BoxConstraint,
+    cursor: &mut Cursor,
+    context: LayoutContext,
+    boxes: &mut Vec<LayoutBox>,
+) {
     if !inline_row.is_empty() {
         boxes.extend(layout_inline_row(
-            arena,
-            &inline_row,
-            containing,
-            cursor,
-            context,
+            arena, inline_row, containing, cursor, context,
         ));
+        inline_row.clear();
     }
-    boxes
 }
 
 /// Place a run of consecutive `inline-block` boxes side by side on one or
@@ -348,35 +363,69 @@ fn layout_inline_row(
 /// Lay out the box-producing descendants of an inline container (depth
 /// first). The container itself never produces a box — [`collect_runs`]
 /// folds its text into the parent's inline runs — so only descendants with
-/// real geometry (replaced elements, block-level boxes) are dispatched,
-/// exactly like the container were a transparent wrapper.
+/// real geometry participate in the caller's flow.
+///
+/// The inline-row state is shared with the caller on purpose. CSS inline
+/// containers are fragments of one parent line, not independent block
+/// boundaries; this lets consecutive inline-level descendants separated by
+/// `<span>/<main>/<aside>` wrap and align together like anonymous inline
+/// boxes do in a browser.
 fn layout_inline_container_descendants(
     arena: &NodeArena,
     container_id: NodeId,
     containing: BoxConstraint,
     cursor: &mut Cursor,
     context: LayoutContext,
-) -> Vec<LayoutBox> {
-    let mut boxes = Vec::new();
-    let mut stack: Vec<NodeId> = arena[container_id].children.iter().rev().copied().collect();
-    while let Some(id) = stack.pop() {
+    inline_row: &mut Vec<InlineRowItem>,
+    pending_space: &mut usize,
+    boxes: &mut Vec<LayoutBox>,
+) {
+    for &id in arena[container_id].children.iter() {
         let Some(generated) = generate_node(arena, id) else {
             continue;
         };
-        if generated.kind == GeneratedBoxKind::Text {
-            // Text is handled by the parent's run collection; no box.
-            continue;
-        }
-        if let Some(b) = layout_generated_box(arena, &generated, containing, cursor, context, None)
-        {
-            boxes.push(b);
-        } else {
-            // Another inline container (nested `<label>` / `<span>` …):
-            // recurse into its children as well.
-            stack.extend(arena[id].children.iter().rev().copied());
+        match generated.outer_display {
+            OuterDisplay::Inline { block: false } if generated.kind == GeneratedBoxKind::Normal => {
+                layout_inline_container_descendants(
+                    arena,
+                    id,
+                    containing,
+                    cursor,
+                    context,
+                    inline_row,
+                    pending_space,
+                    boxes,
+                );
+            }
+            OuterDisplay::Inline { block: true } if generated.kind == GeneratedBoxKind::Normal => {
+                inline_row.push(InlineRowItem {
+                    id,
+                    leading_space: *pending_space,
+                });
+                *pending_space = 0;
+            }
+            _ => {
+                if generated.kind == GeneratedBoxKind::Text
+                    || generated.kind == GeneratedBoxKind::Anonymous
+                {
+                    *pending_space = (*pending_space).max(collapsed_interitem_space(
+                        &arena[id],
+                        arena[container_id]
+                            .css_attr
+                            .get_white_space(&arena[container_id].node_type),
+                    ));
+                    continue;
+                }
+                flush_inline_row(arena, inline_row, containing, cursor, context, boxes);
+                *pending_space = 0;
+                if let Some(b) =
+                    layout_generated_box(arena, &generated, containing, cursor, context, None)
+                {
+                    boxes.push(b);
+                }
+            }
         }
     }
-    boxes
 }
 
 /// Iterate the layout registry; first claim wins.

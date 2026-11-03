@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use htui::html::html_parse::{self, Parser};
+use htui::html::{
+    css_parse,
+    html_parse::{self, Parser},
+};
 use htui::resources::{ResourceRegistry, with_registry};
 use htui::tdom::node::{NodeType, document_base_href};
 
@@ -431,4 +434,37 @@ fn test_link_enters_dom_as_non_rendered_node() {
         NodeType::Link,
         "<link> must stay in the DOM"
     );
+}
+
+#[test]
+fn test_parse_unknown_and_svg_tags_are_addressable() {
+    init();
+    let (root, mut arena, _) =
+        Parser::new(r#"<div id="wrap"><svg id="icon"><circle id="dot"></circle></svg></div>"#)
+            .parse();
+    let rules = css_parse::Parser::new("svg circle { color: red; }").parse();
+    css_parse::css_into_node_with_state(
+        &mut arena,
+        root,
+        &rules,
+        &css_parse::DynamicState::default(),
+    );
+    let svg = find_id(&arena, "icon");
+    let circle = find_id(&arena, "dot");
+    assert_eq!(arena[svg].tag_name().as_deref(), Some("svg"));
+    assert_eq!(arena[circle].tag_name().as_deref(), Some("circle"));
+    assert_eq!(arena[svg].node_name(), "SVG");
+    assert_eq!(arena[circle].node_name(), "CIRCLE");
+    assert!(
+        arena[circle].css_attr.get_color().is_some(),
+        "unknown/SVG nodes must support CSS addressing without vector rendering"
+    );
+}
+
+fn find_id(arena: &htui::tdom::node::NodeArena, id: &str) -> htui::tdom::node::NodeId {
+    arena
+        .iter()
+        .find(|(_, n)| n.attributes.get("id").map(String::as_str) == Some(id))
+        .map(|(nid, _)| nid)
+        .expect("element with id exists")
 }
